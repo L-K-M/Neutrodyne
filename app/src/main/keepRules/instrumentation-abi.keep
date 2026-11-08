@@ -2107,8 +2107,18 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.FeedYouTubeMetadataReaderContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImplContributions$ToAppScope$ProvidesYouTubeAvailabilityRecorderImplMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImplContributions$ToAppScope$ProvidesYouTubeAvailabilityRecorderImplMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImplContributions$ToAppScope$ProvidesYouTubeAvailabilityRecorderImplMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImplContributions$ToAppScope$ProvidesYouTubeAvailabilityRecorderImplMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImplContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImplContributions {
+}
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeChannelRepositoryImplContributions$ToAppScope$ProvidesYouTubeChannelRepositoryImplMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeChannelRepositoryImplContributions$ToAppScope$ProvidesYouTubeChannelRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeChannelRepositoryImplContributions$ToAppScope$ProvidesYouTubeChannelRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeChannelRepositoryImplContributions$ToAppScope$ProvidesYouTubeChannelRepositoryImplMetroFactory {
   ch.lkmc.neutrodyne.core.data.youtube.YouTubeChannelRepositoryImplContributions$ToAppScope$ProvidesYouTubeChannelRepositoryImplMetroFactory$Companion Companion;
@@ -2125,6 +2135,14 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck {
 }
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment$MetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment {
+}
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope$ProvidesYouTubeExternalOpenImplMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope$ProvidesYouTubeExternalOpenImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2134,6 +2152,16 @@
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions$ToAppScope$ProvidesYouTubeFactsWriterImplMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions$ToAppScope$ProvidesYouTubeFactsWriterImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions$ToAppScope$ProvidesYouTubeFactsWriterImplMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions$ToAppScope$ProvidesYouTubeFactsWriterImplMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
@@ -2149,8 +2177,16 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings {
 }
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeOlderLoader$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeOlderLoader$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeOlderLoader$MetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeOlderLoader$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeOlderLoader {
+}
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeSourceAdapterContributions$ToAppScope$ProvideIntoMapYouTubeSourceAdapterMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeSourceAdapterContributions$ToAppScope$ProvideIntoMapYouTubeSourceAdapterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeSourceAdapterContributions$ToAppScope$ProvideIntoMapYouTubeSourceAdapterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeSourceAdapterContributions$ToAppScope$ProvideIntoMapYouTubeSourceAdapterMetroFactory {
   ch.lkmc.neutrodyne.core.data.youtube.YouTubeSourceAdapterContributions$ToAppScope$ProvideIntoMapYouTubeSourceAdapterMetroFactory$Companion Companion;
@@ -4476,6 +4512,9 @@
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$ChannelResolverMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$ChannelResolverMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EnricherMetroFactory {
+  public static ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EnricherMetroFactory create();
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StreamResolverMetroFactory {
   public static ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StreamResolverMetroFactory create();

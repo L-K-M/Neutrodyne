@@ -64,7 +64,44 @@ class YouTubeSubscriptionTest {
     private val scheduler = FakeRefreshScheduler()
     private val settings = FakeSettingsRepository()
     private val search = FakeSearchRepository()
-    private val repository = YouTubeChannelRepositoryImpl(db, FakeYouTubeChannelMetadata(), scheduler, search, settings)
+    private val enricher =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeEnricher()
+    private val factsWriter =
+        ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImpl(
+            db,
+            ch.lkmc.neutrodyne.feeds.jvm.html
+                .JsoupShowNotesSanitizer(),
+        )
+    private val repositoryScope =
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+    private val repository =
+        YouTubeChannelRepositoryImpl(
+            db,
+            FakeYouTubeChannelMetadata(),
+            scheduler,
+            search,
+            settings,
+            ch.lkmc.neutrodyne.core.data.youtube.YouTubeOlderLoader(
+                db,
+                enricher,
+                newIngestor(db, clock),
+                factsWriter,
+                clock,
+                repositoryScope,
+            ),
+            enricher,
+            ch.lkmc.neutrodyne.core.data.youtube
+                .YouTubeAvailabilityRecorderImpl(db),
+            ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment(
+                db,
+                enricher,
+                factsWriter,
+                clock,
+                kotlin.random.Random(1),
+                enabledYouTubeCapabilities(),
+            ),
+        )
     private val channel =
         ChannelResolution.Resolved(
             YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID,
@@ -76,6 +113,7 @@ class YouTubeSubscriptionTest {
         )
 
     @AfterTest fun close() {
+        repositoryScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         db.close()
     }
 

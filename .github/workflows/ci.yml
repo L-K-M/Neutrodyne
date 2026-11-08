@@ -459,6 +459,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - name: Check smoke admission with the macOS system Bash
+        if: runner.os == 'macOS'
+        run: python3 scripts/ci/tests/smoke-start.test.py SmokeStartGateTest.test_macos_system_bash_runs_the_shipped_smoke_gate
       # The KMP android targets configure AGP in every module, so every host
       # needs an SDK even for a desktop-only build.
       - name: Android SDK
