@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.debug
 
 import android.app.Application
+import android.os.Build
 import android.os.StrictMode
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -50,10 +51,12 @@ class DebugVmPolicyRuntimeTest {
     }
 
     @Test
-    @Config(sdk = [36])
+    @Config(sdk = [26, 36])
     fun otherInstrumentedVersionsKeepTheOriginalFatalPolicy() {
         val policy = debugVmPolicy(DebugVmPolicyMode.INSTRUMENTED_TEST)
         assertEquals(mask(originalPolicy()), mask(policy))
-        assertNull(ReflectionHelpers.getField<Any?>(policy, "mListener"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            assertNull(ReflectionHelpers.getField<Any?>(policy, "mListener"))
+        }
     }
 }
