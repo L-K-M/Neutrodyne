@@ -20,7 +20,7 @@ runtime="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["runti
     cd "$sources"
     oras push "$image_repo:$version-sources" --artifact-type application/vnd.neutrodyne.sources.v1 \
         "$runtime:application/gzip" "neutrodyne-server-image-sources-$version.tar.xz:application/x-xz" \
-        RUNTIME-SOURCES.md:text/markdown
+        SERVER-RUNTIME-SOURCES.md:text/markdown
 )
 "$root/scripts/ci/check-server-image.sh" --sources-tag "$image" "$sources"
 # Re-read publication order while serialized. verify-tag's preview can be hours old.

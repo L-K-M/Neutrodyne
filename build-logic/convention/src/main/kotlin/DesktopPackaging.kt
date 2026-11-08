@@ -354,6 +354,18 @@ internal fun imageJarName(file: File): String {
 internal object CanonicalJarHash {
     private val MACHO_EXTS = setOf("dylib", "jnilib", "so")
 
+    /**
+     * The Compose-repacked skiko stub and the native files it extracts, derived from the
+     * Licensee-checked source artifact [file] and the target's extraction rule [extracted]
+     * (an entry is extracted when its name, with any `.sha256` suffix removed, is in the set).
+     * The expected stub hash is the canonical content identity of the remaining entries, so
+     * the image checker can bind the stub without ever trusting a hash taken from the image.
+     */
+    data class StubDerivation(
+        val expectedHash: String,
+        val extracted: List<Pair<String, String>>,
+    )
+
     fun of(file: File): String {
         val raw = file.readBytes()
         val zip =
@@ -363,6 +375,14 @@ internal object CanonicalJarHash {
                 return sha256Hex(raw)
             }
         return zip.use { z -> compute(z) }
+    }
+
+    fun stubOf(
+        file: File,
+        extracted: Set<String>,
+    ): StubDerivation {
+        val zip = java.util.zip.ZipFile(file)
+        return zip.use { z -> computeStub(z, extracted) }
     }
 
     private fun compute(zip: java.util.zip.ZipFile): String {
@@ -387,6 +407,50 @@ internal object CanonicalJarHash {
             outer.update('\n'.code.toByte())
         }
         return hexToString(outer.digest())
+    }
+
+    private fun computeStub(
+        zip: java.util.zip.ZipFile,
+        extracted: Set<String>,
+    ): StubDerivation {
+        val entries = zip.entries().toList()
+        val seen = HashSet<String>()
+        for (entry in entries) {
+            validateName(entry.name)
+            if (!seen.add(entry.name.lowercase(Locale.ROOT))) {
+                throw IllegalArgumentException("duplicate ZIP entry name: ${entry.name}")
+            }
+        }
+        val remaining = mutableListOf<Pair<String, ByteArray>>()
+        val extractedFiles = mutableListOf<Pair<String, String>>()
+        for (entry in entries) {
+            val base =
+                if (entry.name.endsWith(".sha256")) {
+                    entry.name.removeSuffix(".sha256")
+                } else {
+                    entry.name
+                }
+            val bytes =
+                if (entry.isDirectory) {
+                    ByteArray(0)
+                } else {
+                    zip.getInputStream(entry).use { it.readBytes() }
+                }
+            if (base in extracted) {
+                extractedFiles += entry.name.substringAfterLast('/') to
+                    sha256Hex(normalizedEntryBytes(entry.name, bytes))
+            } else {
+                remaining += entry.name to normalizedEntryBytes(entry.name, bytes)
+            }
+        }
+        val outer = MessageDigest.getInstance("SHA-256")
+        for ((name, bytes) in remaining.sortedBy { it.first }) {
+            outer.update(name.toByteArray(Charsets.UTF_8))
+            outer.update(0)
+            outer.update(hexToBytes(MessageDigest.getInstance("SHA-256").digest(bytes)))
+            outer.update('\n'.code.toByte())
+        }
+        return StubDerivation(hexToString(outer.digest()), extractedFiles.sortedBy { it.first })
     }
 
     private fun hexToString(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
@@ -679,12 +743,38 @@ internal object CanonicalJarHash {
     private val LINKEDIT_SEGMENT_NAME = "__LINKEDIT".toByteArray(Charsets.US_ASCII).copyOf(16)
 }
 
+/** The Licensee-checked skiko runtime jar: `skiko-awt-runtime-<os>-<arch>-<version>.jar`. */
+private val SKIKO_RUNTIME_JAR = Regex("skiko-awt-runtime-(linux|windows|macos)-(x64|arm64)-(.+)\\.jar")
+
+/**
+ * The native entries Compose extracts from a skiko runtime jar for the target
+ * (`AbstractJPackageTaskKt.unpackSkikoForCurrentOS`, compose-gradle-plugin 1.12.1): the
+ * host-arch library by the OS's naming scheme, plus Windows' `icudtl.dat`. Each extracted
+ * entry's `.sha256` sibling is extracted too (the rule strips the suffix before matching).
+ */
+internal fun skikoExtractedNames(
+    os: String,
+    arch: String,
+): Set<String> =
+    when (os) {
+        "macos" -> setOf("libskiko-macos-$arch.dylib")
+        "linux" -> setOf("libskiko-linux-$arch.so")
+        "windows" -> setOf("skiko-windows-$arch.dll", "icudtl.dat")
+        else -> emptySet()
+    }
+
 /**
  * Writes the Licensee-checked runtime classpath as `<canonical sha256>  name` lines
  * (09 Build-output checks): `check-desktop-image.sh` asserts every JAR of an image is
  * one of these files. Same-named JARs — `api-desktop.jar` comes from four modules, and
  * androidx artefacts appear twice via the `org.jetbrains.androidx` republish — are no
  * collision here: the recorded name is the mangled image name, which differs by content.
+ *
+ * The skiko runtime jar is the one image entry whose name the build cannot predict: Compose
+ * extracts the target's native library and repacks the rest under a fresh content-md5 stamp.
+ * Its stub record (`<expected stub hash>  <source name>  <extracted file>=<hash>,…`) is
+ * derived here from the source artifact, so the checker binds the stub's canonical content
+ * instead of accepting a name prefix.
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -694,15 +784,34 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:OutputFile
     abstract val manifest: RegularFileProperty
 
+    @get:OutputFile
+    abstract val stubManifest: RegularFileProperty
+
     @TaskAction
     fun write() {
+        val files = runtimeClasspath.files.filter { it.isFile }
         val lines =
-            runtimeClasspath.files
-                .filter { it.isFile }
+            files
                 .map { "${CanonicalJarHash.of(it)}  ${imageJarName(it)}" }
                 .toSortedSet()
                 .joinToString("\n", postfix = "\n")
         manifest.get().asFile.writeText(lines)
+
+        val stubLines =
+            files
+                .mapNotNull { skikoStubRecord(it) }
+                .toSortedSet()
+                .joinToString("\n", postfix = "\n")
+        stubManifest.get().asFile.writeText(stubLines)
+    }
+
+    private fun skikoStubRecord(file: File): String? {
+        val match = SKIKO_RUNTIME_JAR.matchEntire(file.name) ?: return null
+        val os = match.groupValues[1]
+        val arch = match.groupValues[2]
+        val stub = CanonicalJarHash.stubOf(file, skikoExtractedNames(os, arch))
+        val extracted = stub.extracted.joinToString(",") { "${it.first}=${it.second}" }
+        return "${stub.expectedHash}  ${file.name}  $extracted"
     }
 }
 
@@ -981,5 +1090,8 @@ internal fun Project.registerDesktopPackagingTasks(
         )
         runtimeClasspath.from(tasks.named("jar"))
         manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
+        stubManifest.set(
+            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
+        )
     }
 }
