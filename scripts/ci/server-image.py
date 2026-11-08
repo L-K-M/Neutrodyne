@@ -124,7 +124,7 @@ def collect(lock, output, version):
             for item in source['files']:
                 add(f'{source["package"]}/{item["name"]}', (cache / source['package'] / item['name']).read_bytes())
     temporary.replace(bundle)
-    (output / 'RUNTIME-SOURCES.md').write_text(
+    (output / 'SERVER-RUNTIME-SOURCES.md').write_text(
         '# Server runtime sources\n\n'
         f'Image base: `{lock["base"]}`. Runtime: Temurin `{lock["runtime"]["version"]}`.\n\n'
         f'Exact, unmodified runtime source: `{runtime_name(lock)}`; SHA-256 `{lock["runtime"]["sha256"]}`.\n\n'
@@ -148,7 +148,7 @@ def check_sources(lock, directory, version):
                 require(member.isfile() and member.size == item['size'], 'source file size mismatch')
                 require(sha256(tar.extractfile(member).read()) == item['sha256'], 'source file mismatch')
         require(len(tar.getnames()) == len(expected) and set(tar.getnames()) == expected, 'source bundle entry mismatch')
-    require(runtime_name(lock) in (directory / 'RUNTIME-SOURCES.md').read_text(), 'Server validation failed')
+    require(runtime_name(lock) in (directory / 'SERVER-RUNTIME-SOURCES.md').read_text(), 'Server validation failed')
 
 
 def prepare(lock, jar, context, version, notices):

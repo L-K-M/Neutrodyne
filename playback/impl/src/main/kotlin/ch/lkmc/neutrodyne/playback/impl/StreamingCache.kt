@@ -49,8 +49,8 @@ internal class StreamingCache internal constructor(
     ) : this(File(application.filesDir, DIRECTORY), StandaloneDatabaseProvider(application), io, scope, prefs.current)
 
     private val ownership = Any()
-    private val activeKeys = ConcurrentHashMap.newKeySet<String>()
-    private val evictor = AdjustableLruCacheEvictor(defaultBytes(), activeKeys::contains)
+    private val activeKeys = ConcurrentHashMap<String, Int>()
+    private val evictor = AdjustableLruCacheEvictor(defaultBytes(), activeKeys::containsKey)
     private var instance: SimpleCache? = null
 
     init {
@@ -78,9 +78,36 @@ internal class StreamingCache internal constructor(
                 // Let CacheDataSource observe the error and bypass caching on its next retry.
                 Log.w("StreamingCache", e) { "Streaming cache unavailable" }
             }
-            activeKeys.add(key)
+            activeKeys.merge(key, 1, Int::plus)
             Unit
         }
+
+    /** YouTube alone reuses bytes across sessions; reject a known incompatible stored length. */
+    internal fun pinYouTube(
+        key: String,
+        length: Long?,
+        resetKey: String?,
+    ) = synchronized(ownership) {
+        try {
+            resetKey?.let(::resetResource)
+            val cache = cache()
+            val previous =
+                androidx.media3.datasource.cache.ContentMetadata
+                    .getContentLength(cache.getContentMetadata(key))
+            if (previous != C.LENGTH_UNSET.toLong() && previous != length) resetResource(key)
+            cache.applyContentMetadataMutations(
+                key,
+                ContentMetadataMutations().also {
+                    ContentMetadataMutations.setRedirectedUri(it, null)
+                },
+            )
+        } catch (e: Cache.CacheException) {
+            // As for RSS, spans were removed or initialization failed before cache reads.
+            Log.w("StreamingCache", e) { "Streaming cache unavailable" }
+        }
+        activeKeys.merge(key, 1, Int::plus)
+        Unit
+    }
 
     /** A reset also removes redirect/length metadata, which removeResource alone leaves behind. */
     fun resetResource(key: String) =
@@ -97,7 +124,7 @@ internal class StreamingCache internal constructor(
         }
 
     internal fun unpin(key: String) {
-        activeKeys.remove(key)
+        activeKeys.computeIfPresent(key) { _, count -> (count - 1).takeIf { it > 0 } }
         // A pinned resource may temporarily exceed the limit; enforce it after cancellation.
         scope.launch(io) { synchronized(ownership) { instance?.let(evictor::trim) } }
     }
@@ -120,7 +147,7 @@ internal class StreamingCache internal constructor(
         withContext(io) {
             synchronized(ownership) {
                 val cache = cache()
-                cache.keys.filterNot(activeKeys::contains).forEach(cache::removeResource)
+                cache.keys.filterNot(activeKeys::containsKey).forEach(cache::removeResource)
             }
         }
 

@@ -505,6 +505,160 @@ class DesktopPackagingTest {
         }
     }
 
+    @Test
+    fun `the skiko extraction rule matches the pinned compose plugin`() {
+        // AbstractJPackageTaskKt.unpackSkikoForCurrentOS (compose-gradle-plugin 1.12.1).
+        assertEquals(setOf("libskiko-macos-arm64.dylib"), skikoExtractedNames("macos", "arm64"))
+        assertEquals(setOf("libskiko-linux-x64.so"), skikoExtractedNames("linux", "x64"))
+        assertEquals(setOf("libskiko-linux-arm64.so"), skikoExtractedNames("linux", "arm64"))
+        assertEquals(
+            setOf("skiko-windows-x64.dll", "icudtl.dat"),
+            skikoExtractedNames("windows", "x64"),
+        )
+        assertEquals(emptySet(), skikoExtractedNames("freebsd", "x64"))
+    }
+
+    @Test
+    fun `the skiko stub derivation binds the repacked content and extracted natives`() {
+        val root = Files.createTempDirectory("skiko-stub").toFile()
+        try {
+            val native = "libskiko-linux-x64.so"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-X64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    "libskiko-linux-arm64.so" to "NATIVE-ARM64".toByteArray(),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-linux-x64-0.9.30.jar",
+                    zipBytes(entries),
+                )
+
+            val derivation = CanonicalJarHash.stubOf(source, setOf(native))
+
+            // The expected stub hash is the canonical identity of the source minus the
+            // extracted entries: exactly Compose's repacked stub.
+            val remaining =
+                entries.filter { it.first != native && it.first != "$native.sha256" }
+            val stub = writeJar(root, "stub.jar", zipBytes(remaining))
+            assertEquals(CanonicalJarHash.of(stub), derivation.expectedHash)
+            // The extracted natives are recorded by basename and normalized content hash.
+            assertEquals(listOf(native, "$native.sha256"), derivation.extracted.map { it.first })
+            assertEquals(
+                sha256Hex("NATIVE-X64".toByteArray()),
+                derivation.extracted.single { it.first == native }.second,
+            )
+            assertEquals(
+                sha256Hex("0".repeat(64).toByteArray()),
+                derivation.extracted.single { it.first == "$native.sha256" }.second,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub derivation matches the python checker`() {
+        val root = Files.createTempDirectory("skiko-parity").toFile()
+        try {
+            val script = File(repoRoot(), "scripts/ci/canonical-jar-hash.py")
+            assertTrue(script.isFile, "canonical-jar-hash.py not found")
+            val native = "libskiko-linux-x64.so"
+            // A real Mach-O native: the extracted file is re-signed by packaging, so the
+            // recorded hash must be the normalized content hash, not the raw bytes.
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to thinMacho(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    "libskiko-linux-arm64.so" to thinMacho(code = "CODE-B".toByteArray()),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-linux-x64-0.9.30.jar",
+                    zipBytes(entries),
+                )
+            val derivation = CanonicalJarHash.stubOf(source, setOf(native))
+            val remaining = entries.filter { it.first != native && it.first != "$native.sha256" }
+            val stub = writeJar(root, "stub.jar", zipBytes(remaining))
+
+            val stubOut =
+                ProcessBuilder("python3", script.absolutePath, stub.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+                    .let { process ->
+                        val text = process.inputStream.use { it.readBytes().decodeToString().trim() }
+                        assertEquals(0, process.waitFor(), text)
+                        text
+                    }
+            assertEquals(derivation.expectedHash, stubOut)
+
+            val extracted = File(root, native)
+            extracted.writeBytes(thinMacho(sig = "OTHER".toByteArray()))
+            val contentOut =
+                ProcessBuilder("python3", script.absolutePath, "--content", extracted.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+                    .let { process ->
+                        val text = process.inputStream.use { it.readBytes().decodeToString().trim() }
+                        assertEquals(0, process.waitFor(), text)
+                        text
+                    }
+            assertEquals(
+                derivation.extracted.single { it.first == native }.second,
+                contentOut,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the classpath manifest binds the skiko stub record`() {
+        val root = Files.createTempDirectory("skiko-manifest").toFile()
+        try {
+            val native = "libskiko-linux-x64.so"
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-X64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-linux-x64-0.9.30.jar",
+                    zipBytes(entries),
+                )
+            val task = classpathManifestTask(root, source)
+
+            task.write()
+
+            val stubFile = File(root, "manifest-stubs.txt")
+            val lines = stubFile.readLines()
+            assertEquals(1, lines.size)
+            val parts = lines.single().split("  ")
+            assertEquals(3, parts.size)
+            assertEquals("skiko-awt-runtime-linux-x64-0.9.30.jar", parts[1])
+            // The expected stub hash is the source minus the extracted pair.
+            val remaining = entries.filter { it.first != native && it.first != "$native.sha256" }
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "stub.jar", zipBytes(remaining))),
+                parts[0],
+            )
+            // The extracted files are recorded as basename=normalized-hash, comma-separated.
+            assertEquals(2, parts[2].split(",").size)
+            assertTrue(parts[2].startsWith("$native=${sha256Hex("NATIVE-X64".toByteArray())}"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun writeJar(
         dir: File,
         name: String,
@@ -639,6 +793,7 @@ class DesktopPackagingTest {
                 .get()
         task.runtimeClasspath.from(*jars)
         task.manifest.fileValue(File(root, "manifest.txt"))
+        task.stubManifest.fileValue(File(root, "manifest-stubs.txt"))
         return task
     }
 
