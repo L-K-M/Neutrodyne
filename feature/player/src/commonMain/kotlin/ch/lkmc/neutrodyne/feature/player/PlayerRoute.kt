@@ -80,8 +80,7 @@ private fun PlayerRouteContent(
         }
     }
 
-    fun openLink(url: String) {
-        if (platform.urls.open(url) != OpenResult.NO_HANDLER) return
+    fun reportNoHandler(url: String) {
         rootScope.launch {
             if (snackbar.showSnackbar(
                     noHandler,
@@ -95,7 +94,12 @@ private fun PlayerRouteContent(
         }
     }
 
+    fun openLink(url: String) {
+        if (platform.urls.open(url) == OpenResult.NO_HANDLER) reportNoHandler(url)
+    }
+
     ShowUserMessages(ui.messages, vm::onMessageShown) { id ->
+        vm.externalOpen.onAction(id)
         when (val action = vm.onMessageAction(id)) {
             PlaybackMessageAction.OpenPlaybackSettings -> {
                 slot.navigate(SettingsKey(SettingsPage.PLAYBACK))
@@ -109,7 +113,13 @@ private fun PlayerRouteContent(
                 scope.launch {
                     suspendRunCatching { episodeVm.watchLink(action.episodeId) }
                         .onSuccess { url ->
-                            if (url == null) snackbar.showSnackbar(readFailureText) else openLink(url)
+                            if (url == null) {
+                                snackbar.showSnackbar(readFailureText)
+                            } else if (platform.urls.open(url) == OpenResult.NO_HANDLER) {
+                                reportNoHandler(url)
+                            } else {
+                                vm.externalOpen.opened(action.episodeId)
+                            }
                         }.onFailure { snackbar.showSnackbar(readFailureText) }
                 }
             }

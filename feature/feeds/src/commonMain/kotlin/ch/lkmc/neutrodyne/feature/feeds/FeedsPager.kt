@@ -122,6 +122,7 @@ internal fun FeedsScreen(
     onGroupSettings: (Long) -> Unit = {},
     onExportGroup: (Long) -> Unit = {},
     suggestedGroups: @Composable () -> Unit = {},
+    outageBanner: @Composable () -> Unit = {},
     selection: EpisodeSelectionController? = null,
     onPlayEpisode: ((FeedSource, Long) -> Unit)? = null,
     onPlaySelectionNext: (() -> Unit)? = null,
@@ -134,6 +135,13 @@ internal fun FeedsScreen(
             ?.value
             .orEmpty()
     val loadedPages = remember { mutableMapOf<FeedSource, LazyPagingItems<FeedItem>>() }
+    val nativeIds =
+        loadedPages.values
+            .flatMap { it.itemSnapshotList.items }
+            .filterIsInstance<FeedItem.Episode>()
+            .filter { it.row.sourceType == ch.lkmc.neutrodyne.core.model.SourceType.RSS }
+            .mapTo(mutableSetOf()) { it.row.id }
+    val selectionPlayable = state.rowCaps.inAppPlayback || selectedIds.all { it in nativeIds }
     val tabs = state.tabs
     // A zero-page first measure would clamp restored pager selection before tabs arrive.
     if (tabs.isEmpty()) {
@@ -236,13 +244,14 @@ internal fun FeedsScreen(
                 }
             }.focusable(),
     ) {
+        outageBanner()
         if (selectedIds.isNotEmpty() && selection != null) {
             SelectionTopBar(
                 selection,
                 selectedIds.size,
                 selectAll,
-                onPlayNext = onPlaySelectionNext,
-                onPlayLast = onPlaySelectionLast,
+                onPlayNext = onPlaySelectionNext.takeIf { selectionPlayable },
+                onPlayLast = onPlaySelectionLast.takeIf { selectionPlayable },
             )
         } else {
             NdTopAppBar(

@@ -79,6 +79,9 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 queueRepository,
                 chapterRepository,
                 artwork = { artwork },
+                externalOpenService =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeExternalOpen(),
             )
         store.put("player", vm)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }

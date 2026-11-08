@@ -1662,7 +1662,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.repo.PodcastMerger {
 }
 -keep class ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImplContributions$ToAppScope$ProvidesPodcastRepositoryImplMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImplContributions$ToAppScope$ProvidesPodcastRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImplContributions$ToAppScope$ProvidesPodcastRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImplContributions$ToAppScope$ProvidesPodcastRepositoryImplMetroFactory {
   ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImplContributions$ToAppScope$ProvidesPodcastRepositoryImplMetroFactory$Companion Companion;
@@ -1682,7 +1682,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImplContributions$ToAppScope$ProvidesScopeSettingsRepositoryImplMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImplContributions$ToAppScope$ProvidesScopeSettingsRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImplContributions$ToAppScope$ProvidesScopeSettingsRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImplContributions$ToAppScope$ProvidesScopeSettingsRepositoryImplMetroFactory {
   ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImplContributions$ToAppScope$ProvidesScopeSettingsRepositoryImplMetroFactory$Companion Companion;
@@ -1864,6 +1864,16 @@
   ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope$ProvidesYouTubeExternalOpenImplMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope$ProvidesYouTubeExternalOpenImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope$ProvidesYouTubeExternalOpenImplMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope$ProvidesYouTubeExternalOpenImplMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeExternalOpenImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
@@ -3010,7 +3020,7 @@
 -keep interface ch.lkmc.neutrodyne.feature.episode.EpisodeViewModel$Factory {
 }
 -keep class ch.lkmc.neutrodyne.feature.episode.EpisodeViewModel$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.episode.EpisodeViewModel$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.episode.EpisodeViewModel$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.episode.EpisodeViewModel$MetroFactory {
   ch.lkmc.neutrodyne.feature.episode.EpisodeViewModel$MetroFactory$Companion Companion;
@@ -3036,7 +3046,7 @@
 -keep class ch.lkmc.neutrodyne.feature.feeds.FeedsViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.feeds.FeedsViewModelContributions$ToAppScope$ProvideIntoMapFeedsViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.feeds.FeedsViewModelContributions$ToAppScope$ProvideIntoMapFeedsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.feeds.FeedsViewModelContributions$ToAppScope$ProvideIntoMapFeedsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.feeds.FeedsViewModelContributions$ToAppScope$ProvideIntoMapFeedsViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.feeds.FeedsViewModelContributions$ToAppScope$ProvideIntoMapFeedsViewModelMetroFactory$Companion Companion;
@@ -3220,7 +3230,7 @@
 -keep class ch.lkmc.neutrodyne.feature.library.LibraryViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.library.LibraryViewModelContributions$ToAppScope$ProvideIntoMapLibraryViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.library.LibraryViewModelContributions$ToAppScope$ProvideIntoMapLibraryViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.library.LibraryViewModelContributions$ToAppScope$ProvideIntoMapLibraryViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.library.LibraryViewModelContributions$ToAppScope$ProvideIntoMapLibraryViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.library.LibraryViewModelContributions$ToAppScope$ProvideIntoMapLibraryViewModelMetroFactory$Companion Companion;
@@ -3248,7 +3258,7 @@
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion Companion;
@@ -3308,7 +3318,7 @@
 -keep interface ch.lkmc.neutrodyne.feature.podcast.PodcastViewModel$Factory {
 }
 -keep class ch.lkmc.neutrodyne.feature.podcast.PodcastViewModel$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.podcast.PodcastViewModel$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.podcast.PodcastViewModel$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.podcast.PodcastViewModel$MetroFactory {
   ch.lkmc.neutrodyne.feature.podcast.PodcastViewModel$MetroFactory$Companion Companion;
@@ -3322,7 +3332,7 @@
 -keep class ch.lkmc.neutrodyne.feature.queue.UpNextViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.queue.UpNextViewModelContributions$ToAppScope$ProvideIntoMapUpNextViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.queue.UpNextViewModelContributions$ToAppScope$ProvideIntoMapUpNextViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.queue.UpNextViewModelContributions$ToAppScope$ProvideIntoMapUpNextViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.queue.UpNextViewModelContributions$ToAppScope$ProvideIntoMapUpNextViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.queue.UpNextViewModelContributions$ToAppScope$ProvideIntoMapUpNextViewModelMetroFactory$Companion Companion;

@@ -69,10 +69,59 @@ class ScopeSettingsRepositoryTest {
     private val settings = FakeSettingsRepository()
     private val refresh = FakeRefreshController()
     private val snapshots = FakeSnapshotScheduler()
-    private val repo = ScopeSettingsRepositoryImpl(db, settings, { refresh }, FakeGroupChannelSync(), snapshots)
+    private val repo =
+        ScopeSettingsRepositoryImpl(
+            db,
+            settings,
+            { refresh },
+            FakeGroupChannelSync(),
+            snapshots,
+            capabilities =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource(),
+        )
     private val dao = db.scopeSettingsDao()
 
     @AfterTest fun close() = db.close()
+
+    @Test fun externalChannelPolicyIsNotSupportedAndCannotBeEdited() =
+        runTest {
+            val caps =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource()
+            val repository =
+                ScopeSettingsRepositoryImpl(
+                    db,
+                    settings,
+                    { refresh },
+                    FakeGroupChannelSync(),
+                    snapshots,
+                    caps,
+                )
+            val id =
+                db.podcastDao().insertPodcast(
+                    podcastEntity {
+                        copy(sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL)
+                    },
+                )
+            settings.set(ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys.AUTO_DOWNLOAD, true)
+            repository.observePodcast(id).test {
+                assertEquals(SettingSource.NotSupported, awaitItem()?.sources?.get(SettingField.AUTO_DOWNLOAD))
+                caps.capabilities.value =
+                    ch.lkmc.neutrodyne.youtube.api
+                        .YouTubeCapabilities(true, true, true, true, true, null)
+                assertEquals(SettingSource.AppDefault, awaitItem()?.sources?.get(SettingField.AUTO_DOWNLOAD))
+                caps.capabilities.value = caps.capabilities.value.copy(downloads = false)
+                assertEquals(SettingSource.NotSupported, awaitItem()?.sources?.get(SettingField.AUTO_DOWNLOAD))
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertTrue(
+                repository.updatePodcast(id) {
+                    it.copy(autoDownload = true, autoDownloadKeepLatest = 7)
+                } is Outcome.Failure,
+            )
+            assertNull(dao.forPodcast(id))
+        }
 
     @Test fun writesEachScopeAndClearsAllNullRows() =
         runTest {
@@ -194,6 +243,9 @@ class ScopeSettingsRepositoryTest {
                                     { FakeRefreshController() },
                                     FakeGroupChannelSync(),
                                     FakeSnapshotScheduler(),
+                                    capabilities =
+                                        ch.lkmc.neutrodyne.core.testing
+                                            .FakeYouTubeCapabilitiesSource(),
                                 )
                             start.await()
                             when (field) {
@@ -346,6 +398,9 @@ class ScopeSettingsRepositoryTest {
                     { controller },
                     FakeGroupChannelSync(),
                     FakeSnapshotScheduler(),
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
                 )
             assertEquals(Outcome.Success(Unit), hooked.updatePodcast(podcast) { SettingOverrides(120) })
             assertEquals(120, observed)
@@ -366,6 +421,9 @@ class ScopeSettingsRepositoryTest {
                     { controller },
                     FakeGroupChannelSync(),
                     FakeSnapshotScheduler(),
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
                 )
             assertEquals(Outcome.Success(Unit), hooked.updatePodcast(podcast) { SettingOverrides(60) })
             assertEquals(60, dao.forPodcast(podcast)?.o?.refreshIntervalMinutes)

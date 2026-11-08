@@ -80,6 +80,9 @@ class UpNextViewModelTest : MainDispatcherTest() {
         settings = FakeSettingsRepository(),
         platform = FakePlatformInfo(PlatformKind.ANDROID),
         podcasts = podcasts,
+        externalOpenService =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeExternalOpen(),
     ).also { store.put("queue", it) }
 
     @AfterTest fun close() = store.clear()

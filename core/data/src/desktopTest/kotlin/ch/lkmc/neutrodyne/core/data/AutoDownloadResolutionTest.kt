@@ -43,6 +43,9 @@ class AutoDownloadResolutionTest {
             { FakeRefreshController() },
             FakeGroupChannelSync(),
             FakeSnapshotScheduler(),
+            capabilities =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource(),
         )
     private val dao = db.scopeSettingsDao()
 
@@ -185,6 +188,9 @@ class AutoDownloadResolutionTest {
 
     @Test fun notSupportedUsesGlobalDeletionAndFlipsWithoutSettingsWrites() =
         runTest {
+            settings.set(Keys.AUTO_DOWNLOAD, true)
+            val group = db.groupDao().insert(groupEntity(orderKey = "a0"))
+            dao.upsertGroup(PodcastGroupSettingsEntity(group, ScopeOverrides(autoDownload = true)))
             val id = db.podcastDao().insertPodcast(podcastEntity { copy(sourceType = SourceType.YOUTUBE_CHANNEL) })
             dao.upsertPodcast(
                 PodcastSettingsEntity(
@@ -196,6 +202,7 @@ class AutoDownloadResolutionTest {
                     ),
                 ),
             )
+            db.groupDao().insertMember(memberEntity(group, id, "a0"))
             resolver.observeAutoDownload().test {
                 val absent = awaitItem().getValue(id)
                 assertFalse(absent.enabled)

@@ -145,6 +145,7 @@ internal fun LibraryScreen(
     onAddPodcast: () -> Unit,
     onSearchPodcasts: () -> Unit,
     modifier: Modifier = Modifier,
+    outageBanner: @Composable () -> Unit = {},
     segment: LibrarySegment = state.segment,
     selectedIds: List<Long> = emptyList(),
     pendingSelection: PendingSelectionAction? = null,
@@ -198,6 +199,7 @@ internal fun LibraryScreen(
                 }.focusRequester(focus)
                 .focusable(enabled = selectedIds.isNotEmpty()),
     ) {
+        outageBanner()
         if (selectedIds.isNotEmpty()) {
             SelectionTopBar(selectedIds.size, onExitSelection, onSelectionAction)
         } else {

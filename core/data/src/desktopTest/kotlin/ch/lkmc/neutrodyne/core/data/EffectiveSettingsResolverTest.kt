@@ -41,6 +41,9 @@ class EffectiveSettingsResolverTest {
             { FakeRefreshController() },
             FakeGroupChannelSync(),
             FakeSnapshotScheduler(),
+            capabilities =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource(),
         )
     private val dao = db.scopeSettingsDao()
 
