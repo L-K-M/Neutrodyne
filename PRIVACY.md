@@ -60,7 +60,7 @@ Searches, charts and previews remain in memory until eviction or app exit.
 | `podcastindex` | **Podcast Index.** api.podcastindex.org receives search text and result-count parameters, or an explicit Podcast Index feed ID. Every request includes X-Auth-Key (API key), X-Auth-Date (timestamp), and Authorization (SHA-1 of key, secret and timestamp); the secret itself is not sent. Verifying a pair sends the fixed query “podcast”. No country, subscriptions or feed URLs are sent. |
 | `youtube-subscriptions` | **YouTube subscriptions.** When you add or refresh a YouTube channel, www.youtube.com receives channel inputs (IDs, handles, legacy paths or video IDs), page/feed requests and your app locale. HTML requests carry the fixed reject-consent cookie `SOCS=CAE=`, without signed-in cookies. When every channel fails in a library of one or two channels, the app also checks the official YouTube and Google channel feeds to distinguish an outage from a removed channel. Checks stop at the first success and conclusive results are cached for one hour; control channels are never subscribed. YouTube thumbnail hosts (i.ytimg.com, yt3.googleusercontent.com, yt3.ggpht.com) receive image paths. |
 | `youtube-streams` | **YouTube playback and channel search.** With the engine, www.youtube.com receives video/channel IDs, explicit channel searches, locale, client headers and an in-memory consent cookie. googlevideo.com hosts receive media requests. Podcast search text is not sent to YouTube. |
-| `youtube-engine` | **YouTube engine updates.** When enabled, the project GitHub Pages host receives approved-manifest requests; github.com and release-assets.githubusercontent.com receive engine download paths. |
+| `youtube-engine` | **YouTube engine updates.** When enabled, api.github.com receives one release-by-tag index request per update round; github.com and release-assets.githubusercontent.com receive engine download paths. |
 | `app-updates` | **App updates.** When enabled, github.com and release-assets.githubusercontent.com receive update-manifest requests with the app User-Agent. Tapping a release or download opens your browser. |
 | `sync-server` | **Your sync server.** Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. It receives no audio or feed contents. The server operator can read stored data. |
 | `links` | **Links you open.** Your browser or chosen app receives a link you tap, including release/download links. Its own privacy settings apply. |
@@ -136,7 +136,7 @@ The following stable IDs match Settings › Privacy:
 - `notes-images` — show-notes images when allowed or requested.
 - `apple`, `fyyd`, `podcastindex` — directory/search providers with their specific data sent (see table above).
 - `youtube-subscriptions`, `youtube-streams` — YouTube channel/stream requests when used.
-- `youtube-engine` — approved engine manifest and engine downloads from GitHub Pages/github.com when updates enabled.
+- `youtube-engine` — approval index (api.github.com) and engine downloads from github.com/release-assets.githubusercontent.com when updates enabled.
 - `app-updates` — update manifest from github.com/release-assets.githubusercontent.com when checks enabled; links open in browser, no app packages downloaded by the app.
 - `sync-server` — your self-hosted sync server when linked (see Sync section).
 - `links`, `issue-tracker` — links you open.
@@ -166,10 +166,10 @@ is declared anywhere: the app never downloads or installs an update.
 
 ## YouTube engine and update checks
 
-The engine update check contacts `{owner}.github.io` (approved manifest),
-`github.com` and `release-assets.githubusercontent.com`; turn it off in
-Settings › YouTube › "Engine updates". These engine controls are separate
-from app updates.
+The engine update check contacts `api.github.com` (the release-by-tag
+index, once per round), `github.com` and `release-assets.githubusercontent.com`;
+turn it off in Settings › YouTube › "Engine updates". These engine controls
+are separate from app updates.
 
 The app update check requests
 `github.com/L-K-M/Neutrodyne/releases/latest/download/neutrodyne-update.json`,
