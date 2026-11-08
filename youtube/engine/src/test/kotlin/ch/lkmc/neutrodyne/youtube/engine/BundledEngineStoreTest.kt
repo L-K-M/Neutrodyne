@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.youtube.engine
 
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStorePaths
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.youtube.api.EngineRejectReason
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -192,6 +193,189 @@ class BundledEngineStoreTest {
             Files.createSymbolicLink(paths.root.toFile().toPath(), alternate.toPath())
             assertFails { store().prepareBundled() }
             assertTrue(alternate.list()!!.isEmpty())
+        }
+
+    @Test fun beginTrialReportsTheCandidatesOwnCompileStateAndEndingsRestoreTheSavedOne() =
+        runTest {
+            val store = store()
+            val active = store.prepareBundled()
+            compileFixture(active)
+            store.loadStatus()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            val candidateZip = fixtureZip(version = "2026.09.01")
+            val candidate = store.stageVersion("2026.09.01", candidateZip, "0.8.0", 4)
+            // A staged candidate without its compile marker must not claim COMPILED: the next
+            // bind compiles it, so the trial is PREPARING until the host proves otherwise.
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertEquals(candidate, store.hostPrepared())
+            assertEquals(candidate, store.active.value.trial)
+            store.clearTrial()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(active, store.hostPrepared())
+            assertNull(store.active.value.trial)
+            assertEquals("2026.09.01", store.active.value.staged)
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+            // A candidate that already carries its marker is served without a compile budget.
+            compileFixture(candidate)
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(candidate, store.hostPrepared())
+            // Abort records the verdict, removes the tree and restores the active preparation.
+            store.abortTrial("2026.09.01", EngineRejectReason.SELFTEST_FAILED, 4, clock.now())
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(active, store.hostPrepared())
+            assertNull(store.active.value.trial)
+            assertFalse(File(paths.root.toFile(), "versions/2026.09.01").exists())
+            assertEquals(
+                EngineRejectReason.SELFTEST_FAILED,
+                store.active.value.rejected
+                    .single()
+                    .reason,
+            )
+        }
+
+    @Test fun trialOverAnUncompiledActiveRestoresPreparingOnClear() =
+        runTest {
+            val store = store()
+            val bundled = store.prepareBundled()
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 1)
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            store.clearTrial()
+            // The active bundle still has no marker: cancellation must not promote it.
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertEquals(bundled, store.hostPrepared())
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+        }
+
+    @Test fun prepareBundledBetweenStagingAndTrialKeepsTheResumableCandidate() =
+        runTest {
+            val store = store()
+            // Fresh boot, no bundled prepare yet: the updater stages while its run waits
+            // for engine idle, and the delayed engine-prepare worker fires in between.
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            store.prepareBundled()
+            assertTrue(File(candidate.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertEquals("2026.09.01", store.active.value.staged)
+            // The run reaches its trial over the kept tree, and a no-verdict cancellation
+            // keeps the candidate resumable without any rejection.
+            assertEquals(candidate, store.beginTrial("2026.09.01"))
+            store.clearTrial()
+            assertTrue(File(candidate.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertEquals("2026.09.01", store.active.value.staged)
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+        }
+
+    @Test fun prepareBundledDuringATrialKeepsTheCandidateAndTheTrialsPreparation() =
+        runTest {
+            val store = store()
+            val active = store.prepareBundled()
+            compileFixture(active)
+            store.loadStatus()
+            val first = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            store.beginTrial("2026.09.01")
+            compileFixture(first)
+            store.commitTrial(clock.now(), null, false)
+            // A second update trials a newer candidate over the downloaded active; the
+            // delayed worker's prepareBundled lands while the trial host compiles it.
+            val candidate = store.stageVersion("2026.09.15", fixtureZip(version = "2026.09.15"), "0.8.0", 5)
+            store.beginTrial("2026.09.15")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            store.prepareBundled()
+            assertTrue(File(candidate.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertEquals(candidate, store.hostPrepared())
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            // The trial still ends honestly: the candidate compiles and commits.
+            compileFixture(candidate)
+            store.commitTrial(clock.now(), null, false)
+            assertEquals("2026.09.15", store.active.value.current)
+            assertEquals("2026.09.01", store.active.value.previous)
+            assertEquals(candidate, store.hostPrepared())
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+        }
+
+    @Test fun loadStatusDuringATrialReportsTheServedCandidatesOwnState() =
+        runTest {
+            val store = store()
+            val active = store.prepareBundled()
+            compileFixture(active)
+            store.loadStatus()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            // A prepare worker whose active PING finished late calls loadStatus after
+            // beginTrial: the compiled active must not flip the serving trial to COMPILED,
+            // or the trial bind would snapshot the 15 s start budget for an uncompiled
+            // candidate that owes the 120 s first-compile one.
+            store.loadStatus()
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertEquals(candidate, store.hostPrepared())
+            // Once the trial host has written the candidate's marker, the same call
+            // reports COMPILED: the state of the tree actually served.
+            compileFixture(candidate)
+            store.loadStatus()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            store.clearTrial()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(active, store.hostPrepared())
+        }
+
+    @Test fun latestStageSurvivesPreparationAfterAnAbandonedHigherVersion() =
+        runTest {
+            val store = store()
+            store.prepareBundled()
+            for ((sequence, version) in listOf("2026.09.01", "2026.09.15").withIndex()) {
+                val candidate =
+                    store.stageVersion(
+                        version,
+                        fixtureZip(version = version),
+                        "0.8.0",
+                        sequence.toLong() + 1,
+                    )
+                store.beginTrial(version)
+                compileFixture(candidate)
+                store.commitTrial(clock.now(), null, false)
+            }
+            val abandoned = store.stageVersion("2026.11.15", fixtureZip(version = "2026.11.15"), "0.8.0", 3)
+            store.beginTrial("2026.11.15")
+            store.clearTrial()
+            // A later approved manifest may target an older candidate which is still
+            // newer than current. The newest staging operation owns the pending tree.
+            val replacement = store.stageVersion("2026.11.01", fixtureZip(version = "2026.11.01"), "0.8.0", 4)
+            assertEquals("2026.11.01", store.active.value.staged)
+            store.prepareBundled()
+            assertTrue(File(replacement.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertFalse(abandoned.libDir.toFile().exists())
+            assertEquals("2026.09.15", store.active.value.current)
+            assertEquals("2026.09.01", store.active.value.previous)
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+            store.beginTrial("2026.11.01")
+            compileFixture(replacement)
+            store.commitTrial(clock.now(), null, false)
+            assertEquals("2026.11.01", store.active.value.current)
+            assertEquals("2026.09.15", store.active.value.previous)
+            assertEquals(
+                setOf("2026.08.19", "2026.09.15", "2026.11.01"),
+                File(paths.root.toFile(), "versions").list()!!.toSet(),
+            )
         }
 
     @Test fun genuinePinnedZipExtractsWithShebangAndExpectedInventory() {
