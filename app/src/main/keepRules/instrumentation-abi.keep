@@ -2084,7 +2084,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory {
   ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion Companion;
@@ -2831,6 +2831,7 @@
   public ch.lkmc.neutrodyne.sync.api.SyncController getSyncController();
   public ch.lkmc.neutrodyne.core.domain.update.UpdateNotices getUpdateNotices();
   public androidx.work.WorkerFactory getWorkerFactory();
+  public ch.lkmc.neutrodyne.youtube.api.YouTubeHealth getYouTubeHealth();
   public ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource getYoutubeCapabilities();
   public ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver getYoutubeStreamResolver();
   public void inject(ch.lkmc.neutrodyne.ExternalImportActivity);
@@ -4307,6 +4308,9 @@
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EnricherMetroFactory {
   public static ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EnricherMetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StreamResolverMetroFactory {
+  public static ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StreamResolverMetroFactory create();
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule {
   public ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver streamResolver();

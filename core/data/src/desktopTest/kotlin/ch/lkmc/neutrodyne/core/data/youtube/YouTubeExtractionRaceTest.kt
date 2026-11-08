@@ -19,7 +19,14 @@ class YouTubeExtractionRaceTest {
     @Test fun twoWorkerThreadsRaceForExactlyOneTrialAndReleaseIt() =
         runTest {
             val clock = TestClock()
-            val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, backgroundScope, appVersionCode = 42) {}
+            val health =
+                DefaultYouTubeHealth(
+                    FakeSettingsRepository(),
+                    clock,
+                    backgroundScope,
+                    appVersionCode = 42,
+                    invalidateUrls = {},
+                ) {}
             health.awaitLoaded()
             repeat(5) { health.reportExtraction(ExtractionOutcome.ParseFailure("v$it")) }
             health.retryNow()

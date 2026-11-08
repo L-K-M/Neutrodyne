@@ -13,7 +13,14 @@ class YouTubeBreakerRegressionTest {
     @Test fun reportThenGateCannotOvertakeBreakerThreshold() =
         runTest {
             val clock = TestClock()
-            val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, backgroundScope) {}
+            val health =
+                DefaultYouTubeHealth(
+                    FakeSettingsRepository(),
+                    clock,
+                    backgroundScope,
+                    appVersionCode = 0,
+                    invalidateUrls = {},
+                ) {}
             health.awaitLoaded()
             repeat(5) { health.reportExtraction(ExtractionOutcome.ParseFailure("video$it")) }
             assertIs<ExtractionGate.Deny>(health.extractionGate(clock.now()))

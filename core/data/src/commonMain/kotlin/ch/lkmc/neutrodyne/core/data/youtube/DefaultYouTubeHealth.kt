@@ -25,13 +25,17 @@ import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys as Keys
 
-/** Feed commands retain M8 ordering; extraction publishes by CAS before queued snapshot IO. */
+/**
+ * Feed commands retain M8 ordering; extraction publishes by CAS before queued snapshot IO.
+ * `appVersionCode` and `invalidateUrls` have no defaults: omitting them at a call site disabled
+ * persisted breaker restore and cache purge without a compile error (M9a binding regression).
+ */
 internal class DefaultYouTubeHealth(
     private val settings: SettingsRepository,
     private val clock: Clock,
     scope: CoroutineScope,
-    private val appVersionCode: Int = 0,
-    private val invalidateUrls: () -> Unit = {},
+    private val appVersionCode: Int,
+    private val invalidateUrls: () -> Unit,
     private val scheduleRetry: suspend () -> Unit,
 ) : YouTubeExtractionHealth {
     private val mutableState = MutableStateFlow(YouTubeHealthState())
