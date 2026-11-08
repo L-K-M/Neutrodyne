@@ -326,8 +326,12 @@ class BackupWriterTest {
                 val values = reader.settings().values
                 val restored = FakeSettingsRepository()
                 assertIs<Outcome.Success<*>>(
-                    RestoreSettingsMerge(restored, TestDb.inMemory(), FakeSettingsSyncPort(), DataStoreSettingsWriteCoordinator())
-                        .apply(reader.settings()),
+                    RestoreSettingsMerge(
+                        restored,
+                        TestDb.inMemory(),
+                        FakeSettingsSyncPort(),
+                        DataStoreSettingsWriteCoordinator(),
+                    ).apply(reader.settings()),
                 )
                 assertEquals(expected, restored.observePortableSnapshot().first())
                 assertEquals(false, restored.get(AppearanceSettingKeys.ARTWORK_TINT))
@@ -378,8 +382,12 @@ class BackupWriterTest {
                 )
                 val restored = FakeSettingsRepository()
                 assertIs<Outcome.Success<*>>(
-                    RestoreSettingsMerge(restored, TestDb.inMemory(), FakeSettingsSyncPort(), DataStoreSettingsWriteCoordinator())
-                        .apply(exported),
+                    RestoreSettingsMerge(
+                        restored,
+                        TestDb.inMemory(),
+                        FakeSettingsSyncPort(),
+                        DataStoreSettingsWriteCoordinator(),
+                    ).apply(exported),
                 )
                 assertEquals(false, restored.get(UpdateSettingKeys.CHECK_ENABLED))
                 assertEquals(-1L, restored.get(UpdateSettingKeys.LAST_CHECK_AT))

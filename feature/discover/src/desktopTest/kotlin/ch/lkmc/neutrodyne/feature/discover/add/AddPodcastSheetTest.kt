@@ -90,6 +90,8 @@ class AddPodcastSheetTest {
                 .FakeYouTubeChannelResolver(),
             ch.lkmc.neutrodyne.core.testing
                 .FakeYouTubeChannelRepository(),
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeCapabilitiesSource(),
         )
     }
     private var openedPodcast: Long? = null
@@ -130,6 +132,40 @@ class AddPodcastSheetTest {
             onNodeWithText("Open").performClick()
             assertEquals(44, openedPodcast)
             onNodeWithText("0 episodes").assertDoesNotExist()
+        }
+
+    @Test fun youTubeAffordanceNeedsAQueryAndTheCapabilityAndCallsItsOwnCallback() =
+        runComposeUiTest {
+            var directory: String? = null
+            var youtube: String? = null
+            // Capability off: only the ordinary directory destination renders (W10 D1).
+            setSheet(
+                stateOverride = AddPodcastUiState(step = AddSheetStep.Input(searchQuery = "history")),
+                onSearch = { directory = it },
+                onYouTubeSearch = { youtube = it },
+            )
+            onNodeWithText("Search for ‘history’").assertIsDisplayed()
+            onNodeWithText("Search YouTube for ‘history’").assertDoesNotExist()
+            // Capability on: the second destination appears and reaches only its own callback.
+            setSheet(
+                stateOverride =
+                    AddPodcastUiState(
+                        step = AddSheetStep.Input(searchQuery = "history"),
+                        providers = listOf(ProviderInfo(ProviderId.APPLE, true)),
+                        channelSearch = true,
+                    ),
+                onSearch = { directory = it },
+                onYouTubeSearch = { youtube = it },
+            )
+            onNodeWithText("Search YouTube for ‘history’").performClick()
+            assertEquals("history", youtube)
+            assertNull(directory)
+            onNodeWithText("Search for ‘history’").performClick()
+            assertEquals("history", directory)
+            // No search query (plain input error): neither destination renders.
+            setSheet(stateOverride = AddPodcastUiState(step = AddSheetStep.Input(), channelSearch = true))
+            onNodeWithText("Search for ‘history’").assertDoesNotExist()
+            onNodeWithText("Search YouTube for ‘history’").assertDoesNotExist()
         }
 
     @Test fun playlistFailureOffersOwnerWithoutSubscribe() =
@@ -655,6 +691,8 @@ class AddPodcastSheetTest {
         onAutoResolve: (String) -> Unit = viewModel::autoResolve,
         stateOverride: AddPodcastUiState? = null,
         onSubscribe: (Set<Long>) -> Unit = viewModel::subscribe,
+        onSearch: (String) -> Unit = {},
+        onYouTubeSearch: (String) -> Unit = {},
     ) {
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare
@@ -674,6 +712,8 @@ class AddPodcastSheetTest {
                             onAutoResolve = onAutoResolve,
                             onCredentials = viewModel::resolveWithCredentials,
                             onCancelResolve = viewModel::cancelResolve,
+                            onSearch = onSearch,
+                            onYouTubeSearch = onYouTubeSearch,
                             onInputChange = viewModel::onInputChanged,
                             onCandidate = viewModel::resolve,
                             onSubscribe = onSubscribe,
