@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.smoke
 
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -8,8 +9,12 @@ import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
+import ch.lkmc.neutrodyne.desktop.identity.WindowsAppIdentity
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
+import ch.lkmc.neutrodyne.desktop.os.OsRegistrationInitializer
+import ch.lkmc.neutrodyne.desktop.os.withoutOsRegistrations
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
+import ch.lkmc.neutrodyne.desktop.playback.DesktopEnginePaths
 import ch.lkmc.neutrodyne.desktop.shell.appDirsUnder
 import coil3.SingletonImageLoader
 import kotlinx.coroutines.Job
@@ -22,10 +27,13 @@ import kotlin.time.TimeSource
 
 /**
  * The machinery smoke mode and the AOT training run share (11 Smoke mode): a throwaway
- * `AppDirs` root, the timed prologue steps (directories, build info, graph, database,
- * initializers, image loader), the 60 s watchdog and the close-down that stops graph jobs
- * before their files disappear. The prologue mirrors a real start-up closely enough that
- * the AOT archive records the classes the first launch loads.
+ * `AppDirs` root, the timed prologue steps (directories, build info, process identity,
+ * graph, database, initializers, image loader), the 60 s watchdog and the close-down that
+ * stops graph jobs before their files disappear. The prologue mirrors a real start-up
+ * closely enough that the AOT archive records the classes the first launch loads — except
+ * the host's OS registrations, which a controlled run never performs (11 Smoke mode
+ * step 1): the graph's [OsRegistrationInitializer] members are skipped, every other
+ * initializer runs.
  */
 internal class ShellJourney(
     tempPrefix: String,
@@ -40,6 +48,13 @@ internal class ShellJourney(
     fun runPrologue(): BuildInfo {
         val dirs = step("appDirs") { appDirsUnder(root).also { it.ensureCreated() } }
         val buildInfo = step("buildInfo") { BuildInfoLoader.load() }
+        // 11 Start-up step 4's process AppUserModelID — the same pre-graph call
+        // `DesktopShell.runOwner` makes. It is process-local, never an OS registration,
+        // so the controlled journey keeps it: the media-session worker re-asserts the
+        // configured value when a session opens (session_win.cpp).
+        step("processIdentity") {
+            WindowsAppIdentity.applyProcessIdentity(buildInfo, DesktopEnginePaths.current().ndmedia)
+        }
         val startedGraph =
             step("graph") {
                 val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
@@ -49,7 +64,23 @@ internal class ShellJourney(
         // The database open gets its own step ahead of the bands, so the timing is real;
         // band 100's `DatabaseOpenInitializer` then returns at once (11 Smoke mode, M1a).
         step("database") { runBlocking { startedGraph.databaseOpener.awaitOpen() } }
-        step("initializers") { runBlocking { runInitializers(startedGraph.initializers) } }
+        step("initializers") {
+            runBlocking {
+                // Metro materialises a new set of new contributions on every `initializers`
+                // access, so capture one set before diffing — a second call would make
+                // `skipped` report every element.
+                val all = startedGraph.initializers
+                val journey = all.withoutOsRegistrations()
+                val skipped = all - journey
+                if (skipped.isNotEmpty()) {
+                    Log.i(TAG) {
+                        "controlled journey: skipped host OS registrations: " +
+                            skipped.joinToString { it::class.simpleName ?: it::class.toString() }
+                    }
+                }
+                runInitializers(journey)
+            }
+        }
         // The real host installs the artwork-aware Coil singleton at start-up (08); the smoke
         // and training windows compose the same window, so they provision the same loader
         // before the first frame.
@@ -110,6 +141,7 @@ internal class ShellJourney(
     }
 
     private companion object {
+        private const val TAG = "ShellJourney"
         private const val THREAD_NAME = "smoke-watchdog"
         private const val EXIT_HALT = 1
         private val WATCHDOG_TIMEOUT = 60.seconds
