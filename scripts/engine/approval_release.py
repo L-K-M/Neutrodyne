@@ -26,6 +26,15 @@ intact; success is reported only after the new pointer is visible.  A newly
 published snapshot must be reported immutable by the API; the legacy index
 release may stay body-only discovery with ``immutable: false``.
 
+Draft discovery and tag provenance: the by-tag endpoint returns published
+releases only, so a leftover draft with the snapshot tag is recovered
+through the bounded authenticated release listing before any create.  A
+fresh snapshot tag owns no git ref until publication: a pre-existing ref
+is resolved and held to the workflow commit before any mutation, the
+missing ref is normal during the draft phase, and the ref is verified
+strictly after publish.  The echoed ``target_commitish`` is never
+trusted as provenance.
+
 Concurrency precondition (not a linearizable CAS): GitHub's release-body
 PATCH has no compare-and-swap.  ``expected_index_tag`` is checked before the
 PATCH and a missing index is a mismatch when the caller supplied one; a
@@ -83,6 +92,9 @@ MAX_SIGNATURE_BYTES = 4 * 1024
 MAX_HEARTBEAT_BYTES = 4 * 1024
 MAX_GIT_REF_JSON_BYTES = 8 * 1024
 MAX_TAG_OBJECT_JSON_BYTES = 8 * 1024
+DRAFT_DISCOVERY_PER_PAGE = 50
+MAX_DRAFT_DISCOVERY_PAGES = 4
+MAX_RELEASE_LIST_PAGE_BYTES = 256 * 1024
 DEFAULT_TIMEOUT_SECONDS = 15.0
 MAX_REDIRECTS = 3
 MAX_TAG_PEElS = 4
@@ -921,7 +933,7 @@ class SnapshotPublisher:
         steps.extend(
             [
                 f"publish {tag} (draft=false, prerelease=true, make_latest=false)",
-                "verify the published snapshot's four assets and target commit",
+                "verify the published snapshot's four assets and tag ref",
                 f"advance the {INDEX_TAG} index body to {index_body(tag)}",
             ]
         )
@@ -943,7 +955,15 @@ class SnapshotPublisher:
     ) -> PublishResult:
         plan = self.plan(files, run_id, run_attempt, commit_sha)
         tag = plan.snapshot_tag
+        # A fresh snapshot tag owns no git ref until publication.  A
+        # pre-existing ref must already bind the workflow commit before any
+        # draft or publish may use it; a missing ref is normal here.
+        self._verify_snapshot_tag_commit(tag, commit_sha, missing_ok=True)
         release = self._get_release_by_tag(tag)
+        if release is None:
+            # The by-tag endpoint returns published releases only, so a
+            # leftover draft is recovered through the bounded listing.
+            release = self._discover_snapshot_release(tag)
         created = False
         published = False
         reused = False
@@ -954,14 +974,18 @@ class SnapshotPublisher:
                 self._upload_asset(release.id, name, files.by_name()[name])
             self._publish(release.id)
             published = True
-            release = self._get_release_by_id(release.id)
         elif release.draft:
             self._complete_draft(release, files, commit_sha)
             self._publish(release.id)
             published = True
-            release = self._get_release_by_id(release.id)
         else:
             reused = True
+        if published:
+            release = self._get_release_by_id(release.id)
+            if release.tag_name != tag:
+                raise SnapshotStateError(
+                    f"published release reports tag {release.tag_name!r}, expected {tag!r}"
+                )
         self._verify_published(release, files, commit_sha)
         index_release_id, index_created = self.advance_index(
             tag, commit_sha, expected_index_tag=expected_index_tag
@@ -980,6 +1004,12 @@ class SnapshotPublisher:
     # -- snapshot release lifecycle -----------------------------------------
 
     def _get_release_by_tag(self, tag: str) -> Release | None:
+        """Look up a release by tag; this endpoint returns published only.
+
+        A draft is invisible here, so None also covers "a draft carries the
+        tag"; callers must use the bounded listing to tell that apart from
+        "no release carries the tag".
+        """
         response = self._request(
             "GET",
             f"{REPO_API_PREFIX}/releases/tags/{tag}",
@@ -1023,8 +1053,73 @@ class SnapshotPublisher:
             )
         return release
 
-    def _verify_snapshot_tag_commit(self, tag: str, commit_sha: str) -> None:
-        actual = self._resolve_tag_commit(tag)
+    def _discover_snapshot_release(self, tag: str) -> Release | None:
+        """Find the unique same-tag release the by-tag endpoint cannot return.
+
+        The authenticated ``GET /releases`` list includes drafts for a caller
+        with push access.  Pages come only from the fixed repository URL with
+        self-constructed ``per_page``/``page`` parameters; a Link URL is
+        never followed.  All reads stay inside a declared page/item/byte
+        budget.  A non-200, a malformed page or item, a second same-tag
+        release or a continuation past the budget fails closed without
+        mutating: a draft is created only when absence is proven.
+        """
+        match: Release | None = None
+        for page in range(1, MAX_DRAFT_DISCOVERY_PAGES + 1):
+            query = urllib.parse.urlencode(
+                {"per_page": DRAFT_DISCOVERY_PER_PAGE, "page": page}
+            )
+            response = self._request(
+                "GET",
+                f"{REPO_API_PREFIX}/releases?{query}",
+                max_response_bytes=MAX_RELEASE_LIST_PAGE_BYTES,
+            )
+            if response.status != 200:
+                raise SnapshotStateError(
+                    f"release listing failed with HTTP {response.status}"
+                )
+            try:
+                document = json.loads(response.body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
+                raise SnapshotStateError(
+                    "release listing is not UTF-8 JSON"
+                ) from invalid
+            if not isinstance(document, list):
+                raise SnapshotStateError("release listing is not a JSON array")
+            if len(document) > DRAFT_DISCOVERY_PER_PAGE:
+                raise SnapshotStateError(
+                    "release listing returned more items than requested"
+                )
+            for item in document:
+                try:
+                    release = parse_release(item)
+                except ValidationError as invalid:
+                    raise SnapshotStateError(
+                        "release listing contains a malformed release"
+                    ) from invalid
+                if release.tag_name != tag:
+                    continue
+                if match is not None:
+                    raise SnapshotStateError(
+                        f"multiple releases named {tag!r}; refusing to choose"
+                    )
+                match = release
+            if (
+                len(document) < DRAFT_DISCOVERY_PER_PAGE
+                or 'rel="next"' not in (response.header("link") or "")
+            ):
+                return match
+        raise SnapshotStateError(
+            f"release listing exceeded {MAX_DRAFT_DISCOVERY_PAGES} pages; "
+            f"cannot prove no release named {tag!r} exists"
+        )
+
+    def _verify_snapshot_tag_commit(
+        self, tag: str, commit_sha: str, *, missing_ok: bool = False
+    ) -> None:
+        actual = self._resolve_tag_commit(tag, missing_ok=missing_ok)
+        if actual is None:
+            return
         if actual != commit_sha:
             raise SnapshotStateError(
                 f"tag {tag} points at {actual}, expected {commit_sha}"
@@ -1137,7 +1232,6 @@ class SnapshotPublisher:
             or release.make_latest == "true"
         ):
             raise SnapshotStateError("created snapshot release does not match the request")
-        self._verify_snapshot_tag_commit(tag, commit_sha)
         return release
 
     def _publish(self, release_id: int) -> None:
@@ -1263,7 +1357,9 @@ class SnapshotPublisher:
             raise SnapshotStateError("existing draft is not a prerelease")
         if release.make_latest == "true":
             raise SnapshotStateError("existing draft would become the latest release")
-        self._verify_snapshot_tag_commit(release.tag_name, commit_sha)
+        # A draft normally owns no ref yet; a pre-existing one must bind
+        # the workflow commit before this draft is completed under it.
+        self._verify_snapshot_tag_commit(release.tag_name, commit_sha, missing_ok=True)
         missing = self._verify_assets(release.id, files, require_all=False)
         for name in missing:
             self._upload_asset(release.id, name, files.by_name()[name])

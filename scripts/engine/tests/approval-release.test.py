@@ -102,6 +102,8 @@ class FakeGitHub:
         self.tag_object_overrides = {}
         self.document_failures = {}
         self.create_target_overrides = {}
+        self.release_list_overrides = {}
+        self.list_hides_drafts = False
         self._next_release_id = 100
         self._next_asset_id = 500
         if index_snapshot_tag is not None:
@@ -166,7 +168,9 @@ class FakeGitHub:
             "immutable": self.immutable if immutable is None else immutable,
         }
         self.assets[release_id] = []
-        self.tag_refs.setdefault(tag, {"type": "commit", "sha": target_commitish})
+        # A draft owns no git ref; only a published release materializes it.
+        if not draft:
+            self.tag_refs.setdefault(tag, {"type": "commit", "sha": target_commitish})
         return release_id
 
     def set_tag_ref(self, tag, object_type, sha):
@@ -282,7 +286,10 @@ class FakeGitHub:
                 if isinstance(document, bytes):
                     return self.index_status, {}, document
                 return self._json(self.index_status, document)
-            return self._release_response(self.find_by_tag(tag))
+            release = self.find_by_tag(tag)
+            if release is not None and release["draft"]:
+                release = None
+            return self._release_response(release)
         if method in ("DELETE", "PUT", "PATCH") and path.startswith(RELEASES_PATH + "/assets/"):
             self.violations.append(("asset-mutation", method, path))
             return 405, {}, b""
@@ -327,6 +334,8 @@ class FakeGitHub:
         if method == "GET" and path.startswith(RELEASES_PATH + "/") and path.endswith("/assets"):
             release_id = int(path[len(RELEASES_PATH + "/") : -len("/assets")])
             return self._list_assets(release_id)
+        if method == "GET" and path == RELEASES_PATH:
+            return self._list_releases(query)
         if method == "POST" and path == RELEASES_PATH:
             return self._create_release(body)
         if method in ("GET", "PATCH") and path.startswith(RELEASES_PATH + "/"):
@@ -395,11 +404,50 @@ class FakeGitHub:
             return 200, {}, content
         return 404, {}, b""
 
+    def _list_releases(self, query):
+        try:
+            per_page = int(query.get("per_page", ["30"])[0])
+            page = int(query.get("page", ["1"])[0])
+        except (ValueError, IndexError):
+            return 400, {}, b""
+        if per_page < 1 or per_page > 100 or page < 1:
+            return 422, {}, b""
+        if page in self.release_list_overrides:
+            return self.release_list_overrides[page]
+        # The authenticated list returns drafts; an unauthenticated or
+        # read-only listing hides them.  Newest releases come first.
+        releases = [
+            release
+            for release in reversed(list(self.releases.values()))
+            if not (release["draft"] and self.list_hides_drafts)
+        ]
+        start = (page - 1) * per_page
+        items = releases[start : start + per_page]
+        headers = {}
+        if start + per_page < len(releases):
+            headers["Link"] = (
+                f'<{REPO_API}/releases?per_page={per_page}&page={page + 1}>; rel="next"'
+            )
+        return self._json(200, items, headers)
+
     def _create_release(self, body):
         payload = json.loads(body.decode("utf-8"))
         if payload.get("make_latest") not in (None, "false", "legacy"):
             self.violations.append(("make_latest", payload.get("make_latest")))
             return 422, {}, b""
+        # Tag names are unique across releases, drafts included: a second
+        # create for an existing tag is rejected with 422 already_exists.
+        if any(
+            release["tag_name"] == payload["tag_name"]
+            for release in self.releases.values()
+        ):
+            return self._json(
+                422,
+                {
+                    "message": "Validation Failed",
+                    "errors": [{"field": "tag_name", "code": "already_exists"}],
+                },
+            )
         release_id = self._next_release_id
         self._next_release_id += 1
         target_commitish = self.create_target_overrides.get(
@@ -419,11 +467,14 @@ class FakeGitHub:
         }
         self.releases[release_id] = release
         self.assets[release_id] = []
-        # GitHub ignores target_commitish when the tag already exists.
-        self.tag_refs.setdefault(
-            release["tag_name"],
-            {"type": "commit", "sha": payload["target_commitish"]},
-        )
+        # GitHub materializes the tag ref only for a published release; a
+        # draft leaves the ref absent or unchanged.  GitHub ignores
+        # target_commitish when the tag already exists.
+        if not release["draft"]:
+            self.tag_refs.setdefault(
+                release["tag_name"],
+                {"type": "commit", "sha": payload["target_commitish"]},
+            )
         if release["tag_name"] == INDEX_TAG:
             self.index_id = release_id
         return self._json(201, release)
@@ -436,9 +487,17 @@ class FakeGitHub:
         if payload.get("make_latest") not in (None, "false", "legacy"):
             self.violations.append(("make_latest", payload.get("make_latest")))
             return 422, {}, b""
+        was_draft = release["draft"]
         for key in ("draft", "prerelease", "make_latest", "body", "name"):
             if key in payload:
                 release[key] = payload[key]
+        if was_draft and not release["draft"]:
+            # Publication materializes the tag ref at target_commitish; a
+            # pre-existing ref wins and target_commitish is ignored.
+            self.tag_refs.setdefault(
+                release["tag_name"],
+                {"type": "commit", "sha": release["target_commitish"]},
+            )
         return self._json(200, release)
 
     def _list_assets(self, release_id):
@@ -741,6 +800,84 @@ class FakeGitHubGuardTests(unittest.TestCase):
         self.assertEqual(405, response.status)
         self.assertIn("repository-settings", self.fake.violations[0])
 
+    def test_by_tag_hides_draft_releases(self):
+        response = self.fake.request(
+            "GET",
+            f"{RELEASES}/tags/engine-approvals-4242-3",
+            max_response_bytes=1024,
+        )
+        self.assertEqual(404, response.status)
+
+    def test_draft_creation_does_not_materialize_the_tag_ref(self):
+        response = self.fake.request(
+            "POST",
+            RELEASES,
+            max_response_bytes=4096,
+            body=json.dumps(
+                {
+                    "tag_name": "engine-approvals-5-1",
+                    "target_commitish": SHA,
+                    "draft": True,
+                    "make_latest": "false",
+                }
+            ).encode(),
+        )
+        self.assertEqual(201, response.status)
+        self.assertNotIn("engine-approvals-5-1", self.fake.tag_refs)
+
+    def test_publication_materializes_the_tag_ref(self):
+        response = self.fake.request(
+            "PATCH",
+            f"{RELEASES}/{self.release_id}",
+            max_response_bytes=4096,
+            body=json.dumps({"draft": False, "make_latest": "false"}).encode(),
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual(
+            {"type": "commit", "sha": SHA},
+            self.fake.tag_refs["engine-approvals-4242-3"],
+        )
+
+    def test_publication_keeps_a_preexisting_tag_ref(self):
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "0" * 40)
+        response = self.fake.request(
+            "PATCH",
+            f"{RELEASES}/{self.release_id}",
+            max_response_bytes=4096,
+            body=json.dumps({"draft": False, "make_latest": "false"}).encode(),
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual(
+            {"type": "commit", "sha": "0" * 40},
+            self.fake.tag_refs["engine-approvals-4242-3"],
+        )
+
+    def test_second_create_for_an_existing_tag_is_rejected(self):
+        response = self.fake.request(
+            "POST",
+            RELEASES,
+            max_response_bytes=4096,
+            body=json.dumps(
+                {
+                    "tag_name": "engine-approvals-4242-3",
+                    "target_commitish": SHA,
+                    "draft": True,
+                    "make_latest": "false",
+                }
+            ).encode(),
+        )
+        self.assertEqual(422, response.status)
+
+    def test_release_listing_contains_drafts(self):
+        response = self.fake.request(
+            "GET",
+            f"{RELEASES}?per_page=30&page=1",
+            max_response_bytes=65536,
+        )
+        self.assertEqual(200, response.status)
+        tags = [item["tag_name"] for item in json.loads(response.body)]
+        self.assertIn("engine-approvals-4242-3", tags)
+
 
 class PublisherTests(unittest.TestCase):
     def setUp(self):
@@ -830,6 +967,11 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(index_payload["prerelease"])
         self.assertEqual("false", index_payload["make_latest"])
         self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+        # Publication materialized the new tag ref at the workflow commit.
+        self.assertEqual(
+            {"type": "commit", "sha": SHA},
+            self.fake.tag_refs["engine-approvals-4242-3"],
+        )
 
     def test_reuse_complete_published_snapshot(self):
         release_id = self.fake.add_release(
@@ -945,6 +1087,14 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual([], self.index_patch())
         self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
 
+    def _draft_discovery_requests(self):
+        return [
+            request
+            for request in self.fake.requests
+            if request["method"] == "GET"
+            and request["url"].startswith(f"{RELEASES}?")
+        ]
+
     def test_partial_draft_uploads_only_missing_assets(self):
         release_id = self.fake.add_release(
             "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
@@ -959,6 +1109,15 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(
             ["ytdlp-approved.json.sig", "ytdlp-heartbeat.json.sig"],
             [urllib.parse.parse_qs(urllib.parse.urlsplit(u["url"]).query)["name"][0] for u in uploads],
+        )
+        # The draft is invisible to the by-tag endpoint; it was recovered
+        # through the release listing, never recreated.
+        self.assertTrue(self._draft_discovery_requests())
+        self.assertFalse(
+            any(
+                request["method"] == "POST" and request["url"] == RELEASES
+                for request in self.fake.requests
+            )
         )
         self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
 
@@ -1231,6 +1390,221 @@ class PublisherTests(unittest.TestCase):
         self.assertIn("create draft prerelease", plan.summary())
         self.assertIn("ytdlp-approved.json", plan.summary())
         self.assertEqual([], self.fake.requests)
+
+
+class DraftDiscoveryTests(unittest.TestCase):
+    """Drafts are invisible to by-tag; recovery lists releases, bounded."""
+
+    def setUp(self):
+        self.files = make_files()
+        self.fake = FakeGitHub(index_snapshot_tag="engine-approvals-1-1")
+        self.publisher = ar.SnapshotPublisher(self.fake)
+
+    def publish(self, **kwargs):
+        return self.publisher.publish(self.files, 4242, 3, SHA, **kwargs)
+
+    def mutations(self):
+        return [
+            request for request in self.fake.requests if request["method"] != "GET"
+        ]
+
+    def list_requests(self):
+        return [
+            request
+            for request in self.fake.requests
+            if request["url"].startswith(f"{RELEASES}?")
+        ]
+
+    def fill_releases(self, count):
+        for index in range(count):
+            self.fake.add_release(
+                f"engine-approvals-9{index:04d}-1",
+                target_commitish=SHA,
+                draft=False,
+                immutable=True,
+            )
+
+    def test_draft_on_a_later_page_is_recovered(self):
+        # The leftover draft is older than 55 fillers, so it sits past the
+        # first page; discovery must keep paging within its budget.
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        self.fill_releases(55)
+        result = self.publish()
+        self.assertTrue(result.published)
+        self.assertFalse(result.created)
+        pages = [
+            urllib.parse.parse_qs(urllib.parse.urlsplit(r["url"]).query)["page"][0]
+            for r in self.list_requests()
+        ]
+        self.assertIn("2", pages)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_draft_beyond_the_page_budget_fails_closed_without_mutation(self):
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        self.fill_releases(205)
+        with self.assertRaises(ar.SnapshotStateError) as context:
+            self.publish()
+        self.assertIn("engine-approvals-4242-3", str(context.exception))
+        self.assertEqual([], self.mutations())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_release_list_error_fails_closed_without_mutation(self):
+        self.fake.release_list_overrides[1] = (500, {}, b"")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_release_list_malformed_json_fails_closed(self):
+        self.fake.release_list_overrides[1] = (200, {}, b"garbage")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+
+    def test_release_list_non_array_fails_closed(self):
+        self.fake.release_list_overrides[1] = (200, {}, b'{"total":1}')
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+
+    def test_release_list_oversize_page_fails_closed(self):
+        self.fake.release_list_overrides[1] = (
+            200,
+            {},
+            b"x" * (ar.MAX_RELEASE_LIST_PAGE_BYTES + 1),
+        )
+        with self.assertRaises(ar.ResponseTooLargeError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+
+    def test_release_list_more_items_than_requested_fails_closed(self):
+        items = [
+            index_document() for _ in range(51)
+        ]
+        self.fake.release_list_overrides[1] = (
+            200,
+            {},
+            json.dumps(items).encode(),
+        )
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+
+    def test_release_list_malformed_item_fails_closed(self):
+        self.fake.release_list_overrides[1] = (
+            200,
+            {},
+            json.dumps([{"tag_name": "engine-approvals-4242-3"}]).encode(),
+        )
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+
+    def test_duplicate_same_tag_drafts_fail_closed(self):
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_draft_hidden_from_the_listing_fails_closed_via_422(self):
+        # A token without push access gets no draft listings: discovery
+        # proves nothing, so the create attempt 422s instead of clobbering.
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        self.fake.list_hides_drafts = True
+        with self.assertRaises(ar.ApprovalReleaseError):
+            self.publish()
+        self.assertTrue(self.list_requests())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_discovered_draft_targeting_another_commit_fails_before_uploads(self):
+        self.fake.add_release(
+            "engine-approvals-4242-3",
+            target_commitish="b" * 40,
+            draft=True,
+            immutable=True,
+        )
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.uploads())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def uploads(self):
+        return [
+            request
+            for request in self.fake.requests
+            if "uploads.github.com" in request["url"]
+        ]
+
+    def index_patch(self):
+        return [
+            request
+            for request in self.fake.requests
+            if request["method"] == "PATCH"
+            and f"/releases/{self.fake.index_id}" in request["url"]
+        ]
+
+    def test_publish_response_that_stays_a_draft_fails_closed(self):
+        self.fake.override_release = {"draft": True}
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        # The state transition applied even though the response lied.
+        self.assertFalse(
+            self.fake.find_by_tag("engine-approvals-4242-3")["draft"]
+        )
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_publish_response_with_wrong_tag_identity_fails_closed(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+
+        def lie_about_tag(method, url, body):
+            if method == "PATCH" and url == f"{RELEASES}/{release_id}":
+                self.fake.override_release = {"tag_name": "engine-approvals-9-9"}
+            return None
+
+        self.fake.failure = lie_about_tag
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_fresh_publish_with_a_preexisting_correct_ref_keeps_it(self):
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", SHA)
+        result = self.publish()
+        self.assertTrue(result.created)
+        self.assertEqual(
+            {"type": "commit", "sha": SHA},
+            self.fake.tag_refs["engine-approvals-4242-3"],
+        )
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_resolve_and_dry_run_never_enumerate_releases(self):
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        index = ar.resolve_index(self.fake)
+        self.assertIsNotNone(index)
+        self.assertEqual([], self.list_requests())
+        plan = ar.SnapshotPublisher(None).plan(self.files, 4242, 3, SHA)
+        self.assertIn("engine-approvals-4242-3", plan.snapshot_tag)
 
 
 class HttpsTransportTests(unittest.TestCase):
@@ -1615,12 +1989,15 @@ class SnapshotTagBindingTests(unittest.TestCase):
         self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "b" * 40)
         with self.assertRaises(ar.SnapshotStateError):
             self.publisher.publish(self.files, 4242, 3, SHA)
+        # The wrong ref is rejected before any mutation: no draft is created,
+        # nothing is uploaded and the index is untouched.
+        self.assertFalse(
+            any(request["method"] != "GET" for request in self.fake.requests)
+        )
+        self.assertIsNone(self.fake.find_by_tag("engine-approvals-4242-3"))
         self.assertEqual([], self.uploads())
         self.assertEqual([], self.index_patch())
         self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
-        release = self.fake.find_by_tag("engine-approvals-4242-3")
-        self.assertIsNotNone(release)
-        self.assertTrue(release["draft"])
 
     def test_reused_published_snapshot_wrong_tag_fails_before_index_advance(self):
         release_id = self.fake.add_release(
@@ -1701,11 +2078,15 @@ class SnapshotTagBindingTests(unittest.TestCase):
         self.assertEqual([], self.index_patch())
 
     def test_missing_tag_ref_fails_closed_for_snapshot(self):
+        # A snapshot tag that stays missing after publication blocks the
+        # index advance even though the publish itself succeeded.
         tag = "engine-approvals-4242-3"
         self.fake.ref_overrides[tag] = (404, {}, b"")
         with self.assertRaises(ar.SnapshotStateError):
             self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertFalse(self.fake.find_by_tag(tag)["draft"])
         self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
 
     def test_oversize_tag_object_fails_closed(self):
         tag = "engine-approvals-4242-3"
