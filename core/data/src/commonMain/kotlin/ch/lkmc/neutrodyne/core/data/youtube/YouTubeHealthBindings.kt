@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.youtube.api.FeedOutcome
+import ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
@@ -39,21 +40,20 @@ object YouTubeHealthBindings {
         settings: SettingsRepository,
         clock: Clock,
         @ApplicationScope scope: CoroutineScope,
-        db: NeutrodyneDatabase,
+        db: Provider<NeutrodyneDatabase>,
         scheduler: Provider<RefreshScheduler>,
         buildInfo: BuildInfo,
         streams: Provider<YouTubeStreamResolver>,
-    ): YouTubeHealth =
+    ): YouTubeExtractionHealth =
         DefaultYouTubeHealth(
             settings,
             clock,
             scope,
             appVersionCode = buildInfo.versionCode,
-            // The provider defers the lookup past graph construction and past W4 activation:
-            // today it yields the bound external resolver, so the purge is a safe no-op.
+            // Delay stream lookup until invalidation to avoid a health/resolver construction cycle.
             invalidateUrls = { streams().invalidateAll() },
         ) {
-            val ids = db.podcastDao().youtubeChannelIds()
+            val ids = db().podcastDao().youtubeChannelIds()
             if (ids.isNotEmpty()) {
                 scheduler().enqueueNow(
                     RefreshScope.Podcasts(ids),
@@ -63,6 +63,9 @@ object YouTubeHealthBindings {
                 )
             }
         }
+
+    @Provides
+    internal fun healthView(health: YouTubeExtractionHealth): YouTubeHealth = health
 
     @Provides
     @SingleIn(AppScope::class)

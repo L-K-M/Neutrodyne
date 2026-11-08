@@ -79,6 +79,7 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     val playbackMaintenance: PlaybackMaintenance
     val localMediaIndex: LocalMediaIndex
     val networkMonitor: NetworkMonitor
+    val youtubeHealth: ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
     val youtubeEngine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver

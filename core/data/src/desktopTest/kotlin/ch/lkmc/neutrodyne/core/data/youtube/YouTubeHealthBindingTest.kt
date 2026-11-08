@@ -44,11 +44,12 @@ class YouTubeHealthBindingTest {
             val clock = TestClock()
             val streams = ProbeStreams()
             val bind = {
+                val database = TestDb.inMemory().also { db = it }
                 YouTubeHealthBindings.health(
                     settings,
                     clock,
                     backgroundScope,
-                    TestDb.inMemory().also { db = it },
+                    { database },
                     { RecordingScheduler() },
                     buildInfo(),
                     { streams },

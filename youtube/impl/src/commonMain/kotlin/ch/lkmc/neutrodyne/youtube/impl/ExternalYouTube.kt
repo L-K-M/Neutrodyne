@@ -38,10 +38,13 @@ class DeferredYouTubeEngine : YouTubeEngine {
 }
 
 /** Dependency-free external bindings: constructing or calling these never starts a host or IO. */
-class StaticYouTubeCapabilitiesSource : YouTubeCapabilitiesSource {
+class StaticYouTubeCapabilitiesSource(
+    reason: ExternalReason =
+        ExternalReason.NOT_YET_AVAILABLE,
+) : YouTubeCapabilitiesSource {
     override val capabilities =
         MutableStateFlow(
-            YouTubeCapabilities(false, false, false, false, false, ExternalReason.NOT_YET_AVAILABLE),
+            YouTubeCapabilities(false, false, false, false, false, reason),
         ).asStateFlow()
 }
 
@@ -85,4 +88,13 @@ class NoExtractorChannelLookup : ExtractorChannelLookup {
         ref: YtRef,
         depth: MetadataDepth,
     ): ChannelResolution? = null
+}
+
+/** Legal emergency build and unsupported ABI. No host class is needed to expose the reason. */
+class AbsentYouTubeEngine : YouTubeEngine {
+    override val status = MutableStateFlow(EngineStatus(EngineAvailability.NOT_IN_THIS_APK)).asStateFlow()
+
+    override fun prewarm(reason: PrewarmReason) = Unit
+
+    override fun retryStart() = Unit
 }
