@@ -1018,6 +1018,7 @@ abstract class AotTimestampJPackageTask(
     abstract val postImageHook: RegularFileProperty
 
     /** jpackage's `ScriptRunner` looks up `<app name>-post-image<ext>` in the resource dir. */
+    @get:Internal
     protected open val scriptExtension: String =
         if (format == TargetFormat.Msi) ".wsf" else ".sh"
 

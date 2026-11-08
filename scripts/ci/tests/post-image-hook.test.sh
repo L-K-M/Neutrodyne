@@ -286,10 +286,13 @@ make_dmg_staging "$dmg_no_jars"
 rm "$dmg_no_jars/Contents/app/tiny.jar"
 dmg_expect_fail "no classpath JARs" "$dmg_no_jars"
 
-# The MSI hook cannot run here (cscript/WSF is Windows-only); pin its contract
-# as data: well-formed JScript WSF, the Windows staging layout, the read flag,
-# the epoch, and the path read from the environment rather than interpolated
-# into executable command text.
+# The MSI hook cannot run here (cscript/WSF is Windows-only — the native
+# fixture in post-image-hook.test.ps1 executes it on the Windows runners); pin
+# its contract as data: well-formed JScript WSF, the JDK 25 direct-root staging
+# layout (JpAppImageDir IS the app image, with the launcher at its root and
+# app/ below — not the Neutrodyne-App install dir the --install-dir value
+# names), the read flag, the epoch, and the path read from the environment
+# rather than interpolated into executable command text.
 if python3 - "$MSI_HOOK" <<'PY'
 import sys, xml.etree.ElementTree as ET
 path = sys.argv[1]
@@ -302,15 +305,20 @@ assert script is not None and script.get("language") == "JScript"
 text = script.text or ""
 for token in (
     "318211200000",
-    "Neutrodyne-App",
-    "Neutrodyne.cfg",
-    "neutrodyne.aot",
+    "var app = dir;",
+    'app + "\\\\app\\\\Neutrodyne.cfg"',
+    'app + "\\\\app\\\\neutrodyne.aot"',
+    'app + "\\\\Neutrodyne.exe"',
     'java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot',
     'Environment("Process").Item("JpAppImageDir")',
     "ModifyDate",
     "DateLastModified",
 ):
     assert token in text, token
+# JDK 25's WinPackagingPipeline stages the app image at JpAppImageDir itself;
+# the hook must not nest the checks under the installed Neutrodyne-App dir.
+assert 'dir + "\\\\Neutrodyne-App"' not in text, \
+    "the staging tree has no Neutrodyne-App level (that is the install dir)"
 # Supported APIs only: the environment comes from WshShell.Environment (the
 # WScript object has no Environment collection) and file timestamps go through
 # the writable FolderItem.ModifyDate, never the read-only FSO property.
