@@ -267,8 +267,11 @@ private fun configureNativeDistributions(
             shortcut = false
             dirChooser = false
             // Mandatory: jpackage's per-user default would be %LOCALAPPDATA%\Neutrodyne\ — the data
-            // directory its uninstaller deletes (11 Windows MSI and ZIP).
-            installationPath = "Programs\\$DESKTOP_PACKAGE_NAME"
+            // directory its uninstaller deletes (11 Windows MSI and ZIP), so the install dir must
+            // be a different name directly under LocalAppDataFolder. Nesting (Programs/Neutrodyne)
+            // is unreachable per-user: jpackage authors the intermediate Directory but no RemoveFile
+            // component for it, and WiX's ICE64 fails the build (LGHT0204, old nightly 37886973484).
+            installationPath = "$DESKTOP_PACKAGE_NAME-App"
             iconFile.set(project.file("icons/neutrodyne.ico"))
             fileAssociation(
                 mimeType = OPML_MIME_TYPE,
