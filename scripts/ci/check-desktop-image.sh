@@ -122,22 +122,35 @@ ver_gt() {
 
 # --- rule 1: forbidden names (11 item 1) ---------------------------------------
 # Basename globs; plain words without * are exact basename matches, so `bun` never
-# eats `sqlite-bundled`. The python names are the tree pieces trim-python.sh removes.
+# eats `sqlite-bundled`. The python names are the tree pieces trim-python.sh removes:
+# `itcl*`/`thread*` are Tcl/Tk's lib/itcl* and lib/thread* packages, not the stdlib's
+# threading.py or concurrent/futures/thread.py, so they are matched as paths below.
 FORBIDDEN_BASENAME_GLOBS=(
-    '_dbm*' 'libdb*' '_gdbm*' 'libreadline*' 'readline*'
-    '_tkinter*' 'libtcl*' 'libtk*' 'tcl9*' 'tk9*' 'itcl*' 'thread*'
+    '_dbm*' 'libdb*' '_gdbm*' 'libreadline*' 'readline*' '_readline*'
+    '_tkinter*' 'libtcl*' 'libtk*' 'tcl9*' 'tk9*'
     'ensurepip' 'mutagen*' 'bgutil*'
     'qjs' 'qjs.exe' 'deno' 'node' 'bun'
     'AppRun' 'libfuse*' 'proguard*' 'jextract*' 'javafx*' 'vlcj*'
     'gstreamer*' 'libavfilter*' 'libswscale*' 'libpostproc*' 'libmpv*'
 )
 # Path fragments that are forbidden wherever they appear.
-FORBIDDEN_PATH_GLOBS=('*/site-packages/pip*' '*/site-packages/ensurepip*')
+FORBIDDEN_PATH_GLOBS=(
+    '*/site-packages/pip*' '*/site-packages/ensurepip*'
+    '*/lib/itcl*' '*/lib/thread*'
+)
 
-# libedit may carry readline's ABI; it is never a violation (11 item 1).
+# libedit may carry readline's ABI; CPython's own pure-Python _pyrepl/readline.py
+# is a shipped CPython component, not the GPL readline library (11 item 1).
 allowed_name() {
     case "$1" in
         libedit*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+allowed_path() {
+    case "$1" in
+        */_pyrepl/readline.py|*/_pyrepl/readline.pyc) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -146,7 +159,7 @@ check_forbidden_names() {
     local root="$1" path base pat
     while IFS= read -r -d '' path; do
         base="${path##*/}"
-        if allowed_name "$base"; then
+        if allowed_name "$base" || allowed_path "$path"; then
             continue
         fi
         for pat in "${FORBIDDEN_BASENAME_GLOBS[@]}"; do
@@ -278,7 +291,7 @@ content_hash() {
 }
 
 check_jars() {
-    local img="$1" manifest="$2" path hash base record want_hash rest src_name specs actual seen="|" spec appdir name chash file
+    local img="$1" manifest="$2" path hash base record want_hash rest src_name specs actual seen="|" spec appdir name chash file rt
     if [ ! -f "$manifest" ]; then
         fail "runtime-classpath manifest missing: $manifest (run :desktopApp:createDistributable first)"
         return
@@ -288,10 +301,16 @@ check_jars() {
         return
     fi
     local stub_manifest="${manifest%/*}/runtime-classpath-stubs.txt"
+    # Only the resolved runtime root's own jars (jrt-fs.jar) are exempt. A
+    # /runtime/ directory anywhere else is an ordinary image directory: its
+    # JARs must bind the Licensee-checked classpath like any other.
+    rt="$(runtime_dir "$img" || true)"
     while IFS= read -r -d '' path; do
-        case "$path" in
-            */runtime/*) continue ;; # the JDK's own jars (jrt-fs.jar) are not classpath jars
-        esac
+        if [ -n "$rt" ]; then
+            case "$path" in
+                "$rt"/*) continue ;;
+            esac
+        fi
         base="${path##*/}"
         # Field-exact lookup (awk misses return empty, never nonzero): the
         # mangled names carry regex-hostile characters.
@@ -346,10 +365,62 @@ check_jars() {
 }
 
 # --- rule 5: the Python tree matches python-components.lock ---------------------
+# The lock's component names are logical (CPython, OpenSSL, ...), not filenames, so
+# the tree is bound to the lock by the trimmed layout the lock describes: the
+# interpreter, the CA bundle, the standard library's minor version and the image's
+# target (01 Python and native components, 11 Image scan rules). The engine
+# resources arrive at <resources>/engine/ (Compose merges common/ and <os>-<arch>/).
+python_tree_of() {
+    local img="$1" dir
+    for dir in "$img/Contents/app/resources/engine" "$img/app/resources/engine" \
+        "$img/lib/app/resources/engine" "$img/engine"; do
+        if [ -d "$dir" ]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+    return 1
+}
+
+image_target_of() {
+    # A packaged image carries os/arch in build-info.properties (inside the app jar);
+    # a dev image does not, so the target is inferred from the image's shape.
+    local img="$1" jar os arch
+    jar="$(find "$img" -name 'desktopApp-*.jar' -print -quit 2>/dev/null)"
+    if [ -n "$jar" ] && command -v python3 >/dev/null 2>&1; then
+        read -r os arch < <(python3 - "$jar" <<'PYEOF' 2>/dev/null
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        props = {}
+        for line in z.read("build-info.properties").decode("utf-8", "replace").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                props[key.strip()] = value.strip()
+        print(props.get("os", ""), props.get("arch", ""))
+except Exception:
+    print("", "")
+PYEOF
+)
+        if [ -n "$os" ] && [ -n "$arch" ]; then
+            echo "$os-$arch"
+            return 0
+        fi
+    fi
+    if [ -d "$img/Contents" ]; then
+        echo "macos-arm64"
+        return 0
+    fi
+    if [ -d "$img/app" ] && [ -d "$img/runtime" ]; then
+        echo "windows-x64"
+        return 0
+    fi
+    return 1
+}
+
 check_python_tree() {
-    local img="$1" pytree
-    pytree="$(find "$img" -type d -name 'python*' -o -type d -name 'engine' 2>/dev/null | head -1)"
-    if [ -z "$pytree" ]; then
+    local img="$1" engine python target lock_python lock_targets tree_minor
+    if ! engine="$(python_tree_of "$img")"; then
         if [ -f "$PY_LOCK" ] && grep -q '^\[\[component\]\]' "$PY_LOCK"; then
             fail "python-components.lock lists components but no engine/python tree is in the image"
         fi
@@ -359,19 +430,107 @@ check_python_tree() {
         fail "engine/python tree present but youtube/ytdlp-desktop/python-components.lock is missing"
         return
     fi
-    # The lock is TOML with [[component]] entries (01 Python and native components).
-    # Each named component must be present in the tree, and the tree's top-level
-    # entries must each come from a component (the trim manifest grows with MD3;
-    # until then presence is the check that can bind).
-    local missing=0 entry
-    while IFS= read -r entry; do
-        [ -z "$entry" ] && continue
-        if ! find "$pytree" -name "$entry" -print -quit | grep -q .; then
-            fail "python-components.lock component missing in image: $entry"
-            missing=1
+    python="$engine/python"
+
+    # The interpreter: python/bin/python3 off Windows, python/python.exe on Windows.
+    local interpreter
+    if [ -f "$python/python.exe" ]; then
+        interpreter="$python/python.exe"
+    elif [ -f "$python/bin/python3" ]; then
+        interpreter="$python/bin/python3"
+    else
+        fail "no Python interpreter in image (expected $python/bin/python3 or $python/python.exe)"
+    fi
+    if [ -n "$interpreter" ] && [ ! -x "$interpreter" ]; then
+        fail "the bundled Python interpreter is not executable: ${interpreter#"$img"/}"
+    fi
+
+    # The CA bundle the engine's TLS trusts (11 Networking and TLS).
+    if [ ! -f "$engine/cacert.pem" ]; then
+        fail "the bundled CA bundle is missing: $engine/cacert.pem (11 Networking and TLS)"
+    fi
+
+    lock_python="$(grep -E '^python *=' "$PY_LOCK" | tail -1 | sed -E 's/^[^=]*= *"([^"]*)".*/\1/')"
+
+    # The interpreter selects the layout: Lib and lib alias on case-insensitive
+    # filesystems. Bind Windows to the versioned DLL, not the stable python3.dll.
+    tree_minor=""
+    local stdlib lock_minor
+    if [ -f "$python/python.exe" ]; then
+        lock_minor="${lock_python%.*}"
+        if [ -n "$lock_minor" ] && [ -d "$python/Lib" ] && [ -f "$python/python${lock_minor//./}.dll" ]; then
+            tree_minor="$lock_minor"
         fi
-    done < <(awk '/^\[\[component\]\]/{c=1;next} /^\[/{c=0} c && /^name *=/{sub(/^[^=]*= *"?/,"");sub(/".*$/,"");print}' "$PY_LOCK")
-    [ "$missing" = 0 ] && note "python tree matches python-components.lock components"
+    elif [ -d "$python/lib" ]; then
+        for stdlib in "$python"/lib/python*; do
+            if [ -d "$stdlib" ]; then
+                tree_minor="$(basename "$stdlib")"
+                tree_minor="${tree_minor#python}"
+                break
+            fi
+        done
+    fi
+    if [ -z "$tree_minor" ]; then
+        fail "no Python standard library in image (expected $python/lib/python<major>.<minor> or $python/Lib)"
+        return
+    fi
+
+    # The lock's CPython version and the tree's minor must agree.
+    if [ -z "$lock_python" ]; then
+        fail "python-components.lock carries no python version"
+    elif [ "${lock_python%.*}" != "$tree_minor" ]; then
+        fail "Python stdlib minor '$tree_minor' != python-components.lock python '$lock_python'"
+    fi
+
+    # The image's target must be one of the lock's targets.
+    if target="$(image_target_of "$img")"; then
+        lock_targets="$(awk '/^\[\[target\]\]/{t=1;next} /^\[/{t=0} t && /^id *=/{sub(/^[^=]*= *"?/,"");sub(/".*$/,"");print}' "$PY_LOCK")"
+        if ! printf '%s\n' "$lock_targets" | grep -qxF "$target"; then
+            fail "image target '$target' is not one of python-components.lock's targets"
+        fi
+    fi
+
+    # The tree itself must not carry a forbidden component (rule 1 already walks the
+    # whole image; this repeats the match inside the tree so a fixture or a package
+    # dropped into engine/python cannot hide behind the resources merge).
+    check_forbidden_names "$engine"
+
+    # The yt-dlp archive is a relevant archive: its entries must not carry a forbidden
+    # component either (verifyBundledYtDlp checks the release's own inventory; this
+    # binds the shipped bytes to the same forbidden list).
+    local ytdlp="$engine/ytdlp/yt-dlp"
+    if [ -f "$ytdlp" ] && command -v python3 >/dev/null 2>&1; then
+        local bad
+        bad="$(python3 - "$ytdlp" <<'PYEOF' 2>/dev/null
+import sys, zipfile
+# A forbidden component is a whole path segment, never a word inside a name:
+# `bun` must not eat bunnycdn.py and `thread` must not eat threading.py. The
+# runtimes (qjs/deno/node/bun) are matched as exact file names — yt-dlp ships
+# bun.py/deno.py/node.py wrapper modules, which are not the runtimes.
+MODULES = {'_dbm', 'libdb', '_gdbm', 'libreadline', 'readline', '_tkinter',
+           'libtcl', 'libtk', 'tcl9', 'tk9', 'itcl', 'thread', 'ensurepip',
+           'mutagen', 'bgutil'}
+RUNTIMES = {'qjs', 'qjs.exe', 'deno', 'node', 'bun'}
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        hits = []
+        for n in z.namelist():
+            segments = n.split('/')
+            base = segments[-1]
+            if base in RUNTIMES:
+                hits.append(n)
+            elif any(seg in MODULES or seg.split('.')[0] in MODULES for seg in segments):
+                hits.append(n)
+        print('\n'.join(hits[:5]))
+except Exception:
+    pass
+PYEOF
+)"
+        if [ -n "$bad" ]; then
+            fail "forbidden entry in the bundled yt-dlp archive: $(echo "$bad" | head -1)"
+        fi
+    fi
+    note "python tree matches python-components.lock (CPython $tree_minor, target ${target:-unbound})"
 }
 
 # --- rule 6: no GLIBC symbol version above 2.31 (Linux images) ------------------
@@ -407,7 +566,7 @@ check_glibc() {
 
 # --- rule 7: no test classes, fixtures or other entry points --------------------
 check_no_tests() {
-    local img="$1" path base bin_dir
+    local img="$1" path base bin_dir rt
     # Test names matched as segments or suffixes: `*Test*` (capital T — RootForTest
     # is a shipped Compose API, matched only inside our own ch.lkmc packages in the
     # JAR scan below), `test-`/`-test`/`tests`/`fixtures`/`testdata` segments. A
@@ -427,10 +586,18 @@ check_no_tests() {
     # Entries inside the JARs: test or fixture directories anywhere, or *Test*.class
     # inside our own ch.lkmc packages (upstream jars legitimately ship classes like
     # JNA's XTest and Compose's RootForTest; our test classes never belong to main).
+    # Only the resolved runtime root's own jars are exempt; a /runtime/ directory
+    # anywhere else is an ordinary image directory and its JARs are scanned.
+    rt="$(runtime_dir "$img" || true)"
     if command -v python3 >/dev/null 2>&1; then
         while IFS= read -r -d '' path; do
+            if [ -n "$rt" ]; then
+                case "$path" in
+                    "$rt"/*) continue ;;
+                esac
+            fi
             case "$path" in
-                */runtime/*|*.jar.exclude) continue ;;
+                *.jar.exclude) continue ;;
             esac
             local bad
             bad="$(python3 - "$path" <<'PYEOF' 2>/dev/null
@@ -465,6 +632,17 @@ PYEOF
             fi
         fi
     done
+
+    # Windows: the launcher is Neutrodyne.exe at the image root, beside non-entry
+    # DLL/data files and the runtime/ tree (a Windows tree is recognised by
+    # runtime/bin/java.exe, 11 Resources layout). Only executables are entry points.
+    if [ -f "$img/runtime/bin/java.exe" ]; then
+        local exe_count
+        exe_count="$(find "$img" -mindepth 1 -maxdepth 1 -type f -name '*.exe' | wc -l)"
+        if [ "$exe_count" -ne 1 ]; then
+            fail "Windows image root holds $exe_count entry-point executables, expected the one launcher"
+        fi
+    fi
 }
 
 # --- rule 8: macOS signature -----------------------------------------------------
@@ -597,7 +775,7 @@ check_deb() {
 }
 
 check_rpm() {
-    local rpmf="$1" want missing=0
+    local rpmf="$1" want
     if ! command -v rpm >/dev/null 2>&1; then
         fail "RPM check needs rpm(8) to read the package's Requires"
         return
@@ -608,7 +786,6 @@ check_rpm() {
         [ -z "$want" ] && continue
         if ! rpm -qp --queryformat '[%{REQUIRENAME}\n]' "$rpmf" 2>/dev/null | grep -qxF "$want"; then
             fail "RPM is missing our Requires: $want"
-            missing=1
         fi
     done < <(grep -E '^Requires:' "$RPM_SPEC")
     # rpmbuild must not have added its own discovered Requires (Autoreq: 0 in our spec).

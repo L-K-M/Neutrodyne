@@ -51,6 +51,7 @@ import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
@@ -112,8 +113,12 @@ interface DesktopAppGraph {
     val cleanupPlanner: Provider<CleanupPlanner>
     val downloadMover: Provider<DownloadMover>
     val downloadProgress: Provider<DownloadProgressSource>
+    val youtubeEngine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Database-backed; resolve only after the database open gate (M9a health binding). */
+    val youTubeHealth: YouTubeHealth
 
     /** Download-time container chapters (06 Chapters): the desktop `EmbeddedChapterReader`. */
     val embeddedChapterReader: Provider<EmbeddedChapterReader?>

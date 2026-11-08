@@ -64,6 +64,52 @@ class YouTubeIngestRegressionTest {
             }
         }
 
+    @Test fun olderPageCannotRewriteAtomRowsOrPodcastState() =
+        runTest {
+            val clock = TestClock()
+            val db = newDb(clock)
+            try {
+                val id =
+                    seedPodcast(db, "https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaA") {
+                        copy(sourceType = SourceType.YOUTUBE_CHANNEL)
+                    }
+                val ingestor = newIngestor(db, clock)
+                ingestor.ingest(dueFeedOf(db, id), parsedFeed(items = listOf(item())), context())
+                val before = db.episodeDao().byIdentityKey(id, "g:yt:video:aaaaaaaaaaa")!!
+                val podcast = db.podcastDao().byId(id)!!
+                ingestor.ingest(
+                    dueFeedOf(db, id),
+                    parsedFeed(items = listOf(item().copy(title = "Old tab title"))),
+                    context().copy(mode = IngestMode.OLDER_PAGE),
+                )
+                assertEquals(before, db.episodeDao().byId(before.id))
+                assertEquals(podcast, db.podcastDao().byId(id))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test fun initialRowsNeverBecomePromotionAnnouncements() =
+        runTest {
+            val clock = TestClock()
+            val db = newDb(clock)
+            try {
+                val id =
+                    seedPodcast(db, "https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaA") {
+                        copy(sourceType = SourceType.YOUTUBE_CHANNEL)
+                    }
+                val result =
+                    newIngestor(db, clock).ingest(
+                        dueFeedOf(db, id),
+                        parsedFeed(items = listOf(item())),
+                        context().copy(mode = IngestMode.INITIAL),
+                    )
+                assertTrue(db.episodeDao().youTubeAnnounceable(id, result.inserted).isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
     private fun item() =
         parsedEpisode(0, guid = "yt:video:aaaaaaaaaaa", enclosureUrl = null, externalMediaId = "aaaaaaaaaaa")
 

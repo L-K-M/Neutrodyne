@@ -794,6 +794,14 @@ enable only assets of products actually shipped.
   `firstLaunchSeed=restore` and the `FirstLaunchRestoreDeviceTest` class filter
   ([05 Testing](05-groups-opml-backup.md#testing)). An unseeded run cannot
   supply the required named execution evidence.
+- `m10-a11y` selects only M10's focused acceptance lane:
+  four serial `:app:api36DebugAndroidTest` invocations, one class filter each
+  for `M10AccessibilityTest`, `NavigationStateRestorationTest`,
+  `PerAppLanguageTest` and `SubscribeJourneyTest`. Each retains its own XML,
+  logcat and full Gradle log, including on command failure.
+  `assert-selected-tests.py` requires executed, unskipped evidence after each
+  class and across the complete snapshot. `full` already covers the classes
+  inside `instrumented-full`.
 
 Since 2026-10-06, the `ref` dispatch input is gone: every job checks out
 `github.sha`, the exact commit recorded by `head_sha`. Select the branch through
@@ -818,6 +826,7 @@ without changing main's issues.
 | `repro` | M0a | [two signed builds and a diff](#nightly-reproducibility-job) of the APKs, from M0b the desktop application JARs and the server JAR; report-only permanently ([D79](../PLAN.md#3-key-decisions)) | no |
 | `bmgr` | M3 | android-emulator-runner API 31 and API 36 (`data_extraction_rules.xml`), image `default`: `scripts/ci/bmgr-check.sh <api> <evidence-dir>` on the untouched published release `x86_64` APK — the black-box harness: the self-instrumenting `:tools:bmgrdriver` APK seeds through the production `ExternalImportActivity` over UiAutomator, the host triggers the shell-only `SnapshotNowReceiver`, verifies the raw LocalTransport TAR, reinstalls the identical APK and validates the pulled post-restore tree with `check-first-launch-restore-results.py --bmgr-pull`/`--bmgr` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr), plus 07's "no `Podcasts/`" assertion). No test code or hooks in the release process; needs root uninstall/reinstall, which an in-process instrumented test cannot do. Host pulls keep each remote `find` as nonhidden `<dir>-listing.txt` sibling evidence read on fd3, and `bmgr init` keeps every attempt under `init-<label>-attempt<N>.txt` plus an `init-<label>-attempts.txt` rc ledger (bounded retry only for the observed rc0/`result: -1000` observer-race shape; explicit `result: 0` remains the only acceptance — 2026-10-25 run8 corrections, pending a new real run). The legacy `backup_rules.xml` path (API 28–30) is covered by `BackupRulesTest` and the negative API 28/29 diagnostic below, not by a positive app leg ([PO-50](../PLAN.md#48-further-product-owner-decisions)) | yes |
 | `first-launch-restore` | M3 | opt-in scope only: `./gradlew --max-workers=2 :app:api26DebugAndroidTest :app:api36DebugAndroidTest -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest -Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore` — the seeded cold-start restore gate ([05 Testing](05-groups-opml-backup.md#testing)); its XML goes to the `first-launch-restore-results` artifact on success and failure | no (not part of `full`) |
+| `m10-a11y` | M10 | opt-in scope only: four serial `:app:api36DebugAndroidTest` invocations with `--max-workers=1`, one device slot, `neutrodyne.testScope=nightly`, the Lavapipe renderer and one class filter per invocation: `M10AccessibilityTest`, `NavigationStateRestorationTest`, `PerAppLanguageTest`, `SubscribeJourneyTest`. Separate evidence snapshots and full Gradle logs survive failures; `assert-selected-tests.py --device api36 --require-class …` requires each class and the final combined evidence to contain executed, unskipped cases. | no (not part of `full`) |
 | `screenshots-full` | M10 | `./gradlew allTests test --tests '*Screenshot*' -PscreenshotTier=full -Proborazzi.test.verify=true` (the Android and desktop sets; Unverified that `--tests` applies across `allTests`, fallback: the Roborazzi verify tasks per module) | yes |
 | `mutation-full` | M1a | `./gradlew mutationTest -PmutationIterations=1000` | yes |
 | `live-canary` | when 03 ships `feeds/canary/feeds.txt` (M11 at the latest) | `./gradlew :feeds:jvm:liveCanary` | no |
@@ -891,6 +900,12 @@ verified structurally (the workflow test and `test-server-image.py`), not by a
 real tag; the same holds for `gh release verify`, `verify-asset` and
 `gh attestation verify` on a published release, which run only on a real tag
 that this slice must not create.
+
+Each desktop format is scanned before the next install-kind build replaces
+its app JAR and generated classpath manifest. Runtime provenance is checked
+on each installed or extracted payload. On Windows, the installed MSI
+payload is scanned before the portable ZIP is built; MSI table metadata alone
+does not establish the installed JAR identities.
 
 Jobs and steps, in order (target: tag → published release with every asset in < 60 min, N11 and PLAN M11 AC2; [Time budgets](#time-budgets)):
 
