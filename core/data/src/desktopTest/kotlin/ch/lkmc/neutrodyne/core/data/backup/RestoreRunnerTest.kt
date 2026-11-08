@@ -709,6 +709,10 @@ class RestoreRunnerTest {
             val retry = assertIs<RestoreRunResult.Retry>(result)
             assertEquals(BackupError.Storage, retry.error)
             assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+
+            dataStore.failWrites = false
+            assertIs<RestoreRunResult.Completed>(realRunner.run(sessionId))
+            assertEquals(1.5f, store.get(PlaybackSettingKeys.SPEED))
         }
 
     /** `captureAt` never lowers a newer pending clock (10 Capture rules). */
