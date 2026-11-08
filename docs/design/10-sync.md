@@ -1219,9 +1219,8 @@ completed link deletes it. Deviations the current code forces:
   frozen-input rule produces. `onApplied` still reports podcast, group,
   episode and setting winners; the settings journaling
   (`pendingSetting`) runs after `mergeStaged` returns rather than inside
-  each chunk transaction, which keeps the same crash-recovery property
-  (the marker lives in `sync_clock`; `SyncApplyEffects.drainSettings`
-  applies it at the latest start). Boundary (2026-11-08): the merge
+  each chunk transaction; the marker lives in `sync_clock` and is
+  repeatable after interruption. Boundary (2026-11-08): the merge
   itself already drains those markers before it completes, through the
   one app-scoped `SyncApplyEffects` bound with the shared
   `SettingsWriteCoordinator`, so a journaled remote value serializes

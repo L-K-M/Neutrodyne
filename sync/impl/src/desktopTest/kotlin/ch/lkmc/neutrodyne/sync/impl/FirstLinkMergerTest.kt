@@ -866,7 +866,8 @@ class FirstLinkMergerTest {
                 link(db, enabled = true)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
-                db.syncStateDao()
+                db
+                    .syncStateDao()
                     .upsert(
                         SyncStateEntity(
                             enabled = true,
@@ -962,7 +963,8 @@ class FirstLinkMergerTest {
                 link(db, enabled = true)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
-                db.syncStateDao()
+                db
+                    .syncStateDao()
                     .upsert(
                         SyncStateEntity(
                             enabled = true,
