@@ -18,7 +18,7 @@ class BaselineProfileGenerator {
     @get:Rule val baselineProfile = BaselineProfileRule()
 
     @Test
-    fun generate() {
+    fun coldStart() {
         // The startup journey also feeds the startup profile, so R8 can lay out the startup DEX.
         baselineProfile.collect(packageName = PACKAGE, includeInStartupProfile = true) {
             with(JourneyActions) {
@@ -27,18 +27,31 @@ class BaselineProfileGenerator {
                 coldStart()
             }
         }
+    }
+
+    // Each method gets its own output prefix; repeated collects in one test overwrite it.
+    @Test
+    fun coverGrid() {
         baselineProfile.collect(packageName = PACKAGE) {
             with(JourneyActions) {
                 prepareJourney(Destination.LIBRARY, "library_grid")
                 flingCoverGrid()
             }
         }
+    }
+
+    @Test
+    fun podcastDetail() {
         baselineProfile.collect(packageName = PACKAGE) {
             with(JourneyActions) {
                 prepareJourney(Destination.LIBRARY, "library_grid")
                 openPodcast()
             }
         }
+    }
+
+    @Test
+    fun playerExpansion() {
         baselineProfile.collect(packageName = PACKAGE) {
             with(JourneyActions) {
                 prepareJourney(Destination.FEEDS, "mini_player")

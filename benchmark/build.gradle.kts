@@ -46,6 +46,14 @@ androidComponents {
     beforeVariants {
         it.enable = it.buildType == "benchmarkRelease" || it.buildType == "nonMinifiedRelease"
     }
+    onVariants(selector().withBuildType("nonMinifiedRelease")) { variant ->
+        // Other test classes exercise benchmarkRelease's fixtures and Macrobenchmark rules.
+        // The profile producer runs only its generator on this unminified target.
+        variant.instrumentationRunnerArguments.put(
+            "class",
+            "ch.lkmc.neutrodyne.benchmark.BaselineProfileGenerator",
+        )
+    }
 }
 baselineProfile {
     managedDevices += "bench34"
