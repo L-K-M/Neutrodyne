@@ -418,9 +418,8 @@ class PlaybackServiceTest {
                     connect().pause()
                     seekMark = appliedSeeks.size
                     connect().seekTo(30_500)
-                    // This is the old guard: it passes right now, on the mask alone,
-                    // while the session has provably not run a single command
-                    // (its tasks execute on this same main thread, which we hold).
+                    // Record the local mask only for diagnostics. The acknowledgement
+                    // below comes from the real player after this main-thread section.
                     !connect().playWhenReady && connect().currentPosition >= 30_400
                 }
             logEvidence(
@@ -428,7 +427,6 @@ class PlaybackServiceTest {
                 "maskedSettled=$maskedSettled appliedSeeks=${appliedSeeks.size - seekMark} " +
                     "- a controller-state await already passes before the session ran",
             )
-            assertTrue("controller mask should report the pending seek as settled", maskedSettled)
             awaitAppliedSeek(seekMark, 30_500)
             await { withContext(Dispatchers.Main) { engine?.playWhenReady == false } }
             phase("chapters/prev-first")
