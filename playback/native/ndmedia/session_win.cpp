@@ -428,16 +428,11 @@ DWORD WINAPI run(void *) noexcept {
     HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
     const bool initialized = SUCCEEDED(result);
     if (SUCCEEDED(result)) {
-        // The shell owns the process AppUserModelID and sets it before any
-        // window exists (11 Start-up step 4). A session opened first still
-        // needs it on this thread, so the worker re-asserts the configured
-        // value — never a hardcoded ID that could overwrite the release one.
-        wchar_t configured[AUMID_CAPACITY]{};
-        AcquireSRWLockShared(&identityLock);
-        memcpy(configured, processAumid, sizeof(configured));
-        ReleaseSRWLockShared(&identityLock);
-        if (configured[0])
-            result = SetCurrentProcessExplicitAppUserModelID(configured);
+        // TEST-NEGATIVE CONTROL (impl/windows-identity-native-red): the old
+        // hardcoded development ID, restored to prove the identity fixture
+        // catches a late worker overwrite of the release AppUserModelID.
+        // Never merge to main.
+        result = SetCurrentProcessExplicitAppUserModelID(L"ch.lkmc.neutrodyne.debug");
     }
     WNDCLASSW cls{};
     cls.lpfnWndProc = procedure;
