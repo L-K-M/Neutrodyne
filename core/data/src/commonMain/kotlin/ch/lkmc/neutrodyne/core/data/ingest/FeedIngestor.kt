@@ -146,6 +146,10 @@ internal class FeedIngestor(
             podcastDao.byId(podcast.id)
                 ?: return IngestResult.empty(prepared.warnings, vanished = true)
 
+        if (ctx.mode == IngestMode.OLDER_PAGE && original.sourceType == SourceType.YOUTUBE_CHANNEL) {
+            return ingestOlderYouTube(original, prepared)
+        }
+
         // Only a current page-1 request with accepted media can adopt its redirect target.
         val permanentUrl =
             ctx.fetch.permanentUrl.takeIf {
@@ -644,6 +648,41 @@ internal class FeedIngestor(
             firstIngest = firstIngest,
             artworkChanged = artworkChanged,
             warnings = prepared.warnings,
+        )
+    }
+
+    /** Tab snapshots cannot revise Atom identity/hash/fields or persist a host cursor. */
+    private suspend fun ingestOlderYouTube(
+        stored: PodcastEntity,
+        prepared: PreparedFeed,
+    ): IngestResult {
+        val dao = db.ingestDao()
+        val known = dao.existing(stored.id).mapNotNullTo(HashSet()) { it.externalMediaId }
+        val fresh = prepared.items.filter { item -> item.episode.externalMediaId?.let { known.add(it) } == true }
+        val ordered = fresh.sortedByDescending { it.episode.feedOrder }
+        val ids = dao.insertEpisodes(ordered.map { it.insertRow(stored.id, prepared.firstSeenAt, prepared.now) })
+        ordered.zip(ids).forEach { (item, id) ->
+            item.insertedId = id
+            dao.replaceChildren(
+                id,
+                item.descriptionBytes,
+                item.transcripts(id),
+                item.altEnclosures(id),
+                item.persons(id),
+                item.funding(id),
+                item.pscChapters(id),
+            )
+        }
+        return IngestResult(
+            fresh.mapNotNull { it.insertedId },
+            emptyList(),
+            0,
+            prepared.items.size,
+            0,
+            0,
+            false,
+            false,
+            prepared.warnings,
         )
     }
 
