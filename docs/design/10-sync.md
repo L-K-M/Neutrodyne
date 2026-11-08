@@ -1200,6 +1200,13 @@ timestamp-LWW comparison (a local June `playedAt` loses to a server
 October "unplayed"); the staging-file resume of step 1 is not implemented
 yet and a crash mid-merge restarts the pull.
 
+**Implementation note (2026-11-08, first-link shared-library precursor).** The
+shared staging DTOs and merger preserve canonical identities and field metadata.
+Normal pulls now apply a valid winning `youtubeVariants` value on both podcast
+insert and update. `FirstLinkMerger` is still the existing implementation until
+the following flow slice replaces it; this precursor does not activate the
+linked-restore coordinator.
+
 **Implementation note (2026-11-08, MS2, restore-policies precursor).**
 05's `RestoreMerger` now implements the `LINK_*` policies and
 `LibraryMergerImpl` binds the `LibraryMerger` port over a staging
