@@ -570,8 +570,7 @@ HRESULT utf8(const char *value, wchar_t *buffer, int capacity) {
 // A single bounded diagnostic on a failure path: which stage produced the
 // return code — never the .lnk path, which names a user profile directory.
 void stampDiag(const char *phase, int result) {
-    fprintf(stderr, "nd_win_shortcut_set_aumid: %s failed rc=%d (0x%08x)\n", phase, result,
-            (unsigned)result);
+    fprintf(stderr, "nd_win_shortcut_set_aumid: %s failed rc=%d (0x%08x)\n", phase, result, (unsigned)result);
 }
 
 // MS AppUserModelIDs: at most 128 UTF-16 units, no spaces (appids doc).
@@ -762,8 +761,8 @@ extern "C" ND_API int nd_win_shortcut_set_aumid(const char *lnk_utf8, const char
         PropVariantInit(&current);
         // A shortcut already carrying the ID is left untouched: the MSI's file
         // keeps its timestamp and no write races an installer repair check.
-        if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &current)) && current.vt == VT_LPWSTR &&
-            current.pwszVal && wcscmp(current.pwszVal, id) == 0) {
+        if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &current)) && current.vt == VT_LPWSTR && current.pwszVal &&
+            wcscmp(current.pwszVal, id) == 0) {
             dirty = false;
         }
         PropVariantClear(&current);

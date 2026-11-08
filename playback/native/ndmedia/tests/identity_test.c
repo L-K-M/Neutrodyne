@@ -16,12 +16,12 @@
 #include <windows.h>
 
 static int failures = 0;
-#define CHECK(cond, msg)                                                                            \
-    do {                                                                                            \
-        if (!(cond)) {                                                                              \
-            fprintf(stderr, "FAIL %s (line %d)\n", (msg), __LINE__);                                  \
-            ++failures;                                                                             \
-        }                                                                                           \
+#define CHECK(cond, msg)                                                                                               \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            fprintf(stderr, "FAIL %s (line %d)\n", (msg), __LINE__);                                                   \
+            ++failures;                                                                                                \
+        }                                                                                                              \
     } while (0)
 
 static void to_utf8(const wchar_t *in, char *out, int capacity) {
@@ -37,8 +37,7 @@ static int create_shortcut(const wchar_t *lnk) {
     IShellLinkW *link = NULL;
     IPersistFile *file = NULL;
     wchar_t exe[MAX_PATH];
-    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW,
-                                      (void **)&link);
+    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&link);
     if (SUCCEEDED(result))
         result = link->lpVtbl->QueryInterface(link, &IID_IPersistFile, (void **)&file);
     if (SUCCEEDED(result)) {
@@ -61,8 +60,7 @@ static int read_description(const wchar_t *lnk, wchar_t *out, int capacity) {
     IShellLinkW *link = NULL;
     IPersistFile *file = NULL;
     out[0] = 0;
-    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW,
-                                      (void **)&link);
+    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&link);
     if (SUCCEEDED(result))
         result = link->lpVtbl->QueryInterface(link, &IID_IPersistFile, (void **)&file);
     if (SUCCEEDED(result))
@@ -92,8 +90,7 @@ static int read_aumid(const wchar_t *lnk, wchar_t *out, int capacity) {
     IPropertyStore *store = NULL;
     PROPVARIANT value;
     out[0] = 0;
-    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW,
-                                      (void **)&link);
+    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&link);
     if (SUCCEEDED(result))
         result = link->lpVtbl->QueryInterface(link, &IID_IPersistFile, (void **)&file);
     if (SUCCEEDED(result))
@@ -153,8 +150,7 @@ int main(void) {
     CHECK(nd_session_open() == 0, "session open");
     {
         PWSTR current = NULL;
-        CHECK(GetCurrentProcessExplicitAppUserModelID(&current) == S_OK,
-              "post-session aumid read back");
+        CHECK(GetCurrentProcessExplicitAppUserModelID(&current) == S_OK, "post-session aumid read back");
         if (current) {
             to_wide(aumid, expected, 256);
             CHECK(wcscmp(current, expected) == 0, "session kept the release aumid");
@@ -169,8 +165,7 @@ int main(void) {
         wchar_t unique[64];
         swprintf(unique, 64, L"nd-identity-%lu", GetCurrentProcessId());
         lstrcatW(dir, unique);
-        CHECK(CreateDirectoryW(dir, NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS,
-              "temp dir");
+        CHECK(CreateDirectoryW(dir, NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS, "temp dir");
         lstrcpyW(lnk, dir);
         lstrcatW(lnk, L"\\fixture.lnk");
         CHECK(create_shortcut(lnk) == 0, "fixture .lnk created");
@@ -188,8 +183,7 @@ int main(void) {
 
         /* Bounds: relative, non-.lnk and absent paths are all refused. */
         CHECK(stamp("fixture.lnk", aumid) < 0, "relative path rejected");
-        CHECK(stamp("C:\\Windows\\fixture.txt", aumid) < 0,
-              "non-.lnk rejected");
+        CHECK(stamp("C:\\Windows\\fixture.txt", aumid) < 0, "non-.lnk rejected");
         {
             wchar_t missing[MAX_PATH];
             char missing_utf8[MAX_PATH * 4];
