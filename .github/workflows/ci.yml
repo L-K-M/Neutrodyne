@@ -295,9 +295,11 @@ jobs:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       # :sync:server:fatJar :sync:server:serverNotices keeps the server's packaging task green from M0a.
-      # TODO(M0b): add :desktopApp:createDistributable — the desktop image needs
-      # the runtime.lock/jlink setup that lands with the desktop package (it
-      # fails at createRuntimeImage today).
+      # No :desktopApp:createDistributable here: the desktop image is built and
+      # checked in `desktop-smoke` below and packaged per target in
+      # `desktop-matrix` — the smoke and scan steps need the build's own
+      # bundled-runtime tree and classpath manifest, so they share a workspace
+      # with the producer instead of downloading an image artifact.
       - name: Check release instrumentation ABI
         run: |
           ./gradlew --no-configuration-cache --max-workers=2 \
@@ -422,17 +424,110 @@ jobs:
             **/build/outputs/androidTest-results/
             **/build/reports/androidTests/
 
-  # TODO (M0b): `desktop-smoke` (xvfb-run smoke start of the Linux x64 image +
-  # check-desktop-image.sh + check-runtime-sources.sh --image) — `needs: assemble`
-  # per 09; it lands with the desktop packaging.
+  # M0b's required Linux x64 image gate (09 ci.yml `desktop-smoke`, 11 Smoke
+  # mode): the real native build feeds the real image producer here, then the
+  # packaged smoke start, the image scan and the runtime-provenance check run
+  # on the result — the same gates `desktop-matrix` runs per package on
+  # dispatch, on the one PR-visible target. The image is built in this job, not
+  # downloaded from `assemble`: the smoke and the two scans read the build's
+  # own bundled-runtime tree and generated classpath manifest, so the producer
+  # and its checks must share a workspace. `needs: assemble` per 09's graph.
+  desktop-smoke:
+    needs: assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      # The KMP android targets configure AGP in every module, so even a
+      # desktop-only build needs an SDK on the host.
+      - name: Android SDK
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      # binutils serves jlink's strip-debug and check-runtime-sources.sh's
+      # objcopy comparison; xvfb and dbus-x11 wrap the image build and the
+      # smoke start.
+      - name: Host tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils xvfb dbus-x11 dbus-daemon
+      # createDistributable pulls the target's FFmpeg and ndmedia builds and
+      # the licences payload through its own task graph (11 Packaging
+      # pipeline), so the licence gate below reads the libraries the image
+      # actually carries. installKind=tar.gz keeps the image on the production
+      # path — a dev kind reports debug=true (11 build-info). The xvfb/dbus
+      # wrap runs now, before it is load-bearing: MD5's AOT training launch
+      # inside the image build will need the display and the session bus.
+      - name: Build the Linux x64 app image
+        env:
+          TMPDIR: ${{ runner.temp }}/neutrodyne-smoke-tmp
+        run: |
+          mkdir -p "$TMPDIR"
+          # OpenJDK's Linux builds ignore TMPDIR (Temurin JRE 25 container
+          # probe): the property itself pins every forked JVM's temp root —
+          # Gradle, jpackage and the future training JVM — under runner.temp.
+          export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
+          xvfb-run -a dbus-run-session -- ./gradlew :desktopApp:createDistributable \
+            :playback:native:checkNativeLicences -Pneutrodyne.installKind=tar.gz
+      # smoke-start.sh appends -Dneutrodyne.smoke=true to the launcher's
+      # JAVA_TOOL_OPTIONS and keeps the pinned tmpdir. The window step needs
+      # the display Xvfb provides; headless it would report skipped-headless.
+      - name: Smoke-start the image and check it
+        env:
+          TMPDIR: ${{ runner.temp }}/neutrodyne-smoke-tmp
+        run: |
+          export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          xvfb-run -a dbus-run-session -- scripts/desktop/smoke-start.sh "$img" | tee smoke.txt
+          scripts/ci/check-desktop-image.sh "$img"
+          scripts/ci/check-runtime-sources.sh --image "$img" --smoke smoke.txt
+      # A halted smoke JVM leaves crash-<UTC>.txt under its temporary AppDirs
+      # root's state/ — the pinned TMPDIR keeps it inside runner.temp; a
+      # launcher segfault writes hs_err_pid at the repository root (its cwd).
+      - name: Preserve the packaged app's crash reports
+        if: always()
+        run: python3 scripts/ci/preserve-desktop-test-crashes.py "${{ runner.temp }}/neutrodyne-smoke-tmp" desktopApp/build/smoke-crash-evidence
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: desktop-smoke-linux-x64
+          path: |
+            smoke.txt
+            **/hs_err_pid*.log
+            desktopApp/build/desktop-packaging/runtime-classpath*.txt
+            desktopApp/build/smoke-crash-evidence/
+            playback/native/build/ffmpeg-cache/build-linux-x64/*.log
+            playback/native/build/ndmedia/linux-x64/ndmedia-build.txt
+          retention-days: 14
+          if-no-files-found: warn
 
   # MD0's four-target desktop matrix (11 Platform matrix, D88). jpackage cannot
-  # cross-package and neither can a shared library, so each target's unit tests
-  # and its own FFmpeg build and licence check run on the host that serves it:
-  # a green `unit` on linux-x64 says nothing about macOS arm64. Dispatch-only:
-  # a pull_request or main-push run has no runner for the other three targets,
-  # and nightly.yml carries the same job on its schedule. Every `run:` step sets
-  # `shell: bash`, and the SDK step exports one SDK location (asserted by
+  # cross-package and neither can a shared library, so each target's unit tests,
+  # its own FFmpeg build and licence check and its real packages run on the
+  # host that serves them: a green `unit` on linux-x64 says nothing about macOS
+  # arm64. After the engine tests, scripts/ci/build-desktop-release.sh runs the
+  # canonical per-format package build, packaged smoke start, image scan and
+  # runtime-provenance check — the helper release.yml and nightly.yml's
+  # `desktop-packages` drive. Dispatch-only: a pull_request or main-push run
+  # has no runner for the other three targets, and `desktop-smoke` above covers
+  # the Linux x64 image on every run; nightly.yml keeps the same native legs in
+  # its scheduled `desktop-matrix` and adds the release-source download in the
+  # opt-in `desktop-packages` scope. Every `run:` step sets `shell: bash`, and
+  # the SDK step exports one SDK location (asserted by
   # scripts/ci/tests/install-android-sdk.test.sh).
   desktop-matrix:
     if: github.event_name == 'workflow_dispatch'
@@ -443,8 +538,11 @@ jobs:
           - target: windows-x64
             runs-on: windows-2025
             # The MSVC FFmpeg compile is the slowest leg; the shared 90-minute
-            # ceiling once cut it off mid-build, so the leg gets its own.
-            timeout-minutes: 150
+            # ceiling once cut it off mid-build, so the leg gets its own. The
+            # packaging leg adds the same work nightly.yml's `desktop-packages`
+            # bounds at 210 minutes for a native build plus the packages; this
+            # leg matches that proven bound for the combined job.
+            timeout-minutes: 210
           - target: macos-arm64
             runs-on: macos-15
           - target: linux-x64
@@ -484,14 +582,17 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # binutils serves jlink's strip-debug; xvfb and dbus-x11 wrap the desktop
-      # UI tests; libegl1 is skiko-linux-arm64's only unresolvable NEEDED entry.
+      # binutils serves jlink's strip-debug and check-runtime-sources.sh's
+      # objcopy comparison; xvfb and dbus-x11 wrap the desktop UI tests and the
+      # packaged smoke starts; fakeroot, rpm and cpio build and extract the
+      # DEB/RPM legs; libegl1 is skiko-linux-arm64's only unresolvable NEEDED
+      # entry.
       - name: Host tools (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update -qq
-          pkgs="binutils xvfb dbus-x11 dbus-daemon"
+          pkgs="binutils fakeroot rpm cpio xvfb dbus-x11 dbus-daemon"
           [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
           # shellcheck disable=SC2086 # the package list is word-split on purpose
           sudo apt-get install -y -qq $pkgs
@@ -535,6 +636,46 @@ jobs:
             :playback:native:test :desktop:system:test :desktop:system:systemSessionTest --continue"
           [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
           $tests
+      # The release helper's own version source: the checked-out
+      # gradle.properties' versionName. mac_kind selects the supported macOS
+      # package of that version (the 0.x ZIP before the DMG of 1.0.0, PO-39).
+      - name: Read the checked-out version
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          values = dict(line.split('=', 1) for line in Path('gradle.properties').read_text().splitlines()
+                        if '=' in line and not line.lstrip().startswith('#'))
+          version = values['neutrodyne.versionName']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit('Expected a numeric three-part version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\nmac_kind={"mac-zip" if version.startswith("0.") else "dmg"}\n')
+          PY
+      # The canonical per-format gate (09 `desktop-matrix`): every package kind
+      # of this target through scripts/ci/build-desktop-release.sh, each
+      # smoke-started from its installed or extracted payload and checked by
+      # check-desktop-image.sh and check-runtime-sources.sh --image before the
+      # next install kind rebuilds the app JAR and the classpath manifest. On
+      # Linux the helper runs under Xvfb and a private session bus: the smoke
+      # windows need a display, and the AOT training launch inside a future
+      # createDistributable needs the same wrap.
+      - name: Build and check the installed and extracted packages
+        shell: bash
+        env:
+          PACKAGE_TARGET: ${{ matrix.target }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          MAC_PACKAGE_KIND: ${{ steps.version.outputs.mac_kind }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a dbus-run-session -- scripts/ci/build-desktop-release.sh "$PACKAGE_TARGET" "$PACKAGE_VERSION" "$MAC_PACKAGE_KIND" 2>&1 | tee packaging.log
+          else
+            scripts/ci/build-desktop-release.sh "$PACKAGE_TARGET" "$PACKAGE_VERSION" "$MAC_PACKAGE_KIND" 2>&1 | tee packaging.log
+          fi
       # The measured evidence MD0 records per target: stripped sizes, the licence
       # string, the protocol inventory, the enabled components and the build's
       # own configure line and toolchain. It exists even when the tests failed,
@@ -574,6 +715,11 @@ jobs:
           name: desktop-native-${{ matrix.target }}
           path: |
             native-evidence/
+            dist/
+            packaging.log
+            smoke.txt
+            hs_err_pid*.log
+            desktopApp/build/desktop-packaging/runtime-classpath*.txt
             playback/native/build/ffmpeg/${{ matrix.target }}/lib/
             playback/native/build/ffmpeg/${{ matrix.target }}/bin/
             playback/native/build/ndmedia/${{ matrix.target }}/*ndmedia*
