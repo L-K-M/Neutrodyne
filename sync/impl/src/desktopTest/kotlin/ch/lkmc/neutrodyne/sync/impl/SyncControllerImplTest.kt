@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkLocation
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
+import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NetError
@@ -47,6 +49,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
@@ -816,6 +819,42 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun aStaleStatusReadCannotOverwriteTheRevokedStatus() =
+        runTest {
+            val gated = GatedSecretStore()
+            val h = harness(this, gated)
+            try {
+                h.seedLinked()
+                h.client.syncHandler = { _, _ -> throw SyncTransportException(401, "unauthorized", "") }
+                // One refresh read parks holding the pre-revocation snapshot — the constructor's
+                // refresh or this explicit one, whichever loads the token first. A status computed
+                // from that stale snapshot must never publish over the revocation.
+                gated.arm()
+                val stale = launch { h.controller.refreshStatus() }
+                gated.entered.await()
+                h.controller.syncNow()
+                // The marker is durable before the parked read resumes — it does not wait on the
+                // status publish.
+                awaitRevoked(h)
+                // Let the revocation's own publishes finish so the parked read resumes last —
+                // serialized status reads hold it until the gate frees, so idle is only a
+                // bounded wait, not a condition.
+                val quietDeadline = System.nanoTime() + 2_000_000_000L
+                while (h.controllerBusy() && System.nanoTime() < quietDeadline) {
+                    h.tick()
+                    Thread.sleep(2)
+                }
+                gated.gate.complete(Unit)
+                stale.join()
+                await(h, timeoutMs = 10_000) { h.controller.status.value is SyncStatus.Revoked }
+                val states = h.db.syncStateDao()
+                assertEquals("Revoked", states.get()?.lastError)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun listingDevicesMarksThisDevice() =
         runTest {
             val h = harness(this)
@@ -878,7 +917,10 @@ class SyncControllerImplTest {
             }
         }
 
-    private fun harness(scope: TestScope): Harness = Harness(scope, now)
+    private fun harness(
+        scope: TestScope,
+        secrets: SecretStore = FakeSecretStore(),
+    ): Harness = Harness(scope, now, secrets)
 
     /**
      * Waits for [condition], letting the flow's coroutines run and advancing the poll delays: the
@@ -892,6 +934,17 @@ class SyncControllerImplTest {
         val deadline = System.nanoTime() + timeoutMs * 1_000_000L
         while (!condition()) {
             check(System.nanoTime() < deadline) { "timed out waiting for the link flow: ${h.linkFlow.state.value}" }
+            h.tick()
+            Thread.sleep(2)
+        }
+    }
+
+    /** [await]'s suspending twin: polls the `sync_state` row itself, not a published flow. */
+    private suspend fun awaitRevoked(h: Harness) {
+        val deadline = System.nanoTime() + 30_000_000_000L
+        val states = h.db.syncStateDao()
+        while (states.get()?.lastError != "Revoked") {
+            check(System.nanoTime() < deadline) { "timed out waiting for the revocation marker" }
             h.tick()
             Thread.sleep(2)
         }
@@ -913,15 +966,18 @@ class SyncControllerImplTest {
 private class Harness(
     private val scope: TestScope,
     private val now: Long,
+    val secrets: SecretStore = FakeSecretStore(),
 ) {
-    /** The controller's own scope, cancelled before the database closes. */
-    private val controllerJob = kotlinx.coroutines.Job()
+    /**
+     * The controller's own scope, cancelled before the database closes. A supervisor like the
+     * apps' `@ApplicationScope`: one failed controller coroutine must not kill the rest.
+     */
+    private val controllerJob = kotlinx.coroutines.SupervisorJob()
     private val controllerScope =
         kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob)
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
-    val secrets = FakeSecretStore()
     val settings = FakeSettingsSyncPort()
     val address = FakeSyncServerAddress(serverUrl = null)
     val flags = SyncFlags()
@@ -1003,6 +1059,9 @@ private class Harness(
         scope.testScheduler.advanceTimeBy(ms)
         scope.testScheduler.runCurrent()
     }
+
+    /** A controller coroutine is still alive — rounds, link steps or a serialized status read. */
+    fun controllerBusy(): Boolean = controllerJob.children.any { it.isActive }
 
     suspend fun addLocalPodcast() {
         db.withWriteTransaction {
@@ -1234,6 +1293,30 @@ private class FakeNetErrorClassifier(
     var result: NetError = NetError.Offline,
 ) : NetErrorClassifier {
     override fun classify(e: Throwable): NetError = result
+}
+
+/**
+ * A [FakeSecretStore] whose first [get] after [arm] parks on [gate], reporting on [entered]:
+ * a controlled mid-read stop that holds whatever snapshot the caller already loaded.
+ */
+private class GatedSecretStore(
+    private val inner: FakeSecretStore = FakeSecretStore(),
+) : SecretStore by inner {
+    private val armed = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    fun arm() {
+        armed.complete(Unit)
+    }
+
+    override suspend fun get(origin: String): StoredSecret? {
+        // The first parked caller wins `entered`, so only one read ever waits on the gate.
+        if (armed.isCompleted && entered.complete(Unit)) {
+            gate.await()
+        }
+        return inner.get(origin)
+    }
 }
 
 internal fun defaultDiscovery(protocolMax: Int = 1): DiscoveryDocument =
