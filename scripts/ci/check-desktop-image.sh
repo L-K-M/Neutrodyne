@@ -604,13 +604,19 @@ check_no_tests() {
 import sys, zipfile
 try:
     with zipfile.ZipFile(sys.argv[1]) as z:
-        # This inert production interface defines instrumentation injection;
-        # its implementations and test classes still fail the ordinary rule.
-        replay_contract = 'ch/lkmc/neutrodyne/youtube/engine/YtxTestArming.class'
+        # Production types whose names describe engine self-checks or replay
+        # injection. Match exact compiled names, including the current coroutine
+        # state class; neighboring test classes and future generated types still fail.
+        production_engine_types = {
+            'ch/lkmc/neutrodyne/youtube/engine/YtxTestArming.class',
+            'ch/lkmc/neutrodyne/youtube/engine/EngineSelfTestRunner.class',
+            'ch/lkmc/neutrodyne/youtube/engine/EngineSelfTestRunner$Companion.class',
+            'ch/lkmc/neutrodyne/youtube/engine/EngineSelfTestRunner$run$1.class',
+        }
         hits = [n for n in z.namelist()
                 if any(p in {'test', 'tests', 'fixtures', 'testdata', '__tests__'} for p in n.split('/'))
                 or (n.startswith('ch/lkmc/') and 'Test' in n and n.endswith('.class')
-                    and n != replay_contract)]
+                    and n not in production_engine_types)]
         print('\n'.join(hits[:5]))
 except Exception:
     pass

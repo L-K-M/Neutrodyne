@@ -1640,6 +1640,13 @@ Our libraries (`ndmedia`, FFmpeg) load from `<resources>/native/` by absolute pa
 
 ### AOT cache
 
+**Implementation note (2026-11-08, training-task precursor).**
+`DesktopAotTraining` implements the image-training task and its bounded process,
+configuration restoration, timestamp and cache checks. Its 25 task-level tests
+run in static CI. Packaging activation follows separately, with the launcher-flag
+regression and all 17 real-JDK/installer integration cases preserved in that
+slice. The packaging graph gains the training task with that activation.
+
 *Implementation note (2026-11-08, training entry point):* the training and smoke modes share an isolated temporary app graph. The training journey visits all five destinations and exercises the native null backend. A missing display or native backend fails the training with a named step. Unit coverage uses injected window and PCM seams; the real packaged journey is verified with the cache producer and installer checks.
 
 [PO-42](../PLAN.md#48-further-product-owner-decisions): ship the JDK 25 AOT cache ([JEP 483](https://openjdk.org/jeps/483), [JEP 514](https://openjdk.org/jeps/514), [JEP 515](https://openjdk.org/jeps/515)); measured in the research build: first frame 0.58–0.63 s instead of 1.70–2.09 s, idle RSS ≈ 199 MB instead of ≈ 238 MB, cache 55.6 MB (14.1 MB compressed), under software rendering.
@@ -1733,6 +1740,12 @@ separate slice; real Windows installer execution is still pending.
 - on macOS, fails `codesign --verify --deep --strict`;
 - on Windows, is an MSI whose `INSTALLDIR` does not resolve under `LocalAppDataFolder\Neutrodyne-App` ([Windows MSI and ZIP](#windows-msi-and-zip)), or whose `Binary` table holds an entry not listed in `desktopApp/wix.lock` (2026-10-05: only `wixhelper.dll`, WiX Util's custom action and the WixUI resources of the pinned WiX version, [Lockfiles](#lockfiles));
 - on Linux, is a DEB whose members are not xz-compressed or whose `Depends` differs from our `control`, or an RPM without our `Requires` ([Linux DEB, RPM and tar.gz](#linux-deb-rpm-and-targz)).
+
+The production `EngineSelfTestRunner` validates the embedded engine before an
+update activates. Its class and its current companion and coroutine state classes
+are exact exceptions to the test-name scan, alongside the replay injection
+contract. Test classes with similar names remain rejected; the exception grants
+no package or class-prefix exemption.
 
 **Implementation note (2026-11-08):** `writeDesktopRuntimeClasspath` now records
 canonical JAR content hashes. Each hash binds the sorted entry names and their

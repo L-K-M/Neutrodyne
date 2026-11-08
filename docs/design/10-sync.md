@@ -1200,27 +1200,42 @@ timestamp-LWW comparison (a local June `playedAt` loses to a server
 October "unplayed"); the staging-file resume of step 1 is not implemented
 yet and a crash mid-merge restarts the pull.
 
-**Implementation note (2026-11-08, first-link shared-library precursor).** The
-shared staging DTOs and merger preserve canonical identities and field metadata.
-Normal pulls now apply a valid winning `youtubeVariants` value on both podcast
-insert and update. `FirstLinkMerger` is still the existing implementation until
-the following flow slice replaces it; this precursor does not activate the
-linked-restore coordinator.
+**Implementation note (2026-11-08, MS2, first link through 05's port).**
+The shortcut above is gone: Merge and "Use the server's library" run
+`LibraryMerger.mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) over a staging
+directory the pull mapped under the archive's entry names, and the
+staging file (`sync-link-<deviceId>.jsonl` in the cache directory, one
+record per line plus an end marker carrying the cursor) is reused by a
+re-run that finds it complete — the staging-file resume of step 1; a
+completed link deletes it. Deviations the current code forces:
 
-**Implementation note (2026-11-08, MS2, restore-policies precursor).**
-05's `RestoreMerger` now implements the `LINK_*` policies and
-`LibraryMergerImpl` binds the `LibraryMerger` port over a staging
-directory, but `FirstLinkMerger` is not rewired yet: it still uses the
-engine field merge, so those policies are implemented and tested but not
-activated by the client. The linked-restore path has the same precursor
-status: `RestoreRunner` owns the linked Merge captures, the THIS_DEVICE
-unlink and the ALL_DEVICES completion, but `:sync:impl`'s
-`LinkedRestoreCoordinator` lands with the next slice, so
-`LinkedRestoreCoordinatorBindings` (`:core:domain`) temporarily binds the
-fail-closed `NoLinkedRestoreCoordinator`. Linked Replace requests therefore
-fail closed with `BackupError.Unsupported` and keep their durable request
-until that binding is replaced. Scheduling, the LAN gate, revocation and
-refcount behaviour are unchanged.
+- The staging directory carries a one-line `link-meta.json` with the pull
+  time — 05's "no manifest" bars a *validation* manifest, not metadata.
+- Step 4/5 seeding does not consume `onApplied`: `FirstLinkMerger` seeds
+  the local rows at their own timestamps first, folds every received
+  record in through the shared `SyncRecordMerger`, and captures exactly
+  the fields whose clock carries this node (the local winners and every
+  field the server lacks) at their own timestamps — the same set 05's
+  frozen-input rule produces. `onApplied` still reports podcast, group,
+  episode and setting winners; the settings journaling
+  (`pendingSetting`) runs after `mergeStaged` returns rather than inside
+  each chunk transaction; the marker lives in `sync_clock` and is
+  repeatable after interruption. Boundary (2026-11-08): the merge
+  itself already drains those markers before it completes, through the
+  one app-scoped `SyncApplyEffects` bound with the shared
+  `SettingsWriteCoordinator`, so a journaled remote value serializes
+  with local sets under 01's per-key lock; the separate
+  at-each-start drain for normal rounds is still unwired —
+  `SyncEngine` does not run `drainSettings` yet, so a marker left
+  behind waits for the next link merge or the later start drain.
+  Ordinary rounds and the manual resync do not drain those markers yet.
+- The local seed now covers groups, members and Up next too, so an empty
+  account's upload includes them (the 2026-11-04 shortcut uploaded only
+  podcasts and episodes).
+- A linked Merge restore's session write is not captured (the `session`
+  record is MS3's); "Use this device's library everywhere" step 2 (ID
+  adoption and episode-history merge through `LibraryMerger`) remains
+  unimplemented, as recorded in the link-flow note below.
 
 Step 5's `captureAt` receives the frozen value as well as its pre-merge timestamp for played/position/session fields. Field winners come from 05's `onApplied(MergedRecord)` callback; `MergeSummary` carries counts only. Settings the server lacked use literal `v` captures. It never reads a post-merge projection at push time; an interrupted first link resumes from the saved raw inputs without turning an applied server value into a new local action.
 
@@ -1266,8 +1281,23 @@ account never uploads silently. Deviations forced by the current code:
   timeout there is wall-clock, independent of test virtual time).
 - The bootstrap capture writes run with capture already enabled and the
   pulled cursor adopted, so the upload of a Merge or an empty account keeps
-  the rows' own timestamps; a played literal travels as one wire pair with a
-  single clock, as 05's archive requires.
+  the rows' own timestamps; a played literal travels as one wire pair with
+  a single clock, as 05's archive requires.
+
+**Update (2026-11-05, MS2 restore slice).** The first two deviations are
+resolved: Merge and "Use the server's library" now run 05's
+`mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) as the note above records,
+and the staging-file resume exists. The remaining bullets stand, and
+"Use this device's library everywhere" step 2 (ID adoption and the
+episode-history merge) is still open. Restore-while-linked (05's rules)
+is implemented: a linked Merge runs `applying = 1` with `captureAt` at
+the backup's timestamps (presence fields take a fresh literal tick), a
+THIS_DEVICE Replace unlinks first through the `LinkedRestoreCoordinator`
+port (`:core:domain`, bound by `:sync:impl` to the controller's unlink),
+and an ALL_DEVICES Replace keeps the claim-time `linkedAt` clear and
+runs the upload/push/prune steps in the restore's finish before the
+session commits — a failure there leaves the durable request, and a
+re-run replays the idempotent restore and this step.
 
 ### Use the server's library on this device
 
