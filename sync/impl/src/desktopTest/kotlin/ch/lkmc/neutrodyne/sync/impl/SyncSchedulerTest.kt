@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -68,7 +69,11 @@ class SyncSchedulerTest {
             deps.link()
             deps.writeOutbox(coll = "podcast", rid = "p1", field = "subscribed")
 
-            repeat(5) { deps.scheduler.onOutboxChanged() }
+            val burstTime = testScheduler.currentTime
+            repeat(5) {
+                deps.scheduler.onOutboxChanged()
+                assertEquals(burstTime, testScheduler.currentTime, "Database work must not advance the burst clock")
+            }
             testScheduler.advanceTimeBy(OUTBOX_DEBOUNCE_MS)
             runCurrent()
             deps.await { deps.rounds.isNotEmpty() }
@@ -417,8 +422,8 @@ class SyncSchedulerTest {
 
         /**
          * Awaits a scheduler effect: pumps virtual time forward (the debounce, the maturity job
-         * and the playing tick all `delay` on it) and lets the real Room work on
-         * `Dispatchers.Default` land in between.
+         * and the playing tick all `delay` on it), including Room's queries on the same
+         * test dispatcher.
          */
         fun await(
             deadlineMs: Long = AWAIT_MS,
@@ -445,7 +450,13 @@ class SyncSchedulerTest {
     }
 
     private fun TestScope.deps(): Deps {
-        val db = TestDb.inMemory().also { this@SyncSchedulerTest.db = it }
+        // Keep suspending database work on the debounce's clock. A real dispatcher can
+        // leave runTest free to advance virtual timers between callbacks in one burst.
+        val db =
+            TestDb
+                .inMemory(
+                    queryContext = StandardTestDispatcher(testScheduler),
+                ).also { this@SyncSchedulerTest.db = it }
         return Deps(
             scope = this,
             db = db,

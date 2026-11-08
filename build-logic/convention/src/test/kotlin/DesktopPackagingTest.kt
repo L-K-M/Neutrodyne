@@ -107,6 +107,56 @@ class DesktopPackagingTest {
     }
 
     @Test
+    fun `setupBundledRuntime preserves legal notice links from the tar archive`() {
+        val root = Files.createTempDirectory("bundled-runtime-links").toFile()
+        try {
+            val notice = "Pinned runtime notice\n".toByteArray()
+            val prefix = "jdk-25.0.4.1+1/"
+            val out = ByteArrayOutputStream()
+            GZIPOutputStream(out).use { gzip ->
+                fun file(
+                    name: String,
+                    bytes: ByteArray,
+                ) {
+                    gzip.write(tarHeader(prefix + name, bytes.size))
+                    gzip.write(bytes)
+                    gzip.write(ByteArray(tarPadding(bytes.size)))
+                }
+                file("bin/java", byteArrayOf(1))
+                file("legal/java.base/LICENSE", notice)
+                gzip.write(
+                    tarHeader(
+                        prefix + "legal/java.desktop/LICENSE",
+                        0,
+                        '2',
+                        "../java.base/LICENSE",
+                    ),
+                )
+                gzip.write(
+                    tarHeader(
+                        prefix + "legal/java.net/LICENSE",
+                        0,
+                        '1',
+                        prefix + "legal/java.base/LICENSE",
+                    ),
+                )
+                gzip.write(ByteArray(2 * TAR_BLOCK_BYTES))
+            }
+            setupRuntimeTask(root, out.toByteArray()).setup()
+
+            val base = File(root, "jdk/legal/java.base/LICENSE").toPath()
+            val symbolic = File(root, "jdk/legal/java.desktop/LICENSE").toPath()
+            val hard = File(root, "jdk/legal/java.net/LICENSE").toPath()
+            assertTrue(Files.isSymbolicLink(symbolic), "Keep the archive's relative symbolic link")
+            assertEquals(notice.toList(), Files.readAllBytes(symbolic).toList())
+            assertEquals(notice.toList(), Files.readAllBytes(hard).toList())
+            assertTrue(Files.isSameFile(base, hard), "Keep the archive's hard link to its notice")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `setupBundledRuntime rejects an archive that is neither zip nor gzip`() {
         val root = Files.createTempDirectory("bundled-runtime").toFile()
         try {
@@ -644,6 +694,8 @@ class DesktopPackagingTest {
     private fun tarHeader(
         name: String,
         size: Int,
+        type: Char = '0',
+        linkName: String = "",
     ): ByteArray {
         val header = ByteArray(TAR_BLOCK_BYTES)
 
@@ -658,7 +710,8 @@ class DesktopPackagingTest {
         ascii("0000000", 116) // gid
         ascii("%011o".format(size), 124) // size
         ascii("%011o".format(0), 136) // mtime
-        header[156] = '0'.code.toByte() // typeflag: regular file
+        header[156] = type.code.toByte()
+        ascii(linkName, 157)
         ascii("ustar\u0000", 257) // magic
         ascii("00", 263) // ustar version
         // The checksum field reads as spaces while it is computed, then six octal digits,
