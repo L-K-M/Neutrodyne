@@ -2,8 +2,6 @@
 
 package ch.lkmc.neutrodyne.feature.podcast
 
-import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
-import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
@@ -30,6 +28,8 @@ import ch.lkmc.neutrodyne.core.domain.RefreshStatus
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.BasicCredentials

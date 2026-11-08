@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.feature.podcast
 
-import ch.lkmc.neutrodyne.core.ui.forSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +100,7 @@ import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.forSource
 import ch.lkmc.neutrodyne.core.ui.navigation.HeaderSystemBars
 import ch.lkmc.neutrodyne.core.ui.navigation.LocalHeaderSystemBarsEnabled
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
@@ -235,16 +235,16 @@ internal fun PodcastScreen(
                     selection,
                     selectedIds.size,
                     selectAll,
-                onPlayNext =
-                    onPlaySelectionNext.takeIf {
-                        detail?.sourceType == SourceType.RSS ||
-                            state.rowCaps.inAppPlayback
-                    },
-                onPlayLast =
-                    onPlaySelectionLast.takeIf {
-                        detail?.sourceType == SourceType.RSS ||
-                            state.rowCaps.inAppPlayback
-                    },
+                    onPlayNext =
+                        onPlaySelectionNext.takeIf {
+                            detail?.sourceType == SourceType.RSS ||
+                                state.rowCaps.inAppPlayback
+                        },
+                    onPlayLast =
+                        onPlaySelectionLast.takeIf {
+                            detail?.sourceType == SourceType.RSS ||
+                                state.rowCaps.inAppPlayback
+                        },
                 )
             } else {
                 NdTopAppBar(
@@ -268,7 +268,7 @@ internal fun PodcastScreen(
                         )
                         PodcastOverflow(
                             detail = detail,
-                        caps = state.rowCaps,
+                            caps = state.rowCaps,
                             feedUrl = state.feedUrl,
                             onOpenSettings = onOpenSettings,
                             onMarkAllPlayedClick = onMarkAllPlayedClick,
@@ -491,7 +491,7 @@ internal fun PodcastScreen(
                                     row = row,
                                     live = rowLive,
                                     style = EpisodeRowStyle.PODCAST,
-                                caps = state.rowCaps.forSource(row.sourceType).copy(offline = state.offline),
+                                    caps = state.rowCaps.forSource(row.sourceType).copy(offline = state.offline),
                                     highlightNew = false,
                                     selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(row.id),
                                     onAction = { action ->
