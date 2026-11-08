@@ -174,7 +174,8 @@ internal class RestoreMerger(
                 }
             }
             if (removedPodcastMoves.isNotEmpty() || removedPodcastIds.isNotEmpty() || removedGroupIds.isNotEmpty()) {
-                downloads().beforeLibraryReplace()
+                // Unsubscribe owns the removed podcasts' playback and download cleanup.
+                // Group removals own no media; a link merge must retain unrelated downloads.
                 db.withWriteTransaction {
                     db.syncStateDao().withApplying {
                         for ((from, to) in removedPodcastMoves) {
