@@ -88,7 +88,7 @@ internal class Chapters(
                 }
             }
         }
-        currentScope.launch { bestEffort { repository.ensureLoaded(id) } }
+        currentScope.launch { bestEffort { repository.ensureCurrentLoaded(id) } }
         if (player.episodeIdOrNull() == id) extract(player.currentTracks)
     }
 
