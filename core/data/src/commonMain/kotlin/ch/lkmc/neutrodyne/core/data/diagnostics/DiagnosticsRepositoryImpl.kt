@@ -132,6 +132,9 @@ internal class DiagnosticsRepositoryImpl
         }
 
         override suspend fun exportDatabaseCopy(destination: String?): Outcome<String, DiagnosticsError> {
+            // 09's "at most one waits for its share": every export first drops the
+            // previous cache leaf so a share never hands out an older copy.
+            exporter.removeStale()
             val produced =
                 when (val outcome = exporter.produce()) {
                     is Outcome.Failure -> return outcome

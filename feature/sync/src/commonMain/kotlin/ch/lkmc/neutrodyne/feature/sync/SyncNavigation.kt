@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.sync
 
 import androidx.compose.runtime.Composable
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SyncSettingsKey
@@ -21,22 +22,16 @@ import dev.zacsweers.metro.Provides
 object SyncNavigation {
     @Provides
     @IntoSet
-    fun entries(syncController: Provider<SyncController>): EntryProviderInstaller =
+    fun entries(
+        syncController: Provider<SyncController>,
+        backups: Provider<BackupRepository>,
+    ): EntryProviderInstaller =
         {
             entry<SyncSettingsKey>(metadata = NdSceneMetadata.paneDetail()) {
                 SyncSettingsScreen(syncController())
             }
             entry<SyncSetupKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
-                SyncSetupScreen(syncController(), key.serverUrl)
+                SyncSetupScreen(syncController(), key.serverUrl, backups())
             }
         }
-}
-
-/** The link flow screen (08 Linking a device); a placeholder until the full flow lands. */
-@Composable
-internal fun SyncSetupScreen(
-    controller: SyncController,
-    serverUrl: String,
-) {
-    SyncSettingsScreen(controller)
 }

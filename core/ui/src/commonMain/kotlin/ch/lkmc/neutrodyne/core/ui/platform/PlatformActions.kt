@@ -120,7 +120,7 @@ public fun interface AppleLinkSettings {
     public fun openSettings(): OpenResult
 }
 
-public enum class SystemSettingsTarget { STORAGE, BACKGROUND_DATA, APP_DETAILS }
+public enum class SystemSettingsTarget { STORAGE, BACKGROUND_DATA, APP_DETAILS, BATTERY_OPTIMIZATION }
 
 public fun interface SystemSettingsOpener {
     public fun open(target: SystemSettingsTarget): Boolean

@@ -859,6 +859,8 @@
 }
 -keep interface ch.lkmc.neutrodyne.core.common.CredentialLookup {
 }
+-keep interface ch.lkmc.neutrodyne.core.common.LevelMutableLogSink {
+}
 -keep class ch.lkmc.neutrodyne.core.common.LocalNetworkAccess$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.common.LocalNetworkAccess$MetroFactory create();
 }
@@ -1354,7 +1356,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.diagnostics.UnavailableEngineContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.diagnostics.VerboseLogInitializerContributions$ToAppScope$ProvideIntoSetVerboseLogInitializerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetVerboseLogInitializer(ch.lkmc.neutrodyne.core.domain.SettingsRepository, ch.lkmc.neutrodyne.core.common.RingBufferLogSink, ch.lkmc.neutrodyne.core.common.Clock, kotlinx.coroutines.CoroutineScope);
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetVerboseLogInitializer(ch.lkmc.neutrodyne.core.domain.SettingsRepository, java.util.Set, ch.lkmc.neutrodyne.core.common.Clock, kotlinx.coroutines.CoroutineScope);
 }
 -keep class ch.lkmc.neutrodyne.core.data.diagnostics.VerboseLogInitializerContributions$ToAppScope$ProvideIntoSetVerboseLogInitializerMetroFactory {
   ch.lkmc.neutrodyne.core.data.diagnostics.VerboseLogInitializerContributions$ToAppScope$ProvideIntoSetVerboseLogInitializerMetroFactory$Companion Companion;
@@ -2921,6 +2923,7 @@
   public void inject(ch.lkmc.neutrodyne.download.impl.ManualDownloadJobService);
   public void inject(ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService);
   public ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase provideDatabase(ch.lkmc.neutrodyne.core.database.DatabaseOpener);
+  public ch.lkmc.neutrodyne.core.common.LevelMutableLogSink provideRingLevelMutable(ch.lkmc.neutrodyne.core.common.RingBufferLogSink);
 }
 -keep class ch.lkmc.neutrodyne.di.CoreBindings$BuildInfoMetroFactory {
   public static ch.lkmc.neutrodyne.di.CoreBindings$BuildInfoMetroFactory create();
@@ -3735,7 +3738,7 @@
 -keep class ch.lkmc.neutrodyne.feature.settings.DiagnosticsViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.settings.DiagnosticsViewModelContributions$ToAppScope$ProvideIntoMapDiagnosticsViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.settings.DiagnosticsViewModelContributions$ToAppScope$ProvideIntoMapDiagnosticsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.settings.DiagnosticsViewModelContributions$ToAppScope$ProvideIntoMapDiagnosticsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.settings.DiagnosticsViewModelContributions$ToAppScope$ProvideIntoMapDiagnosticsViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.settings.DiagnosticsViewModelContributions$ToAppScope$ProvideIntoMapDiagnosticsViewModelMetroFactory$Companion Companion;
@@ -3823,7 +3826,7 @@
 -keep class ch.lkmc.neutrodyne.feature.settings.UpdatesSettingsViewModelContributions {
 }
 -keep class ch.lkmc.neutrodyne.feature.sync.SyncNavigation {
-  public kotlin.jvm.functions.Function1 entries(dev.zacsweers.metro.Provider);
+  public kotlin.jvm.functions.Function1 entries(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
   ch.lkmc.neutrodyne.feature.sync.SyncNavigation INSTANCE;
 }
 -keep class ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps$Companion {

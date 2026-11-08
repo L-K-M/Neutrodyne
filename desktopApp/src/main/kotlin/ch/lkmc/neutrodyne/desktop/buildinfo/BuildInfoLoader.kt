@@ -42,6 +42,7 @@ internal object BuildInfoLoader {
     private const val KEY_ARCH = "arch"
     private const val KEY_RUNTIME = "runtime"
     private const val KEY_SHIPPED_LOCALES = "shippedLocales"
+    private const val KEY_ACRA_MAILTO = "acraMailto"
     private const val KEY_PODCASTINDEX_KEY = "podcastIndexKey"
     private const val KEY_PODCASTINDEX_SECRET = "podcastIndexSecret"
 
@@ -98,6 +99,7 @@ internal object BuildInfoLoader {
                     .split(',')
                     .filter(String::isNotBlank)
                     .toImmutableList(),
+            acraMailto = properties.getProperty(KEY_ACRA_MAILTO).orEmpty(),
             podcastIndexKey = properties.getProperty(KEY_PODCASTINDEX_KEY).orEmpty(),
             podcastIndexSecret = properties.getProperty(KEY_PODCASTINDEX_SECRET).orEmpty(),
         )
