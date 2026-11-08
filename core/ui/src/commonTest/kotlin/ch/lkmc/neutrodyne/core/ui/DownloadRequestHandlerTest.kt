@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_charging
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_network
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_wifi
+import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_youtube_engine
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder_missing
 import ch.lkmc.neutrodyne.download.api.DeleteReason
 import ch.lkmc.neutrodyne.download.api.RejectReason
@@ -47,6 +48,7 @@ class DownloadRequestHandlerTest {
                 WaitReason.BACKOFF to Res.string.dl_retry_soon,
                 WaitReason.SYSTEM to Res.string.dl_paused_system,
                 WaitReason.NEEDS_FOREGROUND to Res.string.dl_tap_resume,
+                WaitReason.YOUTUBE_ENGINE_OFF to Res.string.dl_wait_youtube_engine,
             )
         assertEquals(WaitReason.entries.toSet(), text.keys)
         text.forEach { (wait, resource) ->
@@ -101,6 +103,7 @@ class DownloadRequestHandlerTest {
                 WaitReason.BACKOFF to DownloadCommand.RETRY,
                 WaitReason.SYSTEM to DownloadCommand.PROMOTE,
                 WaitReason.NEEDS_FOREGROUND to DownloadCommand.RESUME,
+                WaitReason.YOUTUBE_ENGINE_OFF to null,
             )
         assertEquals(WaitReason.entries.toSet(), expected.keys)
         expected.forEach { (reason, command) ->

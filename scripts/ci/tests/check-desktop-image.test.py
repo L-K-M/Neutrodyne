@@ -3,8 +3,8 @@
 """The desktop image gates' fixture checks (11 Image scan rules, 09 Build-output
 checks; review-341 findings I1–I3).
 
-Runs the shipped check-desktop-image.sh and check-runtime-sources.sh
-in a throwaway fixture repo — the scripts resolve the
+Runs the shipped check-desktop-image.sh, check-runtime-sources.sh and
+make-runtime-sources-md.sh in a throwaway fixture repo — the scripts resolve the
 lockfiles and the runtime-classpath manifest relative to their own location, so
 the real code paths run against fixture images:
 
@@ -75,6 +75,7 @@ class Fixture:
         for script in (
             "check-desktop-image.sh",
             "check-runtime-sources.sh",
+            "make-runtime-sources-md.sh",
             "canonical-jar-hash.py",
         ):
             shutil.copy2(CI / script, root / "scripts/ci" / script)
@@ -802,6 +803,26 @@ for image; do :; done
         app = self.mac_app(root_dir="imgs/NestedApp")
         self.fx.write_manifest()
         r = self.fx.image_check(app)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_make_runtime_sources_md_reads_the_nested_home(self):
+        self.mac_app()
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--image", "imgs/Neutrodyne.app", "--out", "RUNTIME-SOURCES.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
+        self.assertIn("java.base", out)
+
+    def test_flat_runtime_still_works(self):
+        """The flat lib/runtime root keeps resolving as before."""
+        app = "imgs/FlatApp"
+        self.fx.write(f"{app}/lib/runtime/release", release_file("java.base"))
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--image", app, "--out", "OUT.md",
+        )
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     # ----- re-signed Mach-O natives under check-runtime-sources ---------------

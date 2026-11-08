@@ -31,6 +31,7 @@ enum class WaitReason {
     SYSTEM,
     NEEDS_FOREGROUND,
     SLOT,
+    YOUTUBE_ENGINE_OFF,
 }
 
 /**

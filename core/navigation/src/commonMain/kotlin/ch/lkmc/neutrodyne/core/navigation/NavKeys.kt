@@ -118,6 +118,15 @@ public data class AddPodcastKey(
     val input: String?,
 ) : NavKey
 
+/**
+ * The explicit YouTube channel search page (M9a W10). Reachable only from the capability-gated
+ * affordance; [query] is the already-validated free text, never a URL.
+ */
+@Serializable
+public data class YouTubeSearchKey(
+    val query: String,
+) : NavKey
+
 /** Opens the unfiltered import picker before navigating to a persisted session. */
 @Serializable
 public data object ImportFileKey : NavKey

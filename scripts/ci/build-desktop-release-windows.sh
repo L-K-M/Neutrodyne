@@ -18,9 +18,7 @@ smoke() { scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt; }
 mkdir -p "$DIST" "$SMOKE_IMG"
 
 ./gradlew createDistributable packageMsi -Pneutrodyne.installKind=msi
-./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip
 cp desktopApp/build/compose/binaries/main/msi/*.msi "$DIST/neutrodyne-$V-windows-x64.msi"
-cp desktopApp/build/desktop-packaging/zip/*.zip "$DIST/neutrodyne-$V-windows-x64.zip"
 
 # The MSI path is data ($env:MSI_PATH), never -Command text: a path is not
 # code, so spaces or apostrophes cannot break the fixed script. -Wait
@@ -46,5 +44,13 @@ case "$rc" in
 esac
 
 smoke "$LOCALAPPDATA/Neutrodyne-App"
+# Validate the actual installed payload while the generated classpath still
+# describes the MSI variant. The MSI table query alone does not scan its JARs.
+scripts/ci/check-desktop-image.sh "$LOCALAPPDATA/Neutrodyne-App" "$DIST/neutrodyne-$V-windows-x64.msi"
+scripts/ci/check-runtime-sources.sh --image "$LOCALAPPDATA/Neutrodyne-App" --smoke smoke.txt
+./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip
+cp desktopApp/build/desktop-packaging/zip/*.zip "$DIST/neutrodyne-$V-windows-x64.zip"
 python -m zipfile -e "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
 smoke "$SMOKE_IMG/Neutrodyne"
+scripts/ci/check-desktop-image.sh "$SMOKE_IMG/Neutrodyne" "$DIST/neutrodyne-$V-windows-x64.zip"
+scripts/ci/check-runtime-sources.sh --image "$SMOKE_IMG/Neutrodyne" --smoke smoke.txt

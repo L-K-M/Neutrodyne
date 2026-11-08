@@ -32,4 +32,5 @@ interface YouTubeFactsWriter {
     )
 }
 
-enum class DescriptionCompleteness { COMPLETE, TRUNCATED }
+// Retain the existing Kotlin source name without a database -> domain dependency.
+typealias DescriptionCompleteness = ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
