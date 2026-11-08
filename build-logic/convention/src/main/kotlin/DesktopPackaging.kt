@@ -1162,6 +1162,9 @@ internal fun Project.registerDesktopPackagingTasks(
 
     // The app image is createDistributable's destinationDir/<name>[.app]; taking it from the
     // task keeps this in step with the plugin's layout instead of hardcoding compose/binaries.
+    // The dir() derivation (not .map) keeps the chain readable at any time: a .map over the
+    // task provider cannot be queried before createDistributable has completed, which the
+    // packaging tasks' appImage reads below would trip.
     val appImageLeaf =
         if (target ==
             DesktopPackagingTarget.MACOS_ARM64
@@ -1170,13 +1173,13 @@ internal fun Project.registerDesktopPackagingTasks(
         } else {
             DESKTOP_PACKAGE_NAME
         }
-    val appImage =
-        tasks
-            .named(
-                "createDistributable",
-                org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
-            ).flatMap { it.destinationDir }
-            .map { it.dir(appImageLeaf) }
+    val createDistributable =
+        tasks.named(
+            "createDistributable",
+            org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
+        )
+    val distributableDir = createDistributable.flatMap { it.destinationDir }
+    val appImage = createDistributable.flatMap { it.destinationDir.dir(appImageLeaf) }
 
     // The desktop entry and hicolor icons the DEB/RPM scriptlets install travel inside the
     // image through appResourcesRootDir (11 Links and files from the OS). The PNG set comes
@@ -1550,8 +1553,23 @@ internal fun Project.registerDesktopPackagingTasks(
     // packaging behavior stay; only the task type changes. The `freeArgs` route cannot work:
     // they are prepended while Compose writes its own --resource-dir last, and the JDK's
     // last-wins option handling keeps that one.
+    //
+    // The installer argv must consume the trained image: Compose 1.12.1 leaves its non-macOS
+    // package tasks in fresh-image mode (`--input` libs + `--main-jar`, which the JDK turns
+    // into a newly generated image that carries no trained neutrodyne.aot, so the post-image
+    // hook fails the packaging closed — Windows run 42509091764, job 128818030637). Setting
+    // the task's appImage switches Compose's own makeArgs to `--app-image` and drops
+    // --input/--main-jar/--runtime-image; on macOS hosts makeArgs appends <name>.app to the
+    // configured directory itself (the form Compose wires for packageDmg), so packageDmg gets
+    // the destination directory and packageMsi the image inside it. The dependsOn pairing is
+    // the one Compose itself adds when it wires appImage (the archive the installers package
+    // is the one createDistributable + trainAotCache leave there).
     val packageMsi = tasks.replace("packageMsi", MsiAotTimestampJPackageTask::class.java)
     packageMsi.postImageHook.set(file("packaging/msi/Neutrodyne-post-image.wsf"))
+    packageMsi.dependsOn(createDistributable)
+    packageMsi.appImage.set(appImage)
     val packageDmg = tasks.replace("packageDmg", DmgAotTimestampJPackageTask::class.java)
     packageDmg.postImageHook.set(file("packaging/dmg/Neutrodyne-post-image.sh"))
+    packageDmg.dependsOn(createDistributable)
+    packageDmg.appImage.set(distributableDir)
 }

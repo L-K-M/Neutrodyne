@@ -936,6 +936,325 @@ class DesktopPackagingTest {
         }
     }
 
+    // ----- the installer tasks consume the trained image (11 AOT cache) ---------
+
+    /**
+     * `registerDesktopPackagingTasks` is the production wiring of every packaging task; this
+     * fixture drives it on a ProjectBuilder project that carries the tasks and files it
+     * reads, so the replaced `packageMsi`/`packageDmg` tasks are the real, production-wired
+     * objects. The trained image is fabricated at `createDistributable`'s destination with
+     * the exact layout the training task leaves ([aotImageLayout]: launcher, `.cfg` with the
+     * `-XX:AOTCache` read flag, the trained archive and a classpath JAR).
+     */
+    private class TrainedImagePackagingFixture(
+        val project: org.gradle.api.Project,
+        val distributableDir: File,
+    )
+
+    private fun trainedImagePackagingFixture(target: DesktopPackagingTarget): TrainedImagePackagingFixture {
+        val projectDir = Files.createTempDirectory("trained-packaging").toFile()
+        // registerDesktopPackagingTasks reads the version property at wiring time; both
+        // property locations ProjectBuilder consults carry it.
+        File(projectDir, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        val gradleHome = File(projectDir, "gradle-home").apply { mkdirs() }
+        File(gradleHome, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        val project =
+            ProjectBuilder
+                .builder()
+                .withProjectDir(projectDir)
+                .withGradleUserHomeDir(gradleHome)
+                .build()
+        val playback =
+            ProjectBuilder
+                .builder()
+                .withParent(project)
+                .withName("playback")
+                .build()
+        val nativeProject =
+            ProjectBuilder
+                .builder()
+                .withParent(playback)
+                .withName("native")
+                .build()
+        File(nativeProject.projectDir, "native-components.lock").apply {
+            parentFile.mkdirs()
+            writeText("[ffmpeg]\nversion = \"9.0.2\"\n")
+        }
+
+        val distributableDir = File(projectDir, "binaries")
+        project.tasks
+            .register("createDistributable", FixtureCreateDistributableTask::class.java) {
+                this.destinationDir.set(distributableDir)
+            }.get()
+        project.tasks
+            .register("setupBundledRuntime", SetupBundledRuntime::class.java) {
+                this.home.set(File(projectDir, "bundled-runtime/jdk"))
+            }.get()
+        project.configurations.create("runtimeClasspath")
+        project.tasks.register("jar", org.gradle.api.tasks.bundling.Jar::class.java)
+        // The Compose plugin has already registered packageMsi/packageDmg when the
+        // convention plugin's afterEvaluate wiring runs and replaces them; Gradle 9's
+        // replace needs a compatible declared type, so the fixture registers the final
+        // types (the production replace of Compose's AbstractJPackageTask registration is
+        // proven by the real Windows run's hook installation).
+        project.tasks.register("packageMsi", MsiAotTimestampJPackageTask::class.java)
+        project.tasks.register("packageDmg", DmgAotTimestampJPackageTask::class.java)
+
+        project.registerDesktopPackagingTasks(
+            target,
+            BundledRuntimeLock(
+                vendor = "Eclipse Adoptium",
+                vendorVersion = "Temurin-25.0.4.1+1",
+                version = "25.0.4.1+1",
+                javaVersion = "25",
+                archiveUrl = "https://example.invalid/jdk",
+                sha256 = "00",
+            ),
+        )
+
+        fabricateTrainedImage(distributableDir, target)
+        return TrainedImagePackagingFixture(project, distributableDir)
+    }
+
+    /** A concrete createDistributable stand-in: the wiring consumes only its destinationDir. */
+    abstract class FixtureCreateDistributableTask :
+        org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask(
+            org.jetbrains.compose.desktop.application.dsl.TargetFormat.AppImage,
+        )
+
+    /** The trained image createDistributable + trainAotCache leave, per [aotImageLayout]. */
+    private fun fabricateTrainedImage(
+        distributableDir: File,
+        target: DesktopPackagingTarget,
+    ) {
+        val layout = aotImageLayout(target.osWire)
+        val image =
+            File(
+                distributableDir,
+                if (target == DesktopPackagingTarget.MACOS_ARM64) "$DESKTOP_PACKAGE_NAME.app" else DESKTOP_PACKAGE_NAME,
+            )
+        File(image, layout.launcher).apply {
+            parentFile.mkdirs()
+            writeBytes(byteArrayOf(1))
+        }
+        File(image, layout.cfg).apply {
+            parentFile.mkdirs()
+            writeText(
+                "[Application]\n" +
+                    "[JavaOptions]\n" +
+                    "java-options=-XX:AOTCache=${'$'}APPDIR/$AOT_CACHE_FILE\n",
+            )
+        }
+        File(image, "${layout.appDir}/$AOT_CACHE_FILE").apply {
+            parentFile.mkdirs()
+            writeBytes(ByteArray(16) { it.toByte() })
+        }
+        File(image, "${layout.appDir}/app-85f294.jar").apply {
+            parentFile.mkdirs()
+            writeBytes(zipBytes(listOf("A.class" to "CODE".toByteArray())))
+        }
+        File(image, layout.runtimeRelease).apply {
+            parentFile.mkdirs()
+            writeText("JAVA_VERSION=\"25.0.4.1\"\n")
+        }
+    }
+
+    /**
+     * The value Compose's `makeArgs` emits for `--app-image` from the configured
+     * [configured] directory: on a macOS host (any format, pinned plugin) it appends
+     * `<name>.app` as a child; non-macOS hosts pass the configured directory itself.
+     */
+    private fun hostAppImageArg(configured: File): String =
+        if (System.getProperty("os.name") == "Mac OS X") {
+            File(configured, DESKTOP_PACKAGE_NAME + ".app").path
+        } else {
+            configured.path
+        }
+
+    /**
+     * Runs a production-wired package task through Compose's real `run()` with a fake
+     * `jpackage` that records the argument file it was handed, and returns those argv
+     * tokens (each args-file line's quotes stripped). The runtime files and main-jar
+     * properties mirror what Compose's own configure action sets in the real build, so a
+     * fresh-image argv (the defect) is produced unchanged when the wiring leaves `appImage`
+     * unset.
+     */
+    private fun runPackagingTask(
+        fixture: TrainedImagePackagingFixture,
+        name: String,
+    ): List<String> {
+        val task =
+            fixture.project.tasks
+                .named(name, AotTimestampJPackageTask::class.java)
+                .get()
+        val projectDir = fixture.project.projectDir
+        val fakeBin = File(projectDir, "fake-jdk-${task.name}/bin").apply { mkdirs() }
+        File(fakeBin, "jpackage").apply {
+            writeText(
+                """
+                #!/bin/sh
+                dest=""
+                want_dest=0
+                args_file=""
+                for arg in "${'$'}@"; do
+                  case "${'$'}arg" in
+                    @*) args_file="${'$'}{arg#@}" ;;
+                  esac
+                done
+                while IFS= read -r line; do
+                  if [ "${'$'}want_dest" = 1 ]; then
+                    dest="${'$'}line"
+                    dest="${'$'}{dest#\"}"
+                    dest="${'$'}{dest%\"}"
+                    want_dest=0
+                  fi
+                  case "${'$'}line" in --dest) want_dest=1 ;; esac
+                done < "${'$'}args_file"
+                mkdir -p "${'$'}dest"
+                cp "${'$'}args_file" "${'$'}dest/argv.txt"
+                printf 'fake' > "${'$'}dest/Neutrodyne-0.1.0.msi"
+                printf 'fake' > "${'$'}dest/Neutrodyne-0.1.0.dmg"
+                exit 0
+                """.trimIndent(),
+            )
+            setExecutable(true, false)
+        }
+        val hook = File(projectDir, "hook-${task.name}.sh").apply { writeText("#!/bin/sh\n") }
+        val mainJar = File(projectDir, "main-${task.name}.jar")
+        mainJar.writeBytes(zipBytes(listOf("Main.class" to "MAIN".toByteArray())))
+        writeRuntimeProperties(File(projectDir, "runtime-${task.name}.properties"))
+        task.postImageHook.set(hook)
+        task.packageName.set(DESKTOP_PACKAGE_NAME)
+        task.launcherMainClass.set("ch.lkmc.neutrodyne.desktop.MainKt")
+        task.packageVersion.set("0.1.0")
+        task.launcherMainJar.set(mainJar)
+        task.files.from(mainJar)
+        task.javaHome.set(fakeBin.parentFile.absolutePath)
+        task.javaRuntimePropertiesFile.set(File(projectDir, "runtime-${task.name}.properties"))
+        task.destinationDir.set(File(projectDir, "dest-${task.name}"))
+
+        task.run(EmptyInputChanges)
+
+        return File(projectDir, "dest-${task.name}/argv.txt")
+            .readLines()
+            .map { line -> line.removePrefix("\"").removeSuffix("\"") }
+    }
+
+    /**
+     * The wired `packageMsi` must hand jpackage the trained app image (`--app-image`), not
+     * Compose's fresh-image layout (`--input` libs + `--main-jar`): a fresh image carries no
+     * trained `neutrodyne.aot`, the post-image WSF correctly fails it closed, and the MSI
+     * never reaches WiX (Windows run 42509091764, job 128818030637). This runs the real
+     * production wiring and Compose's real argument builder against a capturing fake
+     * jpackage; on a macOS host Compose's makeArgs appends the `.app` leaf to any
+     * `--app-image` value (a host quirk of the pinned plugin; Windows passes the image
+     * directory itself).
+     */
+    @Test
+    fun `packageMsi jpackages the trained app image not a fresh jar image`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.WINDOWS_X64)
+        try {
+            val argv = runPackagingTask(fixture, "packageMsi")
+
+            val appImage = argv.indexOf("--app-image")
+            assertTrue(appImage >= 0, "no --app-image in: ${argv.joinToString(" ")}")
+            assertEquals(
+                hostAppImageArg(File(fixture.distributableDir, DESKTOP_PACKAGE_NAME)),
+                argv[appImage + 1],
+            )
+            assertFalse("--input" in argv, "fresh-image --input in: ${argv.joinToString(" ")}")
+            assertFalse("--main-jar" in argv, "fresh-image --main-jar in: ${argv.joinToString(" ")}")
+            assertFalse("--runtime-image" in argv, "fresh-image --runtime-image in: ${argv.joinToString(" ")}")
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The wired `packageDmg` must consume the trained `.app` bundle the same way: Compose's
+     * `makeArgs` derives `--app-image <destinationDir>/<name>.app` from the configured
+     * `appImage` on a macOS host, so the wiring pins the destination directory itself.
+     */
+    @Test
+    fun `packageDmg jpackages the trained app bundle not a fresh jar image`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.MACOS_ARM64)
+        try {
+            val argv = runPackagingTask(fixture, "packageDmg")
+
+            val appImage = argv.indexOf("--app-image")
+            assertTrue(appImage >= 0, "no --app-image in: ${argv.joinToString(" ")}")
+            assertEquals(hostAppImageArg(fixture.distributableDir), argv[appImage + 1])
+            assertFalse("--input" in argv, "fresh-image --input in: ${argv.joinToString(" ")}")
+            assertFalse("--main-jar" in argv, "fresh-image --main-jar in: ${argv.joinToString(" ")}")
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The wired installers and the training task must share one tree: each installer's
+     * `appImage` names the trained image (`createDistributable`'s destination plus the
+     * image leaf, per the target's [aotImageLayout]), that tree carries the trained
+     * layout (launcher, `.cfg` with the read flag, archive), and neither installer runs
+     * before `createDistributable` and `trainAotCache` have produced it. A leaf mismatch
+     * (image vs bundle vs install dir) would train one tree and package another.
+     */
+    @Test
+    fun `the trained archive lives inside the image each installer packages`() {
+        for (target in listOf(DesktopPackagingTarget.WINDOWS_X64, DesktopPackagingTarget.MACOS_ARM64)) {
+            val fixture = trainedImagePackagingFixture(target)
+            try {
+                val layout = aotImageLayout(target.osWire)
+                val imageLeaf =
+                    if (target ==
+                        DesktopPackagingTarget.MACOS_ARM64
+                    ) {
+                        "$DESKTOP_PACKAGE_NAME.app"
+                    } else {
+                        DESKTOP_PACKAGE_NAME
+                    }
+                val msi =
+                    fixture.project.tasks
+                        .named("packageMsi", MsiAotTimestampJPackageTask::class.java)
+                        .get()
+                assertEquals(
+                    File(fixture.distributableDir, imageLeaf).path,
+                    msi.appImage
+                        .get()
+                        .asFile.path,
+                    target.id,
+                )
+                val trainedTree = msi.appImage.get().asFile
+                assertTrue(File(trainedTree, "${layout.appDir}/$AOT_CACHE_FILE").isFile, target.id)
+                assertTrue(File(trainedTree, layout.cfg).isFile, target.id)
+                assertTrue(File(trainedTree, layout.launcher).isFile, target.id)
+
+                val dmg =
+                    fixture.project.tasks
+                        .named("packageDmg", DmgAotTimestampJPackageTask::class.java)
+                        .get()
+                assertEquals(
+                    fixture.distributableDir.path,
+                    dmg.appImage
+                        .get()
+                        .asFile.path,
+                    target.id,
+                )
+
+                for (consumer in listOf<org.gradle.api.Task>(msi, dmg)) {
+                    val names =
+                        consumer.dependsOn.map { dependency ->
+                            (dependency as? org.gradle.api.tasks.TaskProvider<*>)?.name ?: dependency.toString()
+                        }
+                    assertTrue("trainAotCache" in names, "${consumer.name} (${target.id}): $names")
+                    assertTrue("createDistributable" in names, "${consumer.name} (${target.id}): $names")
+                }
+            } finally {
+                fixture.project.projectDir.deleteRecursively()
+            }
+        }
+    }
+
     /** Serializes the Compose `JvmRuntimeProperties` the task's `initState()` reads. */
     private fun writeRuntimeProperties(target: File) {
         val clazz =
