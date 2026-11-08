@@ -3,6 +3,7 @@ import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
 
 plugins {
     alias(libs.plugins.neutrodyne.kmp.feature)
+    alias(libs.plugins.roborazzi)
 }
 
 kotlin {
@@ -37,3 +38,5 @@ kotlin {
         }
     }
 }
+
+roborazzi { outputDir.set(layout.projectDirectory.dir("screenshots")) }

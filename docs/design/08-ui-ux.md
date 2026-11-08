@@ -2395,6 +2395,16 @@ Icons: Material **Symbols** Rounded, weight 400, as vector drawables in `:core:d
 
 `StatusBarAppearance(lightIcons: Boolean)` (`:core:designsystem`; called from common screens, it acts only through the `LocalSystemBars` controller `MainActivity` provides and does nothing on the desktop, which has no system bars) sets `WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars` while composed and restores the previous value on dispose (including a cancelled predictive back). The podcast header and the full player compute `lightIcons = luminance(topColour) > 0.5` from the artwork scheme's top colour and add a 48 dp top scrim (`verticalGradient(scrim 40 % → transparent)`) for busy banners. Navigation-bar icons follow the theme (edge-to-edge, transparent bars).
 
+**Implementation note (2026-11-07, M10 podcast chrome).** The podcast toolbar over
+cover artwork uses a flat 60% black strip with white controls and status-bar
+icons. For this strip, that replaces the 48 dp gradient and luminance-based icon
+choice above: it gives stable contrast over busy or entirely white covers. A
+rendered-pixel regression checks at least 4.5:1 contrast. The measured toolbar
+inset keeps episode rows below the controls; once the cover passes the toolbar,
+the toolbar returns to the opaque surface container. Coexisting panes and the
+player side panel retain opaque chrome.
+
+
 ### Brand assets
 
 [D97](../PLAN.md#3-key-decisions), [PO-17](../PLAN.md#48-further-product-owner-decisions) (partly resolved), R5.5. Delivered in M0b (generated, committed and checked by CI; PLAN M0 AC15), reviewed in both themes and both golden sets in M10. This section owns the rules; 01 owns the JDK-only generator `generateBrandAssets` and its check `checkBrandAssets` and lists the output paths ([01 Brand-asset generator](01-foundation.md#brand-asset-generator)); 11 places the desktop files in the packages and the tray ([11 Packaging and the runtime exception](11-desktop.md#packaging-and-the-runtime-exception), [11 Window and tray behaviour](11-desktop.md#window-and-tray-behaviour)). Generated files are never edited by hand.

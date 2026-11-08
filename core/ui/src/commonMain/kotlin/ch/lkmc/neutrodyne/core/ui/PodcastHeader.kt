@@ -32,8 +32,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
@@ -86,25 +90,27 @@ public fun PodcastHeader(
     onAddToGroups: () -> Unit,
     modifier: Modifier = Modifier,
     colors: ArtworkColors? = null,
+    topInset: Dp = 0.dp,
+    onArtworkBottomInWindow: (Float) -> Unit = {},
 ) {
     Column(
         modifier =
             modifier
                 .fillMaxWidth()
-                .background(
-                    MaterialTheme.colorScheme.surface,
-                ).padding(horizontal = HEADER_PADDING),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
+                .testTag("podcast_header")
                 .background(
                     Brush.verticalGradient(
                         0f to MaterialTheme.colorScheme.primaryContainer,
                         0.7f to MaterialTheme.colorScheme.surface,
                     ),
-                ).padding(top = HEADER_TOP_GAP),
+                ).padding(horizontal = HEADER_PADDING),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(topInset))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = HEADER_TOP_GAP),
             contentAlignment = Alignment.BottomCenter,
         ) {
             if (detail.sourceType == SourceType.YOUTUBE_CHANNEL && detail.bannerUrl != null) {
@@ -132,18 +138,24 @@ public fun PodcastHeader(
                 shape = NeutrodyneShapes.PlayerArt,
                 avgArgb = colors?.avgArgb,
                 modifier =
-                    Modifier.size(HERO_SIZE).sharedArt(SharedKeys.cover(LocalNavTab.current, detail.id)).shadow(
-                        12.dp,
-                        NeutrodyneShapes.PlayerArt,
-                        ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                    ),
+                    Modifier
+                        .size(HERO_SIZE)
+                        .onGloballyPositioned {
+                            onArtworkBottomInWindow(it.positionInWindow().y + it.size.height)
+                        }.sharedArt(SharedKeys.cover(LocalNavTab.current, detail.id))
+                        .shadow(
+                            12.dp,
+                            NeutrodyneShapes.PlayerArt,
+                            ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                            spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        ),
             )
         }
         Spacer(Modifier.height(COVER_TITLE_GAP))
         Text(
             detail.displayTitle,
             style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
