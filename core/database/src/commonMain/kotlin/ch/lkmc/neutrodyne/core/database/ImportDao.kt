@@ -7,6 +7,7 @@ import androidx.room3.Dao
 import androidx.room3.DaoReturnTypeConverters
 import androidx.room3.Insert
 import androidx.room3.Query
+import androidx.room3.Update
 import androidx.room3.paging.PagingSourceDaoReturnTypeConverter
 import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -30,6 +31,10 @@ abstract class ImportDao {
 
     @Insert
     abstract suspend fun insertItems(rows: List<ImportItemEntity>)
+
+    /** Caller owns the session/input witness check for preview upgrades and fix-ups. */
+    @Update
+    abstract suspend fun updateItem(row: ImportItemEntity)
 
     /** Every item of one session in file order (small reads; the UI pages [pagedItems] instead). */
     @Query("SELECT * FROM import_item WHERE sessionId = :sessionId ORDER BY ordinal")

@@ -569,7 +569,8 @@ class SettingsScreensTest {
             try {
                 setSettingsRoot()
                 openSettings()
-                onNodeWithText("About").performClick()
+                // The M8 YouTube row pushes About below the fold on this surface.
+                onNodeWithText("About").performScrollTo().performClick()
                 waitForIdle()
                 onNodeWithText("Screen readers are not supported on Linux", substring = true)
                     .assertIsDisplayed()
@@ -626,6 +627,8 @@ class SettingsScreensTest {
                                 ),
                                 desktopIntegration,
                                 Provider { FakePodcastRepository() },
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeCapabilitiesSource(),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )

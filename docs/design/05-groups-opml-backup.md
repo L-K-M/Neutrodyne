@@ -2522,3 +2522,11 @@ Scope revision, checked 2026-10-05:
 - Okio in common code (`HashingSink`/`HashingSource` on every platform since 2.10.0): https://raw.githubusercontent.com/square/okio/master/CHANGELOG.md
 - Fractional indexing (CC0-1.0), the basis of `OrderKey`: https://github.com/rocicorp/fractional-indexing
 - The rest of the scope revision's facts (KMP source sets, Metro, desktop paths and inputs, sync) are cited in the owning documents: [01 Source sets and JVM islands](01-foundation.md#source-sets-and-jvm-islands), [10 Sources](10-sync.md#sources), [11 Sources](11-desktop.md#sources).
+
+**Implementation note (2026-11-04, M8 current-code port).** YouTube imports
+use the formats and canonical subscription rules in [04 Import and export
+formats](04-youtube.md#import-and-export-formats). The durable import lane
+resolves non-static inputs before insertion, retains cancellation/retry
+markers, and fetches through INITIAL ingestion without notifications or
+automatic downloads. LibreTube memberships merge through the existing group
+normalization rules. NewPipe export is offered only for the full library.

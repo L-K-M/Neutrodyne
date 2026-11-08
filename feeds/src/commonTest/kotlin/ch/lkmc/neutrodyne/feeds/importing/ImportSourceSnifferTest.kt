@@ -86,9 +86,12 @@ class ImportSourceSnifferTest {
             recognized(sniffText("""{"app_version":"x","subscriptions":[{"service_id":0,"url":"u"}]}""")),
         )
         // service_id inside a string value does not count — the check is structural.
-        assertUnsupported("json", sniffText("""{"note":"service_id","subscriptions":[{"url":"u"}]}"""))
+        assertEquals(
+            SniffedFormat.LIBRETUBE_JSON,
+            recognized(sniffText("""{"note":"service_id","subscriptions":[{"url":"u"}]}""")),
+        )
         // subscriptions without service_id is not NewPipe.
-        assertUnsupported("json", sniffText("""{"subscriptions":[{"url":"u"}]}"""))
+        assertEquals(SniffedFormat.LIBRETUBE_JSON, recognized(sniffText("""{"subscriptions":[{"url":"u"}]}""")))
         assertEquals(
             SniffedFormat.LIBRETUBE_JSON,
             recognized(sniffText("""{"localSubscriptions":["a"],"format":"json"}""")),
@@ -144,9 +147,9 @@ class ImportSourceSnifferTest {
     fun csvAndUrlLists() {
         assertEquals(
             SniffedFormat.TAKEOUT_CSV,
-            recognized(sniffText("Channel Id,Channel Url,Channel Title\nUCabc...,https://x,T\n")),
+            recognized(sniffText("Channel Id,Channel Url,Channel Title\nUCBJycsmduvYEL83R_U4JriQ,https://x,T\n")),
         )
-        assertEquals(SniffedFormat.URL_LIST, recognized(sniffText("https://a\nhttps://b\nUC" + "x".repeat(22))))
+        assertEquals(SniffedFormat.URL_LIST, recognized(sniffText("https://a\nhttps://b\nUC" + "x".repeat(21) + "A")))
         assertEquals(SniffedFormat.URL_LIST, recognized(sniffText("# comment\nhttps://a\n@podcast")))
         // 1 good line of 2 falls under the 80% bar.
         assertUnsupported("unknown", sniffText("https://a\nhello world"))

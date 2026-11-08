@@ -538,6 +538,16 @@ sequenceDiagram
 | `Failed(CONSENT_WALL or PAGE_UNREADABLE)` | "Couldn't read this YouTube page. Paste the channel's /channel/UC… link or a link to one of its videos." | Edit |
 | Typed name in external mode | "To add a YouTube channel, share it from the YouTube app or paste its link." | — |
 
+**Implementation note (2026-11-04, M8 current-code port).** Add and imports
+share `YouTubeSubscriptionWriter`: canonical identity, pending INITIAL state,
+new sync ID and memberships commit together, without handle aliases. Plain
+channel descriptions are escaped for the HTML storage column. Detail and
+refresh share the same metadata coordinator. RSS suggestions use only the
+enabled M7 directories and an eight-second deadline; late responses cannot
+restore edited/cancelled channel previews. Shorts settings invalidate current
+feed visibility; past-live settings affect future polls and retain recordings
+already ingested. All shell capabilities remain external.
+
 ### Prefer the show's RSS feed
 
 [PO-9](../PLAN.md#48-further-product-owner-decisions) default. When the preview opens and `youtube.suggest_rss` is on, `YouTubeChannelRepository.findRssAlternative(title)` queries 03's `SearchRepository` (enabled podcast directories only; never YouTube search) with an 8 s timeout. A hit matches when `norm(channelTitle)` equals `norm(collectionName)` or `norm(artistName)`, where `norm` = NFKC, lowercase, remove everything except letters and digits. The first match is shown as a card "This show also has a podcast feed — Subscribe to the podcast instead"; the preview is never blocked. The query only goes to directories the user already has enabled ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery) privacy text applies).
@@ -1351,6 +1361,18 @@ Export (05 writes the XML, [D31](../PLAN.md#3-key-decisions)): each channel as `
 ### URL list (import)
 
 `ImportFormat.URL_LIST` (02's constant, 05's pipeline; stored as TEXT, no migration): UTF-8 text ≤ 1 MB, ≤ 5,000 lines; lines trimmed; empty and `#` lines skipped; each line is an http(s) URL (RSS or YouTube), a `UC…` ID or an `@handle`. Sniffed when ≥ 80 % of the remaining lines are such tokens. Covers LibreTube's "list of URLs/IDs" export and hand-made lists.
+
+**Implementation note (2026-11-04, M8 current-code port).** Bounded common
+parsers now accept NewPipe JSON, grouped LibreTube/Piped JSON, RFC 4180
+Takeout CSV, capped Takeout ZIP and URL lists. Raw inputs are classified in
+core data; unsupported NewPipe services and playlists remain explicit report
+items. Static channels commit immediately; handles/video/legacy inputs stay
+queued for two paced ID-only lookups. Add and import share the canonical
+subscription writer and membership union. Reopened pre-M8 previews are
+upgraded, while completed reports retain their historical outcomes. OPML
+exports canonical channel URLs and variant attributes; full-library NewPipe
+JSON export includes only YouTube channels. Current real-app interchange and
+localized Takeout captures remain manual acceptance work.
 
 ### Pipeline rules for YouTube items (05 implements)
 

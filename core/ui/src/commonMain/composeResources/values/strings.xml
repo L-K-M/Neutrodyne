@@ -347,7 +347,7 @@
     <!-- Add podcast sheet (08 Add podcast sheet, M1a direct feed URLs). -->
     <string name="add_title">Add a podcast</string>
     <string name="add_field_label">Feed or site address</string>
-    <string name="add_helper">Paste a podcast feed, website, Apple Podcasts or YouTube link</string>
+    <string name="add_helper">Paste a podcast feed, website, Apple Podcasts or YouTube link, or a YouTube @handle</string>
     <string name="add_paste">Paste</string>
     <string name="add_looking_up">Looking up…</string>
     <string name="add_subscribe">Subscribe</string>
@@ -767,4 +767,25 @@
     <string name="download_size_gb">%1$d GB</string>
     <string name="download_size_mb_decimal">%1$d.%2$d MB</string>
     <string name="download_size_gb_decimal">%1$d.%2$d GB</string>
+    <string name="yt_long_form_note">Long-form uploads only; change in podcast settings</string>
+    <string name="yt_variants_note">Uploads selected by this link; change in podcast settings</string>
+    <string name="yt_rss_offer">This show also has a podcast feed. Subscribe to the podcast instead.</string>
+    <string name="yt_use_podcast">Use podcast</string>
+    <string name="yt_not_found">This YouTube channel doesn’t exist or was removed.</string>
+    <string name="yt_playlist_unsupported">YouTube playlists can’t be subscribed to yet.</string>
+    <string name="yt_network_error">Couldn’t reach YouTube. Check your connection and try again.</string>
+    <string name="yt_rate_limited">YouTube is limiting requests from your network. Try again later.</string>
+    <string name="yt_page_error">Couldn’t read this YouTube page. Paste the channel’s /channel/UC… link or a link to one of its videos.</string>
+    <string name="yt_subscribe_owner">Subscribe to %1$s</string>
+    <string name="yt_include_shorts">Include Shorts</string>
+    <string name="yt_include_live">Include past live streams</string>
+    <string name="yt_live_future_note">This changes future polls. Previously fetched past live streams remain visible. Without the YouTube engine, live streams and premieres may appear as ordinary videos.</string>
+    <string name="yt_empty_channel">No long-form videos yet. This channel may post only Shorts or live streams.</string>
+    <string name="yt_edit_input">Edit</string>
+    <string name="export_format_opml">OPML</string>
+    <string name="export_format_newpipe">NewPipe JSON (YouTube channels only)</string>
+    <string name="import_youtube_resolution_failed">Couldn’t find this YouTube channel. Edit the URL or retry.</string>
+    <string name="import_newpipe_service">This NewPipe service is not supported (%1$s).</string>
+    <string name="import_err_format_size">This file exceeds its format’s size limit: JSON 10 MB, URL lists 1 MB, CSV 5 MB.</string>
+    <string name="import_err_tgz">Takeout .tgz archives aren’t supported. In Google Takeout, choose the .zip file type.</string>
 </resources>

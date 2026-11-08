@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedInfo
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -81,6 +82,7 @@ public class PodcastSettingsViewModel
         private val podcasts: PodcastRepository,
         private val feedRepository: FeedRepository,
         private val scopeSettings: ScopeSettingsRepository,
+        private val channels: YouTubeChannelRepository,
     ) : ViewModel() {
         private val userMessages = UserMessages()
         private val invalidFields = MutableStateFlow<Set<SettingField>>(emptySet())
@@ -106,6 +108,10 @@ public class PodcastSettingsViewModel
 
         public fun editDownload(edit: DownloadSettingEdit) {
             writeScope(edit.field, edit::applyTo)
+        }
+
+        public fun setVariants(variants: Int) {
+            write { channels.setVariants(podcastId, variants) }
         }
 
         public fun setRefreshIntervalMinutes(minutes: Int?) {

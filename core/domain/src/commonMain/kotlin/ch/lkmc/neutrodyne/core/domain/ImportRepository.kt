@@ -131,6 +131,7 @@ enum class UnsupportedSource { ZIP, TGZ, JSON, SINGLE_FEED, UNKNOWN }
 
 /** The safety cap an import payload broke (05's `Hostile` reasons). */
 enum class HostileInput {
+    DOCUMENT_BYTES,
     ENTITY,
     TAG_TOO_LONG,
     TOO_DEEP,
