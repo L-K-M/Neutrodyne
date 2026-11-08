@@ -129,6 +129,57 @@ internal class RestoreMerger(
         val podcastMatches = matchStagedPodcasts(stagedPodcasts)
         val matchedGroupIds = matchStagedGroups(stagedGroups)
 
+        // The local rows' IDs before transaction A's ID adoption, for the post-commit rekey of
+        // the first-link seed and pending captures (link policies only).
+        val podcastSyncIds = HashMap<Long, String>()
+        val groupUuids = HashMap<Long, String>()
+        if (link) {
+            for (podcast in podcastDao.allForExport()) podcastSyncIds[podcast.id] = podcast.syncId
+            for (group in groupDao.groupsInOrder()) groupUuids[group.id] = group.uuid
+        }
+
+        // LINK_MERGE tombstones: the server's removal applies only when its clock is newer than
+        // the local row's own stamp; a newer local intent keeps the row (10 Merge step 3). The
+        // server-won rows are removed before transaction A; a local-won tombstone keeps its row
+        // and adopts the record's ID; an unmatched tombstone is never inserted (no resurrection).
+        val removedPodcastIds = HashSet<Long>()
+        val removedGroupIds = HashSet<Long>()
+        val removedSeedMoves = ArrayList<Pair<String, String>>()
+        if (link) {
+            for (podcast in stagedPodcasts) {
+                val removedAt = podcast.removedAt ?: continue
+                val localId = podcastMatches[podcast] ?: continue
+                val local = podcastDao.byId(localId) ?: continue
+                if (removedAt >= local.subscribedAt) {
+                    removedPodcastIds += localId
+                    // Move the seed to the record's rid: the field merge then overwrites it with
+                    // the server's tombstone, instead of the capture pass pushing the local
+                    // seed under a stray rid the server does not know.
+                    val syncId = podcast.syncId
+                    if (syncId != null && local.syncId != syncId) removedSeedMoves += local.syncId to syncId
+                }
+            }
+            for (group in stagedGroups) {
+                val removedAt = group.primary.removedAt ?: continue
+                val localId = group.localId ?: continue
+                val local = groupDao.groupById(localId) ?: continue
+                if (removedAt >= local.updatedAt) removedGroupIds += localId
+            }
+            if (removedSeedMoves.isNotEmpty() || removedPodcastIds.isNotEmpty() || removedGroupIds.isNotEmpty()) {
+                downloads().beforeLibraryReplace()
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        for ((from, to) in removedSeedMoves) moveRecordRows(COLL_PODCAST, from, to)
+                        if (removedPodcastIds.isNotEmpty()) unsubscribe(removedPodcastIds.toList())
+                        for (id in removedGroupIds) {
+                            groupDao.clearGroupContext(id, now)
+                            groupDao.deleteGroup(id)
+                        }
+                    }
+                }
+            }
+        }
+
         // Replace's order keys are settled before the destructive pre-step: every staged key
         // is validated and the rewrite fallback chosen here, so a malformed `orderKey`/`ok`
         // can neither persist nor abort the restore after the unsubscribes have run.
@@ -184,6 +235,20 @@ internal class RestoreMerger(
                     var lastGroupKey: String? = groupDao.lastGroupOrderKey()
                     for (group in stagedGroups) {
                         if (group.foldedInto != null) continue
+                        // A tombstone the pre-step removed writes nothing; a local-won one keeps
+                        // its row and adopts the record's uuid; an unmatched one is never inserted.
+                        if (group.primary.removedAt != null) {
+                            val localId = group.localId
+                            if (localId != null && localId !in removedGroupIds) {
+                                group.resolvedId = localId
+                                groupsMatched++
+                                adoptGroupUuid(group, localId, uuidChanges)
+                                writeGroupSettings(localId, group.primary.settings, policy)
+                                onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
+                                progress(++done, total)
+                            }
+                            continue
+                        }
                         val localId =
                             group.localId
                                 ?: run {
@@ -232,6 +297,22 @@ internal class RestoreMerger(
                     }
 
                     for (podcast in stagedPodcasts) {
+                        // A tombstone the pre-step removed writes nothing; a local-won one keeps
+                        // its row and adopts the record's syncId; an unmatched one is never
+                        // inserted (the server says it is dead).
+                        if (podcast.removedAt != null) {
+                            val localId = podcastMatches[podcast]
+                            if (localId != null && localId !in removedPodcastIds) {
+                                podcastsMatched++
+                                adoptPodcastSyncId(localId, podcast)
+                                podcastIdByKey[podcast.key] = localId
+                                for (alias in podcast.aliases) podcastIdByKey.putIfAbsent(alias, localId)
+                                writePodcastSettings(localId, podcast.settings, policy)
+                                onApplied?.invoke(podcastRecord(localId, podcast, policy, matched = true))
+                                progress(++done, total)
+                            }
+                            continue
+                        }
                         var localId = podcastMatches[podcast]
                         // The staged list was deduped by key; a same-key row appearing since the
                         // match pass (or a second staged copy) still resolves to the live row.
@@ -295,13 +376,27 @@ internal class RestoreMerger(
                 .onFailure { Log.w(TAG, it) { "Group channel delete failed" } }
         }
 
+        // The adoption above changed matched rows' IDs; move the first-link seed and any
+        // pending captures to the adopted identity so the shared field merge and the capture
+        // pass see the local winners under the record's rid, never a stray one (10 Merge
+        // steps 3–5). Link policies only: a restore's own ID rules are unchanged.
+        if (link) rekeyAdoptedIds(podcastSyncIds, groupUuids)
+
         // Transaction A's settled staged-`uuid` → survivor map: canonical, folded and
         // absorbed staged uuids all land on their root's resolved row (Merge's fresh
         // inserts included — the staged uuid never exists locally there).
         val groupIdByUuid = LinkedHashMap<String, Long>()
         for (group in stagedGroups) {
+            val root = group.root()
+            // A tombstone with no surviving local row has no id to map; a session context
+            // referencing it clears (RestoreEpisodeMerger.restoreSession).
+            if (root.primary.removedAt != null &&
+                (root.localId == null || root.localId in removedGroupIds)
+            ) {
+                continue
+            }
             val survivor =
-                checkNotNull(group.root().resolvedId) {
+                checkNotNull(root.resolvedId) {
                     "staged group '${group.primary.uuid}' left transaction A unresolved"
                 }
             groupIdByUuid[group.primary.uuid] = survivor
@@ -836,6 +931,16 @@ internal class RestoreMerger(
                 var lastKey = groupDao.lastMemberOrderKey(groupId)
                 for (member in group.members.values) {
                     val podcastId = memberPodcastId(member.podcastKey, podcastIdByKey) ?: continue
+                    // LINK_MERGE tombstone: the server's removal applies only when its clock is
+                    // newer than the local membership's own stamp; a newer local add survives.
+                    val removedAt = member.removedAt
+                    if (link && removedAt != null) {
+                        val existing = groupDao.member(groupId, podcastId)
+                        if (existing != null && removedAt >= existing.addedAt) {
+                            groupDao.deleteMembers(groupId, listOf(podcastId))
+                        }
+                        continue
+                    }
                     val key =
                         if (link) {
                             recordOrderKey(member.orderKey, lastKey)
@@ -909,6 +1014,91 @@ internal class RestoreMerger(
         uuidChanges += UuidChange(local.uuid, group.primary.uuid)
     }
 
+    /**
+     * Moves the clock/outbox rows of every local record whose podcast `syncId` or group `uuid`
+     * the adoption changed. The adoption's target rid has no row of its own (a first link is the
+     * first time this device sees the record), so a rename is the whole move; a collision keeps
+     * the target's row (the merge below then reconciles the values).
+     */
+    private suspend fun rekeyAdoptedIds(
+        podcastSyncIds: Map<Long, String>,
+        groupUuids: Map<Long, String>,
+    ) {
+        val podcastMoves =
+            podcastDao.allForExport().mapNotNull { row ->
+                val old = podcastSyncIds[row.id] ?: return@mapNotNull null
+                if (old == row.syncId) null else old to row.syncId
+            }
+        val groupMoves =
+            groupDao.groupsInOrder().mapNotNull { row ->
+                val old = groupUuids[row.id] ?: return@mapNotNull null
+                if (old == row.uuid) null else old to row.uuid
+            }
+        if (podcastMoves.isEmpty() && groupMoves.isEmpty()) return
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                for ((old, new) in podcastMoves) {
+                    moveRecordRows(COLL_PODCAST, old, new)
+                    movePrefixedRows(COLL_EPISODE, old, new)
+                    movePrefixedRows(COLL_UPNEXT, old, new)
+                    moveMemberRowsByPodcast(old, new)
+                }
+                for ((old, new) in groupMoves) {
+                    moveRecordRows(COLL_GROUP, old, new)
+                    movePrefixedRows(COLL_MEMBER, old, new)
+                }
+            }
+        }
+    }
+
+    /** One record's rows under a new rid. */
+    private suspend fun moveRecordRows(
+        coll: String,
+        from: String,
+        to: String,
+    ) {
+        if (from == to) return
+        db.syncClockDao().get(coll, from)?.let { db.syncClockDao().moveRecord(coll, from, to, it.clocks) }
+        db.syncOutboxDao().moveRecord(coll, from, to)
+    }
+
+    /** Every row whose rid starts with [old] moves to the same suffix under [new]. */
+    private suspend fun movePrefixedRows(
+        coll: String,
+        old: String,
+        new: String,
+    ) {
+        if (old == new) return
+        for (row in db.syncClockDao().all()) {
+            if (row.coll == coll && row.rid.startsWith(old)) {
+                db.syncClockDao().moveRecord(coll, row.rid, new + row.rid.removePrefix(old), row.clocks)
+            }
+        }
+        for (row in db.syncOutboxDao().rows()) {
+            if (row.coll == coll && row.rid.startsWith(old)) {
+                db.syncOutboxDao().moveRecord(coll, row.rid, new + row.rid.removePrefix(old))
+            }
+        }
+    }
+
+    /** The member rows whose podcast half is [old] move to [new]; the group half is unchanged. */
+    private suspend fun moveMemberRowsByPodcast(
+        old: String,
+        new: String,
+    ) {
+        if (old == new) return
+        for (row in db.syncClockDao().all()) {
+            if (row.coll == COLL_MEMBER && row.rid.endsWith(old)) {
+                db.syncClockDao().moveRecord(COLL_MEMBER, row.rid, row.rid.removeSuffix(old) + new, row.clocks)
+            }
+        }
+        for (row in db.syncOutboxDao().rows()) {
+            if (row.coll == COLL_MEMBER && row.rid.endsWith(old)) {
+                db.syncOutboxDao().moveRecord(COLL_MEMBER, row.rid, row.rid.removeSuffix(old) + new)
+            }
+        }
+    }
+
     /** First-link ID adoption: a local podcast matched by key or alias takes the record's `syncId`. */
     private suspend fun adoptPodcastSyncId(
         localId: Long,
@@ -918,6 +1108,14 @@ internal class RestoreMerger(
         val local = podcastDao.byId(localId) ?: return
         if (local.syncId == syncId) return
         podcastDao.adoptSyncId(localId, syncId)
+        // The first-link seed and any pending local captures ride the row's previous rid; move
+        // them to the adopted one so the shared field merge and the capture pass see the local
+        // winners under the record's identity instead of pushing a stray server record (10
+        // Merge steps 3–5).
+        db.syncClockDao().get(COLL_PODCAST, local.syncId)?.let { clock ->
+            db.syncClockDao().moveRecord(COLL_PODCAST, local.syncId, syncId, clock.clocks)
+        }
+        db.syncOutboxDao().moveRecord(COLL_PODCAST, local.syncId, syncId)
     }
 
     /** 05 Restore while linked: an inserted podcast's captures — presence fresh, the rest at `subscribedAt`. */
@@ -1067,6 +1265,8 @@ internal class RestoreMerger(
         const val COLL_PODCAST = "podcast"
         const val COLL_GROUP = "group"
         const val COLL_MEMBER = "member"
+        const val COLL_EPISODE = "episode"
+        const val COLL_UPNEXT = "upnext"
     }
 }
 

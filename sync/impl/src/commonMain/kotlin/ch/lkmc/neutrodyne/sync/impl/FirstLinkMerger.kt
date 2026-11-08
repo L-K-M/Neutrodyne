@@ -182,6 +182,8 @@ class FirstLinkMerger(
             pushOutbox { _, _, _ -> }
             client.reset(DELETE_CONFIRMATION, RESET_MODE_LIBRARY, pull.cursor)
             completeLink()
+            // The snapshot is consumed: a later preview must not count a stale file.
+            discardStaging()
             FirstLinkResult.Completed(0)
         } catch (failure: CancellationException) {
             throw failure
@@ -205,6 +207,9 @@ class FirstLinkMerger(
         try {
             return previewAllDevicesReachUnlocked(roundId, backupPodcastKeys, backupGroupNames)
         } finally {
+            // A preview is read-only: it leaves no staging file behind, so a later preview
+            // (or a merge's resume) never counts or reuses this run's stale snapshot.
+            discardStaging()
             activity.end()
         }
     }
@@ -259,7 +264,7 @@ class FirstLinkMerger(
         val pull = pullStaged(roundId, resume = true, onProgress)
         // A fresh node needs its own rows seeded before the record merge decides winners.
         seedLocalRows()
-        val staged = mapToStagingDirectory(pull)
+        val staged = mapToStagingDirectory(pull, MergePolicy.LINK_MERGE)
         val applied = ArrayList<MergedRecord>()
         val hints = staged.parkHints
         val outcome =
@@ -291,7 +296,7 @@ class FirstLinkMerger(
         onProgress: (LinkPhase, Int, Int) -> Unit,
     ): FirstLinkResult {
         val pull = pullStaged(roundId, resume = true, onProgress)
-        val staged = mapToStagingDirectory(pull)
+        val staged = mapToStagingDirectory(pull, MergePolicy.LINK_REPLACE)
         val hints = staged.parkHints
         val outcome =
             libraryMerger.mergeStaged(
@@ -446,7 +451,10 @@ class FirstLinkMerger(
         val parkHints: Map<String, EpisodeParkHints>,
     )
 
-    private suspend fun mapToStagingDirectory(pull: StagedPull): StagedDirectory {
+    private suspend fun mapToStagingDirectory(
+        pull: StagedPull,
+        policy: MergePolicy,
+    ): StagedDirectory {
         val dir = stagingDirPath(dbDeviceId())
         fileSystem.deleteRecursively(dir, mustExist = false)
         fileSystem.createDirectories(dir)
@@ -464,7 +472,13 @@ class FirstLinkMerger(
         try {
             val keyByPodcastSyncId = HashMap<String, String>()
             for (dto in pull.records) {
-                when (runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull()) {
+                val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
+                // "Use the server's library" treats a server tombstone as an item the server
+                // lacks: the Replace pre-step's local-only cleanup then removes the local row.
+                // Merge keeps the tombstone in the staging library (with its clock) so the
+                // First-link column can compare it with the local row's own stamp.
+                if (policy == MergePolicy.LINK_REPLACE && tombstoneAt(dto, coll) != null) continue
+                when (coll) {
                     SyncCollection.PODCAST -> {
                         mapPodcast(dto)?.let {
                             podcasts += it
@@ -502,19 +516,32 @@ class FirstLinkMerger(
                     SyncCollection.SETTING -> {
                         mapSetting(dto)?.let { settings += it }
                     }
-
-                    null -> {}
                 }
             }
         } finally {
             episodesSink.close()
         }
+        // The server's order travels in `ok`; the merger's Replace replays each list in file
+        // order and preserves the keys only when they are strictly ascending. The pull is in
+        // server `seq` order, so a rename or reorder on another device would otherwise
+        // re-sequence the records into last-write order (10 Merge step 2, 05 First-link column).
         val groups =
-            groupsByUuid.values.map { group ->
-                group.copy(members = membersByGroup[group.uuid].orEmpty())
-            }
-        // The server's Up-next order travels in `ok`; the merger's Replace replays the list
-        // in file order and preserves the keys only when they are strictly ascending.
+            groupsByUuid.values
+                .map { group ->
+                    group.copy(
+                        members =
+                            membersByGroup[group.uuid]
+                                .orEmpty()
+                                .sortedWith(
+                                    compareBy<MemberV1> { it.orderKey == null }
+                                        .thenBy { it.orderKey ?: "" },
+                                ),
+                    )
+                }.sortedWith(
+                    compareBy<ch.lkmc.neutrodyne.feeds.backup.GroupV1> { it.orderKey == null }
+                        .thenBy { it.orderKey ?: "" },
+                )
+        // The server's Up-next order travels in `ok` for the same reason.
         val orderedUpNext =
             upNext.sortedWith(compareBy<UpNextRefV1> { it.ok == null }.thenBy { it.ok ?: "" })
         val createdAt = clock.now()
@@ -562,6 +589,7 @@ class FirstLinkMerger(
             episodeOrder = record.stringField("episodeOrder"),
             syncId = rid,
             settings = record.overrides(),
+            removedAt = tombstoneAt(dto, SyncCollection.PODCAST),
         )
     }
 
@@ -586,6 +614,7 @@ class FirstLinkMerger(
             showAsTab = record.booleanField("showAsTab") ?: true,
             createdAt = record.longField("createdAt"),
             settings = record.overrides(),
+            removedAt = tombstoneAt(dto, SyncCollection.GROUP),
         )
     }
 
@@ -600,7 +629,12 @@ class FirstLinkMerger(
         val key =
             keyByPodcastSyncId[id.podcast.value] ?: db.podcastDao().bySyncId(id.podcast.value)?.feedKey ?: return null
         return id.group.value to
-            MemberV1(podcastKey = key, addedAt = record.longField("addedAt"), orderKey = record.stringField("ok"))
+            MemberV1(
+                podcastKey = key,
+                addedAt = record.longField("addedAt"),
+                orderKey = record.stringField("ok"),
+                removedAt = tombstoneAt(dto, SyncCollection.MEMBER),
+            )
     }
 
     private suspend fun mapEpisode(
@@ -642,7 +676,9 @@ class FirstLinkMerger(
                 posAt = fc["pos"],
                 fav = record.booleanField("fav") ?: false,
                 md = record.longField("measuredDurationMs"),
-                ts = fc.values.filter { it != fc["pos"] }.maxOrNull() ?: 0L,
+                // The newest state clock excluding the `pos` FIELD itself: a played/fav clock
+                // that happens to equal the pos millis still counts (10 Merge step 2).
+                ts = fc.filterKeys { it != "pos" }.values.maxOrNull() ?: 0L,
                 fc = fc,
             )
         val hints =
@@ -675,7 +711,41 @@ class FirstLinkMerger(
                 episodeId?.let { db.episodeDao().byId(it)?.identityKey }
             }
         val orderKey = (dto.fields["ok"]?.v as? JsonPrimitive)?.contentOrNull
-        return UpNextRefV1(p = key, k = matchedKey ?: id.key.value, ok = orderKey)
+        return UpNextRefV1(
+            p = key,
+            k = matchedKey ?: id.key.value,
+            ok = orderKey,
+            removedAt = tombstoneAt(dto, SyncCollection.UPNEXT),
+        )
+    }
+
+    /**
+     * The server's removal marker for [coll] (`subscribed = false`, `deleted = true`,
+     * `in = false`) as the field clock's millis, or null for a live record. The First-link
+     * column compares it with the local row's own stamp to decide the winner.
+     */
+    private fun tombstoneAt(
+        dto: RecordDto,
+        coll: SyncCollection,
+    ): Long? {
+        val name =
+            when (coll) {
+                SyncCollection.PODCAST -> "subscribed"
+                SyncCollection.GROUP -> "deleted"
+                SyncCollection.MEMBER, SyncCollection.UPNEXT -> "in"
+                else -> return null
+            }
+        val field = dto.fields[name] ?: return null
+        val value = (field.v as? JsonPrimitive)?.booleanOrNull ?: return null
+        val dead =
+            when (coll) {
+                SyncCollection.PODCAST -> !value
+                SyncCollection.GROUP -> value
+                SyncCollection.MEMBER, SyncCollection.UPNEXT -> !value
+                else -> return null
+            }
+        if (!dead) return null
+        return field.c?.let { runCatching { Hlc.parse(it).millis }.getOrNull() }
     }
 
     private fun mapSession(dto: RecordDto): ch.lkmc.neutrodyne.feeds.backup.SessionV1? {
@@ -879,6 +949,8 @@ class FirstLinkMerger(
         hints: Map<String, EpisodeParkHints>,
     ) {
         val hint = hints["$podcastSyncId|$identityKey"]
+        // A resumed merge re-runs the same unmatched lines: park each record once.
+        if (db.syncParkedDao().forPodcast(podcastSyncId).any { it.identityKey == identityKey }) return
         db
             .syncParkedDao()
             .park(

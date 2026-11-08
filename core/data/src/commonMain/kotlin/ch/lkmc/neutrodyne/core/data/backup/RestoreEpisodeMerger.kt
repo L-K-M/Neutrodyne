@@ -495,6 +495,19 @@ internal class RestoreEpisodeMerger(
                 val accepted = ArrayList<Pair<UpNextRefV1, Long>>(queue?.upNext?.size ?: 0)
                 val seen = HashSet<Long>()
                 for (ref in queue?.upNext.orEmpty()) {
+                    // LINK_MERGE tombstone: the server's removal applies only when its clock is
+                    // newer than the local entry's own stamp; a newer local add survives.
+                    val removedAt = ref.removedAt
+                    if (link && removedAt != null) {
+                        val episodeId =
+                            resolveRef(ref.p, ref.k, ref.kv, podcastIdByKey, refIds, indexCache)
+                                ?: continue
+                        val existing = queueDao.entryByEpisode(episodeId)
+                        if (existing != null && removedAt >= existing.addedAt) {
+                            queueDao.removeEpisodes(listOf(episodeId))
+                        }
+                        continue
+                    }
                     val episodeId =
                         resolveRef(ref.p, ref.k, ref.kv, podcastIdByKey, refIds, indexCache) ?: continue
                     if (episodeId in played || episodeId in queued || !seen.add(episodeId)) continue

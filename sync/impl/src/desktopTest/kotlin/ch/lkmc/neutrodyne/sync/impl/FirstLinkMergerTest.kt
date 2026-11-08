@@ -150,6 +150,236 @@ class FirstLinkMergerTest {
         }
 
     /**
+     * 10 Merge step 2: the mapper carries every server tombstone into the staging library with
+     * its removal clock, so the merger can compare it with the local row's own stamp. The
+     * database outcome is pinned by `:core:data`'s `LibraryMergerImplTest`.
+     */
+    @Test
+    fun mergeStagesServerTombstonesWithTheirRemovalClocks() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val groupA = "11111111-1111-4111-8111-111111111111"
+                val client =
+                    CountingClient(
+                        listOf(
+                            podcastRecordWithSubscription(localOnlySyncId, "https://example.com/lone", false),
+                            podcastRecord(),
+                            groupRecord(groupA, "Group A", ok = "a0", deleted = true),
+                            memberRecord(groupA, podcastSyncId, ok = "a0", inGroup = false),
+                            upNextRecordWithPresence("g:one", "a0", inQueue = false),
+                        ),
+                    )
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val staged = readStagedLibrary(library.calls.single().stagingDir)
+                assertEquals(october, staged.podcasts.first { it.key == "example.com/lone" }.removedAt)
+                assertEquals(october, staged.groups.single().removedAt)
+                assertEquals(
+                    october,
+                    staged.groups
+                        .single()
+                        .members
+                        .single()
+                        .removedAt,
+                )
+                val queue = readStagedQueue(library.calls.single().stagingDir)
+                assertEquals(october, queue.upNext.single().removedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A resumed merge parks the same unmatched record once, not once per run. */
+    @Test
+    fun aResumedMergeDoesNotDuplicateParkedRecords() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                library.unmatched = listOf(podcastSyncId to "g:one")
+                val client = CountingClient(listOf(podcastRecord(), episodeRecord()))
+                val merger = mergerOf(db, client, library)
+
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Success(
+                        ch.lkmc.neutrodyne.core.model
+                            .MergeSummary(0, 0, 0, 0, 0, 0, 0, 0),
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Completed)
+
+                val parked = db.syncParkedDao().forPodcast(podcastSyncId)
+                assertEquals(listOf("g:one"), parked.map { it.identityKey }, "one parked row per record")
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The ALL_DEVICES preview counts the server's current library: it must not reuse a stale
+     * completed staging file, or the destructive reach counts are wrong.
+     */
+    @Test
+    fun previewAllDevicesReachDoesNotReuseAStaleStagingSnapshot() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val records = mutableListOf(podcastRecord())
+                val client =
+                    object : SyncClient by ScriptedClient(records.toList()) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage =
+                            if (since == null) {
+                                ChangesPage(records.toList(), "c:00000001:1", false, "")
+                            } else {
+                                ChangesPage(emptyList(), "c:00000001:1", false, "")
+                            }
+                    }
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+
+                assertEquals(1 to 0, merger.previewAllDevicesReach(emptySet(), emptySet()))
+                records += podcastRecordFor(localOnlySyncId, "https://example.com/lone")
+                assertEquals(
+                    2 to 0,
+                    merger.previewAllDevicesReach(emptySet(), emptySet()),
+                    "the preview must pull fresh, not reuse the stale snapshot",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * "Use the server's library" treats a server tombstone as an item the server lacks: the
+     * mapper filters it out of the staging directory, so the Replace pre-step's local-only
+     * cleanup removes the local row.
+     */
+    @Test
+    fun useServerFiltersServerTombstonesOutOfTheStagingLibrary() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val client =
+                    CountingClient(
+                        listOf(
+                            podcastRecordWithSubscription(localOnlySyncId, "https://example.com/lone", false),
+                            podcastRecord(),
+                        ),
+                    )
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.USE_SERVER) is FirstLinkResult.Failed)
+
+                val staged = readStagedLibrary(library.calls.single().stagingDir)
+                assertEquals(listOf("example.com/feed"), staged.podcasts.map { it.key })
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Merge step 2 / 05 First-link column: the staging library carries the server's `ok`
+     * order for groups and members, not the pull's `seq` order — a rename or reorder on another
+     * device re-sequences the record, and the merger's Replace replay preserves the list order.
+     */
+    @Test
+    fun mergeStagesGroupsAndMembersInTheServerOkOrder() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val groupA = "11111111-1111-4111-8111-111111111111"
+                val groupB = "22222222-2222-4222-8222-222222222222"
+                // The pull order is server seq order: A (ok a1) then B (ok a0). The server's
+                // ok order is B then A; the members' ok order is the second podcast first.
+                val client =
+                    CountingClient(
+                        listOf(
+                            podcastRecord(),
+                            podcastRecordFor(localOnlySyncId, "https://example.com/lone"),
+                            groupRecord(groupA, "Group A", ok = "a1"),
+                            groupRecord(groupB, "Group B", ok = "a0"),
+                            memberRecord(groupA, podcastSyncId, ok = "a1"),
+                            memberRecord(groupA, localOnlySyncId, ok = "a0"),
+                        ),
+                    )
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val staged = readStagedLibrary(library.calls.single().stagingDir)
+                assertEquals(listOf("Group B", "Group A"), staged.groups.map { it.name })
+                val members = staged.groups.first { it.name == "Group A" }.members
+                assertEquals(
+                    listOf("example.com/lone", "example.com/feed"),
+                    members.map { it.podcastKey },
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Merge step 2: `ts` excludes the `pos` FIELD, not every clock sharing its millis. A
+     * record whose played/fav/pos clocks coincide still carries its played/fav state, so a
+     * server-only episode imports its mark instead of silently dropping it.
+     */
+    @Test
+    fun mergeMapsEqualStateClocksIntoTs() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val same = 1_790_000_000_000L
+                val client = CountingClient(listOf(podcastRecord(), episodeRecordWithEqualClocks(same)))
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val staged = readStagedEpisodeLine(library.calls.single().stagingDir)
+                assertEquals(same, staged?.fc?.get("played"))
+                assertEquals(same, staged?.fc?.get("fav"))
+                assertEquals(same, staged?.fc?.get("pos"))
+                assertEquals(same, staged?.ts, "ts is the newest non-pos state clock, not 0")
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
      * The bootstrap writes run with capture enabled and the rows' own timestamps: an empty
      * account uploads this device's whole library, groups and members included (10 step 5).
      */
@@ -947,6 +1177,11 @@ class FirstLinkMergerTest {
         return fileSystem.source(stagingDir.toPath() / BackupCodec.ENTRY_QUEUE).use(codec::decodeQueue)
     }
 
+    private fun readStagedLibrary(stagingDir: String): ch.lkmc.neutrodyne.feeds.backup.LibraryV1 {
+        val codec = BackupCodec(BackupCodec.Mode.STAGING)
+        return fileSystem.source(stagingDir.toPath() / BackupCodec.ENTRY_LIBRARY).use(codec::decodeLibrary)
+    }
+
     private fun decodeEpisode(json: String): ch.lkmc.neutrodyne.sync.protocol.RecordState =
         ch.lkmc.neutrodyne.sync.protocol.SyncJson
             .decodeFromString<RawSyncRecord>(json)
@@ -1019,6 +1254,89 @@ class FirstLinkMergerTest {
             sharePasswords = { false },
         )
 
+    private fun podcastRecordFor(
+        syncId: String,
+        feedUrl: String,
+    ): RecordDto =
+        podcastRecord().copy(
+            id = JsonPrimitive(syncId),
+            fields =
+                mapOf(
+                    "feedUrl" to FieldValue(JsonPrimitive(feedUrl), clock(october)),
+                    "subscribed" to FieldValue(JsonPrimitive(true), clock(october)),
+                    "title" to FieldValue(JsonPrimitive("Example"), clock(october)),
+                ),
+        )
+
+    private fun podcastRecordWithSubscription(
+        syncId: String,
+        feedUrl: String,
+        subscribed: Boolean,
+    ): RecordDto =
+        podcastRecord().copy(
+            id = JsonPrimitive(syncId),
+            fields =
+                mapOf(
+                    "feedUrl" to FieldValue(JsonPrimitive(feedUrl), clock(october)),
+                    "subscribed" to FieldValue(JsonPrimitive(subscribed), clock(october)),
+                    "title" to FieldValue(JsonPrimitive("Example"), clock(october)),
+                ),
+        )
+
+    private fun groupRecord(
+        uuid: String,
+        name: String,
+        ok: String?,
+        deleted: Boolean = false,
+    ): RecordDto =
+        RecordDto(
+            coll = "group",
+            id = JsonPrimitive(uuid),
+            seq = 0,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields =
+                buildMap {
+                    put("name", FieldValue(JsonPrimitive(name), clock(october)))
+                    put("deleted", FieldValue(JsonPrimitive(deleted), clock(october)))
+                    ok?.let { put("ok", FieldValue(JsonPrimitive(it), clock(october))) }
+                },
+        )
+
+    private fun memberRecord(
+        groupUuid: String,
+        podcastSyncIdValue: String,
+        ok: String?,
+        inGroup: Boolean = true,
+    ): RecordDto =
+        RecordDto(
+            coll = "member",
+            id =
+                buildJsonObject {
+                    put("g", groupUuid)
+                    put("p", podcastSyncIdValue)
+                },
+            seq = 0,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields =
+                buildMap {
+                    put("in", FieldValue(JsonPrimitive(inGroup), clock(october)))
+                    ok?.let { put("ok", FieldValue(JsonPrimitive(it), clock(october))) }
+                },
+        )
+
+    private fun upNextRecordWithPresence(
+        key: String,
+        orderKey: String,
+        inQueue: Boolean,
+    ): RecordDto =
+        upNextRecord(key, orderKey).copy(
+            fields =
+                mapOf(
+                    "in" to FieldValue(JsonPrimitive(inQueue), clock(october)),
+                    "ok" to FieldValue(JsonPrimitive(orderKey), clock(october)),
+                ),
+        )
+
     private fun podcastRecord(): RecordDto =
         RecordDto(
             coll = "podcast",
@@ -1054,6 +1372,28 @@ class FirstLinkMergerTest {
                 ),
             match = enc?.let { MatchHints(enc = it) },
             matchClocks = enc?.let { mapOf("enc" to clock(october)) } ?: emptyMap(),
+        )
+
+    /** An episode record whose played, fav and pos clocks all carry the same millis. */
+    private fun episodeRecordWithEqualClocks(at: Long): RecordDto =
+        RecordDto(
+            coll = "episode",
+            id =
+                buildJsonObject {
+                    put("p", podcastSyncId)
+                    put("k", "g:one")
+                },
+            seq = 2,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields =
+                mapOf(
+                    "played" to FieldValue(JsonPrimitive(true), clock(at)),
+                    "playedAt" to FieldValue(JsonPrimitive(at), clock(at)),
+                    "fav" to FieldValue(JsonPrimitive(true), clock(at)),
+                    "pos" to FieldValue(buildJsonObject { put("ms", at) }, clock(at)),
+                ),
+            match = MatchHints(guid = "one", title = "One"),
+            matchClocks = mapOf("guid" to clock(at).toString()),
         )
 
     private fun episodeRecord(): RecordDto =
