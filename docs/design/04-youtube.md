@@ -1362,6 +1362,18 @@ Export (05 writes the XML, [D31](../PLAN.md#3-key-decisions)): each channel as `
 
 `ImportFormat.URL_LIST` (02's constant, 05's pipeline; stored as TEXT, no migration): UTF-8 text ≤ 1 MB, ≤ 5,000 lines; lines trimmed; empty and `#` lines skipped; each line is an http(s) URL (RSS or YouTube), a `UC…` ID or an `@handle`. Sniffed when ≥ 80 % of the remaining lines are such tokens. Covers LibreTube's "list of URLs/IDs" export and hand-made lists.
 
+**Implementation note (2026-11-04, M8 current-code port).** Bounded common
+parsers now accept NewPipe JSON, grouped LibreTube/Piped JSON, RFC 4180
+Takeout CSV, capped Takeout ZIP and URL lists. Raw inputs are classified in
+core data; unsupported NewPipe services and playlists remain explicit report
+items. Static channels commit immediately; handles/video/legacy inputs stay
+queued for two paced ID-only lookups. Add and import share the canonical
+subscription writer and membership union. Reopened pre-M8 previews are
+upgraded, while completed reports retain their historical outcomes. OPML
+exports canonical channel URLs and variant attributes; full-library NewPipe
+JSON export includes only YouTube channels. Current real-app interchange and
+localized Takeout captures remain manual acceptance work.
+
 ### Pipeline rules for YouTube items (05 implements)
 
 1. Before M8: YouTube items get `YOUTUBE_UNSUPPORTED_YET` and are not selectable.
