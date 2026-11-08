@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36)"
+        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36)"
         default: full
 
 permissions:
@@ -1020,6 +1020,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz coreutils"
+      # The MSI post-image hook runs here before the packaging build: the
+      # fixture executes the shipped WSF through real cscript on a fabricated
+      # direct-root staging tree, so a hook regression fails fast.
+      - name: The MSI post-image hook's native cscript fixture
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci/tests/post-image-hook.test.ps1
       - name: Read the checked-out version
         id: version
         shell: bash
@@ -1106,6 +1112,21 @@ jobs:
             playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
           retention-days: 5
           if-no-files-found: warn
+
+  # The MSI post-image hook's native proof without a build: the fixture runs
+  # the shipped WSF through real cscript on fabricated staging trees — no SDK,
+  # Gradle or app build — so a broken hook reports against a minutes-long job.
+  aot-wsf:
+    if: inputs.scope == 'aot-wsf'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: The MSI post-image hook's native cscript fixture
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci/tests/post-image-hook.test.ps1
 
   repro:
     runs-on: ubuntu-24.04

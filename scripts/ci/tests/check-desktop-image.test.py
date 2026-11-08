@@ -1020,20 +1020,45 @@ for image; do :; done
         self.assertNotEqual(0, r.returncode)
         self.assertIn("attach", r.stderr)
 
-    # ----- 11 AOT cache: the payload's fixed epoch ------------------------------
+    # ----- 11 AOT cache: the .cfg classpath's fixed epoch ----------------------
+    # The archive binds only its classpath inputs (the JARs app.classpath
+    # names); the front-ends own every other entry's metadata.
 
     AOT_EPOCH_S = 318211200  # 1980-02-01T00:00:00Z — AOT_IMAGE_TIMESTAMP_MS
 
-    def tarball(self, image_rel, name="dist/neutrodyne.tar.gz", epoch=AOT_EPOCH_S):
-        """A .tar.gz package holding <image_rel>/…; every entry records the given
-        mtime, the way the timestamp-preserving Gradle archives ship them."""
+    def aot_cfg(self, img):
+        """Make the image AOT-configured: a launcher .cfg whose app.classpath
+        lists every JAR beside it and whose java-options read the trained
+        archive, plus the archive file. Returns the app dir."""
+        for appdir in (f"{img}/app", f"{img}/Contents/app", f"{img}/lib/app"):
+            base = self.root / appdir
+            if base.is_dir():
+                jars = sorted(p.name for p in base.glob("*.jar"))
+                lines = ["[Application]"] + [
+                    f"app.classpath=$APPDIR/{n}" for n in jars
+                ] + ["", "[JavaOptions]",
+                     "java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot"]
+                self.fx.write(f"{appdir}/Neutrodyne.cfg",
+                              ("\n".join(lines) + "\n").encode())
+                self.fx.write(f"{appdir}/neutrodyne.aot", b"AOT")
+                return appdir
+        raise AssertionError(f"no app dir in {img}")
+
+    def tarball(self, image_rel, name="dist/neutrodyne.tar.gz", epoch=AOT_EPOCH_S,
+                jar_epoch=None):
+        """A .tar.gz package holding <image_rel>/…; JAR entries record jar_epoch
+        (default: epoch) and every other entry records epoch — only the
+        classpath JARs' trained times are the archive's bound inputs."""
         src = self.root / image_rel
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         with tarfile.open(path, "w:gz") as tar:
             for p in sorted(src.rglob("*")):
-                info = tar.gettarinfo(str(p), arcname=str(p.relative_to(src)))
-                info.mtime = epoch
+                rel = str(p.relative_to(src))
+                info = tar.gettarinfo(str(p), arcname=rel)
+                info.mtime = jar_epoch if (
+                    jar_epoch is not None and rel.endswith(".jar")
+                ) else epoch
                 if p.is_file():
                     with open(p, "rb") as fh:
                         tar.addfile(info, fh)
@@ -1042,29 +1067,86 @@ for image; do :; done
         return name
 
     def test_targz_payload_epoch_passes(self):
-        """A payload whose entries all carry the trained image's fixed epoch."""
+        """A trained payload whose classpath JARs carry the fixed epoch."""
         img = self.flat_image()
         self.fx.skiko_stub(img)
+        self.aot_cfg(img)
         self.fx.write_manifest()
         r = self.fx.image_check(self.tarball(img))
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
-    def test_targz_payload_drifted_epoch_fails(self):
-        """A one-second drift — what jpackage's attribute-losing staging copy
-        produces without the post-image hook — is a violation."""
+    def test_targz_payload_drifted_jar_fails(self):
+        """A one-second drift on a classpath JAR — what jpackage's
+        attribute-losing staging copy produces without the post-image hook —
+        is a violation."""
         img = self.flat_image()
         self.fx.skiko_stub(img)
+        self.aot_cfg(img)
         self.fx.write_manifest()
-        r = self.fx.image_check(self.tarball(img, epoch=self.AOT_EPOCH_S + 1))
+        r = self.fx.image_check(self.tarball(img, jar_epoch=self.AOT_EPOCH_S + 1))
         self.assertNotEqual(0, r.returncode)
-        self.assertIn("off the fixed 1980-02-01 UTC epoch", r.stderr)
+        self.assertIn("off the trained epoch", r.stderr)
+
+    def test_targz_non_classpath_restamp_passes(self):
+        """The package front-ends own non-classpath metadata: drifted
+        directories, launchers, legal files and the .cfg/.aot themselves do not
+        false-fail — the archive binds the classpath inputs only."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(
+            img, epoch=self.AOT_EPOCH_S + 3600, jar_epoch=self.AOT_EPOCH_S))
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_targz_undeclared_jar_fails(self):
+        """A JAR beside the .cfg that the classpath does not declare is outside
+        the archive's consistency set: fail closed."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        data = b"EXTRA"
+        self.fx.write(f"{img}/lib/app/{self.fx.manifest('extra', data)}", data)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("not on the .cfg classpath", r.stderr)
+
+    def test_targz_classpath_directory_fails_closed(self):
+        """A classpath entry resolving to a directory carries no bindable file
+        metadata: fail closed."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        appdir = self.aot_cfg(img)
+        cfg = self.root / appdir / "Neutrodyne.cfg"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace(
+            "[JavaOptions]", "app.classpath=$APPDIR/cpdir\n\n[JavaOptions]"),
+            encoding="utf-8")
+        self.fx.write(f"{appdir}/cpdir/notes.txt", b"NOTES")
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("not a regular file", r.stderr)
+
+    def test_targz_missing_archive_fails(self):
+        """The flag without the archive file is a strict-launch failure the
+        package must not ship."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        (self.root / f"{img}/lib/app/neutrodyne.aot").unlink()
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("neutrodyne.aot is missing", r.stderr)
 
     def test_zip_payload_gets_the_image_scan(self):
         """The checker's ZIP extraction boundary (extract-zip.py off Darwin, ditto
         on Darwin) feeds the same image rules and restores the artifact's entry
-        times instead of the extraction time."""
+        times instead of the extraction time — the .cfg classpath JARs included."""
         img = self.flat_image()
         self.fx.skiko_stub(img)
+        self.aot_cfg(img)
         self.fx.write_manifest()
         archive = self.root / "dist/neutrodyne-1.0.0-windows-x64.zip"
         archive.parent.mkdir(parents=True, exist_ok=True)
