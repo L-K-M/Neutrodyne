@@ -13,8 +13,12 @@ import ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome
 import ch.lkmc.neutrodyne.youtube.api.EngineUpdatePolicy
 import ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -35,6 +39,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * The 04 acceptance set, all through the loopback fixture server: signature failure, tampered
@@ -441,6 +446,150 @@ class EngineUpdaterTest {
                 File(paths.root.toFile(), "versions/${EngineUpdateFixtures.NEW_VERSION}").exists().not(),
             )
             assertEquals(EngineRejectReason.SELFTEST_FAILED, active.rejected.single().reason)
+        }
+
+    /**
+     * I-1: a run cancelled inside the self-test must not leave the trial serving a candidate
+     * that never passed it. The store is the real [BundledEngineStore]; only the transport
+     * answer suspends.
+     */
+    @Test fun cancelledSelfTestClearsTheTrialAndServesTheCommittedEngine() =
+        runTest {
+            prepare()
+            assertEquals(
+                EngineUpdateOutcome.Activated(EngineUpdateFixtures.NEW_VERSION),
+                updater().runUpdate(EngineUpdateTrigger.SCHEDULED),
+            )
+            // The next snapshot offers a different version; its self-test call suspends
+            // mid-trial so the update coroutine can be cancelled inside it.
+            val newer = fixtures.archive(EngineUpdateFixtures.OTHER_VERSION)
+            val nextSums = fixtures.sums(newer)
+            val nextManifest =
+                fixtures.manifest(
+                    EngineUpdateFixtures.OTHER_VERSION,
+                    sequence = 8,
+                    sha256 = fixtures.sha256(newer),
+                )
+            served[INDEX_PATH] = indexDocument(SNAPSHOT_TAG_NEXT)
+            serveSnapshot(
+                SNAPSHOT_TAG_NEXT,
+                manifest = nextManifest,
+                signature = fixtures.signManifest(nextManifest).toByteArray(),
+            )
+            serveUpstream(
+                EngineUpdateFixtures.OTHER_VERSION,
+                sums = nextSums,
+                sumsSignature = fixtures.sumsSignature(nextSums),
+                archive = newer,
+            )
+            val selftestSuspended = CompletableDeferred<Unit>()
+            transport.answer = { call ->
+                when (call.method) {
+                    YtxMethod.SELFTEST -> {
+                        selftestSuspended.complete(Unit)
+                        awaitCancellation()
+                    }
+
+                    else -> {
+                        throw YtxCallException("ENGINE_UNAVAILABLE")
+                    }
+                }
+            }
+            val run =
+                async(Dispatchers.Default) { updater().runUpdate(EngineUpdateTrigger.SCHEDULED) }
+            awaitReal { selftestSuspended.isCompleted }
+            // The trial is live: a bind right now would serve the not-yet-tested candidate.
+            assertEquals(
+                EngineUpdateFixtures.OTHER_VERSION,
+                store.hostPrepared()!!.marker.engineVersion,
+            )
+            run.cancel()
+            try {
+                run.await()
+                fail("runUpdate must propagate cancellation")
+            } catch (cancelled: CancellationException) {
+                // Cancellation reaches the caller; it is never swallowed into an outcome.
+            }
+            // The committed engine is served again; the untested candidate stays staged
+            // for a later resume but is neither served nor falsely rejected.
+            assertNull(store.active.value.trial)
+            assertEquals(EngineUpdateFixtures.NEW_VERSION, store.active.value.current)
+            assertEquals(
+                EngineUpdateFixtures.NEW_VERSION,
+                store.hostPrepared()!!.marker.engineVersion,
+            )
+            assertEquals(EngineUpdateFixtures.OTHER_VERSION, store.active.value.staged)
+            assertTrue(
+                store.active.value.rejected
+                    .none { it.version == EngineUpdateFixtures.OTHER_VERSION },
+            )
+            // A stuck trial also suppressed the rollback monitor (active.trial != null):
+            // a downloaded engine's start failure must roll back again.
+            transport.status.value = transport.status.value.copy(state = HostState.STARTING)
+            transport.status.value =
+                transport.status.value.copy(state = HostState.STOPPED, lastExit = HostExit.START_FAILED)
+            awaitReal { store.active.value.current == EngineUpdateFixtures.BUNDLED_VERSION }
+            assertTrue(
+                store.active.value.rejected.any {
+                    it.version == EngineUpdateFixtures.NEW_VERSION &&
+                        it.reason == EngineRejectReason.ROLLED_BACK
+                },
+            )
+            // The bundled start-failure counter gates on the same field; it works again.
+            YtDlpEngine(
+                transport,
+                store,
+                settings,
+                FakeEnginePlatformPreflight(),
+                CompileMarker(1, EngineUpdateFixtures.BUNDLED_VERSION, paths.pythonMinor),
+                health,
+                clock,
+                unconfined(),
+            )
+            transport.status.value = transport.status.value.copy(state = HostState.STARTING)
+            transport.status.value =
+                transport.status.value.copy(state = HostState.STOPPED, lastExit = HostExit.START_FAILED)
+            awaitReal { settings.state.value.startFailures == 1 }
+        }
+
+    /**
+     * I-1 companion: the self-test passed but `commitTrial`'s record write fails. The fault
+     * seam is the real filesystem: a directory where `active.json` belongs makes the atomic
+     * rename fail inside the real store.
+     */
+    @Test fun failedCommitClearsTheTrialAndKeepsTheCandidateStaged() =
+        runTest {
+            prepare()
+            val activeJson = File(paths.root.toFile(), "active.json")
+            transport.answer = { call ->
+                when (call.method) {
+                    YtxMethod.SELFTEST -> {
+                        check(activeJson.delete())
+                        check(activeJson.mkdir())
+                        """{"ok":true,"missing":[]}"""
+                    }
+
+                    else -> {
+                        throw YtxCallException("ENGINE_UNAVAILABLE")
+                    }
+                }
+            }
+            val outcome = updater().runUpdate(EngineUpdateTrigger.SCHEDULED)
+            assertEquals(EngineUpdateOutcome.Failed(TransientKind.NETWORK), outcome)
+            // No commit happened: the committed engine is served, the self-tested candidate
+            // stays staged for a later commit, and nothing is falsely rejected.
+            assertNull(store.active.value.trial)
+            assertEquals(EngineUpdateFixtures.BUNDLED_VERSION, store.active.value.current)
+            assertEquals(
+                EngineUpdateFixtures.BUNDLED_VERSION,
+                store.hostPrepared()!!.marker.engineVersion,
+            )
+            assertEquals(EngineUpdateFixtures.NEW_VERSION, store.active.value.staged)
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertTrue(
+                store.active.value.rejected
+                    .none { it.version == EngineUpdateFixtures.NEW_VERSION },
+            )
         }
 
     @Test fun signedApprovedEngineActivatesAtomically() =

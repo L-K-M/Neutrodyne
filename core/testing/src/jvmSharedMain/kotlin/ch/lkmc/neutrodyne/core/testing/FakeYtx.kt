@@ -197,6 +197,11 @@ class FakeEngineStore : EngineStore {
             )
     }
 
+    override suspend fun clearTrial() {
+        trialPrepared = null
+        active.value = active.value.copy(trial = null)
+    }
+
     override suspend fun rollback(
         reason: EngineRejectReason,
         atMs: Long,

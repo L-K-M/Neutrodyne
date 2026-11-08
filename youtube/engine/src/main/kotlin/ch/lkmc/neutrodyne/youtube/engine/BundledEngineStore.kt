@@ -317,6 +317,22 @@ class BundledEngineStore(
         }
     }
 
+    override suspend fun clearTrial() {
+        withContext(io) {
+            processLock.withLock {
+                if (trial == null) return@withLock
+                trial = null
+                mutablePreparation.value = trialPreparation
+                val record = readRecord<ActiveRecord>(File(root, "active.json"))
+                if (record != null) {
+                    publishActive(record)
+                } else {
+                    publishActive(mutableActive.value.copy(trial = null))
+                }
+            }
+        }
+    }
+
     override suspend fun rollback(
         reason: EngineRejectReason,
         atMs: Long,

@@ -12,12 +12,14 @@ import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -244,14 +246,26 @@ class EngineUpdater(
                 return rejected(version, EngineRejectReason.ORIGIN, revokedActive)
             }
         if (!awaitIdle()) return finish(EngineUpdateOutcome.Staged(version))
-        if (!runner.run(candidate)) {
-            transport.shutdown()
-            store.abortTrial(version, EngineRejectReason.SELFTEST_FAILED, sequence, clock.now())
-            if (revokedActive) rollbackRecord(EngineRejectReason.REVOKED)
-            return finish(EngineUpdateOutcome.Rejected(version, EngineRejectReason.SELFTEST_FAILED))
+        try {
+            if (!runner.run(candidate)) {
+                transport.shutdown()
+                store.abortTrial(version, EngineRejectReason.SELFTEST_FAILED, sequence, clock.now())
+                if (revokedActive) rollbackRecord(EngineRejectReason.REVOKED)
+                return finish(EngineUpdateOutcome.Rejected(version, EngineRejectReason.SELFTEST_FAILED))
+            }
+            val basis = monitor.activationBasis()
+            store.commitTrial(clock.now(), basis.lastSuccessAtMs, basis.breakerOpen)
+        } finally {
+            // A cancel or a post-`beginTrial` failure must not leave the never-committed
+            // candidate servable: end the trial without a verdict (a WorkManager stop is
+            // not a rejection) and keep the staged tree for a later run to resume.
+            if (store.active.value.trial != null) {
+                withContext(NonCancellable) {
+                    store.clearTrial()
+                    transport.shutdown()
+                }
+            }
         }
-        val basis = monitor.activationBasis()
-        store.commitTrial(clock.now(), basis.lastSuccessAtMs, basis.breakerOpen)
         health.reportEngineVersion(version)
         return finish(EngineUpdateOutcome.Activated(version))
     }

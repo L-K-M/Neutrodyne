@@ -196,6 +196,13 @@ interface EngineStore {
         breakerWasOpen: Boolean,
     )
 
+    /**
+     * Ends an unfinished trial with no verdict: a cancelled or failed run never proved the
+     * candidate bad. `hostPrepared` serves `current` again, the staged tree stays
+     * resumable, and `rejected[]` is untouched. Only a failed self-test takes [abortTrial].
+     */
+    suspend fun clearTrial()
+
     /** Rejects the current version and falls back to `previous`, else bundled. */
     suspend fun rollback(
         reason: EngineRejectReason,
