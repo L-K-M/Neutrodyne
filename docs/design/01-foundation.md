@@ -113,7 +113,7 @@ All verified 2026-10-04; the YouTube-engine, signature and CI-action rows on 202
 | | Licensee / module-graph-assertion | 1.14.1 / 2.9.1 | Licensee supports `org.jetbrains.kotlin.multiplatform` and `kotlin("jvm")` ([Licensee](https://github.com/cashapp/licensee)); the graph plugin sees KMP source-set edges through their configuration names (verified 2026-10-06, [Module-graph assertion configuration](#module-graph-assertion-configuration)) |
 | | ACRA (`acra-mail`, `acra-dialog`) | 5.14.2 | [D62](../PLAN.md#3-key-decisions); Android release builds; never installed in `:ytx`; mailbox forced empty in `debug` |
 | CI (09) | actions/checkout, setup-java, gradle/actions, upload-artifact, codeql-action | v7.0.1, v6.0.1, v6.4.0, v7.0.1, v4.38.2 (SHA-pinned) | android-emulator-runner v2.38.0 as GMD fallback; no release action: `release.yml` publishes with the runner's preinstalled `gh` CLI ([09 release.yml](09-quality-and-release.md#releaseyml)) |
-| | actions/setup-python, actions/attest, actions/deploy-pages | v7.0.0, v4.2.2, v5.0.1 (SHA-pinned; checked 2026-10-05) | host CPython 3.14 for `.pyc` compilation, `shimTest` and `shimTestStdio`; provenance attestations ([D79](../PLAN.md#3-key-decisions)); engine manifest on GitHub Pages ([D76](../PLAN.md#3-key-decisions)) |
+| | actions/setup-python, actions/attest | v7.0.0, v4.2.2 (SHA-pinned; checked 2026-10-05) | host CPython 3.14 for `.pyc` compilation, `shimTest` and `shimTestStdio`; provenance attestations ([D79](../PLAN.md#3-key-decisions)) |
 
 **Banned** (enforced by [`verifyDependencyPolicy`](#gradle-side-policy-tasks) and plugin guards): `org.jetbrains.kotlin.android`, `kotlin-kapt` / `org.jetbrains.kotlin.kapt`, `androidx.compose.material:material-icons-extended`, `androidx.palette:*`, `com.materialkolor:material-kolor*` (Compose artifact), OkHttp `Cache`, any `com.google.android.gms`, `com.google.firebase`, `com.google.android.play`, `com.crashlytics`, `io.sentry` artifact in any configuration (no build carries a proprietary SDK, [D62](../PLAN.md#3-key-decisions)), `androidx.security:security-crypto` (deprecated; Keystore directly), `com.google.dagger:*` and `androidx.hilt:*` (Metro replaces Hilt, [D82](../PLAN.md#3-key-decisions)), `dev.dirs:directories` (MPL-2.0 code; `AppDirs` is ours), and every component [D3](../PLAN.md#3-key-decisions) rules out: NewPipe Extractor (`com.github.teamnewpipe`, `com.github.TeamNewPipe`), Rhino (`org.mozilla:rhino*`), any `*youtubedl-android*` coordinate, `com.android.tools:desugar_jdk_libs*` (`java.time` is native from API 26; AGP's AAR-metadata check fails the build if a dependency still demands desugaring), `com.guardsquare:proguard*` (GPL-2.0; the Compose desktop `*Release*` tasks would pull it), `org.openjdk:jextract*` (GPL-2.0; FFM bindings are hand-written), `org.openjfx:javafx-media`, `org.bytedeco:*-gpl`, `uk.co.caprica:vlcj` (GPL-3.0), `org.freedesktop.gstreamer:*` and `gst1-java-core`, `ch.qos.logback:*` (use slf4j-simple), `de.mkammerer:argon2-jvm` (LGPL; Bouncy Castle instead), `org.mariadb.jdbc:*` (LGPL). The `com.chaquo.python` plugin is allowed only in `:youtube:ytdlp` ([common Android configuration](#common-android-configuration)).
 
@@ -482,8 +482,8 @@ kotlin.daemon.jvmargs=-Xmx3g
 neutrodyne.versionName=0.1.0
 neutrodyne.versionCode=10095
 neutrodyne.repoUrl=https://github.com/OWNER/Neutrodyne
-# Approved YouTube-engine manifest on GitHub Pages (D76; 04 Engine updates):
-neutrodyne.engineManifestUrl=https://OWNER.github.io/Neutrodyne/engine/ytdlp-approved.json
+# Approved YouTube-engine index release on GitHub (D76; 04 Engine updates):
+neutrodyne.engineManifestUrl=https://api.github.com/repos/OWNER/Neutrodyne/releases/tags/engine-approvals
 # false = emergency builds without the YouTube engine, APKs and desktop images (Build variants and ABIs; risk L1):
 neutrodyne.youtubeEngine=true
 # Committed release crash-report mailbox (PO-10 resolved 2026-11-07):

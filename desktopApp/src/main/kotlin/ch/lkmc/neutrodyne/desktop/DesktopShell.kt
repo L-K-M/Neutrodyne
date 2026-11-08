@@ -21,10 +21,12 @@ import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
+import ch.lkmc.neutrodyne.desktop.identity.WindowsAppIdentity
 import ch.lkmc.neutrodyne.desktop.log.ConsoleSink
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.log.RollingFileSink
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
+import ch.lkmc.neutrodyne.desktop.playback.DesktopEnginePaths
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.desktop_cannot_open_file
 import ch.lkmc.neutrodyne.desktop.shell.HandoffOutcome
@@ -61,8 +63,8 @@ import kotlin.time.Duration.Companion.seconds
  * files, session → the graph and initializer bands → the window (the AWT event thread) → the
  * clean shutdown when it closes. The owner serves hand-offs for the whole process life; SIGTERM
  * runs the same [ShutdownCoordinator] through its shutdown hook. Input routing through
- * `DesktopOpenHandler`/`IntentRouter` waits for the ready root's first frame. The Windows
- * AppUserModelID call and the `desktop.language` locale remain in their desktop milestones.
+ * `DesktopOpenHandler`/`IntentRouter` waits for the ready root's first frame. The
+ * `desktop.language` locale remains in its desktop milestone.
  */
 internal object DesktopShell {
     private const val TAG = "Main"
@@ -189,6 +191,10 @@ internal object DesktopShell {
         // Step 4's macOS AWT facts: the menu bar lives in the screen, the app menu carries our
         // name and tray images may be template images. Before any AWT class initialises.
         installMacosAwtProperties(buildInfo)
+
+        // Step 4's Windows process identity: SetCurrentProcessExplicitAppUserModelID
+        // through ndmedia, before any window or OS surface exists (11 Start-up).
+        WindowsAppIdentity.applyProcessIdentity(buildInfo, DesktopEnginePaths.current().ndmedia)
 
         // Step 5: the graph, the initializer bands and the hand-off server.
         val graph = createDesktopGraph(dirs, buildInfo, crashReporter, fileSink)

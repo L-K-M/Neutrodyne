@@ -378,6 +378,73 @@ class BackupCodecTest {
     }
 
     @Test
+    fun archiveModeStripsTheStagingOnlyTombstoneClocks() {
+        val library =
+            LibraryV1(
+                podcasts =
+                    listOf(
+                        PodcastV1(key = "a", feedUrl = "a", title = "A", subscribedAt = 1, removedAt = 2),
+                    ),
+                groups =
+                    listOf(
+                        GroupV1(
+                            uuid = "u",
+                            name = "G",
+                            sortOrder = 0,
+                            removedAt = 3,
+                            members = listOf(MemberV1("a", removedAt = 4)),
+                        ),
+                    ),
+            )
+        val encoded = codec.encodeLibrary(library)
+        assertFalse(encoded.contains("\"removedAt\""), encoded)
+        val decoded = codec.decodeLibrary(sourceOf(encoded))
+        assertNull(decoded.podcasts.single().removedAt)
+        assertNull(decoded.groups.single().removedAt)
+        assertNull(
+            decoded.groups
+                .single()
+                .members
+                .single()
+                .removedAt,
+        )
+        // Staging mode keeps them: the removal clocks survive the first-link hop.
+        val staged = stagingCodec.decodeLibrary(sourceOf(stagingCodec.encodeLibrary(library)))
+        assertEquals(2, staged.podcasts.single().removedAt)
+        assertEquals(3, staged.groups.single().removedAt)
+        assertEquals(
+            4,
+            staged.groups
+                .single()
+                .members
+                .single()
+                .removedAt,
+        )
+    }
+
+    @Test
+    fun archiveModeStripsTheStagingOnlyUpNextTombstoneClock() {
+        val queue = QueueV1(upNext = listOf(UpNextRefV1("a", "b", removedAt = 5)))
+        val encoded = codec.encodeQueue(queue)
+        assertFalse(encoded.contains("\"removedAt\""), encoded)
+        assertNull(
+            codec
+                .decodeQueue(sourceOf(encoded))
+                .upNext
+                .single()
+                .removedAt,
+        )
+        assertEquals(
+            5,
+            stagingCodec
+                .decodeQueue(sourceOf(stagingCodec.encodeQueue(queue)))
+                .upNext
+                .single()
+                .removedAt,
+        )
+    }
+
+    @Test
     fun episodeLineRoundTripsEveryField() {
         assertEquals(line(), decodeAll(codec.encodeEpisodeLine(line())).single())
     }

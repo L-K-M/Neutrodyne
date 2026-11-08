@@ -34,6 +34,12 @@ class NdmediaLibrary private constructor(
             )
         }
 
+    /** Like [downcall] but returns `null` when [name] is absent — for exports a caller may lack. */
+    internal fun optionalDowncall(
+        name: String,
+        descriptor: FunctionDescriptor,
+    ): MethodHandle? = lookup.find(name).map { linker.downcallHandle(it, descriptor) }.orElse(null)
+
     fun cString(value: String): MemorySegment = arena.allocateFrom(value)
 
     fun allocate(byteSize: Long): MemorySegment = arena.allocate(byteSize)
