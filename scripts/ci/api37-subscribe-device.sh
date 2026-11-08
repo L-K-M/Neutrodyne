@@ -21,7 +21,6 @@ case "$variant" in
     props=(
       -PtestBuildType=release
       -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
-      -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
     )
     package="ch.lkmc.neutrodyne"
     ;;
@@ -30,10 +29,13 @@ esac
 
 status=0
 ./gradlew --max-workers=2 "${props[@]}" \
+  -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true \
   -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
   -Pandroid.testInstrumentationRunnerArguments.class="$class" \
   "$task" || status=$?
 
+# Both variants retain their APKs until evidence is pulled: uninstalling the app
+# also removes its external files. The hosted emulator is discarded after the job.
 # A failing suite still produced evidence: the test leaves the ATF window dump
 # and the screenshot in the app's external files dir for the artifact upload.
 adb pull "/sdcard/Android/data/$package/files/api37-subscribe" \
