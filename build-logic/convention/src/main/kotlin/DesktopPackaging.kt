@@ -990,6 +990,7 @@ internal fun Project.registerDesktopPackagingTasks(
         setupRuntime.map { task ->
             File(File(task.home.get().asFile, target.homeSubdir), "bin/jpackage")
         }
+    val nativeTarget = nativeTargetOf()
 
     // The app image is createDistributable's destinationDir/<name>[.app]; taking it from the
     // task keeps this in step with the plugin's layout instead of hardcoding compose/binaries.
@@ -1064,7 +1065,6 @@ internal fun Project.registerDesktopPackagingTasks(
         // `into` prefix and exclude everything. The tasks are named lazily because
         // :playback:native may not be evaluated when this project is configured.
         dependsOn(":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
-        val nativeTarget = nativeTargetOf()
         from(playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget")) {
             into("${target.id}/native/ffmpeg")
             eachFile {
@@ -1155,6 +1155,33 @@ internal fun Project.registerDesktopPackagingTasks(
             }
         }
 
+    // The runtime-classpath manifest is registered here, ahead of the AOT training task:
+    // the training inputs bind it so a JAR change retrains the archive.
+    tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
+        description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
+        // Compose resolves project dependencies to their jar artifacts for the image,
+        // so the manifest must ask for jar artifacts too (otherwise project deps show
+        // up as classes directories) and include this project's own jar.
+        runtimeClasspath.from(
+            configurations.named("runtimeClasspath").map { conf ->
+                conf.incoming
+                    .artifactView {
+                        attributes {
+                            attribute(
+                                ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
+                                ArtifactTypeDefinition.JAR_TYPE,
+                            )
+                        }
+                    }.files
+            },
+        )
+        runtimeClasspath.from(tasks.named("jar"))
+        manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
+        stubManifest.set(
+            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
+        )
+    }
+
     // --- AOT cache: one training launch writes $APPDIR/neutrodyne.aot into the image (PO-42) ---
     // Every packaging invocation trains: package* tasks depend on the task, and
     // createDistributable's finalizer covers the bare-image path (mac-zip.sh archives the
@@ -1163,17 +1190,47 @@ internal fun Project.registerDesktopPackagingTasks(
     // never depends on a package task.
     val aotLayout = aotImageLayout(target.osWire)
     val image = appImage
+    val runtimeJavaName = "java" + if (target.osWire == "windows") ".exe" else ""
     val trainAotCache =
         tasks.register<TrainAotCacheTask>("trainAotCache") {
             group = "distribution"
             description =
-                "Runs one AOT training launch of the packaged app and leaves the archive in the image (PO-42, 11 AOT cache)."
-            dependsOn("createDistributable")
+                "Runs one AOT training launch of the packaged app, verifies the archive under strict mode and leaves it in the image (PO-42, 11 AOT cache)."
+            dependsOn(
+                "createDistributable",
+                setupRuntime,
+                "writeDesktopRuntimeClasspath",
+                ":playback:native:buildFfmpeg",
+                ":playback:native:buildNdmedia",
+            )
             this.appImage.set(image)
             launcher.set(image.map { it.file(aotLayout.launcher) })
             launcherCfg.set(image.map { it.file(aotLayout.cfg) })
             runtimeRelease.set(image.map { it.file(aotLayout.runtimeRelease) })
             aotArchive.set(image.map { it.file("${aotLayout.appDir}/$AOT_CACHE_FILE") })
+            runtimeHome.set(setupRuntime.flatMap { it.home })
+            runtimeJavaSource.set(
+                setupRuntime.flatMap { setup ->
+                    setup.home.map { home ->
+                        if (target.homeSubdir.isEmpty()) {
+                            home.file("bin/$runtimeJavaName")
+                        } else {
+                            home.dir(target.homeSubdir).file("bin/$runtimeJavaName")
+                        }
+                    }
+                },
+            )
+            runtimeClasspathManifest.set(
+                tasks
+                    .named(
+                        "writeDesktopRuntimeClasspath",
+                        WriteDesktopRuntimeClasspath::class.java,
+                    ).flatMap { it.manifest },
+            )
+            nativeLibraries.from(
+                playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget"),
+                playbackNative.layout.buildDirectory.dir("ndmedia/$nativeTarget"),
+            )
             targetOs.set(target.osWire)
             installKind.set(installKindProperty.orElse(""))
             expectedInstallKinds.set(target.installKinds)
@@ -1304,30 +1361,5 @@ internal fun Project.registerDesktopPackagingTasks(
         useFileSystemPermissions()
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
-    }
-
-    tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
-        description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
-        // Compose resolves project dependencies to their jar artifacts for the image,
-        // so the manifest must ask for jar artifacts too (otherwise project deps show
-        // up as classes directories) and include this project's own jar.
-        runtimeClasspath.from(
-            configurations.named("runtimeClasspath").map { conf ->
-                conf.incoming
-                    .artifactView {
-                        attributes {
-                            attribute(
-                                ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
-                                ArtifactTypeDefinition.JAR_TYPE,
-                            )
-                        }
-                    }.files
-            },
-        )
-        runtimeClasspath.from(tasks.named("jar"))
-        manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
-        stubManifest.set(
-            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
-        )
     }
 }

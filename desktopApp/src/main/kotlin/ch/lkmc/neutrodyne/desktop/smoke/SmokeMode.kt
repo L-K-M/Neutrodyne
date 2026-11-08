@@ -112,6 +112,16 @@ internal class SmokeMode(
         internal const val WINDOW_OPENED = "opened"
         internal const val WINDOW_SKIPPED_HEADLESS = "skipped-headless"
 
+        /** The AOT cache's option prefix and the strict mode that proves its use. */
+        internal const val AOT_CACHE_OPTION_PREFIX = "-XX:AOTCache="
+        internal const val AOT_MODE_STRICT_OPTION = "-XX:AOTMode=on"
+
+        /** The `aotCache` JSON field's values. */
+        internal const val AOT_CACHE_IN_USE = "in-use"
+        internal const val AOT_CACHE_MISSING = "missing"
+        internal const val AOT_CACHE_NOT_CONFIGURED = "not-configured"
+        internal const val AOT_CACHE_UNVERIFIED = "unverified"
+
         /** Steps 11 defines that this milestone cannot run yet (11 Smoke mode). */
         internal val PENDING_STEPS =
             listOf(
@@ -230,13 +240,18 @@ internal class SmokeMode(
 
         /**
          * The PO-42 AOT cache's runtime state (11 step 8's "whether the AOT cache was used"):
-         * `in-use` when the launcher's `-XX:AOTCache` archive exists (the launcher expands
-         * `$APPDIR` before the JVM sees it), `missing` when the flag names a file that is not
-         * there, `not-configured` on dev runs and the assemble image, which carry no flag.
+         * `not-configured` without a `-XX:AOTCache` flag, `missing` when the flag names a
+         * file that is not there. When the file exists the state depends on the JVM's mode.
+         * A strict launch (`-XX:AOTMode=on`) fails before main when the archive cannot be
+         * mapped (JDK 25), so reaching this report under strict mode proves the cache was
+         * used — `in-use`. An auto launch silently falls back to the non-AOT path (JDK 25),
+         * so the file's existence alone proves nothing: `unverified`. The packaged acceptance
+         * launches the image under strict mode; a normal product start stays on auto and is
+         * reported honestly rather than claimed as proven.
          */
         internal fun aotCacheState(): String =
-            aotCacheStateOf(ManagementFactory.getRuntimeMXBean().inputArguments) {
-                Files.exists(Path.of(it))
+            aotCacheStateOf(ManagementFactory.getRuntimeMXBean().inputArguments) { path ->
+                Files.isRegularFile(Path.of(path))
             }
 
         internal fun aotCacheStateOf(
@@ -245,10 +260,15 @@ internal class SmokeMode(
         ): String {
             val path =
                 inputArguments
-                    .firstOrNull { it.startsWith("-XX:AOTCache=") }
+                    .firstOrNull { it.startsWith(AOT_CACHE_OPTION_PREFIX) }
                     ?.substringAfter('=')
-                    ?: return "not-configured"
-            return if (exists(path)) "in-use" else "missing"
+                    ?: return AOT_CACHE_NOT_CONFIGURED
+            if (!exists(path)) return AOT_CACHE_MISSING
+            return if (inputArguments.any { it == AOT_MODE_STRICT_OPTION }) {
+                AOT_CACHE_IN_USE
+            } else {
+                AOT_CACHE_UNVERIFIED
+            }
         }
     }
 }

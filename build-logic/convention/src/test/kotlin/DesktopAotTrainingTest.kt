@@ -41,6 +41,7 @@ class DesktopAotTrainingTest {
                 cfg = "app/Neutrodyne.cfg",
                 appDir = "app",
                 runtimeRelease = "runtime/release",
+                runtimeJava = "runtime/bin/java.exe",
             ),
             aotImageLayout("windows"),
         )
@@ -50,6 +51,7 @@ class DesktopAotTrainingTest {
                 cfg = "Contents/app/Neutrodyne.cfg",
                 appDir = "Contents/app",
                 runtimeRelease = "Contents/runtime/Contents/Home/release",
+                runtimeJava = "Contents/runtime/Contents/Home/bin/java",
             ),
             aotImageLayout("macos"),
         )
@@ -59,6 +61,7 @@ class DesktopAotTrainingTest {
                 cfg = "lib/app/Neutrodyne.cfg",
                 appDir = "lib/app",
                 runtimeRelease = "lib/runtime/release",
+                runtimeJava = "lib/runtime/bin/java",
             ),
             aotImageLayout("linux"),
         )
@@ -158,6 +161,113 @@ class DesktopAotTrainingTest {
             listOf(launcher),
             aotLauncherCommand("windows", launcher, hasDisplay = false, xvfbAvailable = true, dbusAvailable = true),
         )
+    }
+
+    @Test
+    fun `the provisioner copies the pinned java and cleans up after itself`() {
+        val root = Files.createTempDirectory("aot-provision").toFile()
+        try {
+            val imageRoot = File(root, "image")
+            val imageJava = File(imageRoot, "runtime/Contents/Home/bin/java")
+            val sourceRoot = File(root, "pinned")
+            val sourceJava = File(sourceRoot, "Contents/Home/bin/java")
+            sourceJava.parentFile.mkdirs()
+            sourceJava.writeBytes(byteArrayOf(1, 2, 3, 4))
+            sourceJava.setExecutable(true)
+
+            val provisioned =
+                provisionImageJava(imageRoot, imageJava, sourceJava, sourceRoot)
+
+            assertTrue(imageJava.isFile)
+            assertTrue(imageJava.canExecute(), "the copy keeps the launcher's executable bit")
+            assertEquals(sourceJava.readBytes().toList(), imageJava.readBytes().toList())
+            assertTrue(File(imageRoot, "runtime/Contents/Home/bin").isDirectory)
+
+            provisioned.close()
+
+            assertFalse(imageJava.exists(), "the copied launcher is removed")
+            assertFalse(
+                File(imageRoot, "runtime/Contents/Home/bin").exists(),
+                "the bin directory the provisioning created is removed when empty",
+            )
+            assertTrue(sourceJava.isFile, "the pinned launcher is untouched")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the provisioner preserves a pre-existing bin directory`() {
+        val root = Files.createTempDirectory("aot-provision").toFile()
+        try {
+            val imageRoot = File(root, "image")
+            val binDir = File(imageRoot, "runtime/Contents/Home/bin")
+            binDir.mkdirs()
+            val sentinel = File(binDir, "pre-existing")
+            sentinel.writeBytes(byteArrayOf(9))
+            val imageJava = File(binDir, "java")
+            val sourceRoot = File(root, "pinned")
+            val sourceJava = File(sourceRoot, "bin/java")
+            sourceJava.parentFile.mkdirs()
+            sourceJava.writeBytes(byteArrayOf(1))
+
+            val provisioned =
+                provisionImageJava(imageRoot, imageJava, sourceJava, sourceRoot)
+            provisioned.close()
+
+            assertFalse(imageJava.exists())
+            assertTrue(sentinel.isFile, "a pre-existing file in the bin directory survives")
+            assertTrue(binDir.isDirectory, "a pre-existing bin directory is not removed")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the provisioner fails closed instead of overwriting an existing image java`() {
+        val root = Files.createTempDirectory("aot-provision").toFile()
+        try {
+            val imageRoot = File(root, "image")
+            val imageJava = File(imageRoot, "runtime/bin/java")
+            imageJava.parentFile.mkdirs()
+            imageJava.writeBytes(byteArrayOf(7))
+            val sourceRoot = File(root, "pinned")
+            val sourceJava = File(sourceRoot, "bin/java")
+            sourceJava.parentFile.mkdirs()
+            sourceJava.writeBytes(byteArrayOf(1))
+
+            assertFailsWith<GradleException> {
+                provisionImageJava(imageRoot, imageJava, sourceJava, sourceRoot)
+            }
+            assertEquals(listOf(7.toByte()), imageJava.readBytes().toList(), "the existing launcher is untouched")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the provisioner fails closed on a symbolic link in the image path`() {
+        val root = Files.createTempDirectory("aot-provision").toFile()
+        try {
+            val imageRoot = File(root, "image")
+            val realDir = File(root, "real")
+            realDir.mkdirs()
+            val link = File(imageRoot, "runtime")
+            link.parentFile.mkdirs()
+            Files.createSymbolicLink(link.toPath(), realDir.toPath())
+            val imageJava = File(link, "bin/java")
+            val sourceRoot = File(root, "pinned")
+            val sourceJava = File(sourceRoot, "bin/java")
+            sourceJava.parentFile.mkdirs()
+            sourceJava.writeBytes(byteArrayOf(1))
+
+            assertFailsWith<GradleException> {
+                provisionImageJava(imageRoot, imageJava, sourceJava, sourceRoot)
+            }
+            assertFalse(File(realDir, "bin/java").exists(), "nothing is written through the link")
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     @Test
