@@ -209,16 +209,6 @@ def content_sha256(path):
     return sha256_hex(normalized(data, os.path.basename(path)))
 
 
-def content_sha256(path):
-    """SHA-256 over a standalone file's normalized content: the same Mach-O
-    normalization `canonical_sha256` applies to a JAR entry's bytes. Used to bind
-    the native libraries Compose extracts from a skiko runtime jar, which the
-    packager re-signs (so their raw bytes differ from the source artifact)."""
-    with open(path, "rb") as handle:
-        data = handle.read()
-    return sha256_hex(normalized(data, os.path.basename(path)))
-
-
 def validate_name(name):
     if not name or name.startswith("/") or "\\" in name or "\0" in name:
         fail(f"malformed ZIP entry name: {name!r}")
