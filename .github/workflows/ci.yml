@@ -211,12 +211,19 @@ jobs:
       # -Proborazzi.test.verify=true --continue
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
         env:
-          # A dedicated java.io.tmpdir for Gradle and its test workers:
-          # tempAppDirs() puts each test's <root>/state here, so the crash
-          # step below scans one owned root instead of the runner's /tmp.
+          # A dedicated temp root for Gradle and its test workers:
+          # tempAppDirs() puts each test's <root>/state under java.io.tmpdir,
+          # so the crash step below scans one owned root instead of the
+          # platform's default.
           TMPDIR: ${{ runner.temp }}/neutrodyne-test-tmp
         run: |
           mkdir -p "$TMPDIR"
+          # TMPDIR alone does not pin java.io.tmpdir — OpenJDK's Linux builds
+          # report /tmp regardless (Temurin JRE 25 container probe) and macOS
+          # keeps its per-user dir. The property itself must be set, and
+          # JAVA_TOOL_OPTIONS is inherited by every JVM this step forks:
+          # the daemon and each test worker. Existing options are kept.
+          export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
           dbus-run-session -- ./gradlew allTests test mutationTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
       # A desktop test worker that dies mid-suite leaves no test XML — the
       # debug crash-fast path writes crash-<UTC>.txt under <root>/state and

@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Unlicense
-"""A dead desktop test worker must still hand its crash file to unit-reports."""
+"""A dead desktop test worker must still hand its crash file to unit-reports.
+
+The pin has to be the JVM property itself: OpenJDK's Linux builds report
+java.io.tmpdir=/tmp no matter what TMPDIR says (Temurin JRE 25 container
+probe), and this macOS JDK 21 keeps its per-user temp dir with TMPDIR set or
+cleared. The fixture below is therefore a real JVM subprocess — a Python fake
+that reads os.environ['TMPDIR'] would mask exactly that worker mismatch.
+"""
 
 import os
 from pathlib import Path
 import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,7 +25,7 @@ WORKFLOW = ".github/workflows/ci.yml"
 COLLECTOR = "scripts/ci/preserve-desktop-test-crashes.py"
 UNIT_STEP = "Unit tests"
 COLLECTOR_STEP = "Preserve desktop test crash reports"
-FAKE_ROOT = "neutrodyne-test4242424242"
+FAKE_ROOT_PREFIX = "neutrodyne-test"  # tempAppDirs' default prefix
 FAKE_REPORT = "crash-20261108-010203.txt"
 PAYLOAD = b"Neutrodyne crash report fixture: bytes only, not a real trace"
 
@@ -69,8 +77,29 @@ def _step_env(block: str, key: str) -> str | None:
     return None
 
 
+def _java() -> str | None:
+    """A real java binary for the worker fixture: JAVA_HOME, then the known local JDK.
+
+    A bare PATH lookup is never used — /usr/bin/java can be a no-JDK stub.
+    Source-file mode (`java Fixture.java`) needs JDK 11+; CI and the local
+    toolchain carry 21.
+    """
+    candidates = []
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        candidates.append(Path(java_home) / "bin" / "java")
+    candidates.append(Path.home() / ".local/jdks/jdk21/Contents/Home/bin/java")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 class PreserveDesktopTestCrashesTest(unittest.TestCase):
     def test_failed_unit_command_still_preserves_the_crash_report(self):
+        java = _java()
+        if java is None:
+            self.skipTest("no JDK found via JAVA_HOME or ~/.local/jdks/jdk21")
         source = (ROOT / WORKFLOW).read_text()
         unit_block = _step_block(source, UNIT_STEP)
         self.assertIsNotNone(unit_block, "ci.yml has no unit step")
@@ -93,17 +122,43 @@ class PreserveDesktopTestCrashesTest(unittest.TestCase):
             dbus.write_text('#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n')
             dbus.chmod(0o755)
 
-            # Fake gradlew dies like a halted test worker: a crash file in the
-            # tempAppDirs shape under java.io.tmpdir, then exit 1.
+            # The fake worker is a real JVM in source-file mode: like
+            # TempAppDirs.kt it opens a Files.createTempDirectory root under
+            # java.io.tmpdir, drops a crash-<UTC>.txt in state/ and dies like
+            # halt(1). Where the file lands is decided by the JVM property,
+            # not by any env var the platform honours.
+            fixture = work / "CrashFixture.java"
+            fixture.write_text(
+                textwrap.dedent(
+                    f"""\
+                    import java.nio.charset.StandardCharsets;
+                    import java.nio.file.Files;
+                    import java.nio.file.Path;
+
+                    public class CrashFixture {{
+                        public static void main(String[] args) throws Exception {{
+                            Path root = Files.createTempDirectory("{FAKE_ROOT_PREFIX}");
+                            Path report = Files.createDirectories(root.resolve("state"))
+                                .resolve("{FAKE_REPORT}");
+                            Files.writeString(report, "{PAYLOAD.decode()}", StandardCharsets.UTF_8);
+                            System.out.println("java.io.tmpdir=" + System.getProperty("java.io.tmpdir"));
+                            System.out.println("neutrodyne.probe=" + System.getProperty("neutrodyne.probe"));
+                            System.out.println("crash-report=" + report);
+                            System.exit(1);
+                        }}
+                    }}
+                    """
+                )
+            )
+
+            # Fake gradlew runs the fixture. TMPDIR is cleared only in this
+            # child so the platform default can never be confused with the
+            # pinned root — the step's own mechanism has to win the property.
             gradlew = work / "gradlew"
             gradlew.write_text(
-                f"#!{sys.executable}\n"
-                "import os, sys\n"
-                "from pathlib import Path\n"
-                f"report = Path(os.environ['TMPDIR']) / '{FAKE_ROOT}/state' / '{FAKE_REPORT}'\n"
-                "report.parent.mkdir(parents=True)\n"
-                f"report.write_bytes({PAYLOAD!r})\n"
-                "sys.exit(1)\n"
+                "#!/bin/sh\n"
+                "unset TMPDIR\n"
+                f"exec {shlex.quote(java)} {shlex.quote(str(fixture))}\n"
             )
             gradlew.chmod(0o755)
 
@@ -122,6 +177,9 @@ class PreserveDesktopTestCrashesTest(unittest.TestCase):
                 **os.environ,
                 "RUNNER_TEMP": str(runner),
                 "TMPDIR": tmpdir,
+                # Options the step already carries must survive the step's own
+                # JAVA_TOOL_OPTIONS edit — the fixture reports the property.
+                "JAVA_TOOL_OPTIONS": "-Dneutrodyne.probe=keepme",
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             }
 
@@ -134,6 +192,28 @@ class PreserveDesktopTestCrashesTest(unittest.TestCase):
                 timeout=30,
             )
             self.assertEqual(unit.returncode, 1, unit.stderr + unit.stdout)
+
+            jvm = {}
+            for line in unit.stdout.splitlines():
+                for key in ("java.io.tmpdir", "neutrodyne.probe", "crash-report"):
+                    if line.startswith(f"{key}="):
+                        jvm[key] = line.split("=", 1)[1]
+            self.assertIn("Picked up JAVA_TOOL_OPTIONS", unit.stderr)
+            self.assertEqual(
+                jvm.get("neutrodyne.probe"),
+                "keepme",
+                "the step's JAVA_TOOL_OPTIONS edit must keep earlier options",
+            )
+            self.assertEqual(
+                os.path.realpath(jvm.get("java.io.tmpdir", "")),
+                os.path.realpath(tmpdir),
+                "the worker's java.io.tmpdir must be the pinned root, not the platform default",
+            )
+            report = Path(jvm.get("crash-report", ""))
+            self.assertTrue(
+                os.path.realpath(report).startswith(os.path.realpath(tmpdir) + os.sep),
+                f"crash report {report} escaped the pinned temp root",
+            )
 
             collector = subprocess.run(
                 [
@@ -152,7 +232,9 @@ class PreserveDesktopTestCrashesTest(unittest.TestCase):
             self.assertEqual(collector.returncode, 0, collector.stderr + collector.stdout)
 
             saved = (
-                work / "desktopApp/build/test-results/crash-evidence" / FAKE_ROOT / FAKE_REPORT
+                work / "desktopApp/build/test-results/crash-evidence"
+                / report.parent.parent.name
+                / report.name
             )
             self.assertEqual(
                 saved.read_bytes() if saved.is_file() else None,

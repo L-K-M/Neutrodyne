@@ -5,8 +5,9 @@
 Desktop tests build their AppDirs under java.io.tmpdir (TempAppDirs.kt), so a
 crash file lands at <tmpdir>/<root>/state/crash-<UTC>.txt — outside the
 unit-reports glob, where a worker that exits without writing test XML leaves
-no evidence. The unit job pins TMPDIR to a dedicated root, so every immediate
-child directory belongs to this run's JVMs. Each matching
+no evidence. The unit job pins java.io.tmpdir itself to a dedicated root —
+OpenJDK's Linux builds ignore TMPDIR — so every immediate child directory
+belongs to this run's JVMs. Each matching
 <root>/state/crash-*.txt regular file is copied to <destination>/<root name>/
 — distinct roots keep same-named reports apart — inside the existing
 **/build/test-results/ artifact glob. Missing roots and missing reports are
@@ -95,7 +96,7 @@ def preserve_crash_reports(source: Path, destination: Path) -> PreserveResult:
 
 def _main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help="the temp root the unit step pins via TMPDIR")
+    parser.add_argument("source", type=Path, help="the temp root the unit step pins as java.io.tmpdir")
     parser.add_argument("destination", type=Path)
     args = parser.parse_args()
 
