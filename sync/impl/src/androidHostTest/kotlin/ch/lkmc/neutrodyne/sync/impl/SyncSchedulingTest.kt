@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
@@ -355,6 +356,8 @@ class SyncSchedulingTest {
             sharePasswords = { false },
             address = FakeSyncServerAddress(serverUrl = "https://sync.example"),
             tokens = tokens,
+            activity = SyncActivityState(),
+            gate = FakeLocalNetworkGate(),
         )
     }
 
