@@ -39,7 +39,7 @@ def require_no_initialization_errors(root, device):
         raise ValueError(f"{device}: classes reported initializationError, never executed: {', '.join(hidden)}")
 
 
-def verify(root, device, classes):
+def verify(root, device, classes, minimum_cases=None):
     classes = set(classes)
     executed = {classname: 0 for classname in classes}
     bad = []
@@ -60,7 +60,13 @@ def verify(root, device, classes):
     missing = sorted(name for name, count in executed.items() if count == 0)
     if missing:
         raise ValueError(f"{device}: selected classes executed no case: {', '.join(missing)}")
-    print(f"{device}: {sum(executed.values())} cases passed across {len(classes)} selected classes")
+    total = sum(executed.values())
+    if minimum_cases is not None and total < minimum_cases:
+        raise ValueError(
+            f"{device}: selected classes executed {total} cases, fewer than the required {minimum_cases} - "
+            "a truncated lane must not read as a full pass"
+        )
+    print(f"{device}: {total} cases passed across {len(classes)} selected classes")
 
 
 def main():
@@ -75,10 +81,16 @@ def main():
         metavar="FQCN",
         help="class that must report at least one executed case (repeatable)",
     )
+    parser.add_argument(
+        "--require-cases",
+        type=int,
+        metavar="N",
+        help="fail unless the selected classes report at least N executed cases in total",
+    )
     args = parser.parse_args()
     try:
         require_no_initialization_errors(args.root, args.device)
-        verify(args.root, args.device, args.classes)
+        verify(args.root, args.device, args.classes, minimum_cases=args.require_cases)
     except (ValueError, ET.ParseError, OSError) as error:
         parser.exit(1, f"{error}\n")
 

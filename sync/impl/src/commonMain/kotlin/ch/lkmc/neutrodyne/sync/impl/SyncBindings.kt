@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.domain.SyncActivity
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
@@ -135,7 +136,23 @@ object SyncBindings {
             hooks = hooks,
         )
 
-    /** The first-link merge; the controller drives it from the link state machine. */
+    /**
+     * The durable apply-effects drainer (10). Every drain takes the one app-scoped
+     * [SettingsWriteCoordinator] `:core:data` binds for local sets/resets and a linked
+     * restore, so a journaled remote setting never interleaves a local write for its key.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncApplyEffects(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+        writeLocks: SettingsWriteCoordinator,
+    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks)
+
+    /**
+     * The first-link merge; the controller drives it from the link state machine. The
+     * `LibraryMerger` port is `:core:data`'s `RestoreMerger` binding (05's one routine).
+     */
     @Provides
     @SingleIn(AppScope::class)
     fun firstLinkMerger(
@@ -143,7 +160,21 @@ object SyncBindings {
         client: SyncClient,
         applier: SyncApplier,
         engine: SyncEngine,
+        libraryMerger: ch.lkmc.neutrodyne.core.domain.LibraryMerger,
+        storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
+        effects: SyncApplyEffects,
         clock: Clock,
         activity: SyncActivityState,
-    ): FirstLinkMerger = FirstLinkMerger(db, client, applier, engine, clock, activity)
+    ): FirstLinkMerger =
+        FirstLinkMerger(
+            db = db,
+            client = client,
+            applier = applier,
+            engine = engine,
+            libraryMerger = libraryMerger,
+            storagePaths = storagePaths,
+            effects = effects,
+            clock = clock,
+            activity = activity,
+        )
 }

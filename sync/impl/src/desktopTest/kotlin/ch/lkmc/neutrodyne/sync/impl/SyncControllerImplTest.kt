@@ -561,7 +561,7 @@ class SyncControllerImplTest {
         }
 
     @Test
-    fun anEmptyDevicePullsTheServerLibraryWithoutAChoice() =
+    fun anEmptyDeviceMergesTheServerLibraryWithoutAChoice() =
         runTest {
             val h = harness(this)
             try {
@@ -571,7 +571,13 @@ class SyncControllerImplTest {
                 }
                 h.controller.startLink(serverUrl, LinkMethod.CODE)
                 await(h) { h.controller.status.value is SyncStatus.Linked }
-                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                // An empty device runs the server-library merge directly, no choice screen.
+                assertEquals(
+                    ch.lkmc.neutrodyne.core.model.MergePolicy.LINK_REPLACE,
+                    h.libraryMerger.calls
+                        .single()
+                        .policy,
+                )
                 assertNotNull(
                     h.db
                         .syncStateDao()
@@ -583,8 +589,9 @@ class SyncControllerImplTest {
             }
         }
 
+    /** The Replace semantics live in :core:data's merger; here the choice reaches the port. */
     @Test
-    fun useServerReplacesWhatThisDeviceHasOnlyLocally() =
+    fun useServerRunsTheLinkReplaceThroughThePort() =
         runTest {
             val h = harness(this)
             try {
@@ -603,8 +610,12 @@ class SyncControllerImplTest {
                 await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
                 h.controller.chooseFirstLink(FirstLinkChoice.USE_SERVER)
                 await(h) { h.controller.status.value is SyncStatus.Linked }
-                assertNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
-                assertNotNull(h.db.podcastDao().bySyncId(OTHER_PODCAST_SYNC_ID))
+                assertEquals(
+                    ch.lkmc.neutrodyne.core.model.MergePolicy.LINK_REPLACE,
+                    h.libraryMerger.calls
+                        .single()
+                        .policy,
+                )
             } finally {
                 h.close()
             }
@@ -1134,7 +1145,36 @@ private class Harness(
             activity = activity,
             gate = gate,
         )
-    val merger = FirstLinkMerger(db, client, applier, engine, clock, activity)
+    val libraryMerger =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeLibraryMerger()
+    val merger =
+        FirstLinkMerger(
+            db = db,
+            client = client,
+            applier = applier,
+            engine = engine,
+            libraryMerger = libraryMerger,
+            storagePaths = testStoragePaths(),
+            effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()),
+            clock = clock,
+            activity = activity,
+        )
+
+    /** A temp-dir StoragePaths for the staging file and directory. */
+    private fun testStoragePaths(): ch.lkmc.neutrodyne.core.common.StoragePaths {
+        val root = kotlin.io.path.createTempDirectory("nd-controller")
+        return ch.lkmc.neutrodyne.core.common.StoragePaths(
+            ch.lkmc.neutrodyne.core.common.AppDirs(
+                data = root.resolve("data"),
+                config = root.resolve("config"),
+                cache = root.resolve("cache"),
+                state = root.resolve("state"),
+                logs = root.resolve("logs"),
+                downloadsDefault = root.resolve("downloads"),
+            ),
+        )
+    }
 
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()

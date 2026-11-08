@@ -95,6 +95,15 @@ class SelectedClassesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "executed no case"):
             gate.verify(self.root, "api34", CLASSES)
 
+    def test_minimum_case_count_rejects_a_truncated_class(self):
+        self.report([(CLASSES[-1], ["one", "two", "three"], ())])
+        with self.assertRaisesRegex(ValueError, "3 cases, fewer than the required 4"):
+            gate.verify(self.root, "api36", [CLASSES[-1]], minimum_cases=4)
+
+    def test_minimum_case_count_accepts_all_four_executed_cases(self):
+        self.report([(CLASSES[-1], ["one", "two", "three", "four"], ())])
+        gate.verify(self.root, "api36", [CLASSES[-1]], minimum_cases=4)
+
     def test_cli_requires_a_selection(self):
         script = Path(__file__).parents[1] / "assert-selected-tests.py"
         result = subprocess.run(

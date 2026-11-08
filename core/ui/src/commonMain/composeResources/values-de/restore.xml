@@ -30,4 +30,14 @@
         <item quantity="one">%1$d unbekannter Sicherungseintrag wurde ignoriert.</item>
         <item quantity="other">%1$d unbekannte Sicherungseinträge wurden ignoriert.</item>
     </plurals>
+    <string name="restore_reach_title">Die Mediathek ersetzen auf…</string>
+    <string name="restore_reach_this_device">Nur auf diesem Gerät (empfohlen)</string>
+    <string name="restore_reach_this_device_help">Trennt dieses Gerät zuerst. Deine anderen Geräte und der Server behalten ihre Mediathek. Erneutes Verbinden mit Zusammenführen würde sie zurückbringen.</string>
+    <string name="restore_reach_all_devices">Auf allen synchronisierten Geräten</string>
+    <string name="restore_reach_all_devices_help">Ersetzt die Mediathek auf dem Server und auf deinen anderen Geräten.</string>
+    <string name="restore_reach_checking">%1$s wird geprüft…</string>
+    <string name="restore_reach_offline">Braucht eine Verbindung zu %1$s</string>
+    <string name="restore_reach_effect">Andere Geräte entfernen %1$d Podcasts und %2$d Gruppen, wenn sie das nächste Mal synchronisieren; Geräte fragen zuerst, wenn das ihre Grenzen überschreitet. Der Hörverlauf wird nach Datum zusammengeführt, neuere Wiedergaben auf anderen Geräten bleiben.</string>
+    <string name="restore_replace_everywhere">Überall ersetzen</string>
 </resources>
+

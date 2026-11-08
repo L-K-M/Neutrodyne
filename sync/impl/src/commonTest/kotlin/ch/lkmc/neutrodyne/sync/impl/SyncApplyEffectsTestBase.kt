@@ -664,8 +664,12 @@ abstract class SyncApplyEffectsTestBase {
     protected abstract fun newTestDb(): NeutrodyneDatabase
 }
 
-/** The production per-key mutex contract, implemented locally because `:core:data` is off-limits. */
-private class TestSettingsWriteCoordinator : SettingsWriteCoordinator {
+/**
+ * The production per-key mutex contract, implemented locally because `:core:data` is
+ * off-limits. Shared by every `:sync:impl` fixture so a drain and a local write provably
+ * contend for the same lock instance.
+ */
+internal class TestSettingsWriteCoordinator : SettingsWriteCoordinator {
     private val pool = Mutex()
     private val locks = mutableMapOf<String, Mutex>()
     val secondAttempt = CompletableDeferred<Unit>()
@@ -682,7 +686,7 @@ private class TestSettingsWriteCoordinator : SettingsWriteCoordinator {
 }
 
 /** A [FakeSettingsSyncPort] with a DataStore-visible value map and an apply-time hook. */
-private class StoringSettingsSyncPort(
+internal class StoringSettingsSyncPort(
     private val delegate: FakeSettingsSyncPort = FakeSettingsSyncPort(),
 ) : SettingsSyncPort by delegate {
     val applied: List<Pair<SettingKey<*>, String>> get() = delegate.applied
