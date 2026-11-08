@@ -148,7 +148,7 @@ case "$TARGET" in
             "$(cygpath -w "$ROOT/session_win.cpp")" ndmedia.obj \
             -link -OUT:ndmedia.dll \
             -IMPLIB:"$(cygpath -w "$BUILD_ROOT/ndmedia.lib")" \
-            ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib) ||
+            ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib propsys.lib) ||
             die "cl failed"
         ;;
     *) die "unknown target $TARGET" ;;
@@ -194,6 +194,18 @@ case "$TARGET" in
             -Fe"$(cygpath -w "$THUMBNAIL_PROGRAM")" -Fo"$(cygpath -w "$CACHE/thumbnail-check.obj")" ||
             die "thumbnail test compile failed"
         "$THUMBNAIL_PROGRAM" || die "thumbnail boundary test failed"
+        # The AppUserModelID contract: process ID bounds, and the .lnk stamp
+        # through real IShellLinkW + IPropertyStore + IPersistFile objects the
+        # fixture creates inside its own temp directory (11 Start-up step 4,
+        # Windows MSI and ZIP). No user shortcut is touched.
+        IDENTITY_PROGRAM="$CACHE/identity-check-$TARGET.exe"
+        cl -nologo -std:c11 -MD -I"$(cygpath -w "$ROOT")" \
+            "$(cygpath -w "$ROOT/tests/identity_test.c")" \
+            "$(cygpath -w "$BUILD_ROOT/ndmedia.lib")" \
+            ole32.lib shell32.lib uuid.lib propsys.lib \
+            -Fe"$(cygpath -w "$IDENTITY_PROGRAM")" -Fo"$(cygpath -w "$CACHE/identity-check.obj")" ||
+            die "identity test compile failed"
+        "$IDENTITY_PROGRAM" || die "identity boundary test failed"
         ;;
 esac
 rm -f "$BUILD_ROOT/ndmedia.lib" "$BUILD_ROOT/ndmedia.exp" "$BUILD_ROOT/ndmedia.obj"
