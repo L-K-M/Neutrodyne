@@ -1311,7 +1311,7 @@ The pipeline is common code and has no build-, platform- or capability-dependent
 interface AddPodcastResolver {
     suspend fun resolve(input: String): AddResolution                               // canonical; a Choose pick calls resolve(candidate.url)
     suspend fun resolve(input: String, credentials: BasicCredentials): AddResolution // retry after AuthRequired
-    suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError>   // PodcastPreviewKey(feedUrl)
+    suspend fun preview(feedUrl: String): AddResolution   // PodcastPreviewKey(feedUrl)
 }
 sealed interface AddResolution {
     data class Feed(val preview: FeedPreview) : AddResolution
@@ -1391,8 +1391,11 @@ Order, first match wins (`AddPodcastResolverImpl` for the YouTube row, `HostReco
 `AddResolution.YouTube` for classified inputs, including bare and shared
 handles, unwrapped URLs, directory targets, autodiscovery and redirected
 YouTube targets. `FeedFetcher` still stops before dialing YouTube on an Add
-request and returns the rejected URL to the resolver for hand-off. RSS
-preview/subscribe paths retain a defensive refusal. The 2026-11-01/02
+request and returns the rejected URL to the resolver for hand-off. RSS-only
+Edit/subscribe paths retain a defensive refusal. Directory previews return
+`AddResolution` too: a YouTube target replaces the preview with Add channel
+confirmation. An uncached directory URL uses `ADD_DISCOVERED`, including its
+first target, so it cannot fetch a local-network destination. The 2026-11-01/02
 credential, directory-consent, HTML-cap and local-destination rules remain
 in force. A verified RSS feed still wins over a page's YouTube or consent
 candidate; YouTube decides only when no RSS candidate verified. Channel

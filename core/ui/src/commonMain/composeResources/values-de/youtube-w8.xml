@@ -1,0 +1,4 @@
+<resources>
+    <string name="youtube_feed_outage">YouTube-Feeds antworten nicht. Deine Kanäle werden automatisch aktualisiert, sobald YouTube wieder erreichbar ist.</string>
+    <string name="youtube_feed_retry">Jetzt erneut versuchen</string>
+</resources>

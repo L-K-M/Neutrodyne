@@ -133,6 +133,7 @@ jobs:
         run: |
           scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
+          scripts/ci/tests/desktop-packaging.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
@@ -141,6 +142,8 @@ jobs:
           python3 scripts/ci/test-server-image.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-discovery-tests.test.py
+          python3 scripts/ci/tests/youtube-feed-canary.test.py
+          python3 scripts/ci/tests/release-nightly-gate.test.py
           python3 scripts/ci/tests/trace-instrumentation-abi.test.py
           python3 scripts/ci/tests/emulator-acceleration.test.py
           python3 scripts/ci/tests/gmd-device-budget.test.py
@@ -218,7 +221,9 @@ jobs:
       # M7 evidence gate: the shared replay, desktop journeys, host replays and
       # both screenshot surfaces must have executed, unskipped, in this job's XML.
       - name: Require discovery cases in the host XML
-        run: python3 scripts/ci/assert-discovery-tests.py .
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py .
+          python3 scripts/ci/assert-discovery-tests.py . --external-youtube
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -369,7 +374,9 @@ jobs:
       # M7 evidence gate: the four share/deep-link journeys and the five shared
       # replay cases must pass on each CI device (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on both CI devices
-        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api26 --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # Always upload, not only on failure: instrumented-device proofs on reviewable PRs are
         # verified from the per-device result XML, which only exists if success uploads too.

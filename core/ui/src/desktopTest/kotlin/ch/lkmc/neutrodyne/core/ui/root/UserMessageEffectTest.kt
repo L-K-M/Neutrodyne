@@ -21,8 +21,14 @@ import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 
 /**
@@ -32,6 +38,22 @@ import kotlin.test.assertSame
  */
 @OptIn(ExperimentalTestApi::class)
 class UserMessageEffectTest {
+    @Test fun externalOpenUndoExpiresAfterFiveSeconds() =
+        runTest {
+            val host = SnackbarHostState()
+            val result =
+                async {
+                    host.showUserMessage(UserMessage(1, UiText.Raw("Played"), UiText.Raw("Undo"), durationMs = 5_000))
+                }
+            runCurrent()
+            advanceTimeBy(4_999)
+            assertFalse(result.isCompleted)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(androidx.compose.material3.SnackbarResult.Dismissed, result.await())
+            assertNull(host.currentSnackbarData)
+        }
+
     @Test
     fun appendingDoesNotRestartTheVisibleSnackbar() =
         runDesktopComposeUiTest(width = 400, height = 300) {

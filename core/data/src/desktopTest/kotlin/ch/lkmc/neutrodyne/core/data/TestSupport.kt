@@ -686,6 +686,9 @@ internal fun newUnsubscribe(
             fetcher = fetcher,
             tempFiles = tempFiles,
             downloads = Provider { downloads },
+            youTubeHealth =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth(),
         ),
         poster,
     )

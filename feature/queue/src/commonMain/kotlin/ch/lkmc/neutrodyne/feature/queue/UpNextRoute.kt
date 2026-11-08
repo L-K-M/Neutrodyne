@@ -84,7 +84,12 @@ internal fun UpNextRoute(
                 }
 
                 EpisodeRouteResult.HANDLED -> {
-                    Unit
+                    if (action is EpisodeAction.WatchOnYouTube) {
+                        viewModel.externalOpen.opened(
+                            action.episodeId,
+                            action.mode,
+                        )
+                    }
                 }
             }
         },
@@ -99,6 +104,7 @@ internal fun UpNextRoute(
         topBarActions = { SettingsGearButton() },
     )
     ShowUserMessages(state.messages, viewModel::onMessageShown) { id ->
+        viewModel.externalOpen.onAction(id)
         when (val action = viewModel.onPlaybackMessageAction(id)) {
             PlaybackMessageAction.OpenPlaybackSettings -> {
                 navigator.pushDetail(SettingsKey(SettingsPage.PLAYBACK))
@@ -107,7 +113,11 @@ internal fun UpNextRoute(
             is PlaybackMessageAction.WatchOnYouTube -> {
                 scope.launch {
                     viewModel.watchLink(action.episodeId)?.let { url ->
-                        if (urls.open(url) == OpenResult.NO_HANDLER) viewModel.onNoHandler(url)
+                        if (urls.open(url) == OpenResult.NO_HANDLER) {
+                            viewModel.onNoHandler(url)
+                        } else {
+                            viewModel.externalOpen.opened(action.episodeId)
+                        }
                     }
                 }
             }

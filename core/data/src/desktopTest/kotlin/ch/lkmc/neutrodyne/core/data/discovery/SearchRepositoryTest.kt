@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
 import ch.lkmc.neutrodyne.core.data.testUserAgent
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
+import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -27,7 +28,6 @@ import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryAccess
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
-import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderFailure
 import ch.lkmc.neutrodyne.core.model.ProviderId
@@ -591,7 +591,7 @@ class SearchRepositoryTest {
                     networkClients =
                         newNetworkClients(baseDns = pubDns, isLocalPeer = NO_LOCAL_PEER),
                 ).use { bundle ->
-                    val preview = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
+                    val preview = assertIs<AddResolution.Feed>(bundle.resolver.preview(feedUrl)).preview
                     assertEquals("Publisher", preview.title)
                     assertEquals("https://art.example/cover", preview.artworkUrl)
                     assertTrue(db.podcastDao().allForExport().isEmpty())
@@ -601,7 +601,7 @@ class SearchRepositoryTest {
                     val id = assertIs<Outcome.Success<Long>>(subscribe.useCase(preview.previewId, emptySet())).value
                     assertEquals("https://art.example/cover", db.podcastDao().byId(id)?.artworkUrl)
                     prefs.set(Keys.APPLE_ENABLED, false)
-                    val fresh = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
+                    val fresh = assertIs<AddResolution.Feed>(bundle.resolver.preview(feedUrl)).preview
                     assertNull(fresh.artworkUrl)
                 }
             } finally {

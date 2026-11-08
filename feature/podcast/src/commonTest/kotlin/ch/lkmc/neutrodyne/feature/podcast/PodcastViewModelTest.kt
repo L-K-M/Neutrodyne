@@ -106,6 +106,12 @@ class PodcastViewModelTest : MainDispatcherTest() {
         clock,
         artwork = { artwork },
         downloadController = downloads,
+        externalOpenService =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeExternalOpen(),
+        capabilities =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeCapabilitiesSource(),
     )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
