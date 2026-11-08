@@ -10,6 +10,7 @@ plugins {
 kotlin {
     sourceSets.named("desktopTest") {
         resources.srcDir(rootProject.file("feeds/src/test/resources"))
+        resources.srcDir(rootProject.file("youtube/engine/src/test/resources"))
         kotlin.srcDir(project.file("src/jvmTest/kotlin"))
         kotlin.srcDir(rootProject.file("feeds/src/replay/kotlin"))
         kotlin.srcDir("src/test/kotlin")
@@ -86,6 +87,8 @@ kotlin {
         // (implementation deps of :core:datastore are otherwise invisible here).
         desktopTest.dependencies {
             implementation(libs.okhttp.tls)
+            // Real client/cache against the internal health actor, without an engine -> data edge.
+            implementation(project(":youtube:engine"))
             implementation(libs.androidx.datastore.preferences.core)
             // The diagnostics-export scrub test opens its own driver connections (M11b).
             implementation(libs.androidx.sqlite.bundled)
