@@ -849,7 +849,7 @@ External-mode limitation: without enrichment, premieres, live streams and member
 
 Serves R3.1 (search), R3.5, R3.6, R8.6, N5, N8. Delivered in M0a (module stubs per S7), M9a (the Android host, process, Binder API, networking bridge, spike; the host-independent classes), M9b (JS challenge provider if viable), MD3 (the shared island and the desktop host, [11](11-desktop.md#desktop-youtube-engine-host)). Honours [D72](../PLAN.md#3-key-decisions)–[D75](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions). The engine is yt-dlp used as a Python library through its embedding API ([yt-dlp embedding](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)), behind Neutrodyne's shim `neutrodyne_ytx`. yt-dlp never downloads media (07's engine does), never sees the database and never runs in the app's own process: on Android it lives in the `:ytx` process, on the desktop in a CPython child process.
 
-**Implementation note (2026-11-04, M9a current-code port).** The Android shell
+**Implementation note (2026-11-08, Android app activation).** The Android shell
 now binds the shared engine to `BinderYtxTransport` and the two-worker
 `YtxService`. The verified bundle stays at 2026.08.19 with yt-dlp-ejs 0.8.0.
 `engine-prepare` extracts and compiles it before playback admission. Android's
