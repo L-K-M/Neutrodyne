@@ -456,6 +456,54 @@ class DesktopAotTrainingRealTest {
         }
     }
 
+    /**
+     * The installed-payload acceptance (11 AOT cache): the shipped
+     * `scripts/desktop/smoke-start.sh` gate runs the trained image's own launcher the
+     * way the release flow does, applies the strict request itself and must report
+     * `aotCache":"in-use"` — the SMOKE line is the shipped helper's stdout contract.
+     */
+    @Test
+    fun `the shipped smoke gate proves the trained archive in use`() {
+        val image = tinyImage(MAIN_BODY)
+        trainTask(image).train(System.getenv())
+        val result = smokeStart(image)
+        assertEquals(0, result.exit, result.output)
+        assertTrue(result.output.contains("\"aotCache\":\"in-use\""), result.output)
+    }
+
+    /**
+     * The negative of the shipped gate: a corrupted classpath timestamp is the
+     * post-image-hook defect at install time, and the strict launch it requests
+     * must surface as a failed smoke run, never an unverified pass.
+     */
+    @Test
+    fun `the shipped smoke gate fails on a drifted classpath jar`() {
+        val image = tinyImage(MAIN_BODY)
+        trainTask(image).train(System.getenv())
+        val jar =
+            aotClasspathJars(File(image, cfgRelative).readText(), image, osWire)
+                .first { it.isFile }
+        assertTrue(jar.setLastModified(jar.lastModified() + 1000L), "the drift was applied")
+        val result = smokeStart(image)
+        assertNotEquals(0, result.exit, result.output)
+        assertFalse(
+            result.output.lines().any { it.startsWith(SMOKE_REPORT_PREFIX) },
+            "a drifted classpath jar must not produce a SMOKE verdict",
+        )
+    }
+
+    /** Runs the shipped smoke gate the way the release flow does. */
+    private fun smokeStart(image: File): ProbeResult {
+        val script = File(repoRoot(), "scripts/desktop/smoke-start.sh")
+        assertTrue(script.isFile, "the shipped smoke gate is missing: $script")
+        val process =
+            ProcessBuilder("bash", script.absolutePath, image.absolutePath, "--timeout=60")
+                .redirectErrorStream(true)
+                .start()
+        val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
+        return ProbeResult(process.waitFor(), output)
+    }
+
     /** Packages the image as `packageZip` does after the normalization. */
     private fun packageImage(image: File): File {
         val zip = File.createTempFile("aot-packaged", ".zip")
@@ -853,12 +901,29 @@ class DesktopAotTrainingRealTest {
 
     private companion object {
         /**
+         * The honest cache state, computed the way SmokeMode does from the real JVM
+         * input arguments: `in-use` only when the configured archive exists and the
+         * exact strict mode is on the command line — the shipped gate's verdict key.
+         */
+        const val SMOKE_REPORT =
+            "java.util.List<String> opts = " +
+                "java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments(); " +
+                "String cache = opts.stream()" +
+                ".filter(a -> a.startsWith(\"-XX:AOTCache=\"))" +
+                ".map(a -> a.substring(13))" +
+                ".reduce((x, y) -> y).orElse(null); " +
+                "String state = cache == null ? \"not-configured\" : " +
+                "!java.nio.file.Files.exists(java.nio.file.Path.of(cache)) ? \"missing\" : " +
+                "opts.contains(\"-XX:AOTMode=on\") ? \"in-use\" : \"unverified\"; " +
+                "System.out.println(\"SMOKE {\\\"aotCache\\\":\\\"\" + state + \"\\\"}\"); "
+
+        /**
          * The minimal probe main: it reports the training line and, when the strict
          * verification launches it with the smoke property, the smoke line the task parses.
          */
         const val MAIN_BODY =
             "if (Boolean.getBoolean(\"neutrodyne.smoke\")) { " +
-                "System.out.println(\"SMOKE {\\\"aotCache\\\":\\\"in-use\\\"}\"); " +
+                SMOKE_REPORT +
                 "} else { " +
                 "System.out.println(\"AOT-TRAINING {\\\"steps\\\":{}}\"); " +
                 "}"
@@ -869,7 +934,7 @@ class DesktopAotTrainingRealTest {
          */
         const val MARKER_MAIN =
             "if (Boolean.getBoolean(\"neutrodyne.smoke\")) { " +
-                "System.out.println(\"SMOKE {\\\"aotCache\\\":\\\"in-use\\\"}\"); " +
+                SMOKE_REPORT +
                 "} else if (Boolean.getBoolean(\"compose.aot.training-run\")) { " +
                 "System.out.println(\"AOT-TRAINING {\\\"steps\\\":{}}\"); " +
                 "} else { " +
