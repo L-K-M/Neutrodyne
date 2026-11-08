@@ -1,6 +1,6 @@
 {
   "_license": "SPDX-License-Identifier: Unlicense",
-  "$schema-comment": "The asset set each release must carry (09 Release assets / release.yml step 1). verify-tag.sh expands {v} with the version and {mac_ext} with mac_kind (macos-arm64.zip before 1.0.0, .dmg from it, D63/PO-39). publish fails when the uploaded set differs — the 'always' files are generated in publish itself. Groups join the verify-tag --products list as their release jobs land.",
+  "$schema-comment": "The asset set each release must carry (09 Release assets / release.yml step 1). verify-tag.sh expands {v} with the version, {mac_ext} with mac_kind (macos-arm64.zip before 1.0.0, .dmg from it, D63/PO-39) and the lock-driven placeholders through scripts/ci/release_assets.py. An asset whose placeholder does not ship is left out (for example the PBS source before MD3's pbsSource, or the server runtime tarball while it matches the desktop runtime's source). publish fails when the uploaded set differs — the 'always' files are generated in publish itself. Groups join the verify-tag --products list as their release jobs land.",
   "always": [
     "neutrodyne-update.json",
     "SHA256SUMS"
@@ -38,11 +38,11 @@
     ],
     "server-sources": [
       "{server_runtime_source}",
-      "RUNTIME-SOURCES.md"
+      "SERVER-RUNTIME-SOURCES.md"
     ]
   },
   "milestones": {
-    "comment": "the milestone a group starts shipping; verify-tag.sh --products names the active groups (M0a: android). {jdk}, {wix}, {ffmpeg} and {pbsTag} come from the lockfiles when those groups join.",
+    "comment": "the milestone a group starts shipping; verify-tag.sh --products names the active groups (M0a: android). {jdk}, {wix}, {ffmpeg}, {pbsTag} and {server_runtime_source} come from the lockfiles when those groups join.",
     "android": "M0a",
     "desktop": "M0b",
     "sources": "M0b",

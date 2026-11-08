@@ -35,9 +35,24 @@ echo "SMOKE $1"
 EOF
 cat > "$repo/gradlew" <<'EOF'
 #!/bin/sh
+for arg; do
+    case "$arg" in -Pneutrodyne.installKind=*) printf '%s\n' "${arg#*=}" > current-kind ;; esac
+done
 mkdir -p desktopApp/build/compose/binaries/main/msi desktopApp/build/desktop-packaging/zip
 : > desktopApp/build/compose/binaries/main/msi/p.msi
 : > desktopApp/build/desktop-packaging/zip/p.zip
+EOF
+cat > "$repo/scripts/ci/check-desktop-image.sh" <<'EOF'
+#!/bin/sh
+expected=zip
+case "$*" in *Neutrodyne-App*) expected=msi ;; esac
+[ "$(cat current-kind)" = "$expected" ] || { echo 'wrong manifest variant' >&2; exit 1; }
+printf '%s\n' "$expected" >> checked-kinds
+[ -z "${STUB_IMAGE_CHECK_FAIL-}" ]
+EOF
+cat > "$repo/scripts/ci/check-runtime-sources.sh" <<'EOF'
+#!/bin/sh
+exit 0
 EOF
 printf '#!/bin/sh\nprintf "%%s\\n" "%s"\n' "$WIN_PATH" > "$repo/bin/cygpath"
 cat > "$repo/bin/powershell" <<'EOF'
@@ -52,10 +67,10 @@ cat > "$repo/bin/python" <<'EOF'
 #!/bin/sh
 mkdir -p "$5/Neutrodyne"
 EOF
-chmod +x "$repo/gradlew" "$repo/scripts/desktop/smoke-start.sh" "$repo/bin/"*
+chmod +x "$repo/gradlew" "$repo/scripts/desktop/smoke-start.sh" "$repo/scripts/ci/"*.sh "$repo/bin/"*
 
 run_leg() { # [ENV=x ...] — one leg run; clears records, captures leg.log
-    rm -f "$repo/smoke.txt" "$repo/stub.argv" "$repo/stub.env"
+    rm -f "$repo/smoke.txt" "$repo/stub.argv" "$repo/stub.env" "$repo/checked-kinds"
     env PATH="$repo/bin:$PATH" LOCALAPPDATA="$repo" STUB_LOG="$repo/stub" "$@" \
         bash "$repo/scripts/ci/build-desktop-release-windows.sh" 9.9.9 \
         "$repo/dist" "$repo/img" >"$repo/leg.log" 2>&1
@@ -67,6 +82,8 @@ chk "the leg resolves the native path once" test "$(grep -c 'cygpath -w' "$LEG")
 # --- msiexec 0: clean install -------------------------------------------------
 chk "msiexec 0 lets the leg finish" run_leg STUB_MSIEXEC_EXIT=0
 chk "both smokes ran after msiexec 0" test "$(smokes)" -eq 2
+chk "installed MSI and ZIP use their own manifest variants" \
+    test "$(tr '\n' ' ' < "$repo/checked-kinds")" = "msi zip "
 chk "the installed app's smoke ran" grep -q 'Neutrodyne-App' "$repo/smoke.txt"
 chk "powershell got -NoProfile -Command" \
     test "$(head -2 "$repo/stub.argv" | tr '\n' ' ')" = "-NoProfile -Command "
@@ -98,6 +115,11 @@ chk "a child failure cannot wrap to success" test "$rc:$(smokes)" = "1:0"
 run_leg STUB_PS_NOMARKER=1; rc=$?
 chk "a marker-less powershell success fails the leg" test "$rc" -ne 0
 chk "no smoke ran without a marker" test "$(smokes)" -eq 0
+
+run_leg STUB_MSIEXEC_EXIT=0 STUB_IMAGE_CHECK_FAIL=1; rc=$?
+chk "a rejected installed MSI fails the leg" test "$rc" -ne 0
+chk "the ZIP is not built after an installed payload failure" \
+    test "$(cat "$repo/current-kind"):$(smokes)" = "msi:1"
 
 echo
 if [ "$FAILED" -gt 0 ]; then
