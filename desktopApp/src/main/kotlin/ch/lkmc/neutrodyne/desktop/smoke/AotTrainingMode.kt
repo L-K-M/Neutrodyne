@@ -25,7 +25,8 @@ import java.util.concurrent.TimeUnit
  * (`-XX:AOTCacheOutput=$APPDIR/neutrodyne.aot`) records the classes a real start loads. The
  * journey mirrors the first launch: the shared prologue, the window and the five destinations
  * through `AppNavigator`, then one ndmedia "null"-backend PCM write. Like smoke mode it never
- * touches the user's directories: a fresh temporary `AppDirs` root, one `AOT-TRAINING {json}`
+ * touches the user's directories or an OS registration (`ShellJourney` skips the host's
+ * registration initializers): a fresh temporary `AppDirs` root, one `AOT-TRAINING {json}`
  * line, exit 0 — or exit 1 naming the failed step. A headless window skip or a missing
  * ndmedia is a failed training, never a completed window/native proof: an archive trained
  * without the windowed journey must not be packaged.
