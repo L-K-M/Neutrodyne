@@ -44,15 +44,7 @@ xsmoke() { # smoke() under xvfb + a private session bus (Linux)
 
 case "$TARGET" in
     windows-x64)
-        ./gradlew createDistributable packageMsi -Pneutrodyne.installKind=msi
-        ./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip
-        cp desktopApp/build/compose/binaries/main/msi/*.msi "$DIST/neutrodyne-$V-windows-x64.msi"
-        cp desktopApp/build/desktop-packaging/zip/*.zip "$DIST/neutrodyne-$V-windows-x64.zip"
-        powershell -NoProfile -Command \
-            "Start-Process msiexec -Wait -ArgumentList '/i','$(cygpath -w "$DIST/neutrodyne-$V-windows-x64.msi")','/qn','/norestart'"
-        smoke "$LOCALAPPDATA/Neutrodyne-App"
-        python -m zipfile -e "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
-        smoke "$SMOKE_IMG/Neutrodyne" ;;
+        scripts/ci/build-desktop-release-windows.sh "$V" "$DIST" "$SMOKE_IMG" ;;
     macos-arm64)
         if [ "$MAC_KIND" = "mac-zip" ]; then
             ./gradlew createDistributable -Pneutrodyne.installKind=mac-zip
