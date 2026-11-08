@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.backup
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.BackupDao
+import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -163,12 +164,19 @@ internal class RestoreEpisodeMerger(
                                         if (line.ts != NO_STATE_TS) {
                                             writes.mergeState(episodeId, line.stateValues())
                                         }
+                                        // The linked capture needs the pre-merge row to tell a
+                                        // written position from a surviving one. The read is in
+                                        // the same transaction as the writes, so it cannot race a
+                                        // later writer (05: the literal is the snapshot it wrote).
+                                        val before =
+                                            if (captureWithBackupTimes) db.positionDao().byEpisode(episodeId) else null
                                         writes.mergePosition(episodeId, line.positionValues(staged.createdAtMs))
                                         if (captureWithBackupTimes) {
                                             captureRestoredState(
                                                 syncIdOf(podcastId, syncIdByPodcastId),
                                                 episodeId,
                                                 line,
+                                                before,
                                             )
                                         }
                                     }
@@ -409,13 +417,17 @@ internal class RestoreEpisodeMerger(
     /**
      * 05 Restore while linked: the state fields a Merge restore wrote, captured at the
      * backup's own timestamps — the played pair as one literal with `ts`, favourite,
-     * `playCount` and `lastPlayedAt` as their values — plus the winning position at
-     * `posAt` with the snapshot it wrote (never a later read).
+     * `playCount` and `lastPlayedAt` as their values — plus the winning position with the
+     * exact snapshot the merge wrote, at the winning stamp. [before] is the position row as
+     * it stood before the merge in the same transaction, so a surviving local row is not
+     * captured; a row the post rules reset is captured as `{"ms":0,"reset":true}` at the
+     * played stamp, never the staged positive position.
      */
     private suspend fun captureRestoredState(
         podcastSyncId: String?,
         episodeId: Long,
         line: EpisodeLineV1,
+        before: EpisodePositionEntity?,
     ) {
         if (podcastSyncId == null) return
         val rid = podcastSyncId + canonicalKey(line.k, line.kv)
@@ -428,12 +440,21 @@ internal class RestoreEpisodeMerger(
             if (line.pc > 0) outbox.captureAt(COLL_EPISODE, rid, "playCount", line.ts, line.pc.toString())
             if (line.lp != null) outbox.captureAt(COLL_EPISODE, rid, "lastPlayedAt", line.ts, line.lp.toString())
         }
-        val values = line.positionValues(fallbackPosAt = 0L)
-        val stagedPos = line.pos
-        if (stagedPos != null && stagedPos > 0) {
-            val literal = """{"ms":$stagedPos,"dur":${line.dur ?: 0},"src":"${values.positionSource.name}"}"""
-            outbox.captureAt(COLL_EPISODE, rid, "pos", line.posAt ?: 0L, literal)
+        val after = db.positionDao().byEpisode(episodeId) ?: return
+        val written =
+            before == null ||
+                before.positionMs != after.positionMs ||
+                before.durationMs != after.durationMs ||
+                before.positionSource != after.positionSource ||
+                before.updatedAt != after.updatedAt
+        if (!written) return
+        if (after.positionMs == 0L) {
+            outbox.captureAt(COLL_EPISODE, rid, "pos", after.updatedAt, """{"ms":0,"reset":true}""")
+            return
         }
+        val dur = after.durationMs?.toString() ?: "null"
+        val literal = """{"ms":${after.positionMs},"dur":$dur,"src":"${after.positionSource.name}"}"""
+        outbox.captureAt(COLL_EPISODE, rid, "pos", after.updatedAt, literal)
     }
 
     // --- Transaction C: Up next and session -------------------------------------------------

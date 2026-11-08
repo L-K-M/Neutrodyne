@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.backup
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.decodeSyncedValue
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.SettingsError
@@ -128,7 +129,7 @@ internal class RestoreSettingsMerge(
         return SettingsMergeCounts(applied, skipped)
     }
 
-    /** A synced key's linked-restore write: `captureAt` in Room, then `applyRemote`. */
+    /** A synced key's linked-restore write: validate, `captureAt` in Room, then `applyRemote`. */
     private suspend fun linkedSyncedValue(
         key: SettingKey<*>,
         entry: SettingValueV1,
@@ -136,8 +137,17 @@ internal class RestoreSettingsMerge(
     ): Applied {
         if (!typeMatches(key, entry)) return Applied.SKIPPED
         val json = entry.value?.toString() ?: return Applied.SKIPPED
-        db.withWriteTransaction {
-            db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)
+        // 05 step 7: an invalid value is skipped and counted before any Room capture or DataStore
+        // write — the port's rejection is not a storage failure.
+        if (decodeSyncedValue(key, json) == null) return Applied.SKIPPED
+        val applied =
+            db.withWriteTransaction {
+                db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)
+            }
+        if (!applied) {
+            // A newer pending local intent keeps its DataStore value (05 step 7): the archive's
+            // older value must not roll it back.
+            return Applied.SKIPPED
         }
         return if (sync.applyRemote(key, json)) {
             Applied.YES

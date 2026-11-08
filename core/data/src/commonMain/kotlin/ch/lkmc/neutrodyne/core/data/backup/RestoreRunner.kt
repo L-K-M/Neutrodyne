@@ -132,20 +132,26 @@ internal class RestoreRunner(
             }
 
         progressFlow.value = RestoreProgress.Running(sessionId, PHASE_VALIDATE, 0, 0)
-        // 05 Restore while linked, Replace THIS_DEVICE: 10's unlink runs before any restore
-        // write, so the device is unlinked for the whole Replace and pushes nothing.
-        if (request.unlinkFirst) {
-            when (val outcome = linkedSync.unlinkForRestore()) {
-                is Outcome.Failure -> return RestoreRunResult.Retry(sessionId, outcome.error)
-                is Outcome.Success -> Unit
-            }
-        }
+        // 05 step 1 first: the payload is validated before any unlink, so a bad archive cancels
+        // the session without deleting the token or clearing the sync tables.
         val staged =
             when (val outcome = stager.inspect(payloads.payloadFile(request.payloadPath), stagingRoot)) {
                 is Outcome.Failure -> return failRestore(sessionId, outcome.error, request.auto)
                 is Outcome.Success -> outcome.value
             }
-        return staged.use { runStaged(sessionId, request, it) }
+        return try {
+            // 05 Restore while linked, Replace THIS_DEVICE: 10's unlink runs before any restore
+            // write, so the device is unlinked for the whole Replace and pushes nothing.
+            if (request.unlinkFirst) {
+                when (val outcome = linkedSync.unlinkForRestore()) {
+                    is Outcome.Failure -> return RestoreRunResult.Retry(sessionId, outcome.error)
+                    is Outcome.Success -> Unit
+                }
+            }
+            runStaged(sessionId, request, staged)
+        } finally {
+            staged.close()
+        }
     }
 
     /**
