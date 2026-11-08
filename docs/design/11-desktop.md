@@ -1537,7 +1537,10 @@ compose.desktop.application {
         macOS {
             bundleID = "ch.lkmc.neutrodyne"; dockName = "Neutrodyne"; minimumSystemVersion = "13.0"
             appCategory = "public.app-category.music"; iconFile.set(file("icons/neutrodyne.icns"))
-            fileAssociation("text/x-opml", "opml", "OPML subscription list", file("icons/neutrodyne.icns"))
+            // no iconFile here (nightly 37831500506): Compose copies an FA icon into
+            // Contents/Resources while jpackage writes <app>.icns -- they collide on a
+            // case-insensitive volume; a null FA icon falls back to the app icon
+            fileAssociation("text/x-opml", "opml", "OPML subscription list")
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // no signing block: jpackage signs ad hoc
         }
@@ -1712,7 +1715,7 @@ separate slice; real Windows installer execution is still pending.
 - contains a path matching `_dbm*`, `libdb*`, `_gdbm*`, `libreadline*`, `readline*` (other than libedit), `_tkinter*`, `libtcl*`, `libtk*`, `tcl9*`, `tk9*`, `site-packages/pip`, `ensurepip`, `mutagen`, `bgutil`, `qjs`, `qjs.exe`, `deno`, `node`, `bun`, `AppRun`, `libfuse*`, `proguard*`, `jextract*`, `javafx*`, `vlcj*`, `gstreamer*`, `libavfilter*`, `libswscale*`, `libpostproc*` or `libmpv*` (the last only while the fallback is not chosen);
 - lacks `runtime/legal/` or has a `runtime/release` whose `JAVA_VERSION` disagrees with `runtime.lock` (the full runtime check is `check-runtime-sources.sh`);
 - has FFmpeg libraries under other names, or an `ffmpeg-license.txt` (written by `buildFfmpeg` from `avcodec_license()` of the built library) other than "LGPL version 2.1 or later";
-- contains a JAR under `lib/app/` that is not on `:desktopApp`'s Licensee-checked runtime classpath — recorded 2026-10-08 as `sha256  <image name>` lines written by `writeDesktopRuntimeClasspath` (`build/desktop-packaging/runtime-classpath.txt`), where the image name is Compose's mangled one (`<base>-<md5>.jar`; several KMP modules ship a same-named `api-desktop.jar`, and `androidx`/`org.jetbrains.androidx` republishes double entries). Two image JARs are outside that manifest by construction: `lib/runtime/lib/jrt-fs.jar` belongs to the jlink runtime (`check-runtime-sources.sh`), and `skiko-awt-runtime-<os>-<arch>-<md5>.jar` is a stub Compose writes in place of the classpath JAR — the native `libskiko-*.so` is extracted beside it with a `.sha256` sidecar, so the stub's name (its own content hash) can never equal the classpath entry's; the check accepts the stub when the classpath manifest carries a `skiko-awt-runtime-<os>-<arch>-*.jar` entry;
+- contains a JAR under `lib/app/` that is not on `:desktopApp`'s Licensee-checked runtime classpath — recorded as `<canonical sha256>  <image name>` lines by `writeDesktopRuntimeClasspath` (`build/desktop-packaging/runtime-classpath.txt`): the name is Compose's mangled `<base>-<md5>.jar`, the hash canonical jar content (entry name + content SHA-256, sorted), because packaging recompresses and re-signs image JARs; membership is the jar's basename, not a recomputed md5. Two image JARs are outside it: `lib/runtime/lib/jrt-fs.jar` and the skiko stub. The stub is Compose's repacked derivative of the source runtime jar (the target's native library is extracted), so its image name is unpredictable; it is bound by `runtime-classpath-stubs.txt`, whose expected stub hash and extracted natives `writeDesktopRuntimeClasspath` derives from the Licensee-checked source artifact and the target extraction rule — never from the image;
 - has a Python tree whose component list differs from `python-components.lock`;
 - on Linux, contains an ELF file that needs a `GLIBC_` symbol version above 2.31;
 - contains test classes, fixture directories or entry points other than smoke mode;

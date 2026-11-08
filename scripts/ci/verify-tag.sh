@@ -24,7 +24,8 @@
 # server join as their jobs land).
 #
 # Outputs (GITHUB_OUTPUT and stdout): version, versionCode, make_latest,
-# youtube_engine, mac_kind, expected_assets (newline-separated asset names).
+# youtube_engine, mac_kind, ffmpeg_version, expected_assets (newline-separated
+# asset names).
 
 set -euo pipefail
 
@@ -131,39 +132,18 @@ if [ "$MAJOR" -ge 1 ]; then MAC_KIND=dmg; else MAC_KIND=mac-zip; fi
 
 # --- expected assets ------------------------------------------------------------
 
-# The FFmpeg source bundle's name carries the native lock's version (11 FFmpeg LGPL
-# obligations); the other lock-driven names ({jdk}, {wix}, {pbsTag}) join with their groups.
-FFMPEG_VERSION="$(awk -F' *= *' '
-    /^\[ffmpeg\]/ { insec = 1; next }
-    /^\[/ { insec = 0 }
-    insec && $1 == "version" { gsub(/"/, "", $2); print $2; exit }
-' "$REPO_ROOT/playback/native/native-components.lock")"
+# The lock-driven placeholders ({jdk}, {wix}, {ffmpeg}, {pbsTag},
+# {server_runtime_source}) resolve through release_assets.py, the same module
+# make-release-body.py reads, so the expected set and the release body cannot
+# disagree about which components ship. An asset whose placeholder does not ship
+# is left out (the PBS source before MD3, the server runtime tarball while it
+# matches the desktop runtime's source).
+MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)"
+EXPECTED="$(python3 "$SCRIPT_DIR/release_assets.py" expected "$REPO_ROOT" "$PRODUCTS" "$VERSION" "$MAC_EXT")" || exit 1
+
+# The FFmpeg source bundle's version is the one the release body links.
+FFMPEG_VERSION="$(python3 "$SCRIPT_DIR/release_assets.py" placeholders "$REPO_ROOT" | sed -n 's/^{ffmpeg}=//p')"
 [ -n "$FFMPEG_VERSION" ] || fail "native-components.lock has no [ffmpeg] version"
-
-EXPECTED="$(PRODUCTS="$PRODUCTS" MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)" \
-    FFMPEG="$FFMPEG_VERSION" \
-    python3 - "$REPO_ROOT/release-assets.json" "$VERSION" <<'PYEOF'
-import json, os, sys
-from pathlib import Path
-
-doc = json.load(open(sys.argv[1], encoding="utf-8"))
-version = sys.argv[2]
-products = set(os.environ["PRODUCTS"].split(","))
-mac_ext = os.environ["MAC_EXT"]
-ffmpeg = os.environ["FFMPEG"]
-server_source = json.loads(Path("sync/server/deploy/image-sources.lock.json").read_text())["runtime"]["name"]
-
-names = list(doc["always"])
-for group in products:
-    files = doc["groups"].get(group)
-    if files is None:
-        sys.exit(f"verify-tag: release-assets.json has no group '{group}'")
-    names += files
-for n in names:
-    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext).replace("{ffmpeg}", ffmpeg)
-          .replace("{server_runtime_source}", server_source))
-PYEOF
-)" || exit 1
 
 echo "verify-tag: tag $TAG, version $VERSION ($GC), make_latest=$MAKE_LATEST, engine=$ENGINE, mac_kind=$MAC_KIND"
 echo "verify-tag: expected assets:"
