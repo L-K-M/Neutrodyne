@@ -423,6 +423,23 @@ esac
         r = self.fx.image_check(img)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
+    def test_inert_replay_contract_is_allowed_but_test_implementations_fail(self):
+        contract = "ch/lkmc/neutrodyne/youtube/engine/YtxTestArming.class"
+        for entry, accepted in (
+            (contract, True),
+            ("ch/lkmc/neutrodyne/youtube/engine/FakeYtxTestArming.class", False),
+            ("ch/lkmc/neutrodyne/youtube/engine/YtxTestArmingTest.class", False),
+            ("ch/lkmc/neutrodyne/youtube/engine/YtxTestArming$Test.class", False),
+            ("fixtures/YtxTestArming.class", False),
+        ):
+            with self.subTest(entry=entry):
+                img = self.flat_image(name="probe-" + str(accepted) + str(len(entry)))
+                data = zip_bytes([(entry, b"CONTRACT-FIXTURE")])
+                self.fx.write(f"{img}/lib/app/{self.fx.manifest('engine', data)}", data)
+                self.fx.write_manifest()
+                result = self.fx.image_check(img)
+                self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
+
     def test_jar_content_mismatch_fails(self):
         """The name is on the manifest but the bytes are not the row's sha256."""
         img = self.flat_image()
