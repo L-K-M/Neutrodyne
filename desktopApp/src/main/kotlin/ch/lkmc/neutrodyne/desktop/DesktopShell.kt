@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.navigation.IntentRouter
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.RouteInput
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.ConsoleSink
@@ -190,7 +191,7 @@ internal object DesktopShell {
         installMacosAwtProperties(buildInfo)
 
         // Step 5: the graph, the initializer bands and the hand-off server.
-        val graph = createDesktopGraph(dirs, buildInfo, crashReporter)
+        val graph = createDesktopGraph(dirs, buildInfo, crashReporter, fileSink)
         // The diagnostics ring is a graph singleton; it joins the sinks once the graph
         // exists (09 — the pre-graph start-up lines stay file-only).
         Log.install(*sinks, graph.ringBufferLogSink)
@@ -340,6 +341,13 @@ internal object DesktopShell {
                 busySignal = busySignal,
                 clock = DesktopClock,
                 updateChecker = graph.appUpdateChecker,
+                crashOffer =
+                    DesktopCrashOffer(
+                        dirs = dirs,
+                        buildInfo = buildInfo,
+                        clock = DesktopClock,
+                        crashReporter = graph.crashReporter,
+                    ),
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
                 refreshController = graph.refreshController,

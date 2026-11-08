@@ -56,7 +56,8 @@ class YtDlpEngine(
         synchronized(lock) { publish() }
         scope.launch {
             // The consent boundary is the settings load alone: a blocked health load must not
-            // freeze capabilities, so `loaded` turns before the health barrier.
+            // freeze capabilities or deafen live toggles, so observation starts right after the
+            // settings sync block, independent of the health barrier below.
             settings.awaitLoaded()
             synchronized(lock) {
                 enabled = settings.state.value.enabled
@@ -80,24 +81,29 @@ class YtDlpEngine(
                     prewarm(it)
                 }
             }
+            scope.launch {
+                combine(settings.state, transport.status, store.preparation) { prefs, host, preparation ->
+                    Triple(prefs.enabled, host, preparation)
+                }.collect { (newEnabled, host, _) ->
+                    synchronized(lock) {
+                        if (enabled != newEnabled) {
+                            enabled = newEnabled
+                            acceptReady = false
+                            startRequested = false
+                            if (!enabled) transport.shutdown()
+                        }
+                        observeHost(host)
+                        publish()
+                    }
+                }
+            }
+            // Health-boundary steps keep their original post-restore ordering: reporting the
+            // engine version before the restore CAS would drop persisted breaker state, and the
+            // failure identity reset belongs to the same ordering.
             health.awaitLoaded()
             synchronized(lock) {
                 health.reportEngineVersion(identity.engineVersion)
                 if (settings.state.value.failureIdentity != identity) recordFailures()
-            }
-            combine(settings.state, transport.status, store.preparation) { prefs, host, preparation ->
-                Triple(prefs.enabled, host, preparation)
-            }.collect { (newEnabled, host, _) ->
-                synchronized(lock) {
-                    if (enabled != newEnabled) {
-                        enabled = newEnabled
-                        acceptReady = false
-                        startRequested = false
-                        if (!enabled) transport.shutdown()
-                    }
-                    observeHost(host)
-                    publish()
-                }
             }
         }
         scope.launch {

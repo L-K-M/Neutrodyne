@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.youtube.api.ExtractionGate
 import ch.lkmc.neutrodyne.youtube.api.PlatformLimitation
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
+import ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +31,10 @@ import kotlin.test.assertTrue
 class YtDlpEngineTest {
     @Test fun readsAreInertAndAllNormalInstalledStatesKeepCapabilities() =
         runTest {
-            val f = fixture()
+            val settings = FakeEngineSettings()
+            val health = FakeYouTubeHealth()
+            val f = Fixture(this, settings, settings, healthDelegate = health)
+            runCurrent()
             assertEquals(EngineAvailability.STOPPED, f.engine.status.value.availability)
             assertEquals(EngineVersionSource.BUNDLED, f.engine.status.value.source)
             assertFalse(f.engine.status.value.jsChallenges)
@@ -47,13 +51,13 @@ class YtDlpEngineTest {
             f.host(HostState.STOPPED, HostExit.CRASH)
             assertEquals(EngineAvailability.STOPPED, f.engine.status.value.availability)
             f.assertCapabilities(null)
-            f.health.state.value =
-                f.health.state.value.copy(
+            health.state.value =
+                health.state.value.copy(
                     breaker = BreakerState.OPEN,
                     breakerOpenUntil = Long.MAX_VALUE,
                     rateLimitedUntil = Long.MAX_VALUE,
                 )
-            f.health.gate = ExtractionGate.Deny(Long.MAX_VALUE, TransientKind.BREAKER_OPEN)
+            health.gate = ExtractionGate.Deny(Long.MAX_VALUE, TransientKind.BREAKER_OPEN)
             runCurrent()
             f.assertCapabilities(null)
             assertEquals(0, f.settings.state.value.startFailures)
@@ -365,6 +369,92 @@ class YtDlpEngineTest {
             assertEquals(EngineAvailability.READY, f.engine.status.value.availability)
         }
 
+    @Test fun liveOptOutDuringBlockedHealthLoadShutsDownAndBlocksPrewarm() =
+        runTest {
+            val settings = FakeEngineSettings()
+            val health = GatedYouTubeHealth()
+            val f = Fixture(this, settings, settings, healthDelegate = health)
+            runCurrent()
+            // Settings load is done; the health barrier is still held.
+            f.assertCapabilities(null)
+            f.settings.state.value =
+                f.settings.state.value
+                    .copy(enabled = false)
+            runCurrent()
+            assertEquals(1, f.transport.shutdowns)
+            f.assertCapabilities(ExternalReason.DISABLED_BY_USER)
+            assertEquals(EngineAvailability.DISABLED, f.engine.status.value.availability)
+            f.engine.prewarm(PrewarmReason.SCREEN)
+            assertTrue(f.transport.prewarms.isEmpty())
+            assertTrue(f.transport.calls.isEmpty())
+            // The engine version report stays behind the health barrier.
+            assertEquals(1, health.loads)
+            assertFalse(health.reports.contains("version" to "2026.08.19"))
+            health.release()
+            runCurrent()
+            assertTrue(health.reports.contains("version" to "2026.08.19"))
+        }
+
+    @Test fun hostTransitionsDuringBlockedHealthLoadAreObserved() =
+        runTest {
+            val settings = FakeEngineSettings()
+            val health = GatedYouTubeHealth()
+            val f = Fixture(this, settings, settings, healthDelegate = health)
+            runCurrent()
+            f.host(HostState.STARTING)
+            f.host(HostState.STOPPED, HostExit.START_FAILED)
+            assertEquals(1, f.settings.state.value.startFailures)
+            f.assertCapabilities(null)
+            health.release()
+            runCurrent()
+            assertEquals(1, f.settings.state.value.startFailures)
+        }
+
+    @Test fun engineVersionReportFollowsTheHealthBarrier() =
+        runTest {
+            val settings = FakeEngineSettings()
+            val health = GatedYouTubeHealth()
+            val f = Fixture(this, settings, settings, healthDelegate = health)
+            runCurrent()
+            f.assertCapabilities(null)
+            assertEquals(1, health.loads)
+            assertTrue(health.reports.isEmpty())
+            health.release()
+            runCurrent()
+            assertTrue(health.reports.contains("version" to "2026.08.19"))
+            assertEquals(0, f.settings.state.value.startFailures)
+        }
+
+    @Test fun fastHealthLoadDoesNotSkipPersistedFailureRestore() =
+        runTest {
+            val identity = CompileMarker(42, "2026.08.19", "3.14")
+            val settings =
+                FakeEngineSettings().also {
+                    it.state.value =
+                        EngineSettingsSnapshot(startFailures = 3, failureIdentity = identity)
+                }
+            // The adapter exposes the default snapshot until the store loads, as a real one does.
+            val exposed = MutableStateFlow(EngineSettingsSnapshot())
+            val settingsLoaded = CompletableDeferred<Unit>()
+            val delayedSettings =
+                object : EngineSettings by settings {
+                    override val state: StateFlow<EngineSettingsSnapshot> = exposed
+
+                    override suspend fun awaitLoaded() {
+                        settingsLoaded.await()
+                        exposed.value =
+                            EngineSettingsSnapshot(startFailures = 3, failureIdentity = identity)
+                    }
+                }
+            // The health load completes immediately, ahead of the portable settings load.
+            val f = Fixture(this, settings, delayedSettings)
+            runCurrent()
+            f.assertCapabilities(ExternalReason.NOT_YET_AVAILABLE)
+            settingsLoaded.complete(Unit)
+            runCurrent()
+            f.assertCapabilities(ExternalReason.ENGINE_FAILED)
+        }
+
     @Test fun retryDuringHealthyStartAndReadyKeepsTheCurrentAttempt() =
         runTest {
             val f = fixture()
@@ -390,11 +480,12 @@ class YtDlpEngineTest {
         val settings: FakeEngineSettings,
         adapter: EngineSettings,
         limitation: PlatformLimitation? = null,
+        healthDelegate: YouTubeExtractionHealth = FakeYouTubeHealth(),
     ) {
         val transport = FakeYtxTransport()
         val store = FakeEngineStore().also { it.preparation.value = EnginePreparation.COMPILED }
         val preflight = FakeEnginePlatformPreflight().also { it.result = limitation }
-        val health = FakeYouTubeHealth()
+        val health = healthDelegate
         val engine =
             YtDlpEngine(
                 transport,
@@ -432,6 +523,24 @@ class YtDlpEngineTest {
                     caps.backCatalogue,
                 ),
             )
+        }
+    }
+
+    /** Blocks the health load so the engine's observation paths can be probed mid-load. */
+    private class GatedYouTubeHealth(
+        private val delegate: FakeYouTubeHealth = FakeYouTubeHealth(),
+    ) : YouTubeExtractionHealth by delegate {
+        private val barrier = CompletableDeferred<Unit>()
+        var loads = 0
+        val reports: MutableList<Any> get() = delegate.reports
+
+        override suspend fun awaitLoaded() {
+            loads++
+            barrier.await()
+        }
+
+        fun release() {
+            barrier.complete(Unit)
         }
     }
 }
