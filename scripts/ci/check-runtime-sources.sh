@@ -18,9 +18,9 @@
 #   * every file under runtime/ exists in the pinned Temurin tree and every native
 #     file matches it: byte-identical; on Linux also byte-identical after applying
 #     the same `objcopy -g` jlink's --strip-debug applies (or, failing that, after
-#     `objcopy -O binary`, which compares the loadable segments); on macOS after
-#     `codesign --remove-signature` on copies of both files (jpackage re-signs the
-#     runtime with the bundle's ad-hoc signature).
+#     `objcopy -O binary`, which compares the loadable segments); on macOS by
+#     canonical content (canonical-jar-hash.py's Mach-O normalization — jpackage
+#     re-signs the runtime with the bundle's ad-hoc signature).
 #     --jdk overrides the pinned tree; by default the single jdk/ under
 #     desktopApp/build/bundled-runtime/*/ is used.
 #
@@ -206,18 +206,25 @@ image_compare_file() {
         fi
     elif is_macho "$ref_file"; then
         # jpackage seals the bundle with an ad-hoc signature over Adoptium's, so the
-        # comparison runs on copies of both files with signatures removed.
-        if command -v codesign >/dev/null 2>&1; then
-            cp "$ref_file" "$work/ref"
-            cp "$img_file" "$work/img"
-            codesign --remove-signature "$work/ref" 2>/dev/null || true
-            codesign --remove-signature "$work/img" 2>/dev/null || true
-            if cmp -s "$work/ref" "$work/img"; then
+        # comparison binds each file's canonical content (canonical-jar-hash.py's
+        # Mach-O normalization: signature slots removed, __LINKEDIT extents
+        # rebound). codesign --remove-signature cannot serve: it leaves
+        # __LINKEDIT.vmsize at the removed signature's page-rounded extent, so
+        # mixed-size signatures never compare equal.
+        if command -v python3 >/dev/null 2>&1; then
+            # --content applies the normalization by filename extension; the
+            # .dylib names keep it in force for extensionless natives too
+            # (jspawnhelper, bin/*).
+            cp "$ref_file" "$work/ref.dylib"
+            cp "$img_file" "$work/img.dylib"
+            ref_sum="$(python3 "$REPO_ROOT/scripts/ci/canonical-jar-hash.py" --content "$work/ref.dylib" 2>/dev/null || true)"
+            img_sum="$(python3 "$REPO_ROOT/scripts/ci/canonical-jar-hash.py" --content "$work/img.dylib" 2>/dev/null || true)"
+            if [ -n "$ref_sum" ] && [ "$ref_sum" = "$img_sum" ]; then
                 rm -rf "$work"
                 return 0
             fi
         else
-            fail "codesign unavailable for the Mach-O comparison of $rel"
+            fail "python3 unavailable for the Mach-O comparison of $rel"
         fi
     fi
     rm -rf "$work"

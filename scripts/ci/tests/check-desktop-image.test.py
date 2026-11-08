@@ -22,13 +22,13 @@ the real code paths run against fixture images:
     fixture never mounts a real DMG: a fake hdiutil copies a payload tree into
     the mountpoint and records attach/detach.
   * Re-signed Mach-O natives — check-runtime-sources --image compares each
-    runtime Mach-O with the pinned Temurin file after `codesign
-    --remove-signature` on copies of both (jpackage re-signs ad-hoc over
-    Adoptium's signatures). The fakebin codesign emulates sign-append /
-    strip-restores-unsigned on a marker blob — a labeled fixture emulation,
-    not a real CMS signature; where the host has clang and the real codesign,
-    a dylib compiled in the test runs the same pass/fail pair under real
-    signatures.
+    runtime Mach-O with the pinned Temurin file by canonical content
+    (canonical-jar-hash.py's Mach-O normalization; jpackage re-signs ad-hoc
+    over Adoptium's signatures, and `codesign --remove-signature` leaves a
+    signature-size-dependent __LINKEDIT.vmsize residue that can never match
+    across mixed-size signatures). The fixtures carry real LC_CODE_SIGNATURE
+    slots; where the host has clang and the real codesign, a dylib compiled
+    in the test runs the same pass/fail pair under real signatures.
 """
 
 import hashlib
@@ -411,22 +411,6 @@ esac
     def fake_codesign_ok(self):
         self.fake("codesign", "exit 0\n")
 
-    def fake_codesign_emulated(self):
-        """Fixture codesign: --remove-signature truncates the appended CODESIG
-        marker, emulating sign-appends / strip-restores-unsigned. A labeled
-        fixture emulation — not a real CMS signature blob."""
-        self.fake(
-            "codesign",
-            """
-case "${1:-}" in
-    --remove-signature)
-        python3 -c 'import sys; p = sys.argv[1]; d = open(p, "rb").read(); i = d.rfind(b"\\x00CODESIG:"); open(p, "wb").write(d[:i] if i >= 0 else d)' "$2"
-        ;;
-    *) : ;;
-esac
-""",
-        )
-
     # ----- I1: JAR classpath membership --------------------------------------
 
     def test_flat_image_passes(self):
@@ -715,45 +699,37 @@ esac
             "--image", app, "--jdk", jdk, "--smoke", "smoke.txt",
         )
 
-    @staticmethod
-    def fixture_signed(body: bytes, ident: bytes) -> bytes:
-        """The fixture's signed file: body plus an appended marker blob that
-        fake_codesign_emulated strips."""
-        return body + b"\x00CODESIG:" + ident
-
     def test_macos_resigned_native_passes(self):
         """The jpackage ad-hoc re-sign makes image natives differ byte-wise
-        from the pinned Temurin files; after --remove-signature on copies of
-        both they must compare equal (emulated codesign fixture)."""
+        from the pinned Temurin files; their canonical content must compare
+        equal — here with signature blobs of different sizes, the residue
+        case `codesign --remove-signature` cannot equalize."""
         app = self.mac_app()
         jdk = self.mac_jdk()
-        jvm = thin_macho(code=b"JVM-CODE")
         self.fx.write(
             f"{app}/Contents/runtime/Contents/Home/lib/server/libjvm.dylib",
-            self.fixture_signed(jvm, b"jpackage-adhoc"),
+            thin_macho(code=b"JVM-CODE", sig=b"ADHOC-1"),
         )
         self.fx.write(
             f"{jdk}/Contents/Home/lib/server/libjvm.dylib",
-            self.fixture_signed(jvm, b"adoptium-apple"),
+            thin_macho(code=b"JVM-CODE", sig=b"ADOPTIUM" * 800),
         )
-        self.fake_codesign_emulated()
         r = self.runtime_sources(app, jdk)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     def test_macos_resigned_code_tamper_fails(self):
-        """A code difference is not a signature difference: after stripping,
-        the image file still differs and the gate reports it (fail closed)."""
+        """A code difference is not a signature difference: the normalized
+        contents still differ and the gate reports it (fail closed)."""
         app = self.mac_app()
         jdk = self.mac_jdk()
         self.fx.write(
             f"{app}/Contents/runtime/Contents/Home/lib/server/libjvm.dylib",
-            self.fixture_signed(thin_macho(code=b"EVIL-CODE"), b"jpackage-adhoc"),
+            thin_macho(code=b"EVIL-CODE", sig=b"ADHOC-1"),
         )
         self.fx.write(
             f"{jdk}/Contents/Home/lib/server/libjvm.dylib",
-            self.fixture_signed(thin_macho(code=b"JVM-CODE"), b"adoptium-apple"),
+            thin_macho(code=b"JVM-CODE", sig=b"ADOPTIUM" * 800),
         )
-        self.fake_codesign_emulated()
         r = self.runtime_sources(app, jdk)
         self.assertNotEqual(0, r.returncode)
         self.assertIn("differs from the pinned Temurin archive", r.stderr)
@@ -791,8 +767,7 @@ esac
     )
     def test_macos_real_signed_native_passes(self):
         """Real-toolchain variant of the re-signed pass: one dylib under two
-        different ad-hoc identities compares equal after the real
-        codesign --remove-signature."""
+        different ad-hoc identities has identical canonical content."""
         lib = self.clang_dylib("ok", 42)
         img = self.adhoc_sign(lib, "img", "ch.lkmc.fixture.img", "--options", "runtime")
         ref = self.adhoc_sign(lib, "ref", "ch.lkmc.fixture.ref")
@@ -811,7 +786,7 @@ esac
     )
     def test_macos_real_code_tamper_fails(self):
         """Real-toolchain variant of the tamper fail: a different function body
-        under the same signing treatment stays a violation after stripping."""
+        under the same signing treatment stays a normalized violation."""
         lib = self.clang_dylib("ok", 42)
         evil = self.clang_dylib("evil", 43)
         img = self.adhoc_sign(evil, "img", "ch.lkmc.fixture.img", "--options", "runtime")
