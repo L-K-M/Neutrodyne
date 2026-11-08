@@ -7,10 +7,12 @@ import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.EnrichResult
 import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
+import ch.lkmc.neutrodyne.youtube.api.ResolvePurpose
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.SearchCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsPageResult
+import ch.lkmc.neutrodyne.youtube.api.VideoFactsResult
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.coroutines.test.runTest
@@ -31,9 +33,14 @@ class ExternalYouTubeTest {
         runTest {
             val streams = ExternalOnlyYouTubeStreamResolver()
             assertEquals(ResolveResult.Unsupported, streams.resolveAudio("invalid", AudioPref()))
+            assertEquals(
+                ResolveResult.Unsupported,
+                streams.resolveAudio("invalid", AudioPref(), ResolvePurpose.BACKGROUND),
+            )
             streams.invalidate("invalid")
             streams.invalidateAll()
             val enricher = NoOpYouTubeEnricher()
+            assertEquals(VideoFactsResult.Unsupported, enricher.facts("invalid"))
             assertEquals(EnrichResult.Unsupported, enricher.enrich("invalid", setOf("invalid"), 0))
             assertEquals(UploadsPageResult.Unsupported, enricher.uploadsPage("invalid", 0, UploadsCursor("expired")))
             assertEquals(

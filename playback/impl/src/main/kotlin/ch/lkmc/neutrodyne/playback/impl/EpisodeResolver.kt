@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.StreamKind
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
+import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import java.io.IOException
@@ -144,7 +145,3 @@ internal class EpisodeResolver(
         val LOCAL_SCHEMES = setOf("file", "content")
     }
 }
-
-internal class YouTubeResolveException(
-    val result: ResolveResult,
-) : IOException("YouTube source is unavailable")
