@@ -5,15 +5,16 @@
 A tag cannot be created in a unit test, so this runs the real script in a
 throwaway git repository with a fake `gh`. The expected set must expand the
 lock-driven placeholders, leave out a component whose placeholder does not ship
-(the PBS source before MD3, the server runtime tarball while it matches the
-desktop runtime's source), and fail on an unknown product group.
+(the server runtime tarball while it matches the desktop runtime's source), and fail on an unknown product group.
 """
 
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 REPO = Path(__file__).resolve().parents[3]
@@ -124,11 +125,35 @@ class ReleaseAssetsTest(unittest.TestCase):
         for asset in expected:
             with self.subTest(asset=asset):
                 self.assertIn(asset, result.stdout)
-        # The PBS source does not ship (no [pbsSource] in the lock), and the
-        # server runtime tarball matches the desktop one, so neither is expected.
-        self.assertNotIn("python-build-standalone-", result.stdout)
+        python_lock = self.root / "youtube/ytdlp-desktop/python-components.lock"
+        pbs_source = tomllib.loads(python_lock.read_text(encoding="utf-8")).get("pbsSource")
+        if pbs_source:
+            self.assertIn(pbs_source["name"], result.stdout)
+        else:
+            self.assertNotIn("python-build-standalone-", result.stdout)
+        # A shared desktop/server runtime source appears only once.
         self.assertNotIn("openjdk-25.0.4.1+1-temurin-sources.tar.gz\nopenjdk-", result.stdout)
         self.assertIn("ffmpeg_version=9.0.2", result.stdout)
+
+    def test_pbs_source_tracks_the_locked_tag(self):
+        lock = self.root / "youtube/ytdlp-desktop/python-components.lock"
+        text = re.sub(r"(?ms)^\[pbsSource\]\n.*?(?=^\[|\Z)", "", lock.read_text(encoding="utf-8"))
+        lock.write_text(
+            text + '\n[pbsSource]\ntag = "20990101"\nname = "python-build-standalone-20990101-src.tar.gz"\n',
+            encoding="utf-8",
+        )
+        result = self.verify("sources")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("python-build-standalone-20990101-src.tar.gz", result.stdout)
+        self.assertNotIn("python-build-standalone-20261003-src.tar.gz", result.stdout)
+
+    def test_pbs_source_is_omitted_without_a_source_lock(self):
+        lock = self.root / "youtube/ytdlp-desktop/python-components.lock"
+        text = re.sub(r"(?ms)^\[pbsSource\]\n.*?(?=^\[|\Z)", "", lock.read_text(encoding="utf-8"))
+        lock.write_text(text, encoding="utf-8")
+        result = self.verify("sources")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("python-build-standalone-", result.stdout)
 
     def test_android_only(self):
         result = self.verify("android")
