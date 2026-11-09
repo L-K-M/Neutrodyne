@@ -244,6 +244,6 @@ class YtDlpChannelLookupTest {
     )
 
     private companion object {
-        val CHANNEL = YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID
+        val CHANNEL = YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID
     }
 }

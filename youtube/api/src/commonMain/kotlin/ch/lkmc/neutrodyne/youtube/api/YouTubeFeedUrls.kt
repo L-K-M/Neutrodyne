@@ -5,9 +5,9 @@ package ch.lkmc.neutrodyne.youtube.api
 import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 
 object YouTubeFeedUrls {
-    const val YOUTUBE_CONTROL_CHANNEL_ID = "UCBR8-60-B28hp2BmDPdntcQ"
-    const val GOOGLE_CONTROL_CHANNEL_ID = "UCK8sQmJBp8GCxrOtXWBpyEA"
-    val CONTROL_CHANNEL_IDS: List<String> = listOf(YOUTUBE_CONTROL_CHANNEL_ID, GOOGLE_CONTROL_CHANNEL_ID)
+    const val NASA_CONTROL_CHANNEL_ID = "UCLA_DiR1FfKNvjuUpBHmylQ"
+    const val MKBHD_CONTROL_CHANNEL_ID = "UCBJycsmduvYEL83R_U4JriQ"
+    val CONTROL_CHANNEL_IDS: List<String> = listOf(NASA_CONTROL_CHANNEL_ID, MKBHD_CONTROL_CHANNEL_ID)
 
     fun canonical(channelId: String): String = "$FEED?channel_id=${channel(channelId)}"
 

@@ -11,7 +11,10 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-CONTROLS = ("UCBR8-60-B28hp2BmDPdntcQ", "UCK8sQmJBp8GCxrOtXWBpyEA")
+# Same IDs, same order as the app's YouTubeFeedUrls.CONTROL_CHANNEL_IDS (04): the
+# canary exists to notice when an outage-monitor control dies. Replaced 2026-11-09:
+# the previous pair answered 404/500 while these served valid Atom feeds.
+CONTROLS = ("UCLA_DiR1FfKNvjuUpBHmylQ", "UCBJycsmduvYEL83R_U4JriQ")
 BASE = "https://www.youtube.com/feeds/videos.xml?"
 CAP = 2 * 1024 * 1024
 TIMEOUT = 8

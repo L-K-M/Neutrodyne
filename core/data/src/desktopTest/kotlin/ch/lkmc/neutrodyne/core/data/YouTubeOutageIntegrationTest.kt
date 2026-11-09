@@ -117,7 +117,7 @@ class YouTubeOutageIntegrationTest {
                 val id =
                     seedPodcast(
                         db,
-                        YouTubeFeedUrls.canonical(YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID),
+                        YouTubeFeedUrls.canonical(YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID),
                         failureCount = 10,
                         block = { copy(sourceType = SourceType.YOUTUBE_CHANNEL) },
                     )
@@ -263,11 +263,11 @@ class YouTubeOutageIntegrationTest {
                     assertEquals(FeedOutcome.SUCCESS, controls.check())
                     val first = server.takeRequest()
                     assertEquals(
-                        "/feeds/videos.xml?channel_id=${YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID}",
+                        "/feeds/videos.xml?channel_id=${YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID}",
                         first.url.encodedPath + "?" + first.url.encodedQuery,
                     )
                     val second = server.takeRequest()
-                    assertTrue(second.url.toString().contains(YouTubeFeedUrls.GOOGLE_CONTROL_CHANNEL_ID))
+                    assertTrue(second.url.toString().contains(YouTubeFeedUrls.MKBHD_CONTROL_CHANNEL_ID))
                     assertTrue(first.headers["User-Agent"]!!.contains("Neutrodyne"))
                     assertFalse(first.headers["Accept"]!!.contains("application/json"))
                     assertEquals(0, root.resolve("cache/feeds").listFiles()?.size ?: 0)

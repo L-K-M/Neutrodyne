@@ -104,7 +104,7 @@ class YouTubeSubscriptionTest {
         )
     private val channel =
         ChannelResolution.Resolved(
-            YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID,
+            YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID,
             "Channel",
             null,
             null,
