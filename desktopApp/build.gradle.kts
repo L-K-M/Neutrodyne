@@ -428,6 +428,7 @@ tasks.register("md0ProbeImage") {
 // Controller/UI tests share the JDK 25 hardware-free engine double.
 kotlin.sourceSets.named("test") {
     kotlin.srcDir(rootProject.file("core/testing/src/desktopEngineMain/kotlin"))
+    if (youtubeEngine) kotlin.srcDir("src/youtubeEngineTest/kotlin")
 }
 
 tasks.matching { it.name == "run" }.configureEach {

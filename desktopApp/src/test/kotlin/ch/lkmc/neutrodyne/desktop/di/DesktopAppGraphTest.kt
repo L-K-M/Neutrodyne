@@ -394,6 +394,7 @@ class DesktopAppGraphTest {
             assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
             assertThat(graph.localMediaChanges).isSameInstanceAs(graph.localMediaIndex)
             assertThat(graph.youtubeEngine).isSameInstanceAs(graph.youtubeEngine)
+            assertThat(graph.engineSmokeProof != null).isEqualTo(buildInfo.youTubeEngineBundled)
             graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
             graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
             graph.youtubeEngine.retryStart()
