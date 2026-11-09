@@ -19,7 +19,10 @@ class PythonRuntimeProbeTest {
                 assertTrue(setExecutable(true))
             }
         val executor = Executors.newSingleThreadExecutor()
-        val result = executor.submit<PythonRuntime?> { PythonRuntime.probe(executable, 200) }
+        // Headroom above the ProcessBuilder launch itself; under suite load a spawn can
+        // approach a few hundred ms and a tighter deadline would kill the child before
+        // its first write, leaving the pid file absent.
+        val result = executor.submit<PythonRuntime?> { PythonRuntime.probe(executable, 2_000) }
         try {
             assertNull(result.get(5, TimeUnit.SECONDS))
             assertTrue(pidFile.isFile, "The test must launch the hanging interpreter")
