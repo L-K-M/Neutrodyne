@@ -36,6 +36,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -60,7 +61,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aRemoteSettingIsJournaledWithTheCursorAndDrainedAfterCommit() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -86,7 +87,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aFailedDataStoreWriteKeepsTheMarkerForTheNextDrain() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -111,7 +112,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aLocalSettingChangeRecordsItsLiteralIntentBeforeDataStore() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -130,7 +131,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aNewerLocalSetBeforeDrainIsNotAppliedOverThePendingRemoteValue() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -171,7 +172,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aNewerLocalResetBeforeDrainIsNotAppliedOverThePendingRemoteValue() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -212,7 +213,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aSupersededMarkerIsClearedOnLocalWinBeforeTheUploadAckDeletesTheOutbox() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -260,7 +261,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aSupersededResetMarkerIsClearedOnLocalWinBeforeTheUploadAckDeletesTheOutbox() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -306,7 +307,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aLocalSetDuringDrainIsSerializedAndLeavesTheNewestStoredIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = StoringSettingsSyncPort()
@@ -364,7 +365,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun anIdenticalLocalIntentAtThePendingClockStillAppliesAfterAStorageFailure() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -391,7 +392,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aLocalIntentWithANewerNodeAtAnEqualPackedClockWins() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -410,7 +411,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aLocalIntentWithAnOlderNodeAtAnEqualPackedClockLoses() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -429,7 +430,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aLocalIntentWithANewerPackedClockWinsRegardlessOfNode() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -448,7 +449,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun anAckDoesNotStompANewerPendingMarkerOrMetadata() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = StoringSettingsSyncPort()
@@ -491,7 +492,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aTextSettingIsJournaledAndDrainedAsQuotedJson() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = ValidatingSettingsSyncPort()
@@ -520,7 +521,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aChoiceSettingIsJournaledAndDrainedAsQuotedJson() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = ValidatingSettingsSyncPort()
@@ -549,7 +550,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aTextSettingWithQuotesAndBackslashIsJournaledAndDrainedAsQuotedJson() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = ValidatingSettingsSyncPort()
@@ -578,7 +579,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aJsonNullResetIsJournaledAndDrainedAsNull() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = ValidatingSettingsSyncPort()
@@ -605,7 +606,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aMarkerStaysPendingWhileTheSwitchIsOffAndDrainsOnceEnabled() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -632,7 +633,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun disablingTheSwitchBetweenKeysLeavesLaterEffectsPending() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val keys = listOf(PlaybackSettingKeys.SKIP_BACK_MS, PlaybackSettingKeys.SKIP_FORWARD_MS)
@@ -663,7 +664,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun disablingTheSwitchWhileAKeyLockIsHeldKeepsItsEffectPending() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -714,7 +715,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aStartDrainAppliesWhileLinkedAndNotAfterAnUnlink() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 db.withWriteTransaction {
@@ -749,7 +750,7 @@ abstract class SyncApplyEffectsTestBase {
     @Test
     fun aStartDrainSkipsAMarkerWhileUnlinked() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 // Never linked: sync_state carries no link, but a stray marker exists.
                 db.withWriteTransaction {
@@ -874,8 +875,12 @@ abstract class SyncApplyEffectsTestBase {
         }
     }
 
-    /** The host's real in-memory Room database; the Android host supplies a Robolectric context. */
-    protected abstract fun newTestDb(): NeutrodyneDatabase
+    /**
+     * The host's real in-memory Room database; the Android host supplies a Robolectric context.
+     * Its query context is an [kotlinx.coroutines.test.UnconfinedTestDispatcher] sharing
+     * [scheduler], so Room work stays on the test's virtual clock.
+     */
+    protected abstract fun newTestDb(scheduler: TestCoroutineScheduler): NeutrodyneDatabase
 }
 
 /**

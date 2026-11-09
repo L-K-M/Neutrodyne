@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,7 +43,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aRecorderFailurePropagatesAndDataStoreStaysUntouched() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -61,7 +62,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anUnmaterializedCommittedIntentReplaysWithItsOriginalClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort().apply { current[PlaybackSettingKeys.SKIP_BACK_MS.name] = "10000" }
@@ -95,7 +96,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anAlreadyMaterializedIntentOnlyAdvancesTheBaseline() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -123,7 +124,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aReplayKindIntentMaterializesOverTheStoredValue() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -156,7 +157,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aNewerRemoteMarkerDrainsInsteadOfTheOlderIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -198,7 +199,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aNewerLocalIntentBeatsAnOlderPendingRemoteMarker() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort().apply { current[PlaybackSettingKeys.SKIP_BACK_MS.name] = "10000" }
@@ -242,7 +243,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOffSwitchEditIsNotRolledBackByTheOlderIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -298,7 +299,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aRemoteMarkerStaysPendingWhileTheSwitchIsOff() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -342,7 +343,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anUnlinkedCaptureStaysInert() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -372,7 +373,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anAccountAbsentKeyCapturesItsStoredValueOnInstall() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -393,7 +394,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anAckedSettingDoesNotRecaptureOnRestart() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -443,7 +444,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aLocalMaterializedWriteAdvancesTheBaselineToTheIntentClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
@@ -476,7 +477,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anUnreadableStoredValueDoesNotRetireACommittedIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -503,7 +504,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anUnrecordedDifferenceFromAKnownBaselineCapturesTheActualValue() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -537,7 +538,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOffSwitchEditOfAKnownKeyYieldsToTheAccountOnEnable() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -574,7 +575,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aRestartWhileOffStillTracksANewerWriteEqualToTheOldBaseline() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -606,7 +607,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aWriteAfterOutboxSelectionMustMaterializeBeforeItCanBeSent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -631,7 +632,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anAcceptedResetDoesNotRecaptureItsEffectiveDefaultOnRestart() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -664,7 +665,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOffWriteMatchingAnIntentDoesNotBorrowItsClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -690,7 +691,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aClocklessBaselineSupersedesAnEqualOldIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -720,7 +721,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aFailedIntentDoesNotTurnExternalDriftIntoAnOffWrite() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -750,7 +751,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun externalDriftMatchingAnOlderIntentGetsAFreshClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -783,7 +784,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOnEdgeWriteCannotEscapeTheInstalledRecorder() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -808,7 +809,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOffAdmittedWriteCannotBorrowAClockAfterEnabling() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -836,7 +837,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOnAdmittedWriteKeepsItsClockAfterDisabling() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -865,7 +866,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anOffWriteSurvivesACrashBeforeItsRoomCallback() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -895,7 +896,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aFailedOffWriteCannotEraseAPreviousCommittedOnIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -923,7 +924,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aCapturedOnWriteSurvivesAnOlderClocklessBaseline() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -955,7 +956,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aReceiptFromAnotherLinkCannotBecomeANewAccountEdit() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -982,7 +983,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun offAdmissionNeedsNoRoomConnection() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -1002,7 +1003,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aFailedOnWriteRecoversAfterAnOlderUncapturedWrite() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -1031,7 +1032,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun bootstrapAdmissionSurvivesLinkCompletionBeforeAck() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 db.syncStateDao().upsert(db.syncStateDao().get()!!.copy(linkedAt = null))
@@ -1054,7 +1055,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aLaterOffWriteOfTheSameValueSupersedesTheNewIntent() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -1086,7 +1087,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun anUncapturedAccountAbsentValueCanBeAdmittedForPush() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val port = FakeSettingsSyncPort()
@@ -1115,7 +1116,7 @@ abstract class SettingsCaptureTestBase {
 
     private fun restoreAfterOffEdit(write: RestoreStore) =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -1158,7 +1159,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun typedFloatNormalizationKeepsTheHistoricalRestoreClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SPEED
@@ -1205,7 +1206,7 @@ abstract class SettingsCaptureTestBase {
     @Test
     fun aRemoteFloatLiteralDoesNotBecomeAnUnrecordedLocalEdit() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val key = PlaybackSettingKeys.SPEED
@@ -1347,6 +1348,10 @@ abstract class SettingsCaptureTestBase {
         )
     }
 
-    /** The host's real in-memory Room database; the Android host supplies a Robolectric context. */
-    protected abstract fun newTestDb(): NeutrodyneDatabase
+    /**
+     * The host's real in-memory Room database; the Android host supplies a Robolectric context.
+     * Its query context is an [kotlinx.coroutines.test.UnconfinedTestDispatcher] sharing
+     * [scheduler], so Room work stays on the test's virtual clock.
+     */
+    protected abstract fun newTestDb(scheduler: TestCoroutineScheduler): NeutrodyneDatabase
 }
