@@ -10,6 +10,10 @@
   <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
   <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
+  <string name="sync_server_address">Serveradresse</string>
+  <string name="sync_run_server">So betreibst du einen Server</string>
+  <string name="sync_reconnect_action">Erneut verbinden</string>
+  <string name="sync_link_again">Erneut verknüpfen</string>
 
   <string name="sync_setup_title">Gerät verknüpfen</string>
   <string name="sync_setup_address_hint">sync.example.org</string>

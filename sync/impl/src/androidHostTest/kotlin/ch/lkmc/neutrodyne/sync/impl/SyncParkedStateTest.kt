@@ -243,6 +243,9 @@ class SyncParkedStateTest {
             notices = SyncNoticeBus(),
             deviceNames = DeviceNames { emptyList() },
             sharePasswords = { false },
+            coordinator =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeCredentialCommitCoordinator(),
         )
 
     private suspend fun link(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {

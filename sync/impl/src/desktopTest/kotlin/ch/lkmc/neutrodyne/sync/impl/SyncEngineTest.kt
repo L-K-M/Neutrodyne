@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -385,8 +387,17 @@ class SyncEngineTest {
         val gate = FakeLocalNetworkGate()
         val settingsPort = FakeSettingsSyncPort()
         val writeLocks = TestSettingsWriteCoordinator()
+        val credentials = FakeCredentialCommitCoordinator()
         val effects =
-            SyncApplyEffects(db, settingsPort, writeLocks) { true }
+            SyncApplyEffects(
+                db,
+                settingsPort,
+                writeLocks,
+                { true },
+                secrets,
+                credentials,
+                "__absent_cache__".toPath(),
+            )
         val engine =
             SyncEngine(
                 db = db,
@@ -413,6 +424,7 @@ class SyncEngineTest {
                         notices = SyncNoticeBus(),
                         deviceNames = DeviceNames { emptyList() },
                         sharePasswords = { false },
+                        coordinator = credentials,
                     ),
                 clock = clock,
                 secrets = secrets,
@@ -442,6 +454,7 @@ class SyncEngineTest {
                 gate = gate,
                 effects = effects,
                 capture = SettingsCapture(db, settingsPort, writeLocks) { true },
+                notices = SyncNoticeBus(),
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

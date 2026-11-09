@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.sync.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.LibraryMerger
 import ch.lkmc.neutrodyne.core.model.MergePolicy
@@ -119,6 +120,8 @@ class FirstLinkMerger(
     private val effects: SyncApplyEffects,
     private val clock: Clock,
     private val activity: SyncActivityState,
+    private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
+    private val coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
 ) {
     private val fileSystem: FileSystem = FileSystem.SYSTEM
     private val cacheDir: Path = storagePaths.cacheDir.toPath()
@@ -162,6 +165,7 @@ class FirstLinkMerger(
             // re-assertion, so DataStore holds the server value first and the re-assert replays
             // each stored raw clock without re-reading a projection (no echo).
             effects.drainSettings()
+            effects.drainPasswords()
             reassert()
             return FirstLinkResult.Completed(applied)
         } catch (failure: CancellationException) {
@@ -317,16 +321,52 @@ class FirstLinkMerger(
             return FirstLinkResult.Failed("mergeStaged failed: $outcome")
         }
         // The server's records are the adopted state: seed verbatim, nothing captured, so
-        // later local changes order after them (10 Use the server's library).
+        // later local changes order after them (10 Use the server's library). An `auth` is
+        // never seeded — only its protected reference and durable marker (10 Passwords).
+        // The same origin-association proof applies as to a live page: only an `auth` whose
+        // `credentialOrigin` companion sits at the auth's exact complete clock seeds a
+        // reference; an unpaired auth installs nothing.
+        val account = db.syncStateDao().get()?.accountId ?: "local"
         for (dto in pull.records) {
             val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
             val rid = runCatching { RecordId.fromWire(coll, dto.id) }.getOrNull()?.rid ?: continue
             val incoming = runCatching { ProtocolValidation.record(dto) }.getOrNull() ?: continue
-            clockStore.put(coll.wire, rid, RawSyncRecord(incoming))
+            val auth =
+                if (coll == SyncCollection.PODCAST) {
+                    val field = incoming.fields["auth"]
+                    val clock = field?.c
+                    val originField = incoming.fields["credentialOrigin"]
+                    val origin =
+                        (originField?.v as? JsonPrimitive)
+                            ?.takeIf { it.isString }
+                            ?.contentOrNull
+                    if (field != null && clock != null && originField?.c == clock && origin != null) {
+                        val key = pendingAuthKey(account, rid, clock.toString())
+                        Pair(
+                            AuthReference(key, origin, clock.toString()),
+                            PendingAuth(key, origin, clock.toString()),
+                        )
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+            clockStore.put(
+                coll.wire,
+                rid,
+                RawSyncRecord(
+                    state = incoming.withoutField("auth"),
+                    by = dto.by,
+                    authReference = auth?.first,
+                    pendingAuth = auth?.second,
+                ),
+            )
         }
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         journalPendingSettings(pull.records)
         effects.drainSettings()
+        effects.drainPasswords()
         completeLink()
         discardStaging()
         return FirstLinkResult.Completed(pull.records.size)
@@ -352,7 +392,10 @@ class FirstLinkMerger(
 
     // --- The staging pull with resume (10 Merge step 1) --------------------------------------------
 
-    /** `sync-link-<deviceId>.jsonl` in the cache directory (10 Merge step 1). */
+    /**
+     * `sync-link-<deviceId>.jsonl` in the cache directory (10 Merge step 1) — [SyncApplyEffects]
+     * also reads it as a live auth-snapshot consumer.
+     */
     private fun stagingFile(deviceId: String): Path = cacheDir / "sync-link-$deviceId.jsonl"
 
     /** The mapped staging directory, a sibling of the staging file. */
@@ -383,10 +426,27 @@ class FirstLinkMerger(
             while (pages < MAX_PAGES) {
                 pages++
                 val page = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
+                // 10 Passwords: each auth is staged in the protected store before its staging
+                // line is written; the file carries only the snapshot's reference and clock.
+                val stagedAuths = stageAuthCandidates(db, secrets, coordinator, page.records)
                 for (dto in page.records) {
                     maxClock = maxOf(maxClock, maxClockOf(dto))
                     records += dto
-                    sink.writeUtf8(SyncJson.encodeToString(StagingLine(record = dto))).writeByte('\n'.code)
+                    val auth = stagedAuths[wirePodcastRid(dto)]
+                    sink
+                        .writeUtf8(
+                            SyncJson.encodeToString(
+                                StagingLine(
+                                    // `auth` never persists in a staging line — proved or
+                                    // not. An unpaired auth stages no snapshot, so keeping
+                                    // the dto here would leak its plaintext to disk; only a
+                                    // proved reference reconstructs the field on resume.
+                                    record = dto.withoutField("auth"),
+                                    authRef = auth?.storeKey,
+                                    authClock = auth?.clock,
+                                ),
+                            ),
+                        ).writeByte('\n'.code)
                 }
                 cursor = page.cursor
                 onProgress(LinkPhase.DOWNLOADING, records.size, records.size.coerceAtLeast(1))
@@ -422,7 +482,7 @@ class FirstLinkMerger(
     }
 
     /** A complete staging file (end marker present) is reused; a partial one is re-pulled. */
-    private fun readStagedPull(file: Path): StagedPull? {
+    private suspend fun readStagedPull(file: Path): StagedPull? {
         if (!fileSystem.exists(file)) return null
         try {
             val records = ArrayList<RecordDto>()
@@ -436,7 +496,7 @@ class FirstLinkMerger(
                         end = decoded.end
                         break
                     }
-                    decoded.record?.let(records::add)
+                    decoded.record?.let { records += rehydrateAuth(it, decoded) }
                 }
             }
             val marker = end ?: return null
@@ -444,6 +504,40 @@ class FirstLinkMerger(
         } catch (_: Exception) {
             return null
         }
+    }
+
+    /**
+     * Rebuilds the `auth` field a staging line carried by reference: the snapshot in the
+     * protected store at [StagingLine.authRef] is the durable copy; a lost snapshot drops the
+     * field rather than resurrecting nothing — the feed is flagged by the normal projection.
+     */
+    private suspend fun rehydrateAuth(
+        record: RecordDto,
+        line: StagingLine,
+    ): RecordDto {
+        val ref = line.authRef ?: return record
+        val clock = line.authClock ?: return record
+        val stored = suspendRunCatching { secrets.get(ref) }.getOrNull() ?: return record
+        val value =
+            JsonObject(
+                buildMap {
+                    put("u", JsonPrimitive(stored.username))
+                    put("p", JsonPrimitive(stored.secret.concatToString()))
+                },
+            )
+        return record.copy(
+            fields =
+                record.fields + (
+                    "auth" to
+                        ch.lkmc.neutrodyne.sync.protocol.dto
+                            .FieldValue(value, clock)
+                ),
+        )
+    }
+
+    private fun wirePodcastRid(dto: RecordDto): String? {
+        if (dto.coll != SyncCollection.PODCAST.wire) return null
+        return runCatching { RecordId.fromWire(SyncCollection.PODCAST, dto.id) }.getOrNull()?.rid
     }
 
     private suspend fun discardStaging() {
@@ -902,6 +996,7 @@ class FirstLinkMerger(
      * clocks and local-won fields keep the frozen local stamps (10 Merge step 4).
      */
     private suspend fun mergeReceivedClocks(records: List<RecordDto>) {
+        val account = db.syncStateDao().get()?.accountId ?: "local"
         db.withWriteTransaction {
             db.syncStateDao().withApplying {
                 for (dto in records) {
@@ -909,13 +1004,51 @@ class FirstLinkMerger(
                     val rid = runCatching { RecordId.fromWire(coll, dto.id) }.getOrNull()?.rid ?: continue
                     val incoming = runCatching { ProtocolValidation.record(dto) }.getOrNull() ?: continue
                     val stored = clockStore.get(coll.wire, rid)
-                    val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
+                    val merged = SyncRecordMerger.merge(stored?.state, null, incoming.withoutField("auth"))
+                    // 10 Passwords: the staged snapshot is decided like a page's — the merge
+                    // carries no plaintext and a winning auth journals its durable marker.
+                    val auth =
+                        if (coll == SyncCollection.PODCAST) {
+                            // The staging pull already proved the pair before snapshotting:
+                            // an `auth` whose `credentialOrigin` sits at its own complete
+                            // clock. Reconstruct only that proved staging — an unpaired or
+                            // mixed auth can never install here either.
+                            val staged =
+                                dto.fields["auth"]
+                                    ?.c
+                                    ?.let {
+                                        runCatching { Hlc.parse(it) }.getOrNull()
+                                    }?.let { clock ->
+                                        val origin =
+                                            incoming.fields["credentialOrigin"]
+                                                ?.takeIf { it.c == clock }
+                                                ?.v
+                                                ?.let {
+                                                    (it as? JsonPrimitive)
+                                                        ?.takeIf { p -> p.isString }
+                                                        ?.contentOrNull
+                                                }
+                                        origin?.let {
+                                            StagedAuth(
+                                                pendingAuthKey(account, rid, clock.toString()),
+                                                clock.toString(),
+                                                it,
+                                            )
+                                        }
+                                    }
+                            decideAuth(stored, null, merged.record, incoming.fields["auth"], staged)
+                        } else {
+                            null
+                        }
+                    val state = merged.record.withoutField("auth")
                     clockStore.put(
                         coll.wire,
                         rid,
-                        (stored ?: RawSyncRecord(merged.record)).copy(
-                            state = merged.record,
+                        (stored ?: RawSyncRecord(state)).copy(
+                            state = state,
                             by = dto.by ?: stored?.by,
+                            authReference = auth?.reference ?: stored?.authReference,
+                            pendingAuth = auth?.pending ?: stored?.pendingAuth,
                         ),
                     )
                 }
@@ -1050,6 +1183,15 @@ class FirstLinkMerger(
                                 values.sorted().joinToString(prefix = "[", postfix = "]") { "\"$it\"" },
                             )
                     }
+                    // 10 Passwords: the winning auth re-asserts as a replay row at its
+                    // reference clock; the literal is a placeholder — the push hydrates the
+                    // protected snapshot, so no plaintext touches the outbox either.
+                    raw.authReference?.let { ref ->
+                        val stamp = runCatching { Hlc.parse(ref.clock) }.getOrNull() ?: return@let
+                        db
+                            .syncOutboxDao()
+                            .captureStored(row.coll, row.rid, "auth", stamp.packed, stamp.nodeId.value, "{}")
+                    }
                 }
             }
         }
@@ -1136,6 +1278,8 @@ class FirstLinkMerger(
             val page = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
             applied += page.records.size
             applier.applyPage(page.records, roundId)
+            // A resync drains the page's durable credential effects before the re-assert.
+            effects.drainPasswords()
             cursor = page.cursor
             onProgress(LinkPhase.DOWNLOADING, applied, applied.coerceAtLeast(1))
             if (!page.hasMore) break
@@ -1202,6 +1346,10 @@ class FirstLinkMerger(
 private data class StagingLine(
     val record: RecordDto? = null,
     val end: StagingEnd? = null,
+    /** The protected snapshot's `SecretStore` key when the record carried an `auth` (10 Passwords). */
+    val authRef: String? = null,
+    /** The auth field's complete clock string, kept beside its stripped field. */
+    val authClock: String? = null,
 )
 
 @Serializable
@@ -1210,6 +1358,11 @@ private data class StagingEnd(
     val cursor: String? = null,
     val maxClock: Long = 0L,
 )
+
+/** The record minus one field — `auth` never persists in raw state or a staging line. */
+private fun RecordState.withoutField(name: String): RecordState = copy(fields = fields - name)
+
+private fun RecordDto.withoutField(name: String): RecordDto = copy(fields = fields - name)
 
 private fun RecordState.stringField(name: String): String? =
     (fields[name]?.v as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull

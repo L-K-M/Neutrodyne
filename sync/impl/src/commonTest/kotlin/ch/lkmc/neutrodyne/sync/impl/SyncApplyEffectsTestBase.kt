@@ -7,8 +7,10 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncClockEntity
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
@@ -17,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -40,6 +43,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -680,10 +684,15 @@ abstract class SyncApplyEffectsTestBase {
                 lockHeld.await()
                 val drain =
                     launch {
-                        effects(db, port, coordinator) {
-                            gateRead.complete(Unit)
-                            enabled
-                        }.drainSettings()
+                        effects(
+                            db,
+                            port,
+                            coordinator,
+                            settingsSyncEnabled = {
+                                gateRead.complete(Unit)
+                                enabled
+                            },
+                        ).drainSettings()
                     }
                 gateRead.await()
                 enabled = false
@@ -786,6 +795,7 @@ abstract class SyncApplyEffectsTestBase {
             notices = SyncNoticeBus(),
             deviceNames = DeviceNames { emptyList() },
             sharePasswords = { false },
+            coordinator = FakeCredentialCommitCoordinator(),
         )
 
     /** The drainer fixture: the persisted-switch gate defaults to on, as the graph wires it. */
@@ -795,7 +805,18 @@ abstract class SyncApplyEffectsTestBase {
         coordinator: ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator =
             TestSettingsWriteCoordinator(),
         settingsSyncEnabled: suspend () -> Boolean = { true },
-    ): SyncApplyEffects = SyncApplyEffects(db, port, coordinator, settingsSyncEnabled)
+        secrets: SecretStore = FakeSecretStore(),
+        credentials: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db,
+            port,
+            coordinator,
+            settingsSyncEnabled,
+            secrets,
+            credentials,
+            "__absent_cache__".toPath(),
+        )
 
     /** The capture fixture: the same live-gate shape the graph wires. */
     private fun capture(

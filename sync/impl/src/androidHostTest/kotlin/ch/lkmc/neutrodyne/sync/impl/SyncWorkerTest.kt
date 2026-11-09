@@ -10,6 +10,7 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -22,6 +23,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.runBlocking
+import okio.Path.Companion.toPath
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -103,6 +105,7 @@ class SyncWorkerTest {
                                 notices = SyncNoticeBus(),
                                 deviceNames = DeviceNames { emptyList() },
                                 sharePasswords = { false },
+                                coordinator = FakeCredentialCommitCoordinator(),
                             ),
                         clock = clock,
                         secrets = secrets,
@@ -111,8 +114,18 @@ class SyncWorkerTest {
                         tokens = SyncTokenStore(secrets),
                         activity = SyncActivityState(),
                         gate = FakeLocalNetworkGate(),
-                        effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) { true },
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                settings,
+                                TestSettingsWriteCoordinator(),
+                                { true },
+                                secrets,
+                                FakeCredentialCommitCoordinator(),
+                                "__absent_cache__".toPath(),
+                            ),
                         capture = SettingsCapture(db, settings, TestSettingsWriteCoordinator()) { true },
+                        notices = SyncNoticeBus(),
                     )
                 val schedulerCalls = mutableListOf<String>()
                 val scheduler =
@@ -195,6 +208,7 @@ class SyncWorkerTest {
                             notices = SyncNoticeBus(),
                             deviceNames = DeviceNames { emptyList() },
                             sharePasswords = { false },
+                            coordinator = FakeCredentialCommitCoordinator(),
                         ),
                     clock = clock,
                     secrets = secrets,
@@ -203,8 +217,18 @@ class SyncWorkerTest {
                     tokens = SyncTokenStore(secrets),
                     activity = SyncActivityState(),
                     gate = FakeLocalNetworkGate(),
-                    effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) { true },
+                    effects =
+                        SyncApplyEffects(
+                            db,
+                            settings,
+                            TestSettingsWriteCoordinator(),
+                            { true },
+                            secrets,
+                            FakeCredentialCommitCoordinator(),
+                            "__absent_cache__".toPath(),
+                        ),
                     capture = SettingsCapture(db, settings, TestSettingsWriteCoordinator()) { true },
+                    notices = SyncNoticeBus(),
                 )
             val scheduler =
                 SyncScheduler(

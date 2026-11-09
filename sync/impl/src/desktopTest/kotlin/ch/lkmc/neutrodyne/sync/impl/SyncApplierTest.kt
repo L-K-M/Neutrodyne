@@ -6,6 +6,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncActive
@@ -13,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaybackSyncEvent
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -31,6 +33,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
@@ -442,17 +445,26 @@ class SyncApplierTest {
                 val playback = FakePlaybackSyncPort()
                 playback.setActive(episodeId, isPlaying = true)
                 val notices = SyncNoticeBus()
+                val coordinator = FakeCredentialCommitCoordinator()
                 val received = mutableListOf<SyncNotice>()
                 backgroundScope.launch(
                     start = CoroutineStart.UNDISPATCHED,
-                ) { notices.shared.collect { received += it } }
+                ) { notices.notices.collect { received += it } }
                 val applier =
                     applier(
                         db,
                         playback = playback,
                         notices = notices,
+                        coordinator = coordinator,
                         deviceNames =
                             DeviceNames {
+                                // A lookup can need credentials: it must run after the page's
+                                // writer committed and its credential hold was released.
+                                withTimeout(1_000) {
+                                    coordinator.withCredentialCommit {
+                                        assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                                    }
+                                }
                                 listOf(
                                     DeviceDto(
                                         id = deviceId,
@@ -484,6 +496,7 @@ class SyncApplierTest {
 
                 assertEquals(listOf(episodeId to deviceId), playback.remotePlayed)
                 assertEquals(listOf(RemotePlayedMark(episodeId, deviceId)), result.remotePlayed)
+                assertEquals(2, coordinator.commits, "page and post-commit name lookup acquire separately")
                 assertTrue(playback.remoteReverted.isEmpty(), "a committed mark is never reverted")
                 val notice =
                     received
@@ -515,7 +528,7 @@ class SyncApplierTest {
                 val received = mutableListOf<SyncNotice>()
                 backgroundScope.launch(
                     start = CoroutineStart.UNDISPATCHED,
-                ) { notices.shared.collect { received += it } }
+                ) { notices.notices.collect { received += it } }
                 val applier = applier(db, playback = playback, notices = notices)
 
                 val result =
@@ -560,7 +573,7 @@ class SyncApplierTest {
                 val received = mutableListOf<SyncNotice>()
                 backgroundScope.launch(
                     start = CoroutineStart.UNDISPATCHED,
-                ) { notices.shared.collect { received += it } }
+                ) { notices.notices.collect { received += it } }
                 val applier = applier(db, playback = playback, notices = notices)
 
                 // The `pos` clock (30) is newer than the `played` clock (10): the merged record
@@ -635,7 +648,7 @@ class SyncApplierTest {
                 val received = mutableListOf<SyncNotice>()
                 backgroundScope.launch(
                     start = CoroutineStart.UNDISPATCHED,
-                ) { notices.shared.collect { received += it } }
+                ) { notices.notices.collect { received += it } }
                 val applier = applier(db, playback = playback, notices = notices)
 
                 val committed =
@@ -791,6 +804,7 @@ class SyncApplierTest {
         playback: PlaybackSyncPort = NoPlaybackSync,
         notices: SyncNoticeBus = SyncNoticeBus(),
         deviceNames: DeviceNames = DeviceNames { emptyList() },
+        coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     ): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
@@ -814,6 +828,7 @@ class SyncApplierTest {
             notices = notices,
             deviceNames = deviceNames,
             sharePasswords = { false },
+            coordinator = coordinator,
         )
     }
 

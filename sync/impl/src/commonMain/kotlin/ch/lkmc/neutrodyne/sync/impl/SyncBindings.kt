@@ -22,6 +22,7 @@ import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import okio.Path.Companion.toPath
 
 /** The sync engine's graph bindings (10 Client sync engine, 01 Dependency injection). */
 @ContributesTo(AppScope::class)
@@ -70,6 +71,7 @@ object SyncBindings {
         flags: SyncFlags,
         notices: SyncNoticeBus,
         client: SyncClient,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): SyncApplier =
         SyncApplier(
             db = db,
@@ -82,6 +84,7 @@ object SyncBindings {
             sharePasswords = { flags.sharePasswords },
             notices = notices,
             deviceNames = DeviceNames { client.devices() },
+            coordinator = coordinator,
         )
 
     @Provides
@@ -99,6 +102,7 @@ object SyncBindings {
         gate: LocalNetworkGate,
         effects: SyncApplyEffects,
         capture: SettingsCapture,
+        notices: SyncNoticeBus,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -113,6 +117,7 @@ object SyncBindings {
             gate = gate,
             effects = effects,
             capture = capture,
+            notices = notices,
         )
 
     /**
@@ -156,7 +161,19 @@ object SyncBindings {
         settings: SettingsSyncPort,
         writeLocks: SettingsWriteCoordinator,
         address: SyncServerAddress,
-    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks, { address.syncPlaybackSettings() })
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+        storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db,
+            settings,
+            writeLocks,
+            { address.syncPlaybackSettings() },
+            secrets,
+            coordinator,
+            storagePaths.cacheDir.toPath(),
+        )
 
     /**
      * 10 Settings capture: the recorder and the materialization baseline the shared port
@@ -189,6 +206,8 @@ object SyncBindings {
         effects: SyncApplyEffects,
         clock: Clock,
         activity: SyncActivityState,
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -200,5 +219,7 @@ object SyncBindings {
             effects = effects,
             clock = clock,
             activity = activity,
+            secrets = secrets,
+            coordinator = coordinator,
         )
 }

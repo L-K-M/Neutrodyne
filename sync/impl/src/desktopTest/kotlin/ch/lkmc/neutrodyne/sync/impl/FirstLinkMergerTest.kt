@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLibraryMerger
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
@@ -666,6 +667,135 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * 10 Passwords / Merge step 1: the staging line carries the protected snapshot's
+     * reference and clock, never the wire `{u,p}` — and the resume rehydrates the field from
+     * the `SecretStore`, so the journaled marker is bound end to end.
+     */
+    @Test
+    fun theStagingFileCarriesOnlyTheProtectedAuthReference() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            val secrets = FakeSecretStore()
+            val stagedPass = "s3ntinel-link-3c7f"
+            val client = CountingClient(listOf(authPodcastRecord(stagedPass)))
+            try {
+                link(db, deviceId = device)
+                val merger = mergerOf(db, client, library, secrets = secrets)
+
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val stagedText =
+                    fileSystem.read(cache.resolve("sync-link-$device.jsonl").toString().toPath()) {
+                        readUtf8()
+                    }
+                assertFalse(stagedText.contains(stagedPass))
+                assertFalse(stagedText.contains("feed-user"))
+                assertTrue(stagedText.contains("\"authRef\""))
+                assertTrue(stagedText.contains("\"authClock\""))
+
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Success(
+                        ch.lkmc.neutrodyne.core.model
+                            .MergeSummary(0, 0, 0, 0, 0, 0, 0, 0),
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Completed)
+                assertEquals(1, client.changesCalls, "the resume reused the staged auth lines")
+
+                // The rehydrated auth field journaled the durable marker and reference at
+                // the snapshot's own key; the snapshot itself survived the whole flow.
+                val raw = decodeRawClocks(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks)!!
+                val pending = raw.pendingAuth!!
+                val key = pendingAuthKey("local", podcastSyncId, pending.clock)
+                assertEquals(key, pending.reference)
+                assertEquals(key, raw.authReference!!.storeKey)
+                val snapshot = secrets.get(key)
+                assertNotNull(snapshot)
+                assertEquals(stagedPass, snapshot.secret.concatToString())
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Passwords / origin association: an auth whose companion credentialOrigin sits at a
+     * different complete clock proves nothing — it stages no snapshot, and the staging line
+     * still drops the field rather than leaking its plaintext to disk.
+     */
+    @Test
+    fun anUnpairedAuthNeverReachesTheStagingFileOrRawState() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            val secrets = FakeSecretStore()
+            val stagedPass = "s3ntinel-link-9e4d"
+            val client = CountingClient(listOf(unpairedAuthPodcastRecord(stagedPass)))
+            try {
+                link(db, deviceId = device)
+                val merger = mergerOf(db, client, library, secrets = secrets)
+
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val stagedText =
+                    fileSystem.read(cache.resolve("sync-link-$device.jsonl").toString().toPath()) {
+                        readUtf8()
+                    }
+                assertFalse(stagedText.contains(stagedPass))
+                assertFalse(stagedText.contains("feed-user"))
+                assertFalse(stagedText.contains("\"authRef\""))
+                assertFalse(stagedText.contains("\"authClock\""))
+
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Success(
+                        ch.lkmc.neutrodyne.core.model
+                            .MergeSummary(0, 0, 0, 0, 0, 0, 0, 0),
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Completed)
+
+                val raw = decodeRawClocks(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks)!!
+                assertNull(raw.pendingAuth)
+                assertNull(raw.authReference)
+                assertTrue(secrets.originsWithPrefix(PENDING_AUTH_PREFIX).isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * "Use the server's library" applies the same proof to the seeded reference: an
+     * unpaired server auth seeds no reference and no durable marker.
+     */
+    @Test
+    fun useServerSeedsNoReferenceForAnUnpairedAuth() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            val secrets = FakeSecretStore()
+            val client = CountingClient(listOf(unpairedAuthPodcastRecord("s3ntinel-use-server")))
+            try {
+                link(db, deviceId = device)
+                val merger = mergerOf(db, client, library, secrets = secrets)
+
+                assertTrue(merger.merge(FirstLinkChoice.USE_SERVER) is FirstLinkResult.Completed)
+
+                val raw = decodeRawClocks(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks)!!
+                assertNull(raw.pendingAuth)
+                assertNull(raw.authReference)
+                assertTrue(secrets.originsWithPrefix(PENDING_AUTH_PREFIX).isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
     /** Unmatched lines park their record for the next ingest (10 Parked state and stubs). */
     @Test
     fun unmatchedLinesParkTheirRecord() =
@@ -1086,6 +1216,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 val resyncResult = merger.resync()
                 assertTrue(resyncResult is FirstLinkResult.Completed)
@@ -1140,6 +1272,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 val job = launch { merger.merge(FirstLinkChoice.MERGE) }
                 withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
@@ -1212,6 +1346,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 val job = launch { merger.merge(FirstLinkChoice.MERGE) }
                 withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
@@ -1249,6 +1385,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 val result = merger.merge(FirstLinkChoice.MERGE)
                 assertTrue(result is FirstLinkResult.Failed)
@@ -1283,6 +1421,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.MERGE) }
                 assertEquals(0, activity.count.value, "a cancelled merge must clear the activity flag")
@@ -1388,6 +1528,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 val job = launch { merger.resync() }
                 withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
@@ -1420,6 +1562,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 val result = merger.resync()
                 assertTrue(result is FirstLinkResult.Failed)
@@ -1454,6 +1598,8 @@ class FirstLinkMergerTest {
                             newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
+                        secrets = FakeSecretStore(),
+                        coordinator = FakeCredentialCommitCoordinator(),
                     )
                 assertFailsWith<CancellationException> { merger.resync() }
                 assertEquals(0, activity.count.value, "a cancelled resync must clear the activity flag")
@@ -1471,6 +1617,7 @@ class FirstLinkMergerTest {
         library: FakeLibraryMerger,
         activity: SyncActivityState = SyncActivityState(),
         effects: SyncApplyEffects = newEffects(db),
+        secrets: FakeSecretStore = FakeSecretStore(),
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -1482,6 +1629,8 @@ class FirstLinkMergerTest {
             effects = effects,
             clock = TestClock(now),
             activity = activity,
+            secrets = secrets,
+            coordinator = FakeCredentialCommitCoordinator(),
         )
 
     /**
@@ -1494,7 +1643,18 @@ class FirstLinkMergerTest {
         port: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort = FakeSettingsSyncPort(),
         coordinator: ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator =
             TestSettingsWriteCoordinator(),
-    ): SyncApplyEffects = SyncApplyEffects(db, port, coordinator) { true }
+        secrets: FakeSecretStore = FakeSecretStore(),
+        credentials: FakeCredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db,
+            port,
+            coordinator,
+            { true },
+            secrets,
+            credentials,
+            paths.cacheDir.toPath(),
+        )
 
     private suspend fun link(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
@@ -1628,8 +1788,9 @@ class FirstLinkMergerTest {
             gate =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeLocalNetworkGate(),
-            effects = SyncApplyEffects(db, settings, writeLocks) { true },
+            effects = newEffects(db, settings, writeLocks, secrets),
             capture = SettingsCapture(db, settings, writeLocks) { true },
+            notices = SyncNoticeBus(),
         )
     }
 
@@ -1655,6 +1816,7 @@ class FirstLinkMergerTest {
             notices = SyncNoticeBus(),
             deviceNames = DeviceNames { emptyList() },
             sharePasswords = { false },
+            coordinator = FakeCredentialCommitCoordinator(),
         )
 
     private fun podcastRecordFor(
@@ -1752,6 +1914,47 @@ class FirstLinkMergerTest {
                     "subscribed" to FieldValue(JsonPrimitive(true), clock(october)),
                     "title" to FieldValue(JsonPrimitive("Example"), clock(october)),
                 ),
+        )
+
+    /**
+     * A server record whose `auth` clock differs from its `credentialOrigin` clock — the
+     * mixed full record of an origin move, where nothing proves the pair (10 Passwords).
+     */
+    private fun unpairedAuthPodcastRecord(pass: String): RecordDto =
+        podcastRecord().copy(
+            fields =
+                podcastRecord().fields +
+                    mapOf(
+                        "credentialOrigin" to
+                            FieldValue(JsonPrimitive("https://a.example"), clock(october + 1_000)),
+                        "auth" to
+                            FieldValue(
+                                buildJsonObject {
+                                    put("u", "feed-user")
+                                    put("p", pass)
+                                },
+                                clock(october),
+                            ),
+                    ),
+        )
+
+    /** A podcast record carrying a wire `auth` pair for the protected-staging tests. */
+    private fun authPodcastRecord(pass: String): RecordDto =
+        podcastRecord().copy(
+            fields =
+                podcastRecord().fields +
+                    mapOf(
+                        "credentialOrigin" to
+                            FieldValue(JsonPrimitive("https://a.example"), clock(october)),
+                        "auth" to
+                            FieldValue(
+                                buildJsonObject {
+                                    put("u", "feed-user")
+                                    put("p", pass)
+                                },
+                                clock(october),
+                            ),
+                    ),
         )
 
     private fun upNextRecord(

@@ -12,6 +12,13 @@
     <string name="settings_about_summary">Version and build</string>
     <string name="settings_licences">Licences</string>
     <string name="settings_licences_summary">Open-source licences of bundled components</string>
+    <string name="settings_sync">Sync</string>
+    <string name="settings_sync_off">Off</string>
+    <string name="settings_sync_reconnect">Reconnect to %1$s</string>
+    <string name="settings_sync_unfinished">Finish linking</string>
+    <string name="settings_sync_linked">Linked</string>
+    <string name="settings_sync_linked_at">Linked · synced %1$s</string>
+    <string name="settings_sync_revoked">This device was unlinked</string>
 
     <!-- Settings › Appearance (M0a rows of 08 Settings screen structure). -->
     <string name="appearance_theme">Theme</string>

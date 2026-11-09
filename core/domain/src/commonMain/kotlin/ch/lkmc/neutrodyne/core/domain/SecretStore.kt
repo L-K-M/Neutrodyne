@@ -39,6 +39,12 @@ interface SecretStore : CredentialLookup {
 
     suspend fun remove(origin: String)
 
+    /**
+     * Every stored origin starting with [prefix] — 10's `sync:pending:` orphan reconciliation
+     * enumerates only its own staging entries, never feed credentials or sync tokens.
+     */
+    suspend fun originsWithPrefix(prefix: String): Set<String>
+
     /** The feed credential of [podcastId] — 05's opted-in exports, 10's opted-in `auth`. */
     suspend fun forPodcast(podcastId: Long): BasicCredentials?
 

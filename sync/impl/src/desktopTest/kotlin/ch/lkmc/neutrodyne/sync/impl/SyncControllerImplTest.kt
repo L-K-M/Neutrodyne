@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
@@ -53,6 +54,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -1165,6 +1167,7 @@ private class Harness(
     val classifier = FakeNetErrorClassifier()
     val linkFlow = LinkFlowImpl()
     val tokens = SyncTokenStore(secrets)
+    val credentials = FakeCredentialCommitCoordinator()
     val applier =
         SyncApplier(
             db = db,
@@ -1187,17 +1190,25 @@ private class Harness(
             notices = SyncNoticeBus(),
             deviceNames = DeviceNames { emptyList() },
             sharePasswords = { flags.sharePasswords },
+            coordinator = credentials,
         )
     val activity = SyncActivityState()
     val writeLocks = TestSettingsWriteCoordinator()
     val effects =
-        SyncApplyEffects(db, settings, writeLocks) {
-            address.syncPlaybackSettings()
-        }
+        SyncApplyEffects(
+            db,
+            settings,
+            writeLocks,
+            { address.syncPlaybackSettings() },
+            secrets,
+            credentials,
+            testStoragePaths().cacheDir.toPath(),
+        )
     val settingsCapture =
         SettingsCapture(db, settings, writeLocks) {
             address.syncPlaybackSettings()
         }
+    val noticeBus = SyncNoticeBus()
     val engine =
         SyncEngine(
             db = db,
@@ -1212,6 +1223,7 @@ private class Harness(
             gate = gate,
             effects = effects,
             capture = settingsCapture,
+            notices = noticeBus,
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -1227,6 +1239,8 @@ private class Harness(
             effects = effects,
             clock = clock,
             activity = activity,
+            secrets = secrets,
+            coordinator = credentials,
         )
 
     /** A temp-dir StoragePaths for the staging file and directory. */
@@ -1303,7 +1317,9 @@ private class Harness(
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
-            noticeBus = SyncNoticeBus(),
+            noticeBus = noticeBus,
+            secrets = secrets,
+            credentials = credentials,
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,
         )
