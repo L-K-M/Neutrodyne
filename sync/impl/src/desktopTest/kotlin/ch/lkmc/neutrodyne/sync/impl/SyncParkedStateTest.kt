@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
@@ -956,9 +957,9 @@ class SyncParkedStateTest {
 
                     override suspend fun setUsername(username: String?) = Unit
 
-                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
 
-                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
+                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Outcome.Success(Unit)
                 },
             tokens =
                 SyncTokenStore(FakeSecretStore()).apply {
