@@ -45,7 +45,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -176,6 +178,19 @@ class SyncControllerImpl(
     // Own the store-write/runtime-publication span together. A delayed older completion must
     // never overwrite a newer gate, and caller cancellation after commit cannot strand it.
     private val preferenceMutex = Mutex()
+
+    // Authorization and an admitted disconnect must not replace each other's account or token.
+    private val identityMutex = Mutex()
+
+    private data class DisconnectIdentity(
+        val serverUrl: String?,
+        val accountId: String?,
+        val deviceId: String?,
+        val nodeId: String?,
+        val token: String?,
+    ) {
+        override fun toString(): String = "DisconnectIdentity(redacted)"
+    }
 
     init {
         scope.launch { refreshStatus() }
@@ -437,6 +452,7 @@ class SyncControllerImpl(
     }
 
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
+        val expected = identityMutex.withLock { disconnectIdentity() }
         // One push round with a 5-s budget first, so the last edits reach the other devices; an
         // unreachable server must not block the local unlink.
         try {
@@ -448,39 +464,82 @@ class SyncControllerImpl(
         } catch (failure: Throwable) {
             lastRoundProblem.value = classify(failure)
         }
-        address.serverUrl()?.let { url -> runCatching { client.logout() } }
-        db.syncStateDao().unlink()
-        settingsCapture.clear()
-        address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
-        // 10 Passwords: the account's staged auth snapshots leave with the link — under the
-        // coordinator, like every credential delete.
-        credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
-        // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
-        scheduler.onUnlinked()
-        lastRoundProblem.value = null
-        refreshStatus()
-        return Outcome.Success(Unit)
-    }
-
-    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
-        if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
-        val (url, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
-        refreshGateVerdict()
-        return try {
-            client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+        return admittedDisconnect(expected) {
+            expected.serverUrl?.let { runCatching { client.logout() } }
             db.syncStateDao().unlink()
             settingsCapture.clear()
-            tokenStore.clear(hostOf(url))
+            expected.serverUrl?.let { tokenStore.clear(hostOf(it)) }
+            // 10 Passwords: the account's staged auth snapshots leave with the link — under the
+            // coordinator, like every credential delete.
             credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
+            // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
             scheduler.onUnlinked()
             lastRoundProblem.value = null
             refreshStatus()
             Outcome.Success(Unit)
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            Outcome.Failure(tracked(failure))
         }
+    }
+
+    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
+        if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
+        val expected =
+            identityMutex.withLock {
+                if (linkedContext() == null) null else disconnectIdentity()
+            } ?: return Outcome.Failure(SyncProblem.Revoked)
+        val url = expected.serverUrl ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
+        return admittedDisconnect(expected) {
+            try {
+                client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+                db.syncStateDao().unlink()
+                settingsCapture.clear()
+                tokenStore.clear(hostOf(url))
+                credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
+                scheduler.onUnlinked()
+                lastRoundProblem.value = null
+                refreshStatus()
+                Outcome.Success(Unit)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                Outcome.Failure(tracked(failure))
+            }
+        }
+    }
+
+    /** Read only while holding [identityMutex], which also owns authorization's writes. */
+    private suspend fun disconnectIdentity(): DisconnectIdentity {
+        val url = address.serverUrl()
+        val state = db.syncStateDao().get()
+        return DisconnectIdentity(
+            url,
+            state?.accountId,
+            state?.deviceId,
+            state?.nodeId,
+            url?.let { tokenStore.load(hostOf(it)) },
+        )
+    }
+
+    /**
+     * After admission the application owns the request and cleanup. Leaving the screen cancels
+     * only its await; the RPC remains cancellable by its normal timeout or application shutdown.
+     * Recheck after the optional push so an old confirmation never disconnects a newer link.
+     */
+    private suspend fun admittedDisconnect(
+        expected: DisconnectIdentity,
+        operation: suspend () -> Outcome<Unit, SyncProblem>,
+    ): Outcome<Unit, SyncProblem> {
+        coroutineContext.ensureActive()
+        return scope
+            .async(start = CoroutineStart.UNDISPATCHED) {
+                identityMutex.withLock {
+                    if (disconnectIdentity() != expected) {
+                        Outcome.Failure(SyncProblem.Revoked)
+                    } else {
+                        operation()
+                    }
+                }
+            }.await()
     }
 
     override suspend fun renameDevice(
@@ -701,59 +760,60 @@ class SyncControllerImpl(
         token: TokenResponse,
         nodeId: NodeId,
         deviceId: String,
-    ) {
-        // The identity is the session the submit belongs to: a superseded or cancelled job must
-        // never write it into a newer session's state.
-        coroutineContext.ensureActive()
-        tokenStore.save(hostOf(server.serverUrl), token.token)
-        address.setServerUrl(server.serverUrl)
-        token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
-        db.withWriteTransaction {
-            val existing = db.syncStateDao().get()
-            db.syncStateDao().upsert(
-                (existing ?: SyncStateEntity()).copy(
-                    enabled = false,
-                    applying = false,
-                    serverUrl = server.serverUrl,
-                    accountId = token.accountId,
-                    deviceId = deviceId,
-                    nodeId = nodeId.value,
-                    protocol = PROTOCOL_VERSION,
-                    cursor = null,
-                    hlc = existing?.hlc ?: 0,
-                    linkedAt = null,
-                    lastSyncAt = null,
-                    lastError = null,
-                ),
-            )
-        }
-        lastRoundProblem.value = null
-        accountName = token.username
-        refreshStatus()
+    ): Unit =
+        identityMutex.withLock {
+            // The identity is the session the submit belongs to: a superseded or cancelled job must
+            // never write it into a newer session's state.
+            coroutineContext.ensureActive()
+            tokenStore.save(hostOf(server.serverUrl), token.token)
+            address.setServerUrl(server.serverUrl)
+            token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
+            db.withWriteTransaction {
+                val existing = db.syncStateDao().get()
+                db.syncStateDao().upsert(
+                    (existing ?: SyncStateEntity()).copy(
+                        enabled = false,
+                        applying = false,
+                        serverUrl = server.serverUrl,
+                        accountId = token.accountId,
+                        deviceId = deviceId,
+                        nodeId = nodeId.value,
+                        protocol = PROTOCOL_VERSION,
+                        cursor = null,
+                        hlc = existing?.hlc ?: 0,
+                        linkedAt = null,
+                        lastSyncAt = null,
+                        lastError = null,
+                    ),
+                )
+            }
+            lastRoundProblem.value = null
+            accountName = token.username
+            refreshStatus()
 
-        coroutineContext.ensureActive()
-        val summary = client.account()
-        accountName = summary.username
-        val localPodcasts = db.podcastDao().allForExport().size
-        val localGroups = db.groupDao().groupsInOrder().size
-        when {
-            summary.counts.podcasts == 0 && summary.counts.groups == 0 -> {
-                if (localPodcasts == 0 && localGroups == 0) {
-                    completeEmptyLink()
-                } else {
-                    linkFlow.confirmUpload(summary.username, hostOf(server.serverUrl))
+            coroutineContext.ensureActive()
+            val summary = client.account()
+            accountName = summary.username
+            val localPodcasts = db.podcastDao().allForExport().size
+            val localGroups = db.groupDao().groupsInOrder().size
+            when {
+                summary.counts.podcasts == 0 && summary.counts.groups == 0 -> {
+                    if (localPodcasts == 0 && localGroups == 0) {
+                        completeEmptyLink()
+                    } else {
+                        linkFlow.confirmUpload(summary.username, hostOf(server.serverUrl))
+                    }
+                }
+
+                localPodcasts == 0 && localGroups == 0 -> {
+                    beginMerge(FirstLinkChoice.USE_SERVER)
+                }
+
+                else -> {
+                    linkFlow.chooseFirstLink(localPodcasts, localGroups, summary.counts.podcasts, summary.counts.groups)
                 }
             }
-
-            localPodcasts == 0 && localGroups == 0 -> {
-                beginMerge(FirstLinkChoice.USE_SERVER)
-            }
-
-            else -> {
-                linkFlow.chooseFirstLink(localPodcasts, localGroups, summary.counts.podcasts, summary.counts.groups)
-            }
         }
-    }
 
     /** Nothing to combine: the link completes without a merge (both libraries are empty). */
     private suspend fun completeEmptyLink() {

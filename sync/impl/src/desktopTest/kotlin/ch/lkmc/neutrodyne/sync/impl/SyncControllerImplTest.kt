@@ -782,7 +782,7 @@ class SyncControllerImplTest {
             try {
                 h.seedLinked()
                 h.client.syncHandler = { _, _ -> throw java.io.IOException("offline") }
-                h.client.logout = { throw java.io.IOException("offline") }
+                h.client.logoutHandler = { throw java.io.IOException("offline") }
                 val result = h.controller.unlink()
                 assertTrue(result is Outcome.Success)
                 assertFalse(h.tokenStoreContains(host))
@@ -1330,10 +1330,11 @@ class SyncControllerImplTest {
 }
 
 /** The controller, its collaborators and the scripted client for one test. */
-private class Harness(
+internal class Harness(
     private val scope: TestScope,
     private val now: Long,
     val secrets: SecretStore = FakeSecretStore(),
+    controllerDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
 ) {
     /**
      * The controller's own scope, cancelled before the database closes. A supervisor like the
@@ -1341,7 +1342,7 @@ private class Harness(
      */
     private val controllerJob = kotlinx.coroutines.SupervisorJob()
     private val controllerScope =
-        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob)
+        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob + controllerDispatcher)
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
@@ -1678,7 +1679,7 @@ private class Harness(
 }
 
 /** A [SyncClient] whose every call is scripted and recorded. */
-private class ScriptedSyncClient : SyncClient {
+internal class ScriptedSyncClient : SyncClient {
     val calls = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
     val revokes = mutableListOf<String>()
@@ -1704,7 +1705,7 @@ private class ScriptedSyncClient : SyncClient {
         DeviceDto(id, name, "android", "1.0.0", null, false, false)
     }
     var revoke: suspend (String) -> Unit = {}
-    var logout: suspend () -> Unit = {}
+    var logoutHandler: suspend () -> Unit = {}
     var summary: AccountSummary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
     var changesHandler: suspend (String?) -> ChangesPage = { emptyPage() }
     var syncHandler: suspend (String?, List<ChangeDto>) -> SyncResponse = { _, changes -> defaultSyncResponse(changes) }
@@ -1773,7 +1774,7 @@ private class ScriptedSyncClient : SyncClient {
 
     override suspend fun logout() {
         calls += "logout"
-        logout()
+        logoutHandler()
     }
 
     override suspend fun devices(): List<DeviceDto> {
@@ -1833,7 +1834,7 @@ private class ScriptedSyncClient : SyncClient {
     }
 }
 
-private class FakeNetErrorClassifier(
+internal class FakeNetErrorClassifier(
     var result: NetError = NetError.Offline,
 ) : NetErrorClassifier {
     override fun classify(e: Throwable): NetError = result
