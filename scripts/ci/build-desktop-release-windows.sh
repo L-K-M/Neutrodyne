@@ -14,7 +14,10 @@ V="$1" DIST="$2" SMOKE_IMG="$3"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd -P)"
 cd "$REPO_ROOT"
-smoke() { scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt; }
+# MD3 AC2: the same recorded-resolve proof the POSIX leg arms; smoke-start.sh
+# owns the path-form translation the JVM property needs on Windows.
+RECORDED_RESOLVE="$REPO_ROOT/youtube/engine/src/test/resources/recorded/resolve"
+smoke() { scripts/desktop/smoke-start.sh "$1" --engine-replay="$RECORDED_RESOLVE" | tee -a smoke.txt; }
 mkdir -p "$DIST" "$SMOKE_IMG"
 
 ./gradlew createDistributable packageMsi -Pneutrodyne.installKind=msi

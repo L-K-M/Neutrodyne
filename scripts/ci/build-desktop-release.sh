@@ -35,12 +35,20 @@ SMOKE_IMG=/tmp/neutrodyne-smoke-img
 mkdir -p "$DIST" "$SMOKE_IMG"
 : >smoke.txt
 
+# MD3 AC2: every packaged smoke this script drives must also prove the engine —
+# the image's own bundled interpreter, shim and yt-dlp resolving the shared
+# corpus' recorded exchanges under ReplayRH. smoke-start.sh injects the replay
+# property and gates the SMOKE line's engine evidence. This script only ever
+# packages engine builds; the emergency -Pneutrodyne.youtubeEngine=false leg
+# builds APKs only, no packaged desktop image.
+RECORDED_RESOLVE="$REPO_ROOT/youtube/engine/src/test/resources/recorded/resolve"
+
 smoke() { # <image dir> — append the SMOKE line for check-runtime-sources
-    scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt
+    scripts/desktop/smoke-start.sh "$1" --engine-replay="$RECORDED_RESOLVE" | tee -a smoke.txt
     scripts/ci/check-runtime-sources.sh --image "$1" --smoke smoke.txt
 }
 xsmoke() { # smoke() under xvfb + a private session bus (Linux)
-    xvfb-run -a dbus-run-session scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt
+    xvfb-run -a dbus-run-session scripts/desktop/smoke-start.sh "$1" --engine-replay="$RECORDED_RESOLVE" | tee -a smoke.txt
     scripts/ci/check-runtime-sources.sh --image "$1" --smoke smoke.txt
 }
 check_package() {
