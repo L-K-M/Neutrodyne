@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
@@ -107,7 +108,68 @@ class SourceReader(
         val session = db.playSessionDao().get() ?: return null
         val episode = session.currentEpisodeId?.let { db.episodeDao().byId(it) }
         val podcast = episode?.let { db.podcastDao().byId(it.podcastId) }
-        return SessionSource(session, episode, podcast)
+        return SessionSource(session, episode, podcast, sessionContext(session))
+    }
+
+    /**
+     * The session's context columns as the wire object (10: `{type, group, podcast, order,
+     * filters {flags, media}, minSortDate, anchor {p, k}, anchorSortDate}`). Groups publish by
+     * `uuid`, podcasts by `syncId`; an unresolvable or cleared context degrades to `EXTERNAL`.
+     */
+    private suspend fun sessionContext(session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity): JsonObject {
+        val scoped =
+            when (session.contextType) {
+                ContextType.GROUP -> {
+                    session.contextId
+                        ?.let { db.groupDao().groupById(it)?.uuid }
+                        ?.let { "GROUP" to ("group" to it) }
+                }
+
+                ContextType.PODCAST -> {
+                    session.contextId
+                        ?.let { db.podcastDao().byId(it)?.syncId }
+                        ?.let { "PODCAST" to ("podcast" to it) }
+                }
+
+                ContextType.ALL, ContextType.UNGROUPED, ContextType.DOWNLOADS -> {
+                    session.contextType!!.name to null
+                }
+
+                else -> {
+                    null
+                }
+            } ?: return JsonObject(mapOf("type" to JsonPrimitive("EXTERNAL")))
+        return JsonObject(
+            buildMap {
+                put("type", JsonPrimitive(scoped.first))
+                scoped.second?.let { (key, value) -> put(key, JsonPrimitive(value)) }
+                put("order", JsonPrimitive(session.contextOrder.name))
+                put(
+                    "filters",
+                    JsonObject(
+                        mapOf(
+                            "flags" to JsonPrimitive(session.contextFilterFlags),
+                            "media" to JsonPrimitive(session.contextMediaFilter.name),
+                        ),
+                    ),
+                )
+                session.contextMinSortDate?.let { put("minSortDate", JsonPrimitive(it)) }
+                sessionAnchor(session)?.let { put("anchor", it) }
+                session.contextAnchorSortDate?.let { put("anchorSortDate", JsonPrimitive(it)) }
+            },
+        )
+    }
+
+    /** The context anchor as `{p, k}` — dropped when the anchor row is gone. */
+    private suspend fun sessionAnchor(session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity): JsonObject? {
+        val anchor = session.contextAnchorEpisodeId?.let { db.episodeDao().byId(it) } ?: return null
+        val podcast = db.podcastDao().byId(anchor.podcastId) ?: return null
+        return JsonObject(
+            mapOf(
+                "p" to JsonPrimitive(podcast.syncId),
+                "k" to JsonPrimitive(anchor.identityKey),
+            ),
+        )
     }
 
     suspend fun sessionField(field: String): JsonElement? = session()?.field(field)
@@ -440,6 +502,7 @@ class SessionSource(
     val session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity,
     val episode: EpisodeEntity?,
     val podcast: PodcastEntity?,
+    val context: JsonObject,
 ) {
     fun field(name: String): JsonElement? =
         when (name) {
@@ -455,7 +518,7 @@ class SessionSource(
             }
 
             "context" -> {
-                null
+                context
             }
 
             else -> {

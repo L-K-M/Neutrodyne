@@ -1518,7 +1518,7 @@ private class Harness(
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
             notices = SyncNoticeBus(),
-            deviceNames = DeviceNames { emptyList() },
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { flags.sharePasswords },
             coordinator = credentials,
         )
@@ -1590,6 +1590,17 @@ private class Harness(
         )
     }
 
+    val adopter =
+        SessionAdopter(
+            db = db,
+            playback = NoPlaybackSync,
+            names = DeviceNames { null },
+            clock = clock,
+            secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
+            scope = controllerScope,
+        )
+
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()
     val scheduler: SyncScheduler =
@@ -1616,7 +1627,10 @@ private class Harness(
                         schedulerCalls += "unlinked"
                     }
                 },
-            linkStateChanged = { events.reevaluate() },
+            linkStateChanged = {
+                events.reevaluate()
+                adopter.linkStateChanged()
+            },
         )
 
     /**
@@ -1686,6 +1700,7 @@ private class Harness(
             errors = classifier,
             scheduler = scheduler,
             events = events,
+            adopter = adopter,
             activity = activity,
             noticeBus = noticeBus,
             secrets = secrets,

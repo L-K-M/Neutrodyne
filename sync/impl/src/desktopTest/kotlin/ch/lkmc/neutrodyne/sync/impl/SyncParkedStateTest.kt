@@ -876,7 +876,7 @@ class SyncParkedStateTest {
             syncIngestHook = SyncIngestHook.None,
             channelSync = NoGroupChannelSync,
             notices = SyncNoticeBus(),
-            deviceNames = DeviceNames { emptyList() },
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { false },
             coordinator =
                 ch.lkmc.neutrodyne.core.testing

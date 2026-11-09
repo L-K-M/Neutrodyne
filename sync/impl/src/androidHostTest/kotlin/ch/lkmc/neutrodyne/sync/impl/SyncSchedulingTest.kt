@@ -349,7 +349,7 @@ class SyncSchedulingTest {
                         override suspend fun onDeleted(uuid: String) = Unit
                     },
                 notices = SyncNoticeBus(),
-                deviceNames = DeviceNames { emptyList() },
+                deviceNames = ClientDeviceNames { emptyList() },
                 sharePasswords = { false },
                 coordinator = FakeCredentialCommitCoordinator(),
             )
