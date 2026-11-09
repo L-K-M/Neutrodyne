@@ -41,6 +41,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -128,7 +129,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun anOrdinaryResponsePageAppliesAndAcksItsSetting() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -160,7 +161,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aLaterHasMorePageAppliesAndAcksItsSetting() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -201,7 +202,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aPriorMarkerRetriesBeforeThePushEvenWhileOffline() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val port = FakeSettingsSyncPort()
@@ -244,7 +245,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aFailedApplyStaysPendingAndANextRoundRecovers() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -282,7 +283,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aStrictlyNewerLocalIntentWinsOverTheRoundDrain() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -323,7 +324,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aRoundWithTheSwitchOffLeavesTheMarkerPendingUntilEnabled() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -359,7 +360,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun theStartInitializerDrainsWhileLinked() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -408,7 +409,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun theStartInitializerHydratesTheShareGateBeforeTheDrain() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val h = harness(db, scriptedClient(syncRecords = emptyList()))
@@ -453,7 +454,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun theStartInitializerReadsNoSwitchesWhileUnconfigured() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 val h = harness(db, scriptedClient(syncRecords = emptyList()))
                 h.address.updateServerUrl(null)
@@ -491,7 +492,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun theFirstRoundPushesAuthUnderTheStoredShareGate() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val sent = mutableListOf<ChangeDto>()
@@ -527,7 +528,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aStoredOffShareGateStillExportsNoAuth() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val sent = mutableListOf<ChangeDto>()
@@ -553,7 +554,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun aCommittedLocalIntentMaterializesBeforeTheRoundSendsIt() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -579,7 +580,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun anUnmaterializableIntentIsNotPushedOrAcknowledged() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -606,7 +607,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     @Test
     fun anAckCannotRelabelANewerOffSwitchWrite() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -653,7 +654,7 @@ abstract class SyncEngineEffectsDrainTestBase {
 
     private fun olderRestore(write: RestoreWrite) =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 seedLinked(db)
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
@@ -960,8 +961,12 @@ abstract class SyncEngineEffectsDrainTestBase {
             private fun unsupported(): Nothing = throw UnsupportedOperationException()
         }
 
-    /** The host's real in-memory Room database; the Android host supplies a Robolectric context. */
-    protected abstract fun newTestDb(): NeutrodyneDatabase
+    /**
+     * The host's real in-memory Room database; the Android host supplies a Robolectric context.
+     * Its query context is an [kotlinx.coroutines.test.UnconfinedTestDispatcher] sharing
+     * [scheduler], so Room work stays on the test's virtual clock.
+     */
+    protected abstract fun newTestDb(scheduler: TestCoroutineScheduler): NeutrodyneDatabase
 
     private companion object {
         const val AUTH_ORIGIN = "https://a.example"
