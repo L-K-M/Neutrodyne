@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -112,6 +113,30 @@ class MediaSessionCoordinatorTest {
                     .single { it.action == FakePlaybackController.Action.SEEK }
                     .positionMs,
             ).isEqualTo(42_000)
+        }
+
+    @Test
+    fun playAndToggleDispatchTheSystemOrigin() =
+        runTest {
+            // 10 pull before play: OS commands are the fast path — they never wait on a pull.
+            coordinator().start()
+            runCurrent()
+
+            session.emit(RemoteCommand.Play)
+            session.emit(RemoteCommand.Toggle)
+            runCurrent()
+
+            val origins =
+                controller.calls
+                    .filterIsInstance<FakePlaybackController.Call.Transport>()
+                    .filter {
+                        it.action in
+                            setOf(
+                                FakePlaybackController.Action.PLAY,
+                                FakePlaybackController.Action.TOGGLE,
+                            )
+                    }.map { it.origin }
+            assertThat(origins).containsExactly(PlayOrigin.SYSTEM, PlayOrigin.SYSTEM).inOrder()
         }
 
     @Test
