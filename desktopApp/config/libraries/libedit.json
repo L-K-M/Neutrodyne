@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:libedit",
+  "name": "libedit",
+  "description": "Command-line editing (CPython readline's EditLine wrapper).",
+  "website": "https://thrysoee.dk/editline/",
+  "developers": [],
+  "licenses": [
+    "bsd-3-clause-libedit"
+  ],
+  "artifactVersion": "20240808-3.1",
+  "tag": "bundled"
+}

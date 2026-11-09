@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:cpython",
+  "name": "CPython",
+  "description": "The Python runtime bundled with the desktop app (python-build-standalone release 20261003, install_only_stripped, trimmed by scripts/engine/trim-python.sh). Full licence stack included.",
+  "website": "https://www.python.org",
+  "developers": [],
+  "licenses": [
+    "Python-2.0"
+  ],
+  "artifactVersion": "3.14.8",
+  "tag": "bundled"
+}

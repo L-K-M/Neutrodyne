@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:pbs-patches",
+  "name": "python-build-standalone build patches",
+  "description": "python-build-standalone's own MPL-2.0 build patches, compiled into the CPython it ships, unmodified by us (PO-48 named case, owner-approved 2026-11-07). The pinned source is attached to every release: python-build-standalone-20261003-src.tar.gz.",
+  "website": "https://github.com/astral-sh/python-build-standalone",
+  "developers": [],
+  "licenses": [
+    "MPL-2.0"
+  ],
+  "artifactVersion": "20261003",
+  "tag": "bundled"
+}

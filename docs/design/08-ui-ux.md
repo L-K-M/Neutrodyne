@@ -1399,6 +1399,20 @@ Rows while linked:
 | Delete my data on the server | Text button in `error` colour | Dialog "Delete your data on {host}?" + "Removes your subscriptions, groups, listening history, Up next and synced settings from the server, including its backups of your account, and unlinks all your devices. Every device keeps its own library. The server's nightly backups keep a copy for up to 7 days." + a field "Type DELETE to confirm" (the button enables on exactly `DELETE`, not translated) → `deleteServerData("DELETE")` ([10 Unlink and Delete my data](10-sync.md#unlink-and-delete-my-data)) |
 | Diagnostics | — | `SyncDiagnosticsKey` |
 
+**Implementation note (2026-11-09, MS2).** The entry path into this screen is
+shipped: the Settings home row pushes `SyncSettingsKey` (the only sync UI while
+`NotConfigured`, R7.1), `NotConfigured` offers the address field prefilled from
+`sync.server_url` with "Continue" → `SyncSetupKey(address)` and "How to run a
+server" → `{repoUrl}#run-the-server`, and `Reconnect`, `LinkUnfinished` and
+`Revoked` push `SyncSetupKey(serverUrl)` — `LinkUnfinished` resumes the step the
+existing `LinkFlow` holds, it is not cancelled or restarted. `Revoked` shows
+"This device was unlinked" with "Link again". `Linked` currently shows only the
+status text, "Sync now" and the "What syncs" text; the linked rows above
+(device name, Link another device, Devices, the two switches, What the server
+stores, Unlink, Delete my data, Diagnostics), `Reconnect`'s "Forget server",
+the held-changes review and the restore prompts remain MS2 work, as do the
+approve sheet, devices list and diagnostics screens.
+
 #### Linking a device
 
 `SyncSetupKey(serverUrl)`, one screen whose body follows `LinkFlow.state` (10's `LinkState`; flow and states: [10 Link methods](10-sync.md#link-methods)). The flow is started with `SyncController.startLink(serverUrl, method)` and cancelled with `LinkFlow.cancel()` when the user leaves before `Authorising`; leaving during `Merging` only navigates away (the merge continues, and a failure leaves `LinkUnfinished`).

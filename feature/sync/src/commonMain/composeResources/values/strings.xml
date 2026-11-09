@@ -13,6 +13,10 @@
   <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
   <string name="sync_finish_link">Finish linking to %1$s.</string>
   <string name="sync_revoked">This device was unlinked from %1$s.</string>
+  <string name="sync_server_address">Server address</string>
+  <string name="sync_run_server">How to run a server</string>
+  <string name="sync_reconnect_action">Reconnect</string>
+  <string name="sync_link_again">Link again</string>
 
   <string name="sync_setup_title">Link a device</string>
   <string name="sync_setup_address_hint">sync.example.org</string>

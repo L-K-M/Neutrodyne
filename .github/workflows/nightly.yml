@@ -28,7 +28,31 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | desktop-windows (desktop-packages' windows-x64 leg alone) | windows-identity (the windows-x64 ndmedia native boundary: process AUMID, the SMTC worker's release-ID re-assert and the .lnk stamp) | benchmark-dryrun (M10 journeys; timings are diagnostic) | benchmark (cold-start and cover-grid Macrobenchmarks; report-only, emulator timings are diagnostic) | baseline-profile (generate the baseline and startup profiles into an artifact) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36) | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build) | api37-subscribe (API 37 ATF diagnostic on the api37-16k job: SubscribeJourneyTest only) | playback-class (diagnostic: only the classes input's instrumented selection on the api36 debug GMD)"
+        description: >-
+          full
+          | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg)
+          | reboot (the API 37 release leg with the host-driven boot resumption driver)
+          | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path)
+          | downloads (M6a journeys on API26/33/34/36)
+          | desktop (M0b)
+          | desktop-packages (installed and extracted packages on all four desktop targets)
+          | desktop-windows (desktop-packages' windows-x64 leg alone)
+          | windows-identity (the windows-x64 ndmedia native boundary: process AUMID, the SMTC worker's release-ID re-assert and the .lnk stamp)
+          | benchmark-dryrun (M10 journeys; timings are diagnostic)
+          | benchmark (cold-start and cover-grid Macrobenchmarks; report-only, emulator timings are diagnostic)
+          | baseline-profile (generate the baseline and startup profiles into an artifact)
+          | screenshots-full (M10 full Android and desktop matrix)
+          | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)
+          | bmgr (published-release local backup/restore on API31 + API36)
+          | bgstart (M4 P6b external background-start impossibility gate on API31 + API36)
+          | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance)
+          | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)
+          | m10-a11y (M10 acceptance: the four ATF/journey classes on api36)
+          | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36)
+          | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build)
+          | api37-subscribe (API 37 ATF diagnostic on the api37-16k job: SubscribeJourneyTest only)
+          | playback-class (diagnostic: only the classes input's instrumented selection on the api36 debug GMD)
+          | youtube-canary (live reports only)
         default: full
       classes:
         description: "instrumentation class filter for scope=playback-class; Class#method narrows to one test"
@@ -2120,7 +2144,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'youtube-canary'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

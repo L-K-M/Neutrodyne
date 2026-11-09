@@ -4,8 +4,10 @@ package ch.lkmc.neutrodyne.desktop.smoke
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import com.google.common.truth.Truth.assertThat
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Test
 
 /**
@@ -111,6 +113,115 @@ class SmokeModeTest {
         assertThat(json["steps"]!!.jsonObject.keys).contains("window")
         assertThat(json["steps"]!!.jsonObject.keys).doesNotContain(SmokeMode.FIRST_FRAME_STEP)
         assertThat(json.keys).doesNotContain("window")
+    }
+
+    /**
+     * MD3 AC2's report shape (11 Smoke mode step 6): a run the replay property armed carries
+     * the proof's evidence object in `engine` and drops `engine` from `pending`. The proof
+     * itself is the `engineStep` seam here — the packaged run's real one is
+     * `PackagedEngineProof`, which needs the image's own resources.
+     */
+    @Test
+    fun `an armed engine run drops engine from pending and reports its evidence`() =
+        withEngineReplay {
+            val evidence = buildJsonObject { put("resolve", "ok") }
+            val lines = mutableListOf<String>()
+            val exit =
+                SmokeMode(
+                    output = lines::add,
+                    windowStep = { FIRST_FRAME_MS },
+                    engineStep = { _, _ -> evidence },
+                ).run()
+
+            assertThat(exit).isEqualTo(0)
+            val json = Json.parseToJsonElement(lines.single().removePrefix("SMOKE ")).jsonObject
+            assertThat(json["engine"]).isEqualTo(evidence)
+            assertThat(json["pending"]!!.jsonPrimitive.content).doesNotContain("engine")
+            assertThat(json["steps"]!!.jsonObject.keys).contains("engine")
+            assertThat(json.keys).doesNotContain("failed")
+        }
+
+    /**
+     * The armed run's honest failure (MD3 AC2): the replay property reaches the engine step,
+     * and a step that cannot prove — here the real `runEngineProof` against a test JVM with
+     * no packaged engine resources — must fail the run with `failed` and keep `engine`
+     * pending. A plain unarmed success (exit 0, engine pending) is the wrong answer: the
+     * pre-proof contract ignored the property and reported exactly that.
+     */
+    @Test
+    fun `an armed engine run cannot report a plain pending success`() =
+        withEngineReplay {
+            val lines = mutableListOf<String>()
+            val exit =
+                SmokeMode(
+                    output = lines::add,
+                    windowStep = { FIRST_FRAME_MS },
+                ).run()
+
+            assertThat(exit).isEqualTo(1)
+            val json = Json.parseToJsonElement(lines.single().removePrefix("SMOKE ")).jsonObject
+            assertThat(json.keys).contains("failed")
+            assertThat(json.keys).doesNotContain("engine")
+            assertThat(json["pending"]!!.jsonPrimitive.content).contains("engine")
+        }
+
+    /**
+     * A proof that runs and throws — missing resources, a dev interpreter, a failed resolve —
+     * is a failed step like any other: exit 1, `failed` names it, `engine` stays pending.
+     */
+    @Test
+    fun `a thrown engine proof is a failed step`() =
+        withEngineReplay {
+            val lines = mutableListOf<String>()
+            val exit =
+                SmokeMode(
+                    output = lines::add,
+                    windowStep = { FIRST_FRAME_MS },
+                    engineStep = { _, _ -> error("packaged engine resources are missing") },
+                ).run()
+
+            assertThat(exit).isEqualTo(1)
+            val json = Json.parseToJsonElement(lines.single().removePrefix("SMOKE ")).jsonObject
+            assertThat(json["failed"]!!.jsonPrimitive.content).contains("packaged engine resources")
+            assertThat(json["steps"]!!.jsonObject.keys).contains("engine")
+            assertThat(json["pending"]!!.jsonPrimitive.content).contains("engine")
+        }
+
+    /** The arming property's gate: only `neutrodyne.smoke=true` plus a nonblank dir arms it. */
+    @Test
+    fun `engineReplayDir arms only inside a smoke run`() {
+        assertThat(SmokeMode.engineReplayDir("true", "/recorded/resolve"))
+            .isEqualTo(java.io.File("/recorded/resolve"))
+        assertThat(SmokeMode.engineReplayDir("false", "/recorded/resolve")).isNull()
+        assertThat(SmokeMode.engineReplayDir(null, "/recorded/resolve")).isNull()
+        assertThat(SmokeMode.engineReplayDir("true", null)).isNull()
+        assertThat(SmokeMode.engineReplayDir("true", "")).isNull()
+        assertThat(SmokeMode.engineReplayDir("true", "   ")).isNull()
+    }
+
+    private fun <T> withEngineReplay(block: () -> T): T {
+        val smokeBefore = System.getProperty(SmokeMode.SYSTEM_PROPERTY)
+        val replayBefore = System.getProperty(SmokeMode.ENGINE_REPLAY_PROPERTY)
+        System.setProperty(SmokeMode.SYSTEM_PROPERTY, "true")
+        System.setProperty(SmokeMode.ENGINE_REPLAY_PROPERTY, "/recorded/resolve")
+        return try {
+            block()
+        } finally {
+            if (smokeBefore ==
+                null
+            ) {
+                System.clearProperty(SmokeMode.SYSTEM_PROPERTY)
+            } else {
+                System.setProperty(SmokeMode.SYSTEM_PROPERTY, smokeBefore)
+            }
+            if (replayBefore ==
+                null
+            ) {
+                System.clearProperty(SmokeMode.ENGINE_REPLAY_PROPERTY)
+            } else {
+                System.setProperty(SmokeMode.ENGINE_REPLAY_PROPERTY, replayBefore)
+            }
+        }
     }
 
     @Test

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:ncurses",
+  "name": "ncurses",
+  "description": "Terminal handling (CPython _curses).",
+  "website": "https://invisible-island.net/ncurses/",
+  "developers": [],
+  "licenses": [
+    "x11-ncurses"
+  ],
+  "artifactVersion": "6.5",
+  "tag": "bundled"
+}

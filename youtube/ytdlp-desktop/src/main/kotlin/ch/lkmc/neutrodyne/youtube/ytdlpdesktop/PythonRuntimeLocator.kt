@@ -6,11 +6,13 @@ import java.io.File
 /**
  * Which CPython runs the engine child (11 "Python runtime").
  *
- * The bundled python-build-standalone runtime arrives with the packaging slice; this slice's
- * locator resolves an explicit development path or the packaged/dev resource locations and
- * probes the interpreter once for its `<major>.<minor>` marker suffix. A null [PythonRuntimeLocator.locate]
+ * The bundled python-build-standalone runtime arrives with the packaging slice; the locator
+ * resolves an explicit development path, then the packaged resources (`<resources>/engine/python/`,
+ * the tree `trimPythonStandalone` staged), then the dev build's trimmed tree, and probes the
+ * interpreter once for its `<major>.<minor>` marker suffix. A null [PythonRuntimeLocator.locate]
  * maps to `HostState.UNUSABLE`, never a crash: the engine reports ENGINE_FAILED and keeps the
- * external capability path.
+ * external capability path. An arbitrary PATH interpreter is never a production candidate
+ * ([PythonRuntimeSearch] is the development/test seam).
  */
 data class PythonRuntime(
     val executable: File,
@@ -20,7 +22,12 @@ data class PythonRuntime(
         private val MINOR = Regex("""\d+\.\d+""")
 
         /** Runs `<executable> -I -c` once; null when it cannot run or answer (11's non-executable row). */
-        fun probe(executable: File): PythonRuntime? =
+        fun probe(executable: File): PythonRuntime? = probe(executable, PROBE_TIMEOUT_MS)
+
+        internal fun probe(
+            executable: File,
+            timeoutMs: Long,
+        ): PythonRuntime? =
             try {
                 val process =
                     ProcessBuilder(
@@ -30,15 +37,16 @@ data class PythonRuntime(
                         "import sys;print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
                     ).redirectErrorStream(true)
                         .start()
-                val answered =
-                    process.inputStream.bufferedReader().use { it.readText().trim() }
-                if (!process.waitFor(PROBE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                // The version line is tiny; reading it before the timed wait would let
+                // a silent, hung interpreter keep the pipe open past the deadline.
+                if (!process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
                     null
-                } else if (process.exitValue() != 0 || !MINOR.matches(answered)) {
+                } else if (process.exitValue() != 0) {
                     null
                 } else {
-                    PythonRuntime(executable, answered)
+                    val answered = process.inputStream.bufferedReader().use { it.readText().trim() }
+                    answered.takeIf(MINOR::matches)?.let { PythonRuntime(executable, it) }
                 }
             } catch (_: Exception) {
                 null
@@ -67,8 +75,8 @@ class DesktopPythonRuntimeLocator(
     override fun locate(): PythonRuntime? {
         val candidate =
             explicit()?.takeIf(File::isFile)
-                ?: engineResources()?.resolve("python/${exeName()}")?.takeIf(File::isFile)
-                ?: devStandalone()?.resolve(exeName())?.takeIf(File::isFile)
+                ?: engineResources()?.let(::interpreterIn)?.takeIf(File::isFile)
+                ?: devStandalone()?.let(::interpreterIn)?.takeIf(File::isFile)
                 ?: return null
         // Only a working interpreter is memoized: a broken one is re-probed so that
         // retryStart picks up a binary the user fixed or replaced in place.
@@ -79,6 +87,15 @@ class DesktopPythonRuntimeLocator(
         }
     }
 
+    /** The interpreter inside a staged runtime tree (11 Resources layout): `python/python.exe` on
+     * Windows, `python/bin/python3` elsewhere. */
+    private fun interpreterIn(resources: File): File =
+        if (isWindows()) {
+            resources.resolve("python/python.exe")
+        } else {
+            resources.resolve("python/bin/${exeName()}")
+        }
+
     private fun exeName(): String = if (isWindows()) "python.exe" else "python3"
 
     companion object {
@@ -88,6 +105,7 @@ class DesktopPythonRuntimeLocator(
         fun standard(
             engineResources: () -> File?,
             rootDir: () -> File?,
+            probe: (File) -> PythonRuntime? = PythonRuntime.Companion::probe,
         ): DesktopPythonRuntimeLocator =
             DesktopPythonRuntimeLocator(
                 explicit = {
@@ -98,19 +116,22 @@ class DesktopPythonRuntimeLocator(
                     rootDir()
                         ?.resolve("youtube/ytdlp-desktop/build/python-standalone")
                         ?.resolve(currentTarget())
+                        ?.resolve("trimmed")
                         ?.takeIf(File::isDirectory)
                 },
+                probe = probe,
             )
 
-        /** `<os>-<arch>` PBS target id; linux-aarch64 is not a shipped target (11 Build matrix). */
+        /** PBS target IDs match the fetcher's directory names (11 Build matrix). */
         private fun currentTarget(): String {
+            val osName = System.getProperty("os.name").lowercase()
             val os =
                 when {
                     isWindows() -> "windows"
-                    System.getProperty("os.name").let { it.contains("mac") || it.contains("darwin") } -> "macos"
+                    (osName.contains("mac") || osName.contains("darwin")) -> "macos"
                     else -> "linux"
                 }
-            val arch = if (System.getProperty("os.arch").let { it == "aarch64" || it == "arm64" }) "aarch64" else "x64"
+            val arch = if (System.getProperty("os.arch").let { it == "aarch64" || it == "arm64" }) "arm64" else "x64"
             return "$os-$arch"
         }
     }

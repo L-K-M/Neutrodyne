@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:xz",
+  "name": "xz (liblzma)",
+  "description": "LZMA compression (CPython _lzma); liblzma is in the public domain (Lasse Collin and the XZ Utils authors).",
+  "website": "https://tukaani.org/xz",
+  "developers": [],
+  "licenses": [
+    "0bsd-xz"
+  ],
+  "artifactVersion": "5.8.4",
+  "tag": "bundled"
+}

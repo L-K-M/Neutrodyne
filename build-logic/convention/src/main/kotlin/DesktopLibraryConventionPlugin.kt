@@ -25,7 +25,10 @@ class DesktopLibraryConventionPlugin : Plugin<Project> {
             }
             tasks.withType<Test>().configureEach { jvmArgs("--enable-native-access=ALL-UNNAMED") }
             registerDependencyPolicy()
-            if (path == ":youtube:ytdlp-desktop") registerPythonPolicy(desktopLock = true)
+            if (path == ":youtube:ytdlp-desktop") {
+                registerPythonPolicy(desktopLock = true)
+                registerPythonStandalone()
+            }
             configureNeutrodyneTestTasks()
         }
 }

@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
+import ch.lkmc.neutrodyne.desktop.smoke.EngineSmokeProof
 import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.PlatformLimitation
@@ -52,6 +53,7 @@ import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopPythonRuntimeLocator
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.EngineResources
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.NoLaneEngineUpdateHooks
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.PythonRuntimeLocator
+import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.StdioReplayArming
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.StdioYtxTransport
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.YtxProcess
 import dev.zacsweers.metro.BindingContainer
@@ -145,6 +147,14 @@ object DesktopYouTubeBindingsModule {
         paths: DesktopEngineStorePaths,
     ): YtxProcess = YtxProcess(runtime, paths)
 
+    /**
+     * The replay arming's only production-wired state (11 Stdio protocol, MD3 AC2): null
+     * everywhere except inside the smoke-armed packaged run, where it names the recorded
+     * scenario the launcher passed. [PackagedEngineProof.replayArming] owns the gate.
+     */
+    @Provides
+    fun replayArming(): StdioReplayArming? = PackagedEngineProof.replayArming()
+
     @Provides
     @SingleIn(AppScope::class)
     fun transport(
@@ -155,12 +165,13 @@ object DesktopYouTubeBindingsModule {
         @ApplicationScope scope: CoroutineScope,
         context: () -> YtxContext,
         build: BuildInfo,
+        arming: StdioReplayArming?,
     ): YtxTransport =
         StdioYtxTransport(
             process,
             store,
             settings,
-            arming = null,
+            arming = arming,
             debugHooks = build.debug,
             clock = clock,
             scope = scope,
@@ -264,6 +275,38 @@ object DesktopYouTubeBindingsModule {
         }
 
     @Provides fun audioLanguage(): DownloadAudioLanguage = DownloadAudioLanguage { Locale.getDefault().language }
+
+    /**
+     * MD3 AC2's packaged engine proof (11 Smoke mode step 6): the engine build's binding
+     * for the graph's `engineSmokeProof`. It stays inert until the packaged smoke arms
+     * `neutrodyne.smoke.engineReplay` — nothing else calls it.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun engineSmokeProof(
+        engineResources: EngineResourceDir,
+        runtime: PythonRuntimeLocator,
+        paths: DesktopEngineStorePaths,
+        store: EngineStore,
+        identity: CompileMarker,
+        transport: YtxTransport,
+        streams: YouTubeStreamResolver,
+        capabilities: YouTubeCapabilitiesSource,
+        context: () -> YtxContext,
+        clock: Clock,
+    ): EngineSmokeProof? =
+        PackagedEngineProof(
+            engineResources,
+            runtime,
+            paths,
+            store,
+            identity,
+            transport,
+            streams,
+            capabilities,
+            context,
+            clock,
+        )
 
     @Provides
     @IntoSet
