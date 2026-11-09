@@ -12,6 +12,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -189,6 +191,22 @@ class SyncDisconnectActionsTest {
             onNodeWithText("Every device keeps its own library", substring = true).assertIsDisplayed()
             onNodeWithText("nightly backups keep a copy for up to 7 days", substring = true).assertIsDisplayed()
             onNodeWithText("Type DELETE to confirm").assertIsDisplayed()
+        }
+
+    @Test
+    fun deleteConfirmationRemainsReachableInAShortWindow() =
+        runDesktopComposeUiTest(width = 360, height = 300) {
+            val harness = Harness()
+            setScreen(harness)
+
+            onNodeWithText("Delete my data on the server").performScrollTo().performClick()
+            waitForIdle()
+            onNode(hasSetTextAction()).assertIsNotDisplayed()
+            onNode(hasSetTextAction()).performScrollTo().assertIsDisplayed().performTextReplacement("DELETE")
+            deleteConfirm().assertIsEnabled().performClick()
+            waitForIdle()
+
+            assertEquals(listOf("DELETE"), harness.controller.fake.serverDataDeletes)
         }
 
     @Test
