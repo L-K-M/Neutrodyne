@@ -53,6 +53,9 @@ internal object PythonLicencePolicy {
             "bzip2-1.0.6",
             "blessing",
             "LicenseRef-PublicDomain",
+            // python-build-standalone's ncurses build reports the X11 (MIT-style) licence; the
+            // desktop lock records it as PYTHON.json does (01 Python and native components).
+            "X11",
         )
 
     val KINDS: Set<String> = setOf("runtime", "native", "python", "data", "pbs-patches")
@@ -88,12 +91,20 @@ internal object PythonLicencePolicy {
         val sha256: String?,
     )
 
+    /** One `[[target]]` entry of the desktop lock: the archive fetchPythonStandalone downloads. */
+    data class Target(
+        val id: String,
+        val archive: String,
+        val sha256: String,
+    )
+
     data class Lock(
         val chaquopy: String?,
         val python: String?,
         val pip: List<String>,
         val pbs: String?,
         val pbsSource: PbsSource?,
+        val targets: List<Target>,
         val components: List<Component>,
     )
 
@@ -120,6 +131,7 @@ internal object PythonLicencePolicy {
             throw GradleException("python-components.lock: `component` must be an array of tables")
         }
         val components: List<Any?> = parsed.getArray("component")?.toList() ?: emptyList()
+        val targets: List<Any?> = parsed.getArray("target")?.toList() ?: emptyList()
         return Lock(
             chaquopy = parsed.getString("chaquopy"),
             python = parsed.getString("python"),
@@ -132,6 +144,21 @@ internal object PythonLicencePolicy {
                         name = it.getString("name"),
                         url = it.getString("url"),
                         sha256 = it.getString("sha256"),
+                    )
+                },
+            targets =
+                targets.map { t ->
+                    if (t !is TomlTable) {
+                        throw GradleException("python-components.lock: [[target]] entry is not a table")
+                    }
+                    Target(
+                        id = t.getString("id") ?: throw GradleException("lock target without `id`"),
+                        archive =
+                            t.getString("archive")
+                                ?: throw GradleException("lock target ${t.getString("id")} without `archive`"),
+                        sha256 =
+                            t.getString("sha256")
+                                ?: throw GradleException("lock target ${t.getString("id")} without `sha256`"),
                     )
                 },
             components =
@@ -518,14 +545,24 @@ private fun resolvedTargetRuntime(dslVersion: String?): String? =
             ?.let { "${it.key}-${it.value}" }
     }
 
-/** A shell's engine config root's library definitions, relative to the shell's project directory. */
+/**
+ * The desktop's single AboutLibraries root. Unlike `:app` (which switches `configPath` between
+ * `config/` and a complete `config/engine/` union), the desktop keeps one root: duplicating the
+ * shared licence texts into a second root would cost more than this slice's whole diff budget.
+ * The engine entries therefore sit beside the shared ones in `config/libraries`; the emergency
+ * build lists them too (01's documented fallback), and the resources themselves are omitted.
+ */
+private const val DESKTOP_LIBRARY_DEFINITIONS = "config/libraries"
+
+/** `:app`'s separate engine AboutLibraries root — its `configPath` switches with the engine. */
 private const val ENGINE_LIBRARY_DEFINITIONS = "config/engine/libraries"
 
 /**
  * Registers `checkPythonLicences` and `verifyBundledYtDlp` for one engine host. The AboutLibraries
  * definitions are read from the owning shell's engine config root (`app/config/engine/libraries`,
- * `desktopApp/config/engine/libraries`): the engine's manual entries live only there, because the
- * shell switches its `configPath` with the engine (01 Emergency build without the engine).
+ * `desktopApp/config/libraries`): the Android shell keeps the engine's manual entries in their own
+ * root because it switches its `configPath` with the engine (01 Emergency build without the
+ * engine); the desktop keeps one root (see [DESKTOP_LIBRARY_DEFINITIONS]).
  */
 internal fun Project.registerPythonPolicy(desktopLock: Boolean) {
     val checkTask =
@@ -534,8 +571,12 @@ internal fun Project.registerPythonPolicy(desktopLock: Boolean) {
             modulePath.set(path)
             lockFile.set(layout.projectDirectory.file("python-components.lock"))
             this.desktopLock.set(desktopLock)
-            val shell = if (desktopLock) "desktopApp" else "app"
-            val defsDir = rootProject.layout.projectDirectory.dir("$shell/$ENGINE_LIBRARY_DEFINITIONS")
+            val defsDir =
+                if (desktopLock) {
+                    rootProject.layout.projectDirectory.dir("desktopApp/$DESKTOP_LIBRARY_DEFINITIONS")
+                } else {
+                    rootProject.layout.projectDirectory.dir("app/$ENGINE_LIBRARY_DEFINITIONS")
+                }
             aboutLibrariesDefinitions.from(fileTree(defsDir) { include("*.json") })
         }
 
