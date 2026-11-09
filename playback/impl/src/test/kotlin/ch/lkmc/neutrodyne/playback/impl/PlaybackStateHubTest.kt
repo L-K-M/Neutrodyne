@@ -124,6 +124,50 @@ class PlaybackStateHubTest {
         }
     }
 
+    /** The durable slot can still name a previous item when the service detaches: the live
+     * handover must match the *actual* current item, so a stale durable boundary cannot clear
+     * it. The following unload→reload must still mint fresh (anti-revival). */
+    @Test fun liveToDurableHandoverSurvivesAnOlderDurableItem() {
+        LifecycleHarness(RuntimeEnvironment.getApplication(), delayed = true).use { h ->
+            h.seedCurrent(id = 2)
+            val job = h.scope.launch { h.hub.nowPlaying.collect() }
+            h.allowOpen.countDown()
+            pumpUntil {
+                h.hub.nowPlaying.value
+                    ?.episodeId == 2L
+            }
+            val bridge = FakeBridge(liveNow(1, 555L))
+            h.hub.attach(bridge)
+            pumpUntil {
+                h.hub.nowPlaying.value
+                    ?.loadId == 555L
+            }
+            h.seedCurrent(id = 1)
+            h.hub.detach(bridge)
+            pumpUntil {
+                h.hub.nowPlaying.value
+                    ?.episodeId == 1L &&
+                    h.hub.nowPlaying.value
+                        ?.phase == PlayerPhase.NOT_LOADED
+            }
+            assertEquals(
+                555L,
+                h.hub.nowPlaying.value!!
+                    .loadId,
+            )
+            h.publish(VirtualQueue(2, null, emptyList(), emptyList()))
+            pumpUntil { h.hub.nowPlaying.value == null }
+            h.seedCurrent(id = 1)
+            pumpUntil { h.hub.nowPlaying.value != null }
+            assertNotEquals(
+                555L,
+                h.hub.nowPlaying.value!!
+                    .loadId,
+            )
+            job.cancel()
+        }
+    }
+
     /** The merged StateFlow lags a synchronous bridge commit; post-time stamping must not. */
     @Test fun currentNowPlayingFollowsTheLiveCommitBeforeTheMergedViewPumps() {
         LifecycleHarness(RuntimeEnvironment.getApplication(), delayed = true).use { h ->

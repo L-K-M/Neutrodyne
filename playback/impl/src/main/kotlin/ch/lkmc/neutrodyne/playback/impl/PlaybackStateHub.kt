@@ -104,9 +104,12 @@ internal class PlaybackStateHub(
                             load = id to nextNowPlayingLoadId()
                             durableLoad.value = load
                             // Only a boundary against a real earlier durable item clears the
-                            // remembered live identity — the first collection after a detach is
-                            // not a change, it is exactly where the handover must survive.
-                            if (boundary) lastLiveLoad.value = null
+                            // remembered live identity — and only when that identity does not
+                            // already name the item actually current now (a stale durable slot
+                            // left by an earlier attach must not kill the live handover).
+                            if (boundary && lastLiveLoad.value?.first != id) {
+                                lastLiveLoad.value = null
+                            }
                         }
                         session to load.second
                     }.flatMapLatest { (session, minted) ->
