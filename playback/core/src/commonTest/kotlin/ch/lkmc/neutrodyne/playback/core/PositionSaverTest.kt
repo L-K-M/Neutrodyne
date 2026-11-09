@@ -32,8 +32,48 @@ class PositionSaverTest {
         replay: Boolean = false,
     ) {
         saver.load(1, 1000, source, replay)
-        saver.startPositionApplied()
+        saver.startPositionApplied(0)
     }
+
+    @Test fun aPausedPickupUsesItsEntryBaselineWhenNothingChanges() {
+        load()
+        saver.startPositionApplied(12_000)
+        val decide = requireNotNull(saver.capturePausedPickup(1))
+        assertNull(decide(12_500))
+        assertEquals(45_000, decide(45_000))
+    }
+
+    @Test fun anOwnWriteInvalidatesAParkedPickupEvenAtTheSamePosition() =
+        runTest {
+            load()
+            saver.startPositionApplied(12_000)
+            val decide = requireNotNull(saver.capturePausedPickup(1))
+            assertEquals(PositionSaveResult.Saved, saver.onPause(12_000, null))
+            assertNull(decide(45_000))
+        }
+
+    @Test fun reloadingTheSameItemInvalidatesItsPreviousPickup() {
+        load()
+        saver.startPositionApplied(12_000)
+        val decide = requireNotNull(saver.capturePausedPickup(1))
+        saver.clear()
+        saver.load(1, 2000, PositionSource.STREAM)
+        saver.startPositionApplied(12_000)
+        assertNull(decide(45_000))
+    }
+
+    @Test fun aResetOrAppliedSeekInvalidatesAParkedPickup() =
+        runTest {
+            load()
+            saver.startPositionApplied(12_000)
+            val beforeReset = requireNotNull(saver.capturePausedPickup(1))
+            assertEquals(PositionSaveResult.Saved, saver.onSeek(0, null, SeekOrigin.USER))
+            assertNull(beforeReset(45_000))
+
+            val beforeSeek = requireNotNull(saver.capturePausedPickup(1))
+            saver.onSeek(20_000, null, SeekOrigin.CORE)
+            assertNull(beforeSeek(45_000))
+        }
 
     @Test fun ticksSaveEveryFiveSecondsOnlyWhileAdvancing() =
         runTest {
@@ -74,7 +114,7 @@ class PositionSaverTest {
             saver.onPause(250, null)
             saver.onSeek(300, null, SeekOrigin.CORE)
             assertTrue(store.calls.isEmpty())
-            saver.startPositionApplied()
+            saver.startPositionApplied(0)
             saver.onTick(2_705_000, null, true)
             assertEquals(2_705_000L, store.positions.value[1]?.positionMs)
         }
@@ -137,7 +177,7 @@ class PositionSaverTest {
             val sessions = FakePlaySessionStore()
             sessions.onTransition(outgoing.departure, 2, QueueOrigin.CONTEXT, SessionRevision(null, 0), clock.now())
             saver.load(2, 2000, PositionSource.DOWNLOAD)
-            saver.startPositionApplied()
+            saver.startPositionApplied(0)
             assertEquals(
                 1L,
                 sessions.calls
@@ -204,7 +244,7 @@ class PositionSaverTest {
             store.positions.value = mapOf(1L to StoredPosition(1, 0, 1, 1))
             val saver = PositionSaver(gated, clock, PlayedRule())
             saver.load(1, 1000, PositionSource.STREAM, replay = true)
-            saver.startPositionApplied()
+            saver.startPositionApplied(0)
             assertEquals(PositionSaveResult.Skipped, saver.onPlaying())
             assertEquals(1L, store.positions.value[1]?.playedAt)
             allowed = true
@@ -228,7 +268,7 @@ class PositionSaverTest {
             store.positions.value = mapOf(1L to StoredPosition(1, 20_000, 1, null))
             val saver = PositionSaver(gated, clock, PlayedRule())
             saver.load(1, 1000, PositionSource.STREAM)
-            saver.startPositionApplied()
+            saver.startPositionApplied(0)
             assertEquals(PositionSaveResult.Skipped, saver.onSeek(0, null, SeekOrigin.USER))
             assertEquals(20_000L, store.positions.value[1]?.positionMs)
             assertEquals(PositionSaveResult.Saved, saver.onPause(25_000, null))
@@ -257,7 +297,7 @@ class PositionSaverTest {
             var frozen = false
             val saver = PositionSaver(delayed, clock, PlayedRule())
             saver.load(1, 1000, PositionSource.STREAM, allowed = { !frozen })
-            saver.startPositionApplied()
+            saver.startPositionApplied(0)
             val pending = async(start = CoroutineStart.UNDISPATCHED) { saver.onPause(10_000, null) }
             frozen = true
             release.complete(Unit)

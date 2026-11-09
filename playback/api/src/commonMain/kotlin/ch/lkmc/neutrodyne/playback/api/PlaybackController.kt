@@ -10,6 +10,18 @@ import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 
 /**
+ * Where a play command originates (10 pull before play). Visible-UI starts run MS3's bounded
+ * pull so a newer synced position lands before planning; OS surfaces must react at once.
+ */
+enum class PlayOrigin {
+    /** The app's visible UI (the default): the start may wait briefly on a sync pull. */
+    UI,
+
+    /** OS surfaces — media sessions, transport buttons: the start never waits on a pull. */
+    SYSTEM,
+}
+
+/**
  * M4 commands shared by both players (06). Call from the UI/main thread; adapters serialize
  * dispatch on their player thread without blocking. Suspend calls complete after the matching
  * commit and dispatch, never after audio finishes. Cancellation propagates; failed starts return
@@ -41,13 +53,19 @@ interface PlaybackController {
         startEpisodeId: Long? = null,
     ): PlayResult
 
-    /** Resume current through gates; without current, use the automatic queue/context rule. */
-    suspend fun play(): PlayResult
+    /**
+     * Resume current through gates; without current, use the automatic queue/context rule.
+     * [origin] selects the pull-before-play behavior; the default is the UI path.
+     */
+    suspend fun play(origin: PlayOrigin = PlayOrigin.UI): PlayResult
 
     fun pause()
 
-    /** Resume through the same gates, or pause; refused starts are published in state/events. */
-    fun togglePlayPause()
+    /**
+     * Resume through the same gates, or pause; refused starts are published in state/events.
+     * When a resume wins, [origin] has the same pull-before-play meaning as in [play].
+     */
+    fun togglePlayPause(origin: PlayOrigin = PlayOrigin.UI)
 
     /** Clamp to zero/known duration. A user seek below 1 s explicitly resets stored position. */
     fun seekTo(positionMs: Long)
