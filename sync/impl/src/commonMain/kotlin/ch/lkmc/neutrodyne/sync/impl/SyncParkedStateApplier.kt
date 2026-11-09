@@ -44,7 +44,7 @@ class SyncParkedStateApplier(
 
 /**
  * The parked-state start-up recovery (01 Application start-up, band 191 — after the database open
- * at 100 and root's startup drain at 190, before the scheduling arms at 200). Lazy dependencies:
+ * at 100 and the settings drain at 160, before the scheduling arms at 200). Lazy dependencies:
  * resolving the applier reaches the database.
  */
 @ContributesIntoSet(AppScope::class)

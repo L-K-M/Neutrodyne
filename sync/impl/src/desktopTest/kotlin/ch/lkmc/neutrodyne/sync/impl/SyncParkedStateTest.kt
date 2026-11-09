@@ -857,6 +857,7 @@ class SyncParkedStateTest {
                 },
             activity = SyncActivityState(),
             gate = FakeLocalNetworkGate(),
+            effects = SyncApplyEffects(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
         )
 
     private suspend fun link(db: NeutrodyneDatabase) {
