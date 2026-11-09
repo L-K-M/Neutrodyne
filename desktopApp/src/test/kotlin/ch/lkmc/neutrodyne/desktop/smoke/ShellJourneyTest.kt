@@ -18,7 +18,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.nio.file.Files
 
 /**
  * 11 Smoke mode step 1's "no URL-scheme, file-association or login-item registration"
@@ -29,6 +31,60 @@ import org.junit.Test
  * still runs the whole set.
  */
 class ShellJourneyTest {
+    @Test
+    fun `cleanup does not change permissions through symbolic links`() {
+        val outside = Files.createTempDirectory("test-journey-outside-")
+        try {
+            assumeTrue("POSIX symlink permission check", Files.getFileStore(outside).supportsFileAttributeView("posix"))
+            val target = Files.writeString(outside.resolve("target"), "outside fixture")
+            assertThat(target.toFile().setReadOnly()).isTrue()
+            val permissions = Files.getPosixFilePermissions(target)
+            val root = Files.createTempDirectory("test-journey-symlink-")
+            val journey = ShellJourney("test-journey-", createRoot = { root })
+            try {
+                Files.createSymbolicLink(root.resolve("link"), target)
+
+                journey.cleanUp()
+
+                assertThat(Files.exists(root)).isFalse()
+                assertThat(Files.readString(target)).isEqualTo("outside fixture")
+                assertThat(Files.getPosixFilePermissions(target)).isEqualTo(permissions)
+            } finally {
+                journey.disarmWatchdog()
+                if (Files.exists(root)) {
+                    Files.deleteIfExists(root.resolve("link"))
+                    Files.deleteIfExists(root)
+                }
+                target.toFile().setWritable(true, true)
+            }
+        } finally {
+            Files.walk(outside).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+        }
+    }
+
+    @Test
+    fun `cleanup removes read-only compiled engine files and directories`() {
+        val root = Files.createTempDirectory("test-journey-readonly-")
+        val lib = Files.createDirectories(root.resolve("data/ytdlp/versions/2026.08.19/lib"))
+        val compiled = Files.writeString(lib.resolve("engine.pyc"), "compiled fixture")
+        val journey = ShellJourney("test-journey-", createRoot = { root })
+        try {
+            assertThat(compiled.toFile().setReadOnly()).isTrue()
+            assertThat(lib.toFile().setReadOnly()).isTrue()
+
+            journey.cleanUp()
+
+            assertThat(Files.exists(root)).isFalse()
+        } finally {
+            journey.disarmWatchdog()
+            // The pre-fix implementation cannot delete the fixture; restore test-owned modes.
+            if (Files.exists(root)) {
+                Files.walk(root).use { paths -> paths.forEach { it.toFile().setWritable(true, true) } }
+                Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+            }
+        }
+    }
+
     @After
     fun tearDown() {
         Log.install()
