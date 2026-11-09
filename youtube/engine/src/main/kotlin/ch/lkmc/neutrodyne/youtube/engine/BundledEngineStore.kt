@@ -18,10 +18,13 @@ import okio.Path.Companion.toPath
 import okio.buffer
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+import java.nio.file.attribute.DosFileAttributeView
+import java.nio.file.attribute.PosixFileAttributeView
 
 /**
  * Main-process engine store (04 Engine updates): `active.json` names `current`/`previous`, the
@@ -614,10 +617,10 @@ object EngineCompileMarkers {
             "Compile must remove source files"
         }
         lib.walkBottomUp().filter { it != lib }.forEach {
-            require(it.setReadOnly()) { "Cannot protect compiled engine" }
+            require(protectEngineEntry(it)) { "Cannot protect compiled engine" }
         }
         writeRecord(marker(lib, prepared.marker.pythonMinor), StoredMarker.of(prepared.marker), RecordMode.READ_ONLY)
-        require(lib.setReadOnly()) { "Cannot protect compiled directory" }
+        require(protectEngineEntry(lib)) { "Cannot protect compiled directory" }
     }
 
     internal fun exists(
@@ -750,11 +753,46 @@ private fun removeTree(file: File) {
         .walkTopDown()
         .onEnter {
             require(!Files.isSymbolicLink(it.toPath())) { "Engine path contains a symlink" }
-            require(it.setWritable(true, true))
+            require(restoreEngineEntry(it))
             true
         }.forEach {
             require(!Files.isSymbolicLink(it.toPath())) { "Engine path contains a symlink" }
-            require(it.setWritable(true, true))
+            require(restoreEngineEntry(it))
         }
     file.walkBottomUp().forEach { Files.delete(it.toPath()) }
+}
+
+/** Write-protects one engine-tree entry; see [setEngineEntryWritable]. */
+private fun protectEngineEntry(file: File): Boolean = setEngineEntryWritable(file, writable = false)
+
+/** Restores one engine-tree entry's write access before it is deleted. */
+private fun restoreEngineEntry(file: File): Boolean = setEngineEntryWritable(file, writable = true)
+
+/**
+ * Toggles an engine-tree entry's write protection with the host's own semantics. A
+ * POSIX store keeps chmod semantics even when it also advertises DOS attributes. A
+ * DOS-only store sets or clears `dos:readonly` on files and directories alike;
+ * on a directory that flag is only a marker and never ACL-protects the contents. Other
+ * stores keep `File`'s POSIX chmod semantics — protection strips every write bit,
+ * restoration grants owner write only. `File`'s own methods cannot serve Windows here:
+ * the JDK's `WinNTFileSystem.setPermission` skips `FILE_ATTRIBUTE_DIRECTORY` entirely,
+ * so they always fail on a Windows directory. Returns false when neither mechanism can
+ * change the entry.
+ */
+private fun setEngineEntryWritable(
+    file: File,
+    writable: Boolean,
+): Boolean {
+    val posix = Files.getFileAttributeView(file.toPath(), PosixFileAttributeView::class.java, NOFOLLOW_LINKS)
+    if (posix != null) return if (writable) file.setWritable(true, true) else file.setReadOnly()
+    val dos = Files.getFileAttributeView(file.toPath(), DosFileAttributeView::class.java, NOFOLLOW_LINKS)
+    if (dos != null) {
+        return try {
+            dos.setReadOnly(!writable)
+            true
+        } catch (_: IOException) {
+            false
+        }
+    }
+    return if (writable) file.setWritable(true, true) else file.setReadOnly()
 }
