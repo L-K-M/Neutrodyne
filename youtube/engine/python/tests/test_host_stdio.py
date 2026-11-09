@@ -210,11 +210,17 @@ class ServeTest(unittest.TestCase):
             session.send(call_frame(4))
             self.assertTrue(wait_for(lambda: bool(bridge.calls)))
             session.send(call_frame(4))
-            hold.set()
-            errors = [x for x in session.wait_lines(3) if x.get('t') == 'err']
+            # Keep the first call in flight until the reader rejects the duplicate.
+            # Sending a line only flushes the pipe; it does not mean serve() read it.
+            errors = [x for x in session.wait_lines(2) if x.get('t') == 'err']
             self.assertEqual(1, len(errors))
             self.assertEqual({'t': 'err', 'id': 4, 'code': 'ENGINE_UNAVAILABLE'}, errors[0])
+            self.assertEqual(1, len(bridge.calls))
+            hold.set()
+            replies = [x for x in session.wait_lines(3) if x.get('t') == 'ok']
+            self.assertEqual([{'t': 'ok', 'id': 4, 'r': {'ready': True}}], replies)
         finally:
+            hold.set()
             session.close()
 
     def test_status_reply(self):
