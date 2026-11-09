@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:astring",
+  "name": "astring",
+  "description": "Bundled in yt_dlp_ejs/yt/solver/lib.min.js.",
+  "website": "https://github.com/davidbonnet/astring",
+  "developers": [],
+  "licenses": [
+    "mit-astring"
+  ],
+  "artifactVersion": "1.9.0",
+  "tag": "bundled"
+}
