@@ -3,14 +3,17 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
 import ch.lkmc.neutrodyne.sync.protocol.dto.ProtocolRange
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -23,7 +26,9 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 /**
  * 10 Live updates' supervisor: gates on link/network/platform/discovery, drops the own-device
@@ -255,6 +260,43 @@ class SyncEventsClientTest {
             deps.link()
             runCurrent()
             assertEquals(2, deps.transport.opens.size)
+        }
+
+    @Test
+    fun desktopLaneRevocationClosesAnAlreadyOpenStream() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            assertTrue(deps.client.connected.value)
+            val rejection = SyncTransportException(401, null, "revoked")
+            val lane =
+                DesktopSyncLane(
+                    db = deps.db,
+                    round = {
+                        // The real engine persists revocation before reporting its HTTP failure.
+                        deps.db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
+                        throw rejection
+                    },
+                    network = deps.network,
+                    clock = TestClock(),
+                    poker = Provider { JobLanePoker {} },
+                    onRevoked = { deps.client.reevaluate() },
+                )
+            val failure =
+                try {
+                    lane.run(Instant.fromEpochMilliseconds(1_791_072_000_000L))
+                    null
+                } catch (failure: SyncTransportException) {
+                    failure
+                }
+            assertSame(rejection, failure)
+            runCurrent()
+            assertFalse(deps.client.connected.value)
+            deps.transport.sessions
+                .single()
+                .awaitClosed()
         }
 
     // --- plumbing --------------------------------------------------------------------------------

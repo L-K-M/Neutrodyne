@@ -43,7 +43,17 @@ object DesktopSyncBindings {
         network: NetworkMonitor,
         clock: Clock,
         poker: Provider<JobLanePoker>,
-    ): DesktopSyncLane = DesktopSyncLane(db, { reason -> engine.round(reason) }, network, clock, poker)
+        scheduler: Provider<SyncScheduler>,
+    ): DesktopSyncLane =
+        DesktopSyncLane(
+            db,
+            { reason -> engine.round(reason) },
+            network,
+            clock,
+            poker,
+            // Lazy: the scheduler's desktop hooks already depend on this lane.
+            onRevoked = { scheduler().onUnlinked() },
+        )
 
     @Provides
     @IntoSet

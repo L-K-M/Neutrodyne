@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import dev.zacsweers.metro.Provider
+import io.ktor.http.HttpStatusCode
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Instant
 
@@ -37,6 +38,7 @@ class DesktopSyncLane(
     private val network: NetworkMonitor,
     private val clock: Clock,
     private val poker: Provider<JobLanePoker>,
+    private val onRevoked: suspend () -> Unit = {},
 ) : JobLane {
     override val name: String = SYNC_LANE_NAME
 
@@ -66,7 +68,13 @@ class DesktopSyncLane(
                     lastRoundOlderThan(PULL_INTERVAL_MS, now) -> SyncRoundReason.PERIODIC
                     else -> return
                 }
-        round(reason)
+        try {
+            round(reason)
+        } catch (failure: SyncTransportException) {
+            // The engine records revocation; the scheduler also closes its live stream.
+            if (failure.status == HttpStatusCode.Unauthorized.value) onRevoked()
+            throw failure
+        }
         lastRoundMs = clock.now()
     }
 
