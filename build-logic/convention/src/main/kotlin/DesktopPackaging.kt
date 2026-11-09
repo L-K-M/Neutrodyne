@@ -15,6 +15,7 @@ import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
@@ -25,6 +26,9 @@ import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
 import org.gradle.process.CommandLineArgumentProvider
 import org.gradle.process.ExecOperations
+import org.gradle.work.InputChanges
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
@@ -35,6 +39,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 /** The four desktop packaging targets of 11's platform matrix (D88, D89). */
@@ -987,6 +994,154 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
  */
 abstract class JPackageImageTask : Exec()
 
+/**
+ * Compose's `packageMsi`/`packageDmg` task carrying the AOT post-image hook (11 AOT cache).
+ *
+ * Compose 1.12.1 exposes no `--resource-dir` hook: its `freeArgs` are prepended while the
+ * task's own `--resource-dir` is written last (the JDK's `DeployParams.addBundleArgument`
+ * overwrites, so the last one wins), and `prepareWorkingDir` clears that directory after
+ * `doFirst`. The supported extension point is the task itself: this subclass overrides
+ * `prepareWorkingDir` to call the Compose implementation and then drop the format's
+ * `<app name>-post-image` script into Compose's own resource directory, so jpackage's
+ * `ScriptRunner` finds it after the attribute-losing `copyAppImage` and before the WiX/DMG
+ * bundler reads the staging tree. Everything else — the DSL-driven arguments, the WiX
+ * toolchain wiring, the macOS Info.plist generation, the ad-hoc seal, the output
+ * directory — is inherited unchanged; [Project.registerDesktopPackagingTasks] swaps the
+ * Compose task for this type with `TaskContainer.replace`, which keeps the registered
+ * configure actions.
+ */
+abstract class AotTimestampJPackageTask(
+    private val format: TargetFormat,
+) : AbstractJPackageTask(format) {
+    /** The shipped hook for this format, copied into Compose's resource directory. */
+    @get:Internal
+    abstract val postImageHook: RegularFileProperty
+
+    /** jpackage's `ScriptRunner` looks up `<app name>-post-image<ext>` in the resource dir. */
+    @get:Internal
+    protected open val scriptExtension: String =
+        if (format == TargetFormat.Msi) ".wsf" else ".sh"
+
+    override fun prepareWorkingDir(inputChanges: InputChanges) {
+        super.prepareWorkingDir(inputChanges)
+        writePostImageHook(
+            hook = postImageHook.get().asFile,
+            packageName = packageName.get(),
+            scriptExtension = scriptExtension,
+            resourcesDir = jpackageResources.get().asFile,
+        )
+    }
+}
+
+/**
+ * Drops the hook into jpackage's resource directory under the exact name its
+ * `ScriptRunner` looks up (`<app name>-post-image<ext>`). Fails closed when the
+ * shipped hook is missing: packaging without it would ship a strict-cache failure.
+ */
+internal fun writePostImageHook(
+    hook: File,
+    packageName: String,
+    scriptExtension: String,
+    resourcesDir: File,
+) {
+    if (!hook.isFile) {
+        throw GradleException("the AOT post-image hook is missing: $hook")
+    }
+    File(resourcesDir, "$packageName-post-image$scriptExtension").writeBytes(hook.readBytes())
+}
+
+/** Compose's `packageMsi` with the Windows post-image hook. */
+abstract class MsiAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Msi)
+
+/** Compose's `packageDmg` with the macOS post-image hook. */
+abstract class DmgAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Dmg)
+
+/**
+ * Rewrites [zip] so every entry carries the Info-ZIP extended timestamp field
+ * (0x5455): the entry's modification time as UTC seconds. Gradle's Zip records
+ * only the MS-DOS local-time fields — commons-compress writes no 0x5455 — so an
+ * extractor in another timezone would decode a different instant and a strict
+ * AOT launch could pass or fail depending on where the ZIP was built. The
+ * `java.util.zip` itself only emits the field for times outside the DOS range,
+ * so the rewrite sets the entry extra bytes explicitly; decoding the DOS time
+ * back happens on this host, so the recorded instant round-trips exactly.
+ * Entry order and names are preserved; unix-mode external attributes are not —
+ * java.util.zip exposes none, and the Windows image this archives carries none
+ * to lose.
+ */
+internal fun addUtcTimestamps(zip: File) {
+    val rewritten = zip.resolveSibling("${zip.name}.utc")
+    try {
+        rewriteZipWithUtcTimestamps(zip, rewritten)
+    } catch (e: Exception) {
+        rewritten.delete()
+        throw e
+    }
+    if (!zip.delete() || !rewritten.renameTo(zip)) {
+        rewritten.delete()
+        throw GradleException("could not rewrite $zip with UTC timestamps")
+    }
+}
+
+private fun rewriteZipWithUtcTimestamps(
+    zip: File,
+    rewritten: File,
+) {
+    ZipFile(zip).use { source ->
+        ZipOutputStream(rewritten.outputStream().buffered()).use { out ->
+            for (entry in source.entries().asSequence()) {
+                val copy = ZipEntry(entry.name)
+                if (entry.time >= 0) {
+                    copy.time = entry.time
+                    copy.extra = withoutUtcField(entry.extra) + utcTimestampField(entry.time / 1000)
+                } else {
+                    copy.extra = entry.extra
+                }
+                if (entry.comment != null) {
+                    copy.comment = entry.comment
+                }
+                out.putNextEntry(copy)
+                if (!entry.isDirectory) {
+                    source.getInputStream(entry).copyTo(out)
+                }
+                out.closeEntry()
+            }
+        }
+    }
+}
+
+/** The Info-ZIP 0x5455 extended timestamp field: flags=1 (mtime present) plus UTC seconds. */
+private fun utcTimestampField(utcSeconds: Long): ByteArray =
+    ByteBuffer
+        .allocate(9)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putShort(0x5455)
+        .putShort(5)
+        .put(1)
+        .putInt(utcSeconds.toInt())
+        .array()
+
+/**
+ * [extra] minus any 0x5455 fields, so the rewrite stays idempotent and a second
+ * run records one timestamp. Other producers' extra fields pass through.
+ */
+private fun withoutUtcField(extra: ByteArray?): ByteArray {
+    if (extra == null) return ByteArray(0)
+    val out = java.io.ByteArrayOutputStream(extra.size)
+    val fields = ByteBuffer.wrap(extra).order(ByteOrder.LITTLE_ENDIAN)
+    while (fields.remaining() >= 4) {
+        val start = fields.position()
+        val size = fields.getShort(start + 2).toInt() and 0xFFFF
+        val end = start + 4 + size
+        if (end > extra.size) break
+        if ((fields.getShort(start).toInt() and 0xFFFF) != 0x5455) {
+            out.write(extra, start, end - start)
+        }
+        fields.position(end)
+    }
+    return out.toByteArray()
+}
+
 /** The Windows portable ZIP: the app image archived (11 Windows MSI and ZIP). */
 abstract class WindowsZipTask : Zip()
 
@@ -1003,9 +1158,13 @@ internal fun Project.registerDesktopPackagingTasks(
         setupRuntime.map { task ->
             File(File(task.home.get().asFile, target.homeSubdir), "bin/jpackage")
         }
+    val nativeTarget = nativeTargetOf()
 
     // The app image is createDistributable's destinationDir/<name>[.app]; taking it from the
     // task keeps this in step with the plugin's layout instead of hardcoding compose/binaries.
+    // The dir() derivation (not .map) keeps the chain readable at any time: a .map over the
+    // task provider cannot be queried before createDistributable has completed, which the
+    // packaging tasks' appImage reads below would trip.
     val appImageLeaf =
         if (target ==
             DesktopPackagingTarget.MACOS_ARM64
@@ -1014,13 +1173,13 @@ internal fun Project.registerDesktopPackagingTasks(
         } else {
             DESKTOP_PACKAGE_NAME
         }
-    val appImage =
-        tasks
-            .named(
-                "createDistributable",
-                org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
-            ).flatMap { it.destinationDir }
-            .map { it.dir(appImageLeaf) }
+    val createDistributable =
+        tasks.named(
+            "createDistributable",
+            org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
+        )
+    val distributableDir = createDistributable.flatMap { it.destinationDir }
+    val appImage = createDistributable.flatMap { it.destinationDir.dir(appImageLeaf) }
 
     // The desktop entry and hicolor icons the DEB/RPM scriptlets install travel inside the
     // image through appResourcesRootDir (11 Links and files from the OS). The PNG set comes
@@ -1077,7 +1236,6 @@ internal fun Project.registerDesktopPackagingTasks(
         // `into` prefix and exclude everything. The tasks are named lazily because
         // :playback:native may not be evaluated when this project is configured.
         dependsOn(":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
-        val nativeTarget = nativeTargetOf()
         from(playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget")) {
             into("${target.id}/native/ffmpeg")
             eachFile {
@@ -1167,6 +1325,94 @@ internal fun Project.registerDesktopPackagingTasks(
                 )
             }
         }
+
+    // The runtime-classpath manifest is registered here, ahead of the AOT training task:
+    // the training inputs bind it so a JAR change retrains the archive.
+    tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
+        description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
+        // Compose resolves project dependencies to their jar artifacts for the image,
+        // so the manifest must ask for jar artifacts too (otherwise project deps show
+        // up as classes directories) and include this project's own jar.
+        runtimeClasspath.from(
+            configurations.named("runtimeClasspath").map { conf ->
+                conf.incoming
+                    .artifactView {
+                        attributes {
+                            attribute(
+                                ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
+                                ArtifactTypeDefinition.JAR_TYPE,
+                            )
+                        }
+                    }.files
+            },
+        )
+        runtimeClasspath.from(tasks.named("jar"))
+        manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
+        stubManifest.set(
+            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
+        )
+    }
+
+    // --- AOT cache: one training launch writes $APPDIR/neutrodyne.aot into the image (PO-42) ---
+    // Every packaging invocation trains: package* tasks depend on the task, and
+    // createDistributable's finalizer covers the bare-image path (mac-zip.sh archives the
+    // image directly — no package task runs). The graph stays acyclic: train needs
+    // createDistributable's output, package* need the trained image, and createDistributable
+    // never depends on a package task.
+    val aotLayout = aotImageLayout(target.osWire)
+    val image = appImage
+    val runtimeJavaName = "java" + if (target.osWire == "windows") ".exe" else ""
+    val trainAotCache =
+        tasks.register<TrainAotCacheTask>("trainAotCache") {
+            group = "distribution"
+            description =
+                "Runs one AOT training launch of the packaged app, verifies the archive under strict mode and leaves it in the image (PO-42, 11 AOT cache)."
+            dependsOn(
+                "createDistributable",
+                setupRuntime,
+                "writeDesktopRuntimeClasspath",
+                ":playback:native:buildFfmpeg",
+                ":playback:native:buildNdmedia",
+            )
+            this.appImage.set(image)
+            launcher.set(image.map { it.file(aotLayout.launcher) })
+            launcherCfg.set(image.map { it.file(aotLayout.cfg) })
+            runtimeRelease.set(image.map { it.file(aotLayout.runtimeRelease) })
+            aotArchive.set(image.map { it.file("${aotLayout.appDir}/$AOT_CACHE_FILE") })
+            runtimeHome.set(setupRuntime.flatMap { it.home })
+            runtimeJavaSource.set(
+                setupRuntime.flatMap { setup ->
+                    setup.home.map { home ->
+                        if (target.homeSubdir.isEmpty()) {
+                            home.file("bin/$runtimeJavaName")
+                        } else {
+                            home.dir(target.homeSubdir).file("bin/$runtimeJavaName")
+                        }
+                    }
+                },
+            )
+            runtimeClasspathManifest.set(
+                tasks
+                    .named(
+                        "writeDesktopRuntimeClasspath",
+                        WriteDesktopRuntimeClasspath::class.java,
+                    ).flatMap { it.manifest },
+            )
+            nativeLibraries.from(
+                playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget"),
+                playbackNative.layout.buildDirectory.dir("ndmedia/$nativeTarget"),
+            )
+            targetOs.set(target.osWire)
+            installKind.set(installKindProperty.orElse(""))
+            expectedInstallKinds.set(target.installKinds)
+            // No install kind means a dev/assemble image: no AOT flag in its .cfg either,
+            // so there is nothing to train and nothing missing — the task simply does not run.
+            onlyIf { installKind.get().isNotBlank() }
+        }
+    tasks.named("createDistributable") { finalizedBy(trainAotCache) }
+    tasks
+        .matching { it.name in AOT_CACHE_CONSUMERS }
+        .configureEach { dependsOn(trainAotCache) }
 
     // --- DEB: jpackage with our own control file and maintainer scripts -----------------------
     tasks.register<JPackageImageTask>("packageDeb") {
@@ -1267,8 +1513,14 @@ internal fun Project.registerDesktopPackagingTasks(
         archiveFileName.set("neutrodyne-$versionName-${target.id}.zip")
         destinationDirectory.set(layout.buildDirectory.dir("desktop-packaging/zip"))
         from(appImage.map { it.asFile.parentFile }) { include("$appImageLeaf/**") }
-        isPreserveFileTimestamps = false
+        // The AOT cache records the classpath JARs' modification times (11 AOT cache), so
+        // the archive must preserve them; trainAotCache normalized every image file to a
+        // fixed timestamp first, which keeps this archive reproducible.
+        isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
+        // The DOS fields above record local time only; add the UTC 0x5455 field so the
+        // artifact's timestamps are unambiguous for any extractor's timezone.
+        doLast { addUtcTimestamps(archiveFile.get().asFile) }
     }
 
     // --- Linux tar.gz: the image as Neutrodyne/, executable bits carried from the image -------
@@ -1284,32 +1536,40 @@ internal fun Project.registerDesktopPackagingTasks(
         // Gradle 9's replacement for dirMode/fileMode: the tar keeps the modes the image files
         // already have (jpackage writes the launcher and jspawnhelper with 0755).
         useFileSystemPermissions()
-        isPreserveFileTimestamps = false
+        // The AOT cache records the classpath JARs' modification times (11 AOT cache), so
+        // the archive must preserve them; trainAotCache normalized every image file to a
+        // fixed timestamp first, which keeps this archive reproducible.
+        isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
     }
 
-    tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
-        description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
-        // Compose resolves project dependencies to their jar artifacts for the image,
-        // so the manifest must ask for jar artifacts too (otherwise project deps show
-        // up as classes directories) and include this project's own jar.
-        runtimeClasspath.from(
-            configurations.named("runtimeClasspath").map { conf ->
-                conf.incoming
-                    .artifactView {
-                        attributes {
-                            attribute(
-                                ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
-                                ArtifactTypeDefinition.JAR_TYPE,
-                            )
-                        }
-                    }.files
-            },
-        )
-        runtimeClasspath.from(tasks.named("jar"))
-        manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
-        stubManifest.set(
-            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
-        )
-    }
+    // --- MSI/DMG: Compose's tasks carrying the AOT post-image hook ---------------------------
+    // Compose registers packageMsi/packageDmg for the host's target formats. Swap each for
+    // the subclass that drops the format's post-image hook into Compose's own resource
+    // directory during prepareWorkingDir — after the attribute-losing copyAppImage and before
+    // WiX/hdiutil read the staging tree. TaskContainer.replace keeps the configure actions
+    // Compose registered on the provider (the DSL arguments, the WiX toolchain wiring, the
+    // macOS Info.plist generation), so the entry points, the output names and every current
+    // packaging behavior stay; only the task type changes. The `freeArgs` route cannot work:
+    // they are prepended while Compose writes its own --resource-dir last, and the JDK's
+    // last-wins option handling keeps that one.
+    //
+    // The installer argv must consume the trained image: Compose 1.12.1 leaves its non-macOS
+    // package tasks in fresh-image mode (`--input` libs + `--main-jar`, which the JDK turns
+    // into a newly generated image that carries no trained neutrodyne.aot, so the post-image
+    // hook fails the packaging closed — Windows run 42509091764, job 128818030637). Setting
+    // the task's appImage switches Compose's own makeArgs to `--app-image` and drops
+    // --input/--main-jar/--runtime-image; on macOS hosts makeArgs appends <name>.app to the
+    // configured directory itself (the form Compose wires for packageDmg), so packageDmg gets
+    // the destination directory and packageMsi the image inside it. The dependsOn pairing is
+    // the one Compose itself adds when it wires appImage (the archive the installers package
+    // is the one createDistributable + trainAotCache leave there).
+    val packageMsi = tasks.replace("packageMsi", MsiAotTimestampJPackageTask::class.java)
+    packageMsi.postImageHook.set(file("packaging/msi/Neutrodyne-post-image.wsf"))
+    packageMsi.dependsOn(createDistributable)
+    packageMsi.appImage.set(appImage)
+    val packageDmg = tasks.replace("packageDmg", DmgAotTimestampJPackageTask::class.java)
+    packageDmg.postImageHook.set(file("packaging/dmg/Neutrodyne-post-image.sh"))
+    packageDmg.dependsOn(createDistributable)
+    packageDmg.appImage.set(distributableDir)
 }

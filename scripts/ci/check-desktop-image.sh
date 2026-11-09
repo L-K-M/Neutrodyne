@@ -804,6 +804,92 @@ check_rpm() {
     fi
 }
 
+# 11 AOT cache: the trained archive binds the size and modification time of
+# the launcher's classpath inputs — the JARs the .cfg's app.classpath lists.
+# Only those must carry the fixed epoch trainAotCache wrote (318211200000 ms,
+# 1980-02-01T00:00:00Z); the package front-ends own every other entry's
+# metadata — legal and runtime directories, Info.plist, signature files, the
+# launchers — which repacking, signing and extraction legitimately re-stamp. A
+# package whose .cfg reads -XX:AOTCache but whose classpath JARs sit off the
+# epoch ships a strict -XX:AOTMode=on failure; a package without the flag
+# carries no archive and the gate does not apply.
+check_aot_epoch() {
+    local img="$1" appdir cfg="" bad
+    for appdir in "$img/app" "$img/Contents/app" "$img/lib/app"; do
+        if [ -f "$appdir/Neutrodyne.cfg" ]; then cfg="$appdir/Neutrodyne.cfg"; break; fi
+    done
+    # No launcher .cfg means no -XX:AOTCache flag and no trained archive to
+    # gate; the layout checks own malformed payloads.
+    if [ -z "$cfg" ] || ! grep -q '^java-options=-XX:AOTCache=' "$cfg"; then
+        note "the payload reads no -XX:AOTCache; the classpath epoch gate does not apply"
+        return
+    fi
+    [ -f "$appdir/neutrodyne.aot" ] \
+        || fail "the .cfg reads -XX:AOTCache but $appdir/neutrodyne.aot is missing"
+    # Bash 3.2 cannot parse this Python heredoc inside command substitution.
+    # Keep its output private and treat a failed probe as a counted violation.
+    local epoch_report
+    epoch_report="$(mktemp)"
+    if ! IMG="$img" APPDIR="$appdir" python3 - "$cfg" > "$epoch_report" <<'PY'
+import os, sys
+img = os.path.realpath(os.environ["IMG"])
+appdir = os.path.realpath(os.environ["APPDIR"])
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+# The launcher reads keys only inside their [Section]; the section name runs to
+# the last ] on the line (jpackage's cfg parser).
+entries, in_app = [], False
+for line in raw.split("\n"):
+    if line.endswith("\r"):
+        line = line[:-1]
+    if line.startswith("["):
+        end = line.rfind("]")
+        in_app = end > 0 and line[1:end] == "Application"
+        continue
+    if not in_app:
+        continue
+    key, sep, value = line.partition("=")
+    if sep and key == "app.classpath":
+        entries.append(value)
+problems = []
+if not entries:
+    problems.append("no app.classpath entries")
+declared = set()
+for entry in entries:
+    path = entry.replace("$APPDIR", appdir)
+    if "$" in path:
+        problems.append("classpath entry outside $APPDIR: " + entry)
+        continue
+    real = os.path.realpath(path)
+    if real != img and not real.startswith(img + os.sep):
+        problems.append("classpath entry escapes the image: " + entry)
+        continue
+    # Fail closed on directories or anything whose required metadata cannot be
+    # validated; the JDK classpath timestamp semantics bind regular files.
+    if not os.path.isfile(real):
+        problems.append("classpath entry is not a regular file: " + entry)
+        continue
+    if os.lstat(real).st_mtime_ns != 318211200000000000:
+        problems.append("classpath entry off the trained epoch: " + entry)
+    declared.add(real)
+# Every JAR beside the .cfg must be a declared classpath entry: an undeclared
+# JAR is outside the archive's recorded consistency set and cannot be gated.
+for name in sorted(os.listdir(appdir)):
+    if name.endswith(".jar"):
+        p = os.path.realpath(os.path.join(appdir, name))
+        if p not in declared:
+            problems.append("JAR not on the .cfg classpath: " + name)
+print("\n".join(problems[:3]))
+PY
+    then
+        rm -f "$epoch_report"
+        fail "cannot inspect the packaged AOT classpath epoch"
+        return
+    fi
+    bad="$(cat "$epoch_report")"
+    rm -f "$epoch_report"
+    [ -z "$bad" ] || fail "the packaged AOT classpath is not at the trained epoch: $(echo "$bad" | tr '\n' ' ')"
+}
+
 # --- dispatch ----------------------------------------------------------------------
 scan_dir() {
     local img="$1"
@@ -833,7 +919,11 @@ extract_and_scan() {
                 # exposes AppleDouble metadata as payload. Preserve the signed app bundle.
                 ditto -x -k "$pkg" "$tmp"
             else
-                python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$pkg" "$tmp"
+                # Restore each entry's recorded mtime (and Unix mode) from the artifact
+                # instead of the extraction time: the AOT cache binds the trained JARs'
+                # timestamps, and a drifted producer must stay drifted for the strict
+                # check to catch it.
+                python3 "$SCRIPT_DIR/extract-zip.py" "$pkg" "$tmp"
             fi ;;
         deb) dpkg-deb -x "$pkg" "$tmp" ;;
         rpm)
@@ -868,10 +958,19 @@ extract_and_scan() {
     for d in "${roots[@]}"; do
         # DEB/RPM extracts land under <install-dir>/<pkg>; scan the app dir itself.
         if [ -d "$d/opt/neutrodyne" ]; then
-            scan_dir "$d/opt/neutrodyne"
-        else
-            scan_dir "$d"
+            d="$d/opt/neutrodyne"
         fi
+        scan_dir "$d"
+        case "$fmt" in
+            # The archive binds only its own classpath inputs' file times; tar
+            # and the DEB/RPM/DMG post-image hooks restore the trained epoch on
+            # the staged JARs and the ZIP extractor restores recorded times, so
+            # every format's .cfg classpath is gated the same way. The MSI
+            # payload's CAB timestamps stay unverified here — checking them
+            # needs a Windows install, which the native Windows smoke covers
+            # (11 AOT cache).
+            deb|rpm|tar.gz|dmg|zip) check_aot_epoch "$d" ;;
+        esac
     done
     if [ -n "$mnt" ]; then
         # The mount leaves on the normal path too; the EXIT trap covers aborts.

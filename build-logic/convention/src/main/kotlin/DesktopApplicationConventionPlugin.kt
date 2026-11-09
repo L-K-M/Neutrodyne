@@ -93,7 +93,13 @@ class DesktopApplicationConventionPlugin : Plugin<Project> {
                         }.getOrNull()
                 // javaHome is non-nullable in the Compose DSL; null means "keep the default".
                 if (packagingJavaHome != null) javaHome = packagingJavaHome
-                jvmArgs += desktopJvmOptions(hostTarget)
+                // installKind marks a packaging invocation: only then does the launcher's
+                // .cfg carry the AOT cache flag (PO-42); run/tests/dev images stay flag-free.
+                jvmArgs +=
+                    desktopJvmOptions(
+                        hostTarget,
+                        providers.gradleProperty("neutrodyne.installKind").isPresent,
+                    )
                 // Compose resolves ProGuard (GPL-2.0, D3) through a detached configuration inside the release
                 // task actions, so it never lands on a named configuration to scan. Disabling the release
                 // build type's ProGuard is the enforceable gate; verifyDependencyPolicy asserts that no
@@ -200,6 +206,10 @@ internal val RUNTIME_IMAGE_CONSUMERS =
 internal val PACKAGING_ONLY_TASKS =
     setOf("packageDeb", "packageRpm", "packageZip", "packageTarGz")
 
+/** Every task that turns the app image into an installer/archive — all consume the trained image. */
+internal val AOT_CACHE_CONSUMERS =
+    setOf("packageMsi", "packageDmg", "packageDeb", "packageRpm", "packageZip", "packageTarGz")
+
 /** Compose's uber-JAR tasks; host-independent, so never blocked. */
 private val UBER_JAR_TASKS = setOf("packageUberJarForCurrentOS", "packageReleaseUberJarForCurrentOS")
 
@@ -208,12 +218,21 @@ private const val OPML_MIME_TYPE = "text/x-opml"
 private const val OPML_EXTENSION = "opml"
 private const val OPML_DESCRIPTION = "OPML subscription list"
 
-/** Per-OS launcher options (11 JVM options). The AOT cache is not shipped before MD5 (PO-42 fallback). */
-internal fun desktopJvmOptions(target: DesktopPackagingTarget?): List<String> =
+/**
+ * Per-OS launcher options (11 JVM options). [packaged] is set on packaging invocations
+ * (`-Pneutrodyne.installKind=…`): only then does the launcher's .cfg carry the JDK 25 AOT
+ * cache flag (PO-42, 11 AOT cache) — dev runs, tests and the assemble image get no flag
+ * and no cache.
+ */
+internal fun desktopJvmOptions(
+    target: DesktopPackagingTarget?,
+    packaged: Boolean,
+): List<String> =
     buildList {
         add("--enable-native-access=ALL-UNNAMED")
         add("-XX:+ExitOnOutOfMemoryError")
         add("-Xmx768m")
+        if (packaged && target != null) add(AOT_CACHE_OPTION)
         when (target?.osWire) {
             "windows" -> {
                 // The jpackage launcher expands environment variables in its configuration file
