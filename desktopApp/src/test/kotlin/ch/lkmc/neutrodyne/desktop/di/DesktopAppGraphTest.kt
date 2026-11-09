@@ -726,6 +726,18 @@ class DesktopAppGraphTest {
     }
 
     /**
+     * MS3 wiring: the desktop graph's pull before play must be sync's `PrePlaySyncImpl` — never
+     * the `None` default, which would never refresh the current remote state. Resolving it must
+     * stay cheap (01 DI rule 7): the database is not open yet, and the hook defers it.
+     */
+    @Test
+    fun thePrePlaySyncIsTheSyncImpl() {
+        assertThat(graph.prePlaySync)
+            .isInstanceOf(ch.lkmc.neutrodyne.sync.impl.PrePlaySyncImpl::class.java)
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    /**
      * M3 C3a: the export repository resolves to the real `ExportRepositoryImpl` — resolution
      * also proves the `FileExportDestination` binding and the `OpmlExporter` chain — and the
      * snapshot scheduler is D34's documented no-op, not a silent fallback. The impls are

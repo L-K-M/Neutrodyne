@@ -120,7 +120,7 @@ class PositionTrackerTest {
                         .positionMs,
                 )
                 f.tracker.coreSeek { f.player.seekTo(80_000) }
-                f.tracker.startPositionApplied()
+                f.tracker.startPositionApplied(80_000)
                 f.tracker.flush(PositionFlushReason.PAUSE)
                 runCurrent()
                 assertEquals(
