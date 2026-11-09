@@ -12,8 +12,10 @@ import org.gradle.kotlin.dsl.dependencies
 internal const val DEFAULT_RUNNER = "androidx.test.runner.AndroidJUnitRunner"
 internal const val ORCHESTRATOR = "ANDROIDX_TEST_ORCHESTRATOR"
 private const val SCOPE_CI = "ci"
-private const val CI_EXCLUDED_ANNOTATIONS =
-    "ch.lkmc.neutrodyne.core.testing.Nightly,androidx.test.filters.FlakyTest"
+
+// AGP 9.4.1's managed-device engine splits comma-valued arguments. Quarantined flaky
+// tests must also carry Nightly until the bridge can preserve a compound exclusion.
+private const val CI_EXCLUDED_ANNOTATIONS = "ch.lkmc.neutrodyne.core.testing.Nightly"
 private const val GROUP_CI = "ci"
 private const val GROUP_NIGHTLY = "nightly"
 private const val API_26 = "api26"
@@ -40,7 +42,7 @@ private data class ManagedDevice(
 
 /**
  * The instrumentation arguments both DSL surfaces carry (09): `clearPackageData` for the
- * orchestrator, and under `neutrodyne.testScope=ci` the exclusion of `Nightly` and `FlakyTest`.
+ * orchestrator, and under `neutrodyne.testScope=ci` the exclusion of `Nightly` (including quarantined flaky tests).
  */
 internal fun Project.configureInstrumentationArgs(args: MutableMap<String, String>) {
     args["clearPackageData"] = "true"
