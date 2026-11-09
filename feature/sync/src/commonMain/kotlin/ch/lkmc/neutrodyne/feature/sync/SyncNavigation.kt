@@ -9,6 +9,8 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
+import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.sync.api.SyncController
@@ -40,6 +42,12 @@ object SyncNavigation {
             }
             entry<SyncSetupKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
                 SyncSetupScreen(syncController(), key.serverUrl, backups())
+            }
+            entry<SyncDevicesKey>(metadata = NdSceneMetadata.paneDetail()) {
+                SyncDevicesScreen(syncController())
+            }
+            entry<SyncApproveKey>(metadata = NdSceneMetadata.bottomSheet()) { key ->
+                SyncApproveSheet(syncController(), key.userCode)
             }
         }
 }

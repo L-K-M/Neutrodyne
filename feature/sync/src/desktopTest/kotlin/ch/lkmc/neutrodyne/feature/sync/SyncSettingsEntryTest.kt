@@ -25,6 +25,8 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.testing.FakeLinkFlow
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
@@ -218,6 +220,35 @@ class SyncSettingsEntryTest {
 
             assertEquals(1, harness.controller.syncNows.size)
             assertTrue(harness.navigator.calls.isEmpty())
+        }
+
+    @Test
+    fun aLinkedDeviceCanOpenDevicesAndApproveAnotherDevice() =
+        runComposeUiTest {
+            val harness =
+                Harness(
+                    SyncStatus.Linked(
+                        serverUrl = "https://sync.example.org",
+                        accountId = "acc",
+                        deviceId = "dev",
+                        username = "anna",
+                        nodeId = "node",
+                        lastSyncAtMs = null,
+                        activity = SyncActivity.IDLE,
+                        problem = null,
+                    ),
+                )
+            setSyncPage(harness)
+            onNodeWithText("Devices").performClick()
+            onNodeWithText("Link another device").performClick()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.Push(SyncDevicesKey),
+                    RecordingAppNavigator.Call.Push(SyncApproveKey()),
+                ),
+                harness.navigator.calls,
+            )
+            assertTrue(harness.controller.startLinks.isEmpty(), "approval must not start a replacement link")
         }
 
     private fun assertUntouched(harness: Harness) {
