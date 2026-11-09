@@ -44,12 +44,16 @@ class SyncSchedulingInitializer
         // Lazy (01 DI rule 7): every dependency reaches the database, which band 100 opens first.
         private val workScheduler: Provider<WorkManagerSyncScheduler>,
         private val scheduler: Provider<SyncScheduler>,
+        private val eventsGate: Provider<SyncEventsGate>,
     ) : AppInitializer {
         override val order: Int = 200
 
         override suspend fun run() {
             workScheduler().reschedulePeriodic()
             scheduler().start()
+            // 10 Live updates: the events supervisor starts gated — it only opens the stream
+            // once the UI or playback allows it and a live link exists.
+            eventsGate().start()
         }
     }
 

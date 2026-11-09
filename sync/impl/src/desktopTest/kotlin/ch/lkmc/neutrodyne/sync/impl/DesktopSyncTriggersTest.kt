@@ -23,6 +23,8 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 /**
@@ -95,6 +97,27 @@ class DesktopSyncTriggersTest {
             deps.powerEvents.emit(PowerEvent.Suspending)
             runCurrent()
             assertEquals(emptyList(), deps.pokes)
+        }
+
+    @Test
+    fun `suspend closes the stream gate and resume reopens it with a round`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.triggers.start()
+            runCurrent()
+            assertTrue(deps.triggers.awake.value)
+
+            // 10 Live updates: the stream must not outlive the machine's sleep.
+            deps.powerEvents.emit(PowerEvent.Suspending)
+            runCurrent()
+            assertFalse(deps.triggers.awake.value)
+            assertEquals(emptyList(), deps.pokes)
+
+            deps.powerEvents.emit(PowerEvent.Resumed)
+            runCurrent()
+            assertTrue(deps.triggers.awake.value)
+            assertEquals(listOf(SYNC_LANE_NAME), deps.pokes)
         }
 
     // --- plumbing --------------------------------------------------------------------------------

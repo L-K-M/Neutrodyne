@@ -23,7 +23,7 @@ class ClientFamilyTest {
     private fun allKinds(clients: NetworkClients): List<OkHttpClient> = HttpClientKind.entries.map(clients::get)
 
     @Test
-    fun `all seven kinds derive from one dispatcher and pool`() {
+    fun `all kinds derive from one dispatcher and pool`() {
         val clients = newNetworkClients()
         val core = clients.base.dispatcher
         for ((kind, client) in HttpClientKind.entries.zip(allKinds(clients))) {
@@ -51,6 +51,16 @@ class ClientFamilyTest {
         assertThat(clients.download.readTimeoutMillis).isEqualTo(60_000)
         assertThat(clients[HttpClientKind.YOUTUBE].callTimeoutMillis).isEqualTo(60_000)
         assertThat(clients[HttpClientKind.SYNC].callTimeoutMillis).isEqualTo(60_000)
+        // 10's events stream: a heartbeat-driven SSE call outlives the family's 30 s read
+        // timeout, so the derivation disables read and call timeouts (the watchdog replaces
+        // them); connect and write keep SYNC's.
+        val stream = clients[HttpClientKind.SYNC_STREAM]
+        assertThat(stream.readTimeoutMillis).isEqualTo(0)
+        assertThat(stream.callTimeoutMillis).isEqualTo(0)
+        assertThat(stream.connectTimeoutMillis)
+            .isEqualTo(clients[HttpClientKind.SYNC].connectTimeoutMillis)
+        assertThat(stream.writeTimeoutMillis)
+            .isEqualTo(clients[HttpClientKind.SYNC].writeTimeoutMillis)
     }
 
     @Test
@@ -78,6 +88,7 @@ class ClientFamilyTest {
         assertThat(hasAuth(clients.download)).isTrue()
         assertThat(hasAuth(clients.image)).isTrue()
         assertThat(hasAuth(clients[HttpClientKind.SYNC])).isFalse()
+        assertThat(hasAuth(clients[HttpClientKind.SYNC_STREAM])).isFalse()
         assertThat(hasAuth(clients[HttpClientKind.YOUTUBE])).isFalse()
     }
 
@@ -101,6 +112,8 @@ class ClientFamilyTest {
         val access = LocalNetworkAccess()
         val clients = newNetworkClients(access = access, platform = fakePlatform(PlatformKind.ANDROID, 37))
         assertThat(clients[HttpClientKind.SYNC].dns).isInstanceOf(LocalNetworkGuardDns::class.java)
+        assertThat(clients[HttpClientKind.SYNC_STREAM].dns)
+            .isInstanceOf(LocalNetworkGuardDns::class.java)
         assertThat(clients.feed.dns).isInstanceOf(LocalNetworkGuardDns::class.java)
         // Desktop has the pre-confirmation DNS wrapper; unmarked calls retain normal resolution.
         assertThat(newNetworkClients().feed.dns).isInstanceOf(PreConfirmationDns::class.java)

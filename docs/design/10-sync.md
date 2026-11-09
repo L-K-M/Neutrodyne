@@ -1045,6 +1045,28 @@ every sync work name.
 - **Events:** `changed` with `by ≠` this device → a round within 500 ms (coalesced); `by` = this device → ignored.
 - If the server lacks `sse` or a proxy breaks streaming, polling covers it: rounds on foreground, pause and the timers above.
 
+**Implementation note (2026-11-22, MS3).** `SyncEventsClient` supervises one stream
+over `HttpClientKind.SYNC_STREAM` — `SYNC` derived with `readTimeout(0)` and
+`callTimeout(0)` (the same SYNC-mode LAN guard, DNS chain, pool and interceptors;
+Ktor's `SSE` plugin is installed for both kinds). Discovery's `sse` feature gates the
+first open and is re-checked on a 5-min cadence while absent. The gate combines the
+platform flow, `sync_state`'s live-link read (funneled through `SyncScheduler`'s
+`linkStateChanged` callback on every link, unlink and revocation, so a revoke closes
+the stream at once instead of waiting out the watchdog) and the network monitor.
+Android's `SyncEventsGate` emits the UI-or-playback gate with the 60-s grace and an
+immediate initial `false` (a backgrounded start must not wait out the grace before
+the supervisor sees a state); `SyncSchedulingInitializer` starts it at band 200. The
+desktop gate is `DesktopSyncTriggers.awake` (`PowerEvent.Suspending`/`Resumed`),
+started by `DesktopSyncSchedulingInitializer` at band 210. Every (re)connect pokes
+the scheduler because the bus does not replay; remote `changed` events and the
+connect poke coalesce into one `SyncRoundReason.SSE` round 500 ms after the last
+signal, and the event cursor is discarded — the round is the only data path. A `401`
+on open or mid-stream writes `sync_state`'s `markRevoked` (the engine's own write)
+and runs `SyncScheduler.onUnlinked`. `SyncStatus.Linked.activity` derives
+`SYNCING` (the round counter) over `LIVE` (`connected`) over `IDLE`, refreshed by the
+controller's combine collector; Settings › Sync shows it. Diagnostics expose only the
+connected flag — no token or cursor.
+
 ### Token storage
 
 `SyncTokenStore` keeps the device token in `SecretStore` (`:core:domain`) under the origin `sync:<host>`:
