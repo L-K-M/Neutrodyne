@@ -2240,8 +2240,9 @@ Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB
   `scripts/ci/assert-benchmark-run.py` fails the job unless both classes executed, the
   JSON carries 15 `timeToInitialDisplayMs` and 15 `timeToFullDisplayMs` runs (the
   library silently drops any iteration with incomplete metrics - "Skipping results from
-  iter 5"), the cover-grid frame samples exist, and all 15 + 5 per-iteration traces are
-  retained; emulator timings stay diagnostic.
+  iter 5"), all five cover-grid `sampledMetrics.frameOverrunMs.runs` lists contain
+  frame samples, and all 15 + 5 per-iteration traces are retained. Failed or skipped
+  XML cases do not count as execution; emulator timings stay diagnostic.
 - **Full display:** 08's Feeds route calls `ReportDrawnWhen { first page loaded }` ([08 Performance journeys](08-ui-ux.md#performance-journeys)), so `StartupTimingMetric` also reports time to full display; not budgeted in v1.
 - Results (`*-benchmarkData.json`) from the reference device are attached to the release checklist issue; a regression > 10 % against the previous minor release on PB1–PB4 blocks the release until explained.
 - **R8** (`release` and `benchmarkRelease`): full mode via `optimization { enable = true }` and `-dontobfuscate` (01); keep rules reviewed with R8's `-printconfiguration` and `-printusage` (S19). Size tips when PB12 or PB13 is at risk: legacy native packaging (compressed `.so` files, ≈ 6 MB less per 64-bit APK, decided by S7, [01 Build variants and ABIs](01-foundation.md#build-variants-and-abis)); Chaquopy's foreign-ABI assets left in each split (S7 measures them; > 5 MB per APK triggers [D2](../PLAN.md#3-key-decisions)'s ABI-flavor fallback) and its ABI-independent Python assets in the `armeabi-v7a` APK (01 open question 13); `packaging` excludes such as `/DebugProbesKt.bin`.

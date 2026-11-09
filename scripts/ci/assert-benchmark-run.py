@@ -51,6 +51,8 @@ def _xml_testcases(results_dir: Path) -> set[str]:
         except ElementTree.ParseError:
             continue
         for case in root.iter("testcase"):
+            if any(case.find(tag) is not None for tag in ("failure", "error", "skipped")):
+                continue
             cases.add(f"{case.get('classname')}.{case.get('name')}")
     return cases
 
@@ -67,14 +69,14 @@ def _runs(report: dict, test_name: str, metric: str) -> list | None:
     return None
 
 
-def _sampled_samples(report: dict, test_name: str, metric: str) -> list | None:
+def _sampled_runs(report: dict, test_name: str, metric: str) -> list | None:
     for result in report.get("benchmarks", []):
         if result.get("name") != test_name:
             continue
 
         entry = result.get("sampledMetrics", {}).get(metric)
         if entry is not None:
-            return entry.get("data")
+            return entry.get("runs")
 
     return None
 
@@ -113,11 +115,17 @@ def check(host_collected: Path, results_dir: Path, cold_iterations: int, frame_i
                     f"{COLD_TEST}: metric {metric} has {len(runs)} samples, expected {cold_iterations}"
                 )
 
-        samples = _sampled_samples(report, GRID_TEST, GRID_METRIC)
-        if samples is None:
+        runs = _sampled_runs(report, GRID_TEST, GRID_METRIC)
+        if not isinstance(runs, list):
             problems.append(f"{GRID_TEST}: sampled metric {GRID_METRIC} missing from the JSON")
-        elif not samples:
-            problems.append(f"{GRID_TEST}: sampled metric {GRID_METRIC} has no samples")
+        elif len(runs) != frame_iterations:
+            problems.append(
+                f"{GRID_TEST}: sampled metric {GRID_METRIC} has {len(runs)} runs, expected {frame_iterations}"
+            )
+        elif any(not isinstance(samples, list) or not samples for samples in runs):
+            problems.append(
+                f"{GRID_TEST}: sampled metric {GRID_METRIC} has no samples or lacks nonempty per-iteration samples"
+            )
 
     traces = [path.name for path in host_collected.rglob("*.perfetto-trace")]
     cold_traces = [name for name in traces if COLD_TRACE.fullmatch(name)]

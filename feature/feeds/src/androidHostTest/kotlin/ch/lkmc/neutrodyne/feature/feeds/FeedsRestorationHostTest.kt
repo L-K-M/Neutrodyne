@@ -56,6 +56,7 @@ class FeedsRestorationHostTest {
     fun cachedRowsRemainUnsettledDuringRefresh() {
         val drawn = setReadinessFeed(LoadState.Loading)
         compose.onNodeWithTag("feed_list").assertIsDisplayed()
+        compose.onNodeWithTag("feed_loading").assertIsDisplayed()
         compose.runOnIdle { assertFalse(assertNotNull(drawn.get()).invoke()) }
         compose.onNodeWithTag("feed_settled").assertDoesNotExist()
     }

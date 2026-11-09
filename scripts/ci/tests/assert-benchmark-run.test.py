@@ -54,7 +54,7 @@ def _report(cold_runs: list[float] | None, ttfd_runs: list[float] | None, frame_
         "name": "coverGridFling",
         "className": "ch.lkmc.neutrodyne.benchmark.CoverGridBenchmark",
         "metrics": {},
-        "sampledMetrics": {"frameOverrunMs": {"data": frame_samples or []}},
+        "sampledMetrics": {"frameOverrunMs": {"runs": [frame_samples or [] for _ in range(5)]}},
     }
     return json.dumps({"context": {}, "benchmarks": [cold, grid]})
 
@@ -158,6 +158,36 @@ class AssertBenchmarkRunTest(unittest.TestCase):
         finally:
             tree.close()
         self.assertTrue(any("frameOverrunMs has no samples" in p for p in problems), problems)
+
+    def test_dropped_grid_iterations_fail(self):
+        report = json.loads(GOOD_REPORT)
+        report["benchmarks"][1]["sampledMetrics"]["frameOverrunMs"]["runs"].pop()
+        tree = Tree(BOTH_CASES, ALL_TRACES, json.dumps(report))
+        try:
+            problems = self._check(tree)
+        finally:
+            tree.close()
+        self.assertTrue(any("frameOverrunMs has 4 runs, expected 5" in p for p in problems), problems)
+
+    def test_flat_grid_samples_are_not_iteration_runs(self):
+        report = json.loads(GOOD_REPORT)
+        report["benchmarks"][1]["sampledMetrics"]["frameOverrunMs"]["runs"] = [1.0] * 5
+        tree = Tree(BOTH_CASES, ALL_TRACES, json.dumps(report))
+        try:
+            problems = self._check(tree)
+        finally:
+            tree.close()
+        self.assertTrue(any("nonempty per-iteration samples" in p for p in problems), problems)
+
+    def test_skipped_case_is_not_execution(self):
+        tree = Tree(BOTH_CASES, ALL_TRACES, GOOD_REPORT)
+        try:
+            path = tree.results_dir / "TEST-bench34.xml"
+            path.write_text(path.read_text().replace('time="1.0" />', 'time="1.0"><skipped /></testcase>'), encoding="utf-8")
+            problems = self._check(tree)
+        finally:
+            tree.close()
+        self.assertTrue(any("test case did not execute" in p for p in problems), problems)
 
     def test_journey_constants_still_mirror_the_gate_defaults(self):
         actions = (ROOT / "benchmark/src/main/kotlin/ch/lkmc/neutrodyne/benchmark/JourneyActions.kt").read_text(
