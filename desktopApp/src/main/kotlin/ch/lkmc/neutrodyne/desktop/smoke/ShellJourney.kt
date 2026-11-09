@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.smoke
 
+import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
@@ -20,8 +21,13 @@ import coil3.SingletonImageLoader
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.attribute.DosFileAttributeView
+import java.nio.file.attribute.PosixFileAttributeView
+import java.nio.file.attribute.PosixFilePermission
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
@@ -37,9 +43,10 @@ import kotlin.time.TimeSource
  */
 internal class ShellJourney(
     tempPrefix: String,
+    createRoot: (String) -> Path = { Files.createTempDirectory(it) },
 ) {
     val timings = LinkedHashMap<String, Long>()
-    private val root: Path = Files.createTempDirectory(tempPrefix)
+    private val root: Path = createRoot(tempPrefix)
     var graph: DesktopAppGraph? = null
         private set
     private val watchdog: Thread = armWatchdog()
@@ -113,6 +120,9 @@ internal class ShellJourney(
                 if (opened) startedGraph.databaseOpener.requireDatabase().close()
             }
         }
+        // Compiled engine libraries protect their files and directories. Restore write
+        // access inside this owned tree before deleting children; never follow a link.
+        Files.walk(root).use { paths -> paths.forEach(::restoreWritable) }
         Files.walk(root).use { paths ->
             paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
         }
@@ -140,11 +150,76 @@ internal class ShellJourney(
         watchdog.join()
     }
 
-    private companion object {
+    companion object {
         private const val TAG = "ShellJourney"
         private const val THREAD_NAME = "smoke-watchdog"
         private const val EXIT_HALT = 1
         private val WATCHDOG_TIMEOUT = 60.seconds
         private val RUNNER_GRACE = 3.seconds
+
+        /**
+         * `dos:readonly` is the platform's read-only marker only on a DOS file system. A
+         * Unix store can advertise both POSIX and DOS views. Keep its existing POSIX
+         * permission semantics and consult the DOS marker on Windows alone.
+         */
+        private val DOS_HOST = AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS
+
+        /**
+         * Restores write access on [path] inside the owned journey tree so the bottom-up
+         * delete can remove it; a symbolic link is never followed, its target lives
+         * outside this tree.
+         *
+         * `File.setWritable` is deliberately not the guard: on Windows it reports failure
+         * even for directories that are perfectly writable — the hosted windows-x64 AOT
+         * training run failed this way on a freshly created temporary root. Actual
+         * writability can short-circuit POSIX restoration. On Windows a directory can
+         * report writable while its DOS marker is still read-only, so always clear and
+         * read back that marker: the owner-write bit on a POSIX store, `dos:readonly` on
+         * a DOS host. A marker that still reads read-only fails the cleanup instead of
+         * letting the delete pass hit it unprepared.
+         */
+        internal fun restoreWritable(path: Path) {
+            if (Files.isSymbolicLink(path)) return
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return
+            if (!DOS_HOST && Files.isWritable(path)) return
+            val restored =
+                when {
+                    Files.getFileStore(path).supportsFileAttributeView("posix") -> restorePosixWritable(path)
+                    DOS_HOST -> restoreDosWritable(path)
+                    else -> restoreFallbackWritable(path)
+                }
+            if (!restored) {
+                throw IOException("Cannot make temporary journey path writable: $path")
+            }
+        }
+
+        /** The owner-write bit is the read-only marker the engine store sets on POSIX. */
+        private fun restorePosixWritable(path: Path): Boolean {
+            val view =
+                Files.getFileAttributeView(path, PosixFileAttributeView::class.java, LinkOption.NOFOLLOW_LINKS)
+                    ?: return restoreFallbackWritable(path)
+            val permissions = view.readAttributes().permissions()
+            if (PosixFilePermission.OWNER_WRITE in permissions) return true
+            view.setPermissions(permissions + PosixFilePermission.OWNER_WRITE)
+            return PosixFilePermission.OWNER_WRITE in view.readAttributes().permissions()
+        }
+
+        /** `dos:readonly` is the same marker through the DOS attribute view. */
+        private fun restoreDosWritable(path: Path): Boolean {
+            val view =
+                Files.getFileAttributeView(path, DosFileAttributeView::class.java, LinkOption.NOFOLLOW_LINKS)
+                    ?: return restoreFallbackWritable(path)
+            if (!view.readAttributes().isReadOnly) return true
+            view.setReadOnly(false)
+            return !view.readAttributes().isReadOnly
+        }
+
+        /**
+         * A store that is neither POSIX nor DOS gets `File.setWritable` — with its
+         * return value verified against actual writability, since the boolean does not
+         * reliably mean success or failure.
+         */
+        private fun restoreFallbackWritable(path: Path): Boolean =
+            path.toFile().setWritable(true, true) || Files.isWritable(path)
     }
 }

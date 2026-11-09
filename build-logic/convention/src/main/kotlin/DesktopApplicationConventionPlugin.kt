@@ -93,7 +93,13 @@ class DesktopApplicationConventionPlugin : Plugin<Project> {
                         }.getOrNull()
                 // javaHome is non-nullable in the Compose DSL; null means "keep the default".
                 if (packagingJavaHome != null) javaHome = packagingJavaHome
-                jvmArgs += desktopJvmOptions(hostTarget)
+                // installKind marks a packaging invocation: only then does the launcher's
+                // .cfg carry the AOT cache flag (PO-42); run/tests/dev images stay flag-free.
+                jvmArgs +=
+                    desktopJvmOptions(
+                        hostTarget,
+                        providers.gradleProperty("neutrodyne.installKind").isPresent,
+                    )
                 // Compose resolves ProGuard (GPL-2.0, D3) through a detached configuration inside the release
                 // task actions, so it never lands on a named configuration to scan. Disabling the release
                 // build type's ProGuard is the enforceable gate; verifyDependencyPolicy asserts that no
@@ -182,6 +188,14 @@ internal val JLINK_MODULES =
         "jdk.unsupported",
     )
 
+/**
+ * The locales jlink keeps inside `jdk.localedata` (11 jlink modules, PB27): English covers
+ * the shipped `en-US` strings and UI fallback, German the `de` resources the app carries;
+ * every other locale falls back to root. Compose 1.12.1's jlink step cannot express
+ * `--include-locales`, so the convention plugin's own jlink task adds it.
+ */
+internal val JLINK_INCLUDED_LOCALES = listOf("en", "de")
+
 /** Tasks that execute or probe the javaHome JDK and therefore need the pinned runtime unpacked first. */
 internal val RUNTIME_IMAGE_CONSUMERS =
     setOf(
@@ -200,6 +214,10 @@ internal val RUNTIME_IMAGE_CONSUMERS =
 internal val PACKAGING_ONLY_TASKS =
     setOf("packageDeb", "packageRpm", "packageZip", "packageTarGz")
 
+/** Every task that turns the app image into an installer/archive — all consume the trained image. */
+internal val AOT_CACHE_CONSUMERS =
+    setOf("packageMsi", "packageDmg", "packageDeb", "packageRpm", "packageZip", "packageTarGz")
+
 /** Compose's uber-JAR tasks; host-independent, so never blocked. */
 private val UBER_JAR_TASKS = setOf("packageUberJarForCurrentOS", "packageReleaseUberJarForCurrentOS")
 
@@ -208,12 +226,21 @@ private const val OPML_MIME_TYPE = "text/x-opml"
 private const val OPML_EXTENSION = "opml"
 private const val OPML_DESCRIPTION = "OPML subscription list"
 
-/** Per-OS launcher options (11 JVM options). The AOT cache is not shipped before MD5 (PO-42 fallback). */
-internal fun desktopJvmOptions(target: DesktopPackagingTarget?): List<String> =
+/**
+ * Per-OS launcher options (11 JVM options). [packaged] is set on packaging invocations
+ * (`-Pneutrodyne.installKind=…`): only then does the launcher's .cfg carry the JDK 25 AOT
+ * cache flag (PO-42, 11 AOT cache) — dev runs, tests and the assemble image get no flag
+ * and no cache.
+ */
+internal fun desktopJvmOptions(
+    target: DesktopPackagingTarget?,
+    packaged: Boolean,
+): List<String> =
     buildList {
         add("--enable-native-access=ALL-UNNAMED")
         add("-XX:+ExitOnOutOfMemoryError")
         add("-Xmx768m")
+        if (packaged && target != null) add(AOT_CACHE_OPTION)
         when (target?.osWire) {
             "windows" -> {
                 // The jpackage launcher expands environment variables in its configuration file

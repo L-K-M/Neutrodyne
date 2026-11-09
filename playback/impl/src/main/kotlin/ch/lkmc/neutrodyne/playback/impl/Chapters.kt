@@ -130,12 +130,17 @@ internal class Chapters(
     override fun onIsPlayingChanged(isPlaying: Boolean) = evaluate()
 
     fun command(action: String): SessionResult? {
+        val position = player.currentPosition
         val target =
             when (action) {
-                PlaybackSessionCommands.CHAPTER_NEXT -> index.next(player.currentPosition)
-                PlaybackSessionCommands.CHAPTER_PREV -> index.previous(player.currentPosition)
+                PlaybackSessionCommands.CHAPTER_NEXT -> index.next(position)
+                PlaybackSessionCommands.CHAPTER_PREV -> index.previous(position)
                 else -> return null
             }
+        // Session commands bypass the per-controller player-command queue in Media3, so a
+        // chapter command can evaluate a position an already-issued seek has not yet
+        // applied. Record what was seen: it is the only evidence for that ordering.
+        Log.i(TAG, "command action=$action position=$position size=${index.chapters.size} target=$target")
         target?.let { seek(player.duration.takeIf { it > 0 }?.let(it::coerceAtMost) ?: it) }
         evaluate()
         return SessionResult(SessionResult.RESULT_SUCCESS)

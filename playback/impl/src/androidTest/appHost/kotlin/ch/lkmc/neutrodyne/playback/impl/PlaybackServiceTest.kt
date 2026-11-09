@@ -20,6 +20,8 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.core.app.ActivityScenario
@@ -77,6 +79,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import ch.lkmc.neutrodyne.BuildConfig as AppBuildConfig
 
 /**
@@ -114,6 +117,25 @@ class PlaybackServiceTest {
             }
             // Set before the service exists, never through a production preference.
             if (AppBuildConfig.DEBUG) PlaybackTestHooks.foregroundServiceTimeoutMs = 5_000
+            appliedSeeks.clear()
+            // Arm before any call that could create the service; re-fires on
+            // service recreation and re-attaches to the fresh player.
+            PlaybackTestHooks.playerCreated = { player ->
+                engine = player
+                player.addListener(
+                    object : Player.Listener {
+                        override fun onPositionDiscontinuity(
+                            oldPosition: Player.PositionInfo,
+                            newPosition: Player.PositionInfo,
+                            reason: Int,
+                        ) {
+                            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                                appliedSeeks += newPosition.positionMs
+                            }
+                        }
+                    },
+                )
+            }
             observation.launch { graph.playbackStateSource.nowPlaying.collect {} }
             graph.databaseOpener.awaitOpen()
             graph.playbackController.dismiss()
@@ -134,6 +156,7 @@ class PlaybackServiceTest {
             scenario?.close()
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             if (AppBuildConfig.DEBUG) PlaybackTestHooks.foregroundServiceTimeoutMs = null
+            PlaybackTestHooks.playerCreated = null
             if (hardening) device.executeShellCommand("cmd audio set-enable-hardening enable")
             device.wakeUp()
             server.close()
@@ -381,25 +404,66 @@ class PlaybackServiceTest {
             }
             // Pin the position so previous picks a deterministic branch: under three
             // seconds into the chapter rewinds to the prior chapter; over it restarts.
-            withContext(Dispatchers.Main) {
-                connect().pause()
-                graph.playbackController.seekTo(30_500)
-            }
-            withContext(Dispatchers.Main) { graph.playbackController.previousChapter() }
-            await { snapshotPosition() < 3_000 }
-            withContext(Dispatchers.Main) { graph.playbackController.seekTo(35_000) }
-            await { snapshotPosition() >= 34_000 }
-            withContext(Dispatchers.Main) { graph.playbackController.previousChapter() }
-            await { snapshotPosition() in 29_000..31_000 }
+            // Chapter commands are session commands, which Media3 does not order behind
+            // a still-queued player-command seek, so the session must have consumed the
+            // seek before previous can evaluate its position. MediaController getters
+            // cannot prove that: pause() and seekTo() update the controller's local
+            // mask before the remote command queue runs (Media3 1.11.1
+            // MediaControllerImplBase). The only ack is the real player's own SEEK
+            // discontinuity, recorded through the playerCreated hook.
+            phase("chapters/prev-seek")
+            var seekMark = 0
+            val maskedSettled =
+                withContext(Dispatchers.Main) {
+                    connect().pause()
+                    seekMark = appliedSeeks.size
+                    connect().seekTo(30_500)
+                    // Record the local mask only for diagnostics. The acknowledgement
+                    // below comes from the real player after this main-thread section.
+                    !connect().playWhenReady && connect().currentPosition >= 30_400
+                }
+            logEvidence(
+                "seek-mask",
+                "maskedSettled=$maskedSettled appliedSeeks=${appliedSeeks.size - seekMark} " +
+                    "- a controller-state await already passes before the session ran",
+            )
+            awaitAppliedSeek(seekMark, 30_500)
+            await { withContext(Dispatchers.Main) { engine?.playWhenReady == false } }
+            phase("chapters/prev-first")
+            seekMark =
+                withContext(Dispatchers.Main) {
+                    val mark = appliedSeeks.size
+                    graph.playbackController.previousChapter()
+                    mark
+                }
+            awaitAppliedSeek(seekMark, 0, 3_000)
+            phase("chapters/restart-seek")
+            seekMark =
+                withContext(Dispatchers.Main) {
+                    val mark = appliedSeeks.size
+                    graph.playbackController.seekTo(35_000)
+                    mark
+                }
+            awaitAppliedSeek(seekMark, 35_000, 1_000)
+            phase("chapters/prev-second")
+            seekMark =
+                withContext(Dispatchers.Main) {
+                    val mark = appliedSeeks.size
+                    graph.playbackController.previousChapter()
+                    mark
+                }
+            awaitAppliedSeek(seekMark, 30_000, 1_000)
             phase("chapters/timestamp")
             withContext(Dispatchers.Main) { connect().play() }
             awaitAudio()
-            withContext(Dispatchers.Main) { graph.playbackController.seekTo(TIMESTAMP_SEEK_MS) }
-            await {
-                snapshotPosition() in
-                    TIMESTAMP_SEEK_MS..TIMESTAMP_SEEK_MS + SEEK_TOLERANCE_MS
-            }
-            assertTrue(withContext(Dispatchers.Main) { connect().playWhenReady })
+            seekMark =
+                withContext(Dispatchers.Main) {
+                    val mark = appliedSeeks.size
+                    graph.playbackController.seekTo(TIMESTAMP_SEEK_MS)
+                    mark
+                }
+            awaitAppliedSeek(seekMark, TIMESTAMP_SEEK_MS, SEEK_TOLERANCE_MS)
+            assertTrue(withContext(Dispatchers.Main) { engine?.playWhenReady == true })
             assertEquals(
                 PlayResult.Started,
                 graph.playbackController.playEpisodeAt(ids[1], TIMESTAMP_SEEK_MS),
@@ -409,7 +473,7 @@ class PlaybackServiceTest {
                     snapshotPosition() in
                     TIMESTAMP_SEEK_MS..TIMESTAMP_SEEK_MS + SEEK_TOLERANCE_MS
             }
-            assertTrue(withContext(Dispatchers.Main) { connect().playWhenReady })
+            assertTrue(withContext(Dispatchers.Main) { engine?.playWhenReady == true })
         }
 
     @Test @Nightly
@@ -753,7 +817,26 @@ class PlaybackServiceTest {
         graph.playbackStateSource.nowPlaying.value
             ?.episodeId
 
-    private suspend fun snapshotPosition() = withContext(Dispatchers.Main) { connect().currentPosition }
+    /**
+     * Session-side settle ack: await a SEEK discontinuity appended by the
+     * playerCreated hook after [mark] — the only signal that the session's
+     * command queue consumed the issued seek. [snapshotPosition] and
+     * MediaController getters are optimistic masks, not acks.
+     */
+    private suspend fun awaitAppliedSeek(
+        mark: Int,
+        targetMs: Long,
+        toleranceMs: Long = 250,
+    ) = await {
+        var hit = false
+        for (i in mark until appliedSeeks.size) {
+            if (abs(appliedSeeks[i] - targetMs) <= toleranceMs) hit = true
+        }
+        hit
+    }
+
+    // The real session player's position; a MediaController read masks pending commands.
+    private suspend fun snapshotPosition() = withContext(Dispatchers.Main) { engine?.currentPosition ?: -1L }
 
     private fun serviceDump() =
         device.executeShellCommand(
@@ -912,22 +995,41 @@ class PlaybackServiceTest {
         )
     }
 
-    private fun stateSnapshot(): String {
+    private suspend fun stateSnapshot(): String {
         val process = ActivityManager.RunningAppProcessInfo()
         ActivityManager.getMyMemoryState(process)
         val current = graph.playbackStateSource.nowPlaying.value
+        val chapter = graph.playbackStateSource.currentChapter.value
+        val live =
+            withContext(Dispatchers.Main) {
+                // Controller getters verify the application thread and report the
+                // optimistic mask; engine reads are the session-side truth.
+                "ctrl=" +
+                    controller?.let {
+                        "pos=${it.currentPosition} buffered=${it.bufferedPosition} " +
+                            "duration=${it.duration} mediaItemIndex=${it.currentMediaItemIndex} " +
+                            "itemCount=${it.mediaItemCount} playbackState=${it.playbackState}"
+                    } +
+                    " engine=" +
+                    engine?.let {
+                        "pos=${it.currentPosition} pwr=${it.playWhenReady} state=${it.playbackState}"
+                    }
+            }
         return "phase=$phase uid=${Process.myUid()} pid=${Process.myPid()} importance=${process.importance} " +
-            "playWhenReady=${current?.playWhenReady} isPlaying=${current?.isPlaying} issue=${current?.issue}"
+            "episode=${current?.episodeId} playWhenReady=${current?.playWhenReady} " +
+            "isPlaying=${current?.isPlaying} issue=${current?.issue} " +
+            "chapter=${chapter?.index}/${chapter?.count} $live " +
+            "appliedSeeks=${appliedSeeks.takeLast(8)}"
     }
 
-    private fun captureFailure() {
-        fun record(
+    private suspend fun captureFailure() {
+        suspend fun record(
             name: String,
-            value: () -> String,
+            value: suspend () -> String,
         ) {
-            logEvidence(name, runCatching(value).getOrElse { "Capture failed: $it" })
+            logEvidence(name, runCatching { value() }.getOrElse { "Capture failed: $it" })
         }
-        record("state", ::stateSnapshot)
+        record("state") { stateSnapshot() }
         record("hierarchy") {
             val path = File(app.cacheDir, "playback-window.xml")
             try {
@@ -1001,6 +1103,19 @@ class PlaybackServiceTest {
         const val DATA_CYCLE_GRACE_MS = 10_000L
         const val DATA_CYCLE_MS = 10_000L
         const val THIRTY_MINUTES_MS = 30 * 60 * 1_000L
+
+        /**
+         * The session-side player, captured through PlaybackTestHooks.playerCreated.
+         * MediaController getters report an optimistic local mask (pause() and
+         * seekTo() mutate it before the session's command queue runs), so only
+         * this handle can prove a queued command was actually applied. Companion
+         * scope: JUnit rebuilds the class per test and a bound service can outlive
+         * one case, so the hook refills this whenever the player is recreated.
+         */
+        @Volatile private var engine: ExoPlayer? = null
+
+        /** Positions the session player actually landed at, in delivery order. */
+        private val appliedSeeks = CopyOnWriteArrayList<Long>()
         val EMBEDDED_CHAPTER_FIXTURES =
             listOf(
                 "chapters_id3.mp3" to ChapterSource.ID3,
