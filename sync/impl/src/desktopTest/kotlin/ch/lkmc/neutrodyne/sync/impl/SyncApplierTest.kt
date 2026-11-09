@@ -606,7 +606,7 @@ class SyncApplierTest {
                         .ingestDao()
                         .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
                         .single()
-                // Page A's mark commits; page B's identical mark then rolls its transaction back.
+                // Page A commits; page B carries a newer mark and fails after installing its freeze.
                 val freezes = mutableMapOf<Long, Int>()
                 var failOnMark = false
                 val playback =
@@ -664,14 +664,15 @@ class SyncApplierTest {
                                     podcastSyncId,
                                     "g:one",
                                     MatchHints(guid = "one"),
-                                    "played" to bool(true),
-                                    "playedAt" to int(10L),
+                                    "played" to FieldValue(JsonPrimitive(true), clock(11).toString()),
+                                    "playedAt" to FieldValue(JsonPrimitive(10L), clock(11).toString()),
                                 ),
                             ),
                             roundId = now + 1,
                         )
                     }
                 assertTrue(failure.isFailure, "the injected apply failure propagates")
+                assertEquals("injected apply failure", failure.exceptionOrNull()?.message)
                 assertEquals(
                     1,
                     freezes[episodeId],
@@ -679,6 +680,107 @@ class SyncApplierTest {
                 )
                 assertEquals(1, received.size, "a failed page posts no further notice")
                 assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt, "page B rolled back")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFavouriteUpdateDoesNotRepeatAnEarlierPlayedMark() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val playback = FakePlaybackSyncPort()
+                val applier = applier(db, playback = playback)
+                playback.setActive(episodeId, isPlaying = true)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(true),
+                            "playedAt" to int(9L),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            episodeRecord(
+                                podcastSyncId,
+                                "g:one",
+                                MatchHints(guid = "one"),
+                                "fav" to bool(true),
+                            ).copy(by = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+                        ),
+                        roundId = now + 1,
+                    )
+                assertEquals(1, result.applied, "the favourite really changed")
+                assertTrue(db.episodeStateDao().byEpisode(episodeId)?.isFavorite == true)
+                assertEquals(
+                    listOf(episodeId to deviceId),
+                    playback.remotePlayed,
+                    "an unrelated field update must not repeat an earlier played mark",
+                )
+                assertTrue(result.remotePlayed.isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aNewerPlayedMarkStillReportsAWinningMark() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val playback = FakePlaybackSyncPort()
+                playback.setActive(episodeId, isPlaying = true)
+                val applier = applier(db, playback = playback)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(true),
+                            "playedAt" to int(9L),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            episodeRecord(
+                                podcastSyncId,
+                                "g:one",
+                                MatchHints(guid = "one"),
+                                "played" to FieldValue(JsonPrimitive(true), clock(11).toString()),
+                                "playedAt" to FieldValue(JsonPrimitive(10L), clock(11).toString()),
+                            ),
+                        ),
+                        roundId = now + 1,
+                    )
+                assertEquals(1, result.remotePlayed.size)
+                assertEquals(2, playback.remotePlayed.size)
             } finally {
                 db.close()
             }

@@ -599,6 +599,9 @@ class SyncApplier(
         by: String?,
         remotePlayed: MutableList<RemotePlayedMark>,
     ) {
+        // A later favourite or other unrelated field can carry an old played state. Only
+        // a newly winning played marker may freeze again or name its writer in a notice.
+        if ("played" !in merge.advanced) return
         if (EpisodeStateRules.derive(merge.record.fields).state !=
             ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress.PLAYED
         ) {
