@@ -189,6 +189,7 @@ class SyncControllerImpl(
         override fun toString(): String = "DisconnectIdentity(redacted)"
     }
 
+
     init {
         scope.launch { refreshStatus() }
         // 10 Live updates: the status card's activity line follows the round counter and the
