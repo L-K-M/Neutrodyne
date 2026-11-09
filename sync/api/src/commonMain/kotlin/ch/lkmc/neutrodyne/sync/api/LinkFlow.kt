@@ -30,6 +30,13 @@ data class SyncDisclosure(
     val encrypted: Boolean,
 )
 
+/**
+ * What an approved link grants (10 Link codes — Approval): `device` gives the new device the
+ * whole library, `web` signs a browser in to the account. The server knows only these two
+ * values; anything else fails closed at the client.
+ */
+enum class LinkPurpose { DEVICE, WEB }
+
 /** The pending device an already linked device approves (10 Link methods). */
 data class PendingDevice(
     val userCode: String,
@@ -37,6 +44,9 @@ data class PendingDevice(
     val platform: String,
     val appVersion: String,
     val requestedAtMs: Long,
+    val purpose: LinkPurpose,
+    /** Whether `link/start` came from the approver's client IP — `false` warns of consent phishing. */
+    val sameNetwork: Boolean,
 )
 
 /**

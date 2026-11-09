@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.sync
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -21,9 +23,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
@@ -31,9 +36,13 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_idle
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_live
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_syncing
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices_linked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_intro
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_again
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_another
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_another_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_linked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_now
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect
@@ -47,6 +56,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_what_syncs
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -103,6 +113,12 @@ fun SyncSettingsScreen(
                     Button(onClick = controller::syncNow, enabled = !syncing) {
                         Text(stringResource(Res.string.sync_now))
                     }
+                    LinkedDeviceRows(
+                        controller,
+                        current,
+                        onDevices = { navigator.push(SyncDevicesKey) },
+                        onApprove = { navigator.push(SyncApproveKey()) },
+                    )
                     Text(
                         stringResource(Res.string.sync_what_syncs),
                         style = MaterialTheme.typography.bodySmall,
@@ -170,5 +186,32 @@ private fun ColumnScope.NotConfiguredBody(
     NdTextButton(
         label = stringResource(Res.string.sync_run_server),
         onClick = { actions.urls.open(runServerUrl) },
+    )
+}
+
+@Composable
+private fun ColumnScope.LinkedDeviceRows(
+    controller: SyncController,
+    linked: SyncStatus.Linked,
+    onDevices: () -> Unit,
+    onApprove: () -> Unit,
+) {
+    val identity = linked.identity()
+    var count by remember(identity) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(identity) {
+        val result = controller.devices()
+        if (controller.status.value.identity() == identity && result is Outcome.Success) {
+            count = result.value.size
+        }
+    }
+    ListItem(
+        headlineContent = { Text(stringResource(Res.string.sync_link_another)) },
+        supportingContent = { Text(stringResource(Res.string.sync_link_another_hint)) },
+        modifier = Modifier.clickable(onClick = onApprove),
+    )
+    ListItem(
+        headlineContent = { Text(stringResource(Res.string.sync_devices)) },
+        supportingContent = count?.let { n -> { Text(pluralStringResource(Res.plurals.sync_devices_linked, n, n)) } },
+        modifier = Modifier.clickable(onClick = onDevices),
     )
 }

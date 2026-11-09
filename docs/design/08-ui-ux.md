@@ -1406,12 +1406,21 @@ shipped: the Settings home row pushes `SyncSettingsKey` (the only sync UI while
 server" → `{repoUrl}#run-the-server`, and `Reconnect`, `LinkUnfinished` and
 `Revoked` push `SyncSetupKey(serverUrl)` — `LinkUnfinished` resumes the step the
 existing `LinkFlow` holds, it is not cancelled or restarted. `Revoked` shows
-"This device was unlinked" with "Link again". `Linked` currently shows only the
-status text, "Sync now" and the "What syncs" text; the linked rows above
-(device name, Link another device, Devices, the two switches, What the server
-stores, Unlink, Delete my data, Diagnostics), `Reconnect`'s "Forget server",
-the held-changes review and the restore prompts remain MS2 work, as do the
-approve sheet, devices list and diagnostics screens.
+"This device was unlinked" with "Link again". While `Linked`, the rows
+"Link another device" and "Devices" ("{n} linked") are shipped with their
+destinations: `SyncApproveKey`'s sheet looks the code up with `approveLink`,
+shows the named pending request — a purpose line says what approval grants
+("gets your whole library" for `device`, "signs a browser in to your account"
+for `web`) and warns "Requested from a different network" when `sameNetwork`
+is false — and only the explicit **Link**/**Don't link** choice calls
+`confirmLink`; `SyncDevicesKey` lists every `SyncDevice` with
+platform icon, version, "This device"/"Last seen"/"Not seen for 6 months",
+Rename (trimmed 1–40) and a name-confirming Remove for the other devices, plus
+the "manage devices on {host}" footer. Still open for MS2: the Name (own
+device) row, the Sync-playback-settings and Share-feed-passwords switches,
+"What the server stores", Unlink this device, Delete my data, the Diagnostics
+row and screen, `Reconnect`'s "Forget server", the held-changes review and the
+restore prompts.
 
 #### Linking a device
 
