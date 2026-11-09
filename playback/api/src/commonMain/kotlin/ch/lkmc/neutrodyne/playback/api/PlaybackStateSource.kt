@@ -19,6 +19,14 @@ import kotlinx.coroutines.flow.StateFlow
  */
 interface PlaybackStateSource {
     val nowPlaying: StateFlow<NowPlaying?>
+
+    /**
+     * The latest synchronously committed item. On producers whose [nowPlaying] is assembled
+     * through a deferred pipeline (a `flatMapLatest`/`stateIn` hop), `nowPlaying.value` can still
+     * hold the outgoing item while the live source already committed the next — post-time
+     * stamping (the marked-played-elsewhere notice) must use this snapshot instead.
+     */
+    val currentNowPlaying: NowPlaying? get() = nowPlaying.value
     val positionTicks: Flow<PositionSnapshot>
     val effectivePlayback: StateFlow<EffectivePlayback?>
 

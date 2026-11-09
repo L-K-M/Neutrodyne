@@ -62,9 +62,10 @@ class MarkedPlayedElsewhereTracker(
         if (!started.compareAndSet(false, true)) return
         val stamper: (SyncNotice) -> Unit = { notice ->
             (notice as? SyncNotice.MarkedPlayedElsewhere)?.let { n ->
-                val now = state.nowPlaying.value
+                val now = state.currentNowPlaying
                 // Only a notice for the item actually current at post time lands; anything else
-                // leaves the retained mark for the current item untouched.
+                // leaves the retained mark for the current item untouched. `currentNowPlaying`,
+                // not the merged StateFlow, so a live commit not yet pumped is still seen.
                 if (now?.episodeId == n.episodeId) {
                     posted.value = MarkedPlayedElsewhere(n.episodeId, n.deviceName, now.loadId)
                 }

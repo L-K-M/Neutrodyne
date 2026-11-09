@@ -201,6 +201,42 @@ class MarkedPlayedElsewhereTrackerTest {
             assertNull(tracker.markedPlayedElsewhere.value)
         }
 
+    /**
+     * The real hub's merged `nowPlaying` lags a synchronous bridge commit by a dispatcher pass;
+     * the stamper reads `currentNowPlaying`, so a notice for the just-committed item still lands.
+     */
+    @Test fun aNoticeForTheJustCommittedLiveItemIsStampedNotLost() =
+        runTest {
+            state.nowPlaying.value = now(7)
+            val committed = now(9)
+            val source =
+                object : ch.lkmc.neutrodyne.playback.api.PlaybackStateSource by state {
+                    override val currentNowPlaying get() = committed
+                }
+            val tracker = MarkedPlayedElsewhereTracker(source, bus, backgroundScope)
+            tracker.start()
+            // Posted in the lag window: the merged view still shows 7 while live already is 9.
+            bus.post(notice(9, "Laptop"))
+            state.nowPlaying.value = committed
+            runCurrent()
+            tracker.assertLine(9, "Laptop")
+        }
+
+    /** The inverse lag: the outgoing item's notice must not ride the stale merged view. */
+    @Test fun aNoticeForTheOutgoingItemCannotRideTheStaleView() =
+        runTest {
+            state.nowPlaying.value = now(7)
+            val source =
+                object : ch.lkmc.neutrodyne.playback.api.PlaybackStateSource by state {
+                    override val currentNowPlaying get() = now(9)
+                }
+            val tracker = MarkedPlayedElsewhereTracker(source, bus, backgroundScope)
+            tracker.start()
+            bus.post(notice(7))
+            runCurrent()
+            assertNull(tracker.markedPlayedElsewhere.value)
+        }
+
     @Test fun aFreshNoticeReArmsTheReloadedItem() =
         runTest {
             state.nowPlaying.value = now(7)
