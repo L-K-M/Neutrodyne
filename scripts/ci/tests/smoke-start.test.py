@@ -35,6 +35,7 @@ Exit 0 = every contract holds; 1 = at least one regression.
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import stat
@@ -268,10 +269,12 @@ class SmokeStartGateTest(unittest.TestCase):
             "_JAVA_OPTIONS": underscore_java_options,
         }
 
-    def run_script(self, img: Path, timeout: int, env: dict, shell="bash"):
+    def run_script(self, img: Path, timeout: int, env: dict, shell="bash",
+                   replay=None):
         """Run the shipped script; on a hang, kill exactly its process group."""
+        extra = [] if replay is None else [f"--engine-replay={replay}"]
         proc = subprocess.Popen(
-            [shell, str(SMOKE_START), str(img), f"--timeout={timeout}"],
+            [shell, str(SMOKE_START), str(img), f"--timeout={timeout}", *extra],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -481,6 +484,144 @@ class SmokeStartGateTest(unittest.TestCase):
         self.assertEqual(0, rc, err)
         self.assertEqual(VALID_SMOKE + "\n", out)
         self.assert_unchanged(cfg, CFG_PREEXISTING, 0o640)
+
+    # --- armed engine-replay contracts (MD3 AC2) ---------------------------------
+    #
+    # The fake image carries engine/python/bin/python3 so the evidence's inside-
+    # the-image checks have a real file to canonicalise. The pins the gate reads
+    # come from the real lock files, so the fixture derives them rather than
+    # hardcoding them twice.
+
+    def make_engine_image(self, cfg_bytes: bytes = CFG_ABSENT, cfg_mode: int = 0o640):
+        img, cfg = self.make_image(cfg_bytes, cfg_mode)
+        interpreter = img / "engine" / "python" / "bin" / "python3"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.write_text("#!/bin/sh\n", encoding="utf-8")
+        return img, cfg
+
+    def engine_evidence(self, img: Path, **overrides):
+        lock = (REPO / "youtube/ytdlp-desktop/python-components.lock").read_text()
+        python = re.search(r'^python\s*=\s*"([^"]+)"', lock, re.M).group(1)
+        bundled = json.loads(
+            (REPO / "youtube/ytdlp/engine/bundled.json").read_text())
+        evidence = {
+            "resolve": "ok",
+            "videoId": "aaaaaaaaaaA",
+            "formatId": "140",
+            "urlHost": "media.example.invalid",
+            "durationMs": 120000,
+            "interpreter": os.path.realpath(img / "engine" / "python" / "bin" / "python3"),
+            "resources": os.path.realpath(img / "engine"),
+            "python": python,
+            "engineVersion": bundled["version"],
+            "ytDlp": bundled["version"],
+            "ejs": bundled["ejsVersion"],
+            "expectedYtdlp": bundled["version"],
+            "shimApi": 1,
+            "host": "stdio",
+            "cacert": True,
+            "child": "exited",
+        }
+        evidence.update(overrides)
+        report = json.loads(VALID_SMOKE[len("SMOKE "):])
+        report["engine"] = evidence
+        return "SMOKE " + json.dumps(report, separators=(",", ":"))
+
+    def test_engine_replay_injects_the_property_and_checks_evidence(self):
+        img, cfg = self.make_engine_image()
+        replay = REPO / "youtube/engine/src/test/resources/recorded/resolve"
+        line = self.engine_evidence(img)
+        self.behave(lines=[line], exit_code=0, record_env=True)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertEqual(0, rc, err)
+        self.assertEqual(line + "\n", out)
+        options = self.env_record.read_text()
+        self.assertIn("-Dneutrodyne.smoke=true", options)
+        self.assertIn(
+            f'-Dneutrodyne.smoke.engineReplay="{os.path.realpath(replay)}"', options)
+        self.assert_unchanged(cfg, CFG_ABSENT, 0o640)
+
+    def test_engine_replay_rejects_a_missing_dir(self):
+        img, cfg = self.make_engine_image()
+        self.behave(lines=[self.engine_evidence(img)], ran_marker=True)
+        rc, out, err = self.run_script(
+            img, 60, self.env(cfg), replay=self.root / "no-such-dir")
+        self.assertEqual(2, rc)
+        self.assertIn("recorded scenario", err)
+        self.assert_not_launched()
+
+    def test_engine_replay_rejects_an_empty_value(self):
+        img, cfg = self.make_engine_image()
+        self.behave(lines=[self.engine_evidence(img)], ran_marker=True)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay="")
+        self.assertEqual(2, rc)
+        self.assertIn("recorded scenario", err)
+        self.assert_not_launched()
+
+    def test_engine_replay_requires_engine_evidence(self):
+        img, cfg = self.make_engine_image()
+        replay = REPO / "youtube/engine/src/test/resources/recorded/resolve"
+        self.behave(lines=[VALID_SMOKE], exit_code=0)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assertIn("engine", err)
+
+    def test_engine_replay_rejects_wrong_evidence(self):
+        img, cfg = self.make_engine_image()
+        replay = REPO / "youtube/engine/src/test/resources/recorded/resolve"
+        cases = {
+            "interpreter outside the image": {"interpreter": "/usr/bin/python3"},
+            "interpreter not under engine/python": {
+                "interpreter": os.path.realpath(img / "engine" / "python3")},
+            "wrong python pin": {"python": "3.13.0"},
+            "wrong yt-dlp pin": {"ytDlp": "2025.01.01"},
+            "wrong engine version": {"engineVersion": "2025.01.01"},
+            "host interpreter claim": {"resolve": "ok", "host": "chaquopy"},
+            "failed resolve claim": {"resolve": "unavailable"},
+            "child still running": {"child": "running"},
+        }
+        for name, override in cases.items():
+            with self.subTest(case=name):
+                self.behave(
+                    lines=[self.engine_evidence(img, **override)], exit_code=0)
+                rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+                self.assertNotEqual(0, rc, name)
+                self.assertEqual("", out, name)
+                self.assertIn("engine evidence", err, name)
+
+    def test_engine_replay_cfg_declaration_fails_prelaunch(self):
+        cfg_bytes = (
+            b"[JavaOptions]\n"
+            b"java-options=-Xmx512m\n"
+            b"java-options=-Dneutrodyne.smoke.engineReplay=/x\n"
+        )
+        img, cfg = self.make_engine_image(cfg_bytes)
+        replay = REPO / "youtube/engine/src/test/resources/recorded/resolve"
+        self.behave(lines=[self.engine_evidence(img)], ran_marker=True)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assert_not_launched()
+        self.assert_unchanged(cfg, cfg_bytes, 0o640)
+
+    def test_engine_replay_underscore_java_options_declaration_fails(self):
+        img, cfg = self.make_engine_image()
+        replay = REPO / "youtube/engine/src/test/resources/recorded/resolve"
+        self.behave(lines=[self.engine_evidence(img)], ran_marker=True)
+        env = self.env(cfg, underscore_java_options="-Dneutrodyne.smoke.engineReplay=/x")
+        rc, out, err = self.run_script(img, 60, env, replay=replay)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assert_not_launched()
+
+    def test_engine_replay_failed_smoke_fails(self):
+        img, cfg = self.make_engine_image()
+        replay = REPO / "youtube/engine/src/test/resources/recorded/resolve"
+        self.behave(lines=[FAILED_SMOKE], exit_code=1)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
 
     def test_crlf_cfg_is_parsed(self):
         original = CFG_ABSENT_NEWLINE.replace(b"\n", b"\r\n")

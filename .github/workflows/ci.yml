@@ -507,7 +507,12 @@ jobs:
         run: |
           export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
           img=desktopApp/build/compose/binaries/main/app/Neutrodyne
-          xvfb-run -a dbus-run-session -- scripts/desktop/smoke-start.sh "$img" | tee smoke.txt
+          # --engine-replay arms MD3 AC2's packaged engine proof: the image's own
+          # bundled runtime resolves the shared corpus' recorded exchanges, and
+          # smoke-start.sh gates the SMOKE line's engine evidence before this
+          # step or either downstream gate can pass.
+          xvfb-run -a dbus-run-session -- scripts/desktop/smoke-start.sh "$img" \
+            --engine-replay=youtube/engine/src/test/resources/recorded/resolve | tee smoke.txt
           scripts/ci/check-desktop-image.sh "$img"
           scripts/ci/check-runtime-sources.sh --image "$img" --smoke smoke.txt
       # A halted smoke JVM leaves crash-<UTC>.txt under its temporary AppDirs

@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.desktop.youtube
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.desktop.smoke.EngineSmokeProof
 import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
@@ -47,6 +48,10 @@ object DesktopYouTubeBindingsModule {
     @Provides fun channelSearch(): YouTubeChannelSearch = search
 
     @Provides fun channelLookup(): ExtractorChannelLookup = lookup
+
+    /** The emergency build ships no engine: MD3 AC2's proof binds null, so a smoke run that
+     * names the replay fixture fails honestly instead of fabricating evidence. */
+    @Provides fun engineSmokeProof(): EngineSmokeProof? = null
 
     @Provides
     @SingleIn(AppScope::class)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Unlicense
 #
-# smoke-start.sh <image dir> [--timeout seconds]
+# smoke-start.sh <image dir> [--timeout seconds] [--engine-replay=<dir>]
 #
 # Starts a packaged Neutrodyne app image in smoke mode and prints its `SMOKE {json}`
 # line (11 Smoke mode). Used by check-runtime-sources.sh --image and the desktop
@@ -17,6 +17,17 @@
 # tool never repairs another process's writes. A read-only .cfg and image are
 # valid because nothing here writes them.
 #
+# --engine-replay=<dir> arms MD3 AC2's packaged engine proof: <dir> is a recorded
+# scenario directory (the shared corpus' `recorded/resolve/`, http.json included)
+# injected as `-Dneutrodyne.smoke.engineReplay`; the image's engine child replays
+# the recorded exchanges, never the network. The SMOKE line must then carry an
+# `engine` object proving the resolve through the image's own packaged runtime —
+# the interpreter and engine resources inside the image, the pinned interpreter
+# and yt-dlp versions, the resolved audio's recorded identity and a dead child —
+# and the step's budget grows to 300 s for the cold bundled compile. A .cfg or
+# `_JAVA_OPTIONS` declaration of the replay property fails before launch, and a
+# missing or contradicting `engine` object fails the verdict.
+#
 # An image whose .cfg reads a trained AOT cache (-XX:AOTCache=) gets a stricter
 # contract: the run appends -XX:AOTMode=on to the child's JAVA_TOOL_OPTIONS and
 # the final SMOKE line must report "aotCache":"in-use" — a fallback, a missing
@@ -27,9 +38,10 @@
 #
 # <image dir> is a jpackage app image: `Neutrodyne/` (Windows and Linux), or
 # `Neutrodyne.app` (macOS). Exit 0 = the launcher exited 0 and its final SMOKE
-# line is a JSON object with no `failed` field; 1 = the launcher exited nonzero,
-# printed no SMOKE line, printed a malformed or non-object SMOKE line, reported a
-# failed step, hit the watchdog (60 s by default, Smoke mode's budget), or the
+# line is a JSON object with no `failed` field (plus the `engine` evidence when
+# --engine-replay armed it); 1 = the launcher exited nonzero, printed no SMOKE
+# line, printed a malformed or non-object SMOKE line, reported a failed step,
+# hit the watchdog (60 s by default, 300 s armed; Smoke mode's budget), or the
 # .cfg changed during the run. The final SMOKE line is the verdict: smoke mode
 # prints it and then exits 1 when a step failed, so a SMOKE line alone is not
 # success. Diagnostics go to stderr; stdout carries only the SMOKE line on
@@ -41,15 +53,38 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd -P)"
+
 IMG=""
-TIMEOUT_S=60
+TIMEOUT_S=""
+REPLAY_SEEN=""
+REPLAY=""
 for arg in "$@"; do
     case "$arg" in
         --timeout=*) TIMEOUT_S="${arg#--timeout=}" ;;
+        --engine-replay=*) REPLAY="${arg#--engine-replay=}"; REPLAY_SEEN=1 ;;
         -h|--help) sed -n '2,/^set -euo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
         *) IMG="$arg" ;;
     esac
 done
+if [ -n "$REPLAY_SEEN" ]; then
+    if [ -z "$REPLAY" ] || [ ! -d "$REPLAY" ] || [ ! -f "$REPLAY/http.json" ]; then
+        echo "smoke-start: --engine-replay needs a recorded scenario directory with http.json" >&2
+        exit 2
+    fi
+    REPLAY="$(cd -- "$REPLAY" >/dev/null 2>&1 && pwd -P)"
+    # The JVM property needs the interpreter's own path form: on Windows the
+    # launcher's File() cannot read an MSYS /d/... path, so hand it the
+    # drive-letter form (cygpath -m keeps forward slashes, which Java accepts).
+    if command -v cygpath >/dev/null 2>&1; then
+        REPLAY="$(cygpath -m "$REPLAY")"
+    fi
+fi
+if [ -z "$TIMEOUT_S" ]; then
+    # The armed run's budget covers a cold bundled compile plus the resolve.
+    if [ -n "$REPLAY" ]; then TIMEOUT_S=300; else TIMEOUT_S=60; fi
+fi
 case "$TIMEOUT_S" in
     ''|*[!0-9]*|0)
         echo "smoke-start: --timeout needs a positive number of seconds" >&2
@@ -57,7 +92,7 @@ case "$TIMEOUT_S" in
         ;;
 esac
 if [ -z "$IMG" ] || [ ! -d "$IMG" ]; then
-    echo "usage: $0 <image dir> [--timeout=seconds]" >&2
+    echo "usage: $0 <image dir> [--timeout=seconds] [--engine-replay=<dir>]" >&2
     exit 2
 fi
 if ! command -v python3 >/dev/null 2>&1; then
@@ -121,17 +156,19 @@ trap request_cancel INT TERM
 # Snapshot the .cfg read-only and compute the child's JAVA_TOOL_OPTIONS. The
 # .cfg's java-options are command-line options and override JAVA_TOOL_OPTIONS;
 # `_JAVA_OPTIONS` overrides both. A conflicting value fails before launch.
-python3 - "$CFG" "$SNAPSHOT" "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" "$RUN_DIR/aot-strict" >"$RUN_DIR/java-tool-options" <<'PY' || exit 1
+python3 - "$CFG" "$SNAPSHOT" "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" "$REPLAY" "$RUN_DIR/aot-strict" >"$RUN_DIR/java-tool-options" <<'PY' || exit 1
 import hashlib
 import os
 import stat
 import sys
 
-cfg_path, snapshot_path, jto, underscore, aot_marker = sys.argv[1:6]
+cfg_path, snapshot_path, jto, underscore, replay, aot_marker = sys.argv[1:7]
 SMOKE_PROP = "neutrodyne.smoke"
 SMOKE_OPT = "-Dneutrodyne.smoke=true"
+REPLAY_PROP = "neutrodyne.smoke.engineReplay"
 WHITESPACE = " \t\r\n"
 PREFIX = "-D" + SMOKE_PROP
+REPLAY_PREFIX = "-D" + REPLAY_PROP
 
 
 def fail(message):
@@ -220,6 +257,10 @@ for line in text.split("\n"):
     if not separator or key.strip().lower() != "java-options":
         continue
     option = option.lstrip()
+    # The .cfg may never declare the replay property: it would override the
+    # injected value below and replay a fixture the gate did not choose.
+    if option == REPLAY_PREFIX or option.startswith(REPLAY_PREFIX + "="):
+        fail(f"{cfg_path} declares -D{REPLAY_PROP}; the launcher chooses the fixture")
     if option == PREFIX:
         cfg_value = ""
     elif option.startswith(PREFIX + "="):
@@ -232,6 +273,9 @@ for line in text.split("\n"):
 underscore_value = smoke_value(underscore_tokens)
 if underscore_value is not None and underscore_value != "true":
     fail(f"_JAVA_OPTIONS sets -D{SMOKE_PROP}={underscore_value!r}, not true")
+if any(token == REPLAY_PREFIX or token.startswith(REPLAY_PREFIX + "=")
+       for token in underscore_tokens):
+    fail(f"_JAVA_OPTIONS sets -D{REPLAY_PROP}; the launcher chooses the fixture")
 
 # The launcher's effective AOT options come from the .cfg's [JavaOptions]
 # java-options lines (jpackage's cfg parser reads keys inside their [Section];
@@ -301,8 +345,12 @@ if aot_requested:
         fail(f"{cfg_path} declares {bad[0]!r}, which would override the strict AOT launch")
 
 # The last -D wins within JAVA_TOOL_OPTIONS, so our true overrides an earlier
-# false there; unrelated options are preserved.
+# false there; unrelated options are preserved. The replay property rides quoted:
+# the JVM honours double quotes inside JAVA_TOOL_OPTIONS, so a fixture path with
+# spaces survives as one option.
 options = f"{jto} {SMOKE_OPT}".strip() if jto.strip() else SMOKE_OPT
+if replay:
+    options = f'{options} {REPLAY_PREFIX}="{replay}"'
 if aot_requested:
     options += " -XX:AOTMode=on"
     with open(aot_marker, "w", encoding="ascii") as handle:
@@ -539,5 +587,101 @@ if [ -f "$CANCEL_FILE" ]; then
     echo "smoke-start: cancelled" >&2
     exit 1
 fi
+
+# The armed run's extra verdict (MD3 AC2): the engine object must prove the
+# recorded resolve ran through the image's own packaged runtime — interpreter and
+# resources inside the checked image, the lock-pinned interpreter version, the
+# manifest-pinned yt-dlp, the recorded answer and a dead child. Anything missing
+# or contradicting fails the gate; the SMOKE line alone is never enough.
+if [ -n "$REPLAY" ]; then
+    PY_LOCK="$REPO_ROOT/youtube/ytdlp-desktop/python-components.lock"
+    BUNDLED="$REPO_ROOT/youtube/ytdlp/engine/bundled.json"
+    for pin in "$PY_LOCK" "$BUNDLED"; do
+        if [ ! -f "$pin" ]; then
+            echo "smoke-start: expected pin file is missing: $pin" >&2
+            exit 1
+        fi
+    done
+    # The inside-the-image comparison needs the image's canonical path in the
+    # interpreter's own form — a Windows caller may hand an MSYS path over.
+    IMG_CHECK="$(cd -- "$IMG" >/dev/null 2>&1 && pwd -P)"
+    if command -v cygpath >/dev/null 2>&1; then
+        IMG_CHECK="$(cygpath -m "$IMG_CHECK")"
+    fi
+    if ! python3 - "$IMG_CHECK" "$VERDICT" "$PY_LOCK" "$BUNDLED" <<'PY'
+import json
+import os
+import re
+import sys
+
+img_arg, verdict_path, lock_path, bundled_path = sys.argv[1:5]
+
+
+def fail(message):
+    print(f"smoke-start: engine evidence: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+with open(verdict_path, "r", encoding="utf-8") as handle:
+    line = handle.read().strip()
+report = json.loads(line[len("SMOKE "):])
+engine = report.get("engine")
+if not isinstance(engine, dict):
+    fail("the SMOKE line carries no engine evidence for the armed replay run")
+if engine.get("resolve") != "ok":
+    fail(f"resolve is {engine.get('resolve')!r}, not ok")
+for key, wanted in (("videoId", "aaaaaaaaaaA"), ("formatId", "140"),
+                    ("urlHost", "media.example.invalid"), ("host", "stdio"),
+                    ("child", "exited"), ("cacert", True)):
+    if engine.get(key) != wanted:
+        fail(f"{key} is {engine.get(key)!r}, not {wanted!r}")
+
+# The reported interpreter and resource paths must canonicalise inside the very
+# image the gate launched, and the interpreter inside the packaged engine's
+# python/ — a host or dev-tree interpreter can never satisfy this.
+img = os.path.normcase(os.path.realpath(img_arg))
+def real(field):
+    value = engine.get(field)
+    if not isinstance(value, str) or not value:
+        fail(f"{field} is missing or not a path")
+    return os.path.normcase(os.path.realpath(value))
+
+resources = real("resources")
+if not resources.startswith(img + os.sep):
+    fail("resources is outside the checked image")
+if os.path.basename(resources) != "engine":
+    fail("resources is not the image's engine/ directory")
+interpreter = real("interpreter")
+if not interpreter.startswith(resources + os.sep + "python" + os.sep):
+    fail("interpreter is not inside the packaged engine/python/")
+if not os.path.isfile(interpreter):
+    fail("interpreter is not a file in the checked image")
+
+with open(lock_path, "r", encoding="utf-8") as handle:
+    lock = handle.read()
+match = re.search(r'^python\s*=\s*"([^"]+)"', lock, re.M)
+expected_python = match.group(1) if match else None
+with open(bundled_path, "r", encoding="utf-8") as handle:
+    bundled = json.load(handle)
+expected_ytdlp = bundled["version"]
+expected_ejs = bundled.get("ejsVersion")
+
+if engine.get("python") != expected_python:
+    fail(f"python is {engine.get('python')!r}, not the lock's {expected_python!r}")
+for key in ("ytDlp", "engineVersion", "expectedYtdlp"):
+    if engine.get(key) != expected_ytdlp:
+        fail(f"{key} is {engine.get(key)!r}, not the manifest's {expected_ytdlp!r}")
+if expected_ejs is not None and engine.get("ejs") != expected_ejs:
+    fail(f"ejs is {engine.get('ejs')!r}, not the manifest's {expected_ejs!r}")
+if engine.get("shimApi") != 1:
+    fail(f"shimApi is {engine.get('shimApi')!r}, not 1")
+PY
+    then
+        echo "smoke-start: engine evidence check failed" >&2
+        dump_output
+        exit 1
+    fi
+fi
+
 printf '%s\n' "$(cat "$VERDICT")"
 exit 0
