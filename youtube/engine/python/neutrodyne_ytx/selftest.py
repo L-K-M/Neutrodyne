@@ -7,7 +7,11 @@ import platform
 import ssl
 
 
-def probe(ydl=None):
+def probe(ydl=None, expected_handlers=None):
+    # Each host names its approved transport keys: Chaquopy runs NeutrodyneOkHttp,
+    # the stdio child runs NeutrodyneUrllib, and both run Replay/Recording in tests.
+    if expected_handlers is None:
+        expected_handlers = ('NeutrodyneOkHttp', 'Replay', 'Recording')
     missing = []
     try:
         from yt_dlp import YoutubeDL
@@ -24,7 +28,7 @@ def probe(ydl=None):
         if 'process' not in inspect.signature(YoutubeDL.extract_info).parameters:
             missing.append('extract_info.process')
         handlers = getattr(common, '_REQUEST_HANDLERS', {})
-        if len(handlers) != 1 or next(iter(handlers), None) not in ('NeutrodyneOkHttp', 'Replay', 'Recording'):
+        if len(handlers) != 1 or next(iter(handlers), None) not in expected_handlers:
             missing.append('exclusive_handler')
         if 'NeutrodyneOkHttp' in handlers and not callable(okhttp_rh._execute):
             missing.append('PyHttp.execute')

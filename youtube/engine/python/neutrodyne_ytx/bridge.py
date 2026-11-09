@@ -191,11 +191,13 @@ class _Cursor:
 
 
 class Bridge:
-    def __init__(self, cache_dir=False, host='chaquopy', ydl_factory=YoutubeDL, clock=time.monotonic):
+    def __init__(self, cache_dir=False, host='chaquopy', ydl_factory=YoutubeDL, clock=time.monotonic,
+                 expected_handlers=None):
         self._cache_dir = cache_dir
         self._host = host
         self._factory = ydl_factory
         self._clock = clock
+        self._expected_handlers = expected_handlers
         self._workers = threading.local()
         self._cursors = OrderedDict()
         self._lock = threading.RLock()
@@ -271,7 +273,7 @@ class Bridge:
                     'python': platform.python_version(), 'jsc': False, 'host': self._host}
         if method == 'selftest':
             from .selftest import probe
-            return probe(worker.ydl)
+            return probe(worker.ydl, self._expected_handlers)
         if method in ('resolve', 'facts'):
             video_id = request.get('videoId')
             if not isinstance(video_id, str) or not VIDEO.fullmatch(video_id):
