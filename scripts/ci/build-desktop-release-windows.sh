@@ -50,7 +50,11 @@ scripts/ci/check-desktop-image.sh "$LOCALAPPDATA/Neutrodyne-App" "$DIST/neutrody
 scripts/ci/check-runtime-sources.sh --image "$LOCALAPPDATA/Neutrodyne-App" --smoke smoke.txt
 ./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip
 cp desktopApp/build/desktop-packaging/zip/*.zip "$DIST/neutrodyne-$V-windows-x64.zip"
-python -m zipfile -e "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
+# Restore each entry's recorded mtime from the artifact instead of the extraction
+# time: the AOT cache binds the trained JARs' timestamps, and a drifted producer
+# must stay drifted for the strict check to catch it. (The stdlib zipfile CLI
+# drops them, which would silently lose the cache and hide the drift.)
+python "$SCRIPT_DIR/extract-zip.py" "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
 smoke "$SMOKE_IMG/Neutrodyne"
 scripts/ci/check-desktop-image.sh "$SMOKE_IMG/Neutrodyne" "$DIST/neutrodyne-$V-windows-x64.zip"
 scripts/ci/check-runtime-sources.sh --image "$SMOKE_IMG/Neutrodyne" --smoke smoke.txt

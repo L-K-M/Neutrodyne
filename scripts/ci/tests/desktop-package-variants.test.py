@@ -98,6 +98,13 @@ for arg in sys.argv[1:]:
         self.assertIn("rejected package", result.stderr)
         self.assertEqual((self.root/"build-kinds").read_text().splitlines(), ["deb", "rpm"])
 
+    def test_dmg_smoke_copy_preserves_the_artifact_timestamps(self):
+        """The DMG smoke copy must not re-stamp the payload: cp -R drops the
+        trained JARs' mtimes and would hide a drifted DMG from the strict check."""
+        text = (ROOT / "scripts/ci/build-desktop-release.sh").read_text()
+        self.assertIn("ditto /tmp/neutrodyne-dmg-mnt/Neutrodyne.app", text)
+        self.assertNotIn("cp -R /tmp/neutrodyne-dmg-mnt/Neutrodyne.app", text)
+
 
 if __name__ == "__main__":
     unittest.main()
