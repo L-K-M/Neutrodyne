@@ -502,6 +502,7 @@ class BundledEngineStoreTest {
     private fun compileFixture(prepared: PreparedEngine) {
         prepared.libDir.toFile().walkTopDown().filter { it.extension == "py" }.forEach {
             File(it.parentFile, "${it.name}c").writeText("fake bytecode, no Python executed")
+            assertTrue(it.setWritable(true, true))
             assertTrue(it.delete())
         }
         EngineCompileMarkers.write(prepared)
