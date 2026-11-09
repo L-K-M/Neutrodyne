@@ -1,0 +1,551 @@
+// SPDX-License-Identifier: Unlicense
+
+package ch.lkmc.neutrodyne.sync.impl
+
+import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
+import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
+import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
+import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
+import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.protocol.Hlc
+import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
+import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.AccountSummary
+import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeResultDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.ChangesPage
+import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
+import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
+import ch.lkmc.neutrodyne.sync.protocol.dto.InviteRedeemRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.LinkApproveResponse
+import ch.lkmc.neutrodyne.sync.protocol.dto.LinkStartResponse
+import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
+import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * 10 Durable apply effects, the round half: ordinary response pages and later `hasMore` pages
+ * drain their committed `pendingSetting` markers through the engine, a marker left by an
+ * earlier round retries before the round's first request (offline too), a failed apply stays
+ * pending for the next round, and the persisted switch gates every drain. Both platforms run
+ * this base against a real Room database.
+ */
+abstract class SyncEngineEffectsDrainTestBase {
+    private val now = 1_800_000_000_000L
+    private val remote = NodeId("0000000000000002")
+    private val deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+
+    /** One linked device over a scripted client; the gate mirrors the graph's live switch read. */
+    private class DrainHarness(
+        val db: NeutrodyneDatabase,
+        val port: FakeSettingsSyncPort,
+        val address: FakeSyncServerAddress,
+        val engine: SyncEngine,
+        val effects: SyncApplyEffects,
+    )
+
+    private fun harness(
+        db: NeutrodyneDatabase,
+        client: SyncClient,
+        port: FakeSettingsSyncPort = FakeSettingsSyncPort(),
+        switch: Boolean = true,
+    ): DrainHarness {
+        val address = FakeSyncServerAddress(serverUrl = "https://sync.example")
+        address.updateSyncPlaybackSettings(switch)
+        val clock = TestClock(now)
+        val effects =
+            SyncApplyEffects(db, port, TestSettingsWriteCoordinator()) {
+                address.syncPlaybackSettings()
+            }
+        val engine =
+            SyncEngine(
+                db = db,
+                client = client,
+                applier = applier(db, port, clock),
+                clock = clock,
+                secrets = FakeSecretStore(),
+                sharePasswords = { false },
+                address = address,
+                tokens =
+                    SyncTokenStore(FakeSecretStore()).apply {
+                        runBlocking { save(hostOf("https://sync.example"), "token") }
+                    },
+                activity = SyncActivityState(),
+                gate = FakeLocalNetworkGate(),
+                effects = effects,
+            )
+        return DrainHarness(db, port, address, engine, effects)
+    }
+
+    @Test
+    fun anOrdinaryResponsePageAppliesAndAcksItsSetting() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val client =
+                    scriptedClient(syncRecords = listOf(settingRecord(key, 15_000L)))
+                val h = harness(db, client)
+
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+
+                assertEquals(1, h.port.applied.size)
+                assertEquals(
+                    key,
+                    h.port.applied
+                        .single()
+                        .first,
+                )
+                assertEquals(
+                    "15000",
+                    h.port.applied
+                        .single()
+                        .second,
+                )
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aLaterHasMorePageAppliesAndAcksItsSetting() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val client =
+                    scriptedClient(
+                        syncRecords = emptyList(),
+                        syncHasMore = true,
+                        pageRecords = listOf(settingRecord(key, 15_000L)),
+                    )
+                val h = harness(db, client)
+
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+
+                assertEquals(1, h.port.applied.size)
+                assertEquals(
+                    key,
+                    h.port.applied
+                        .single()
+                        .first,
+                )
+                assertEquals(
+                    "15000",
+                    h.port.applied
+                        .single()
+                        .second,
+                )
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * A marker committed by an earlier round retries before this round's first request: the
+     * drain is local, so the value reaches DataStore even though the server is unreachable
+     * and the round itself fails.
+     */
+    @Test
+    fun aPriorMarkerRetriesBeforeThePushEvenWhileOffline() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val port = FakeSettingsSyncPort()
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                applier(db, port, TestClock(now)).applyPage(
+                    listOf(settingRecord(key, 15_000L)),
+                    roundId = now,
+                )
+                assertEquals("15000", pendingSetting(db, key.name))
+                val client =
+                    scriptedClient(
+                        syncRecords = emptyList(),
+                        syncFailure = { java.io.IOException("sync.example unreachable") },
+                    )
+                val h = harness(db, client, port)
+
+                val round = runCatching { h.engine.round(SyncRoundReason.SYNC_NOW) }
+
+                assertTrue(round.isFailure, "the offline round must still fail honestly")
+                assertEquals(1, h.port.applied.size)
+                assertEquals(
+                    key,
+                    h.port.applied
+                        .single()
+                        .first,
+                )
+                assertEquals(
+                    "15000",
+                    h.port.applied
+                        .single()
+                        .second,
+                )
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A failed DataStore apply keeps the marker; the next round's pre-push drain recovers it. */
+    @Test
+    fun aFailedApplyStaysPendingAndANextRoundRecovers() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val failing =
+                    scriptedClient(syncRecords = listOf(settingRecord(key, 15_000L)))
+                val failingPort = FakeSettingsSyncPort().apply { remoteResult = false }
+                val failingHarness = harness(db, failing, failingPort)
+
+                failingHarness.engine.round(SyncRoundReason.SYNC_NOW)
+
+                assertTrue(
+                    failingPort.applied.isNotEmpty(),
+                    "the failed apply must have been attempted",
+                )
+                assertEquals("15000", pendingSetting(db, key.name))
+
+                failingPort.remoteResult = true
+                val idle = scriptedClient(syncRecords = emptyList())
+                val h = harness(db, idle, failingPort)
+
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+
+                assertEquals(2, h.port.applied.size)
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 01 Sync write ordering through the round: a strictly newer local intent beats the pending
+     * remote marker — the pre-push drain clears the superseded marker but never applies over
+     * the intent, and an unreachable server keeps the intent un-pushed for the next round.
+     */
+    @Test
+    fun aStrictlyNewerLocalIntentWinsOverTheRoundDrain() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
+                applier(db, FakeSettingsSyncPort(), TestClock(now)).applyPage(
+                    listOf(settingRecord(key, 15_000L, remoteClock)),
+                    roundId = now,
+                )
+                val localClock = Hlc.of(1_577_836_800_001L, 0, remote)
+                seedLocalIntent(db, key, "20000", localClock)
+                val client =
+                    scriptedClient(
+                        syncRecords = emptyList(),
+                        syncFailure = { java.io.IOException("sync.example unreachable") },
+                    )
+                val h = harness(db, client)
+
+                val round = runCatching { h.engine.round(SyncRoundReason.SYNC_NOW) }
+
+                assertTrue(round.isFailure, "the offline round must still fail honestly")
+                assertTrue(h.port.applied.isEmpty(), "the newer local intent must win")
+                assertNull(pendingSetting(db, key.name), "the superseded marker must be cleared")
+                val local = db.syncOutboxDao().get(SyncCollection.SETTING.wire, key.name, "v")
+                assertTrue(local != null && local.value == "20000", "the local intent survives the drain")
+                assertTrue(
+                    local != null && Hlc(local.hlc, NodeId(local.nodeId)) == localClock,
+                    "the surviving intent keeps its own complete clock",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Pull and apply step 3 at the round level: while the persisted switch is off the
+     * page's marker stays pending, and once enabled a later round's drain applies it.
+     */
+    @Test
+    fun aRoundWithTheSwitchOffLeavesTheMarkerPendingUntilEnabled() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val client =
+                    scriptedClient(syncRecords = listOf(settingRecord(key, 15_000L)))
+                val h = harness(db, client, switch = false)
+
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+
+                assertTrue(h.port.applied.isEmpty(), "the disabled switch must leave the marker pending")
+                assertEquals("15000", pendingSetting(db, key.name))
+
+                h.address.updateSyncPlaybackSettings(true)
+                val idle = scriptedClient(syncRecords = emptyList())
+                val enabled = harness(db, idle, h.port, switch = true)
+
+                enabled.engine.round(SyncRoundReason.SYNC_NOW)
+
+                assertEquals(1, enabled.port.applied.size)
+                assertEquals(
+                    key,
+                    enabled.port.applied
+                        .single()
+                        .first,
+                )
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The band-160 start initializer drains while linked, before any scheduling arm runs. */
+    @Test
+    fun theStartInitializerDrainsWhileLinked() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val port = FakeSettingsSyncPort()
+                applier(db, port, TestClock(now)).applyPage(
+                    listOf(settingRecord(key, 15_000L)),
+                    roundId = now,
+                )
+                val h = harness(db, scriptedClient(syncRecords = emptyList()), port)
+                val initializer =
+                    SyncStartupDrainInitializer(dev.zacsweers.metro.Provider { h.effects })
+
+                assertEquals(true, initializer.order in 101..199, "the drain belongs to the data band")
+                initializer.run()
+
+                assertEquals(1, h.port.applied.size)
+                assertEquals(
+                    key,
+                    h.port.applied
+                        .single()
+                        .first,
+                )
+                assertEquals(
+                    "15000",
+                    h.port.applied
+                        .single()
+                        .second,
+                )
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    // --- Fixtures -----------------------------------------------------------------------------------
+
+    private fun applier(
+        db: NeutrodyneDatabase,
+        port: FakeSettingsSyncPort,
+        clock: TestClock,
+    ): SyncApplier =
+        SyncApplier(
+            db = db,
+            clock = clock,
+            secrets = FakeSecretStore(),
+            settings = port,
+            playback = NoPlaybackSync,
+            syncIngestHook = SyncIngestHook.None,
+            channelSync =
+                object : GroupChannelSync {
+                    override suspend fun sync() = Unit
+
+                    override suspend fun onUuidChanged(
+                        oldUuid: String,
+                        newUuid: String,
+                    ) = Unit
+
+                    override suspend fun onDeleted(uuid: String) = Unit
+                },
+            sharePasswords = { false },
+        )
+
+    private suspend fun seedLinked(db: NeutrodyneDatabase) {
+        db.withWriteTransaction {
+            db.syncStateDao().upsert(
+                SyncStateEntity(
+                    enabled = true,
+                    deviceId = deviceId,
+                    nodeId = "0000000000000001",
+                    hlc = 1L shl 16,
+                    linkedAt = 1L,
+                ),
+            )
+        }
+    }
+
+    private fun settingRecord(
+        key: SettingKey<*>,
+        value: Long,
+        clock: Hlc = Hlc.of(now, 1, remote),
+    ): RecordDto =
+        RecordDto(
+            coll = SyncCollection.SETTING.wire,
+            id = JsonPrimitive(key.name),
+            seq = 1,
+            by = deviceId,
+            fields = mapOf("v" to FieldValue(JsonPrimitive(value), clock.toString())),
+        )
+
+    private suspend fun pendingSetting(
+        db: NeutrodyneDatabase,
+        key: String,
+    ): String? {
+        val row = db.syncClockDao().get(SyncCollection.SETTING.wire, key) ?: return null
+        val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull()
+        return raw?.pendingSetting?.value
+    }
+
+    private suspend fun seedLocalIntent(
+        db: NeutrodyneDatabase,
+        key: SettingKey<*>,
+        value: String,
+        clock: Hlc,
+    ) {
+        db.withWriteTransaction {
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity(
+                    coll = SyncCollection.SETTING.wire,
+                    rid = key.name,
+                    field = "v",
+                    hlc = clock.packed,
+                    nodeId = clock.nodeId.value,
+                    value = value,
+                ),
+            )
+        }
+    }
+
+    /** A [SyncClient] whose `sync`/`changes` answers come from parameters; the rest is unused. */
+    private fun scriptedClient(
+        syncRecords: List<RecordDto>,
+        syncHasMore: Boolean = false,
+        syncFailure: (() -> Throwable)? = null,
+        pageRecords: List<RecordDto> = emptyList(),
+    ): SyncClient =
+        object : SyncClient {
+            override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
+
+            override suspend fun login(
+                baseUrl: String,
+                username: String,
+                password: String,
+                device: DeviceInfoDto,
+            ): TokenResponse = unsupported()
+
+            override suspend fun redeemInvite(
+                baseUrl: String,
+                code: String,
+                device: DeviceInfoDto,
+            ): TokenResponse = unsupported()
+
+            override suspend fun linkStart(
+                baseUrl: String,
+                device: DeviceInfoDto,
+            ): LinkStartResponse = unsupported()
+
+            override suspend fun linkToken(
+                baseUrl: String,
+                deviceCode: String,
+            ): TokenResponse = unsupported()
+
+            override suspend fun linkApprove(
+                baseUrl: String,
+                token: String,
+                userCode: String,
+            ): LinkApproveResponse = unsupported()
+
+            override suspend fun linkConfirm(
+                baseUrl: String,
+                token: String,
+                userCode: String,
+                approve: Boolean,
+            ) = unsupported()
+
+            override suspend fun logout() = unsupported()
+
+            override suspend fun devices(): List<DeviceDto> = unsupported()
+
+            override suspend fun renameDevice(
+                deviceId: String,
+                name: String,
+            ): DeviceDto = unsupported()
+
+            override suspend fun revokeDevice(deviceId: String) = unsupported()
+
+            override suspend fun account(): AccountSummary = unsupported()
+
+            override suspend fun sync(
+                since: String?,
+                changes: List<ChangeDto>,
+            ): SyncResponse {
+                syncFailure?.let { throw it() }
+                return SyncResponse(
+                    results =
+                        changes.mapIndexed { index, _ -> ChangeResultDto(index, "applied") },
+                    records = syncRecords,
+                    cursor = "c:00000001:5",
+                    hasMore = syncHasMore,
+                    serverTime = "",
+                )
+            }
+
+            override suspend fun changes(
+                since: String?,
+                limit: Int,
+            ): ChangesPage =
+                ChangesPage(
+                    records = pageRecords,
+                    cursor = "c:00000001:9",
+                    hasMore = false,
+                    serverTime = "",
+                )
+
+            override suspend fun reset(
+                confirm: String,
+                mode: String,
+                beforeCursor: String?,
+            ): AccountSummary = unsupported()
+
+            private fun unsupported(): Nothing = throw UnsupportedOperationException()
+        }
+
+    /** The host's real in-memory Room database; the Android host supplies a Robolectric context. */
+    protected abstract fun newTestDb(): NeutrodyneDatabase
+}

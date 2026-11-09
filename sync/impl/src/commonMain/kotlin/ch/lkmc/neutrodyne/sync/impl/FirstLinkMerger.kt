@@ -158,6 +158,10 @@ class FirstLinkMerger(
         activity.begin()
         try {
             val applied = pullAndApply(roundId, { _, _, _ -> })
+            // 10 Durable apply effects: the pull's committed settings effects drain before the
+            // re-assertion, so DataStore holds the server value first and the re-assert replays
+            // each stored raw clock without re-reading a projection (no echo).
+            effects.drainSettings()
             reassert()
             return FirstLinkResult.Completed(applied)
         } catch (failure: CancellationException) {
