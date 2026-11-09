@@ -3,9 +3,11 @@ import org.gradle.api.GradleException
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.FileSystemLocation
 import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.testfixtures.ProjectBuilder
 import org.gradle.work.FileChange
 import org.gradle.work.InputChanges
+import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
@@ -982,6 +984,9 @@ class DesktopPackagingTest {
         }
 
         val distributableDir = File(projectDir, "binaries")
+        // Compose registers createRuntimeImage alongside createDistributable; the wiring's
+        // replace targets it, so the fixture registers the same abstract base Compose does.
+        project.tasks.register("createRuntimeImage", AbstractJLinkTask::class.java)
         project.tasks
             .register("createDistributable", FixtureCreateDistributableTask::class.java) {
                 this.destinationDir.set(distributableDir)
@@ -1186,6 +1191,302 @@ class DesktopPackagingTest {
             assertEquals(hostAppImageArg(fixture.distributableDir), argv[appImage + 1])
             assertFalse("--input" in argv, "fresh-image --input in: ${argv.joinToString(" ")}")
             assertFalse("--main-jar" in argv, "fresh-image --main-jar in: ${argv.joinToString(" ")}")
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    // ----- the runtime image producer: the locale restriction of 11 jlink modules ---------
+
+    /** The production shape around createRuntimeImage on a ProjectBuilder project. */
+    private class RuntimeImageFixture(
+        val project: org.gradle.api.Project,
+        val fakeJdk: File,
+        val runtimeDir: File,
+        val createRuntimeImageProvider: TaskProvider<AbstractJLinkTask>,
+        val createDistributable: FixtureCreateDistributableTask,
+    )
+
+    /**
+     * Mirrors Compose 1.12.1's own wiring on a ProjectBuilder project: `createRuntimeImage`
+     * registered as the abstract [AbstractJLinkTask] with the configure action Compose's
+     * `configureCommonJvmDesktopTasks` attaches (javaHome, modules, destinationDir — the
+     * application data the convention plugin sets), and `createDistributable` wired to it
+     * the way Compose's `configurePackageTask` does (dependsOn the provider and
+     * `--runtime-image` from the same provider's destinationDir). [registerDesktopPackagingTasks]
+     * then runs against this exactly as in the real build, so what the assertions exercise
+     * is the production wiring, not a stand-in task.
+     */
+    private fun runtimeImageFixture(
+        target: DesktopPackagingTarget,
+        destinationDir: File? = null,
+        withoutEngine: Boolean = false,
+    ): RuntimeImageFixture {
+        val projectDir = Files.createTempDirectory("runtime-image").toFile()
+        File(projectDir, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        if (withoutEngine) {
+            File(projectDir, "gradle.properties").appendText("neutrodyne.youtubeEngine=false\n")
+        }
+        val gradleHome = File(projectDir, "gradle-home").apply { mkdirs() }
+        File(gradleHome, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        val project =
+            ProjectBuilder
+                .builder()
+                .withProjectDir(projectDir)
+                .withGradleUserHomeDir(gradleHome)
+                .build()
+        val playback =
+            ProjectBuilder
+                .builder()
+                .withParent(project)
+                .withName("playback")
+                .build()
+        val nativeProject =
+            ProjectBuilder
+                .builder()
+                .withParent(playback)
+                .withName("native")
+                .build()
+        File(nativeProject.projectDir, "native-components.lock").apply {
+            parentFile.mkdirs()
+            writeText("[ffmpeg]\nversion = \"9.0.2\"\n")
+        }
+
+        val fakeJdk = File(projectDir, "fake-jdk")
+        File(fakeJdk, "bin").apply { mkdirs() }
+        val runtimeDir = (destinationDir ?: File(projectDir, "compose/tmp/runtime")).apply { mkdirs() }
+
+        val createRuntimeImage =
+            project.tasks.register("createRuntimeImage", AbstractJLinkTask::class.java) {
+                this.javaHome.set(fakeJdk.absolutePath)
+                this.modules.set(JLINK_MODULES)
+                this.includeAllModules.set(false)
+                this.destinationDir.set(runtimeDir)
+            }
+        val createDistributable =
+            project.tasks
+                .register(
+                    "createDistributable",
+                    FixtureCreateDistributableTask::class.java,
+                ) {
+                    this.dependsOn(createRuntimeImage)
+                    this.destinationDir.set(File(projectDir, "binaries"))
+                    this.runtimeImage.set(createRuntimeImage.flatMap { task -> task.destinationDir })
+                }.get()
+        project.tasks.register("packageMsi", MsiAotTimestampJPackageTask::class.java)
+        project.tasks.register("packageDmg", DmgAotTimestampJPackageTask::class.java)
+        project.configurations.create("runtimeClasspath")
+        project.tasks.register("jar", org.gradle.api.tasks.bundling.Jar::class.java)
+        project.tasks.register("setupBundledRuntime", SetupBundledRuntime::class.java) {
+            home.set(File(projectDir, "bundled-runtime/jdk"))
+        }
+
+        project.registerDesktopPackagingTasks(
+            target,
+            BundledRuntimeLock(
+                vendor = "Eclipse Adoptium",
+                vendorVersion = "Temurin-25.0.4.1+1",
+                version = "25.0.4.1+1",
+                javaVersion = "25",
+                archiveUrl = "https://example.invalid/jdk",
+                sha256 = "00",
+            ),
+        )
+        return RuntimeImageFixture(project, fakeJdk, runtimeDir, createRuntimeImage, createDistributable)
+    }
+
+    /**
+     * Runs the production-wired `createRuntimeImage` through Compose's real `run()` with a
+     * fake `jlink` that records the argument file it was handed (one token per line, values
+     * quoted when they contain spaces) and the tool path it was invoked as. Returns the argv
+     * tokens with the argfile's value quoting stripped, paired with that tool path — the
+     * javaHome JDK selection shows up as the executed binary.
+     */
+    private fun runCreateRuntimeImage(fixture: RuntimeImageFixture): Pair<List<String>, String> {
+        val capture = File(fixture.project.projectDir, "captured").apply { mkdirs() }
+        File(fixture.fakeJdk, "bin/jlink").apply {
+            writeText(
+                """
+                #!/bin/sh
+                args_file=""
+                for arg in "${'$'}@"; do
+                  case "${'$'}arg" in @*) args_file="${'$'}{arg#@}" ;; esac
+                done
+                cp "${'$'}args_file" "${capture.absolutePath}/argv.txt"
+                printf '%s\n' "${'$'}0" > "${capture.absolutePath}/tool.txt"
+                exit 0
+                """.trimIndent(),
+            )
+            setExecutable(true, false)
+        }
+        val task =
+            fixture.project.tasks
+                .named("createRuntimeImage", AbstractJLinkTask::class.java)
+                .get()
+        task.run(EmptyInputChanges)
+
+        val argv =
+            File(capture, "argv.txt").readLines().map { line ->
+                line.removePrefix("\"").removeSuffix("\"")
+            }
+        return argv to File(capture, "tool.txt").readText().trim()
+    }
+
+    /**
+     * The runtime image producer must restrict `jdk.localedata` to the shipped locales
+     * (`--include-locales=en,de`, 11 jlink modules; PB27's miss reserved the convention
+     * plugin's own jlink step — Compose 1.12.1's `AbstractJLinkTask` has no such option).
+     * Without the restriction the module ships whole: measured 26.5 MB more installed.
+     */
+    @Test
+    fun `the runtime image producer restricts jdk locale data to the shipped locales`() {
+        val fixture = runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64)
+        try {
+            val (argv, _) = runCreateRuntimeImage(fixture)
+
+            val locales = argv.indexOf("--include-locales")
+            assertTrue(locales >= 0, "no --include-locales in: ${argv.joinToString(" ")}")
+            assertEquals("en,de", argv[locales + 1])
+            val output = argv.indexOf("--output")
+            assertTrue(output > locales, "--include-locales after --output in: ${argv.joinToString(" ")}")
+            assertFalse("--compress" in argv, "--compress grows the download size (measured): ${argv.joinToString(" ")}")
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The restriction changes nothing else: the argv handed to jlink stays exactly the
+     * Compose flags (module list in DSL order, the four strip options, `--output`) plus
+     * the one locale pair, and the executed tool is the javaHome JDK's own `jlink` — the
+     * bundled runtime the convention plugin pins, never the Gradle VM.
+     */
+    @Test
+    fun `the runtime image producer keeps the exact compose flags module list and jdk`() {
+        val fixture = runtimeImageFixture(DesktopPackagingTarget.LINUX_X64)
+        try {
+            val (argv, tool) = runCreateRuntimeImage(fixture)
+
+            val expected = buildList {
+                for (module in JLINK_MODULES) {
+                    add("--add-modules")
+                    add(module)
+                }
+                add("--strip-debug")
+                add("--no-header-files")
+                add("--no-man-pages")
+                add("--strip-native-commands")
+                add("--include-locales")
+                add("en,de")
+                add("--output")
+                add(fixture.runtimeDir.absolutePath)
+            }
+            assertEquals(expected, argv)
+            assertEquals(File(fixture.fakeJdk, "bin/jlink").absolutePath, tool)
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Compose hands jlink an argument file (one token per line, values with spaces
+     * quoted); the inserted locale pair must not disturb that. A destination directory
+     * with spaces stands in for the Windows `Program Files` case: `--output` still
+     * round-trips to the exact path and the locale list stays one unquoted token.
+     */
+    @Test
+    fun `the locale restriction keeps spaced destination paths intact`() {
+        val spacedRuntimeDir = File(Files.createTempDirectory("runtime-image-spaced").toFile(), "dir with spaces/runtime")
+        val fixture =
+            runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64, destinationDir = spacedRuntimeDir)
+        try {
+            val (argv, _) = runCreateRuntimeImage(fixture)
+
+            val output = argv.indexOf("--output")
+            assertTrue(output >= 0, "no --output in: ${argv.joinToString(" ")}")
+            assertEquals(spacedRuntimeDir.absolutePath, argv[output + 1])
+            val locales = argv.indexOf("--include-locales")
+            assertTrue(locales >= 0, "no --include-locales in: ${argv.joinToString(" ")}")
+            assertEquals("en,de", argv[locales + 1])
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+            spacedRuntimeDir.parentFile.deleteRecursively()
+        }
+    }
+
+    /**
+     * The runtime image is engine-independent: `-Pneutrodyne.youtubeEngine=false` omits
+     * the YouTube engine host from the image but must not change the jlink invocation —
+     * one module list and one locale set serve every build of a target. (The `--output`
+     * value differs per fixture temp dir, so the comparison drops the trailing pair.)
+     */
+    @Test
+    fun `the locale restriction is independent of the youtube engine property`() {
+        val withEngine = runtimeImageFixture(DesktopPackagingTarget.LINUX_X64)
+        val withoutEngine = runtimeImageFixture(DesktopPackagingTarget.LINUX_X64, withoutEngine = true)
+        try {
+            val (argvWithEngine, _) = runCreateRuntimeImage(withEngine)
+            val (argvWithoutEngine, _) = runCreateRuntimeImage(withoutEngine)
+
+            val locales = argvWithEngine.indexOf("--include-locales")
+            assertTrue(locales >= 0, "no --include-locales in: ${argvWithEngine.joinToString(" ")}")
+            // Everything up to and including the locale pair; --output/--output-dir vary by fixture.
+            assertEquals(
+                argvWithEngine.subList(0, locales + 2),
+                argvWithoutEngine.subList(0, locales + 2),
+            )
+        } finally {
+            withEngine.project.projectDir.deleteRecursively()
+            withoutEngine.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The production wiring replaces Compose's `createRuntimeImage` with the locale-restricted
+     * type (the mechanism `packageMsi`/`packageDmg` established): the Compose configure action
+     * survives the replace — javaHome, the module list and the destination dir keep the values
+     * the Compose registration set — exactly one jlink task exists (one writer of the runtime
+     * image), and `createDistributable` still consumes that task's destination dir as its
+     * `--runtime-image`, with `trainAotCache` downstream of the image it builds from it.
+     */
+    @Test
+    fun `the replaced jlink task owns the runtime image with compose wiring intact`() {
+        val fixture = runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64)
+        try {
+            val producer = fixture.project.tasks.getByName("createRuntimeImage")
+            assertTrue(producer is LocaleRestrictedJLinkTask, "createRuntimeImage is ${producer.javaClass.name}")
+            producer as LocaleRestrictedJLinkTask
+            assertEquals(JLINK_INCLUDED_LOCALES, producer.includedLocales.get())
+            assertEquals(fixture.fakeJdk.absolutePath, producer.javaHome.get())
+            assertEquals(JLINK_MODULES, producer.modules.get())
+            assertEquals(
+                fixture.runtimeDir.absolutePath,
+                producer.destinationDir.get().asFile.absolutePath,
+            )
+
+            val jlinkTasks =
+                fixture.project.tasks
+                    .withType(AbstractJLinkTask::class.java)
+                    .map { task -> task.name }
+            assertEquals(listOf("createRuntimeImage"), jlinkTasks)
+
+            assertEquals(
+                fixture.runtimeDir.absolutePath,
+                fixture.createDistributable.runtimeImage
+                    .get()
+                    .asFile.absolutePath,
+            )
+            val depNames =
+                fixture.createDistributable.dependsOn.map { dependency ->
+                    (dependency as? TaskProvider<*>)?.name ?: dependency.toString()
+                }
+            assertTrue("createRuntimeImage" in depNames, depNames.toString())
+            val trainAotCache = fixture.project.tasks.named("trainAotCache").get()
+            val trainDeps =
+                trainAotCache.dependsOn.map { dependency ->
+                    (dependency as? TaskProvider<*>)?.name ?: dependency.toString()
+                }
+            assertTrue("createDistributable" in trainDeps, trainDeps.toString())
         } finally {
             fixture.project.projectDir.deleteRecursively()
         }
