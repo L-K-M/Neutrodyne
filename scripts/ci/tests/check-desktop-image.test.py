@@ -95,6 +95,15 @@ class Fixture:
         ):
             (root / lock).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / lock, root / lock)
+        # make-runtime-sources-md.sh reads the jlink module and locale lists from
+        # the convention plugin source when no image is given (and the locale list
+        # always), so the fixture repo carries that file too.
+        plugin_src = (
+            REPO
+            / "build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt"
+        )
+        (root / "build-logic/convention/src/main/kotlin").mkdir(parents=True)
+        shutil.copy2(plugin_src, root / "build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt")
         (root / "desktopApp/build/desktop-packaging").mkdir(parents=True)
         (root / "fakebin").mkdir()
         self.env = {
@@ -947,6 +956,33 @@ for image; do :; done
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
         self.assertIn("java.base", out)
+
+    def test_make_runtime_sources_md_records_the_locale_restriction(self):
+        """The generated document names --include-locales=en,de (read from the
+        convention plugin's JLINK_INCLUDED_LOCALES) and the one legal file the
+        restriction drops — never a hand-deleted notice (11 jlink modules)."""
+        self.mac_app()
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--image", "imgs/Neutrodyne.app", "--out", "RUNTIME-SOURCES.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
+        self.assertIn("en,de", out)
+        self.assertIn("legal/jdk.localedata/thaidict.md", out)
+
+    def test_make_runtime_sources_md_reads_the_plugin_without_an_image(self):
+        """The no-image path derives the module list and the locale set from the
+        convention plugin source (the same constants the build uses)."""
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--out", "OUT.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "OUT.md").read_text(encoding="utf-8")
+        self.assertIn("java.base", out)
+        self.assertIn("jdk.localedata", out)
+        self.assertIn("en,de", out)
 
     def test_flat_runtime_still_works(self):
         """The flat lib/runtime root keeps resolving as before."""

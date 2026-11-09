@@ -10,6 +10,7 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.RelativePath
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
@@ -28,6 +29,7 @@ import org.gradle.process.CommandLineArgumentProvider
 import org.gradle.process.ExecOperations
 import org.gradle.work.InputChanges
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
 import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -1268,6 +1270,55 @@ abstract class TrimSkikoStubTask : DefaultTask() {
 abstract class JPackageImageTask : Exec()
 
 /**
+ * Compose's `createRuntimeImage` with `jdk.localedata` restricted to the shipped locales
+ * (11 jlink modules; PB27's miss reserved the convention plugin's own jlink step, open
+ * question 12). Compose 1.12.1's `AbstractJLinkTask` emits only `--add-modules`,
+ * `--strip-debug`, `--strip-native-commands`, `--no-header-files`, `--no-man-pages`,
+ * an internal `--compress` and `--output` — there is no `--include-locales` and no DSL
+ * for it, so this subclass appends the one missing pair in [makeArgs]. Everything else —
+ * the Compose configure action's javaHome, module list and destination dir, the argument
+ * file, the tool invocation and every input/output annotation — is inherited unchanged;
+ * [Project.registerDesktopPackagingTasks] swaps the Compose task for this type with
+ * `TaskContainer.replace`, the same mechanism `packageMsi`/`packageDmg` already use.
+ */
+abstract class LocaleRestrictedJLinkTask : AbstractJLinkTask() {
+    /**
+     * The locale tags joined for `--include-locales` (en,de); an [org.gradle.api.tasks.Input]
+     * so the set participates in the task's up-to-date and cache keys.
+     */
+    @get:Input
+    abstract val includedLocales: ListProperty<String>
+
+    override fun makeArgs(tmpDir: File): MutableList<String> {
+        val locales =
+            includedLocales.get().also { tags ->
+                if (tags.isEmpty()) {
+                    throw GradleException("includedLocales is empty: jlink would ship every locale (11 jlink modules)")
+                }
+                for (tag in tags) {
+                    if (tag.isEmpty() || tag.any { it == ',' || it.isWhitespace() }) {
+                        throw GradleException("invalid --include-locales tag '$tag' (11 jlink modules)")
+                    }
+                }
+            }
+        val args = super.makeArgs(tmpDir)
+        if ("--include-locales" in args) {
+            throw GradleException(
+                "the pinned Compose jlink step already restricts locales; drop LocaleRestrictedJLinkTask (11 jlink modules)",
+            )
+        }
+        // The base list ends with the --output pair; keep the plugin option set together
+        // ahead of it so the argument file stays flags-then-output.
+        val output = args.indexOf("--output")
+        if (output < 0) {
+            throw GradleException("the pinned Compose jlink step no longer emits --output (11 jlink modules)")
+        }
+        args.addAll(output, listOf("--include-locales", locales.joinToString(",")))
+        return args
+    }
+}
+
+/**
  * Compose's `packageMsi`/`packageDmg` task carrying the AOT post-image hook (11 AOT cache).
  *
  * Compose 1.12.1 exposes no `--resource-dir` hook: its `freeArgs` are prepended while the
@@ -1453,6 +1504,16 @@ internal fun Project.registerDesktopPackagingTasks(
         )
     val distributableDir = createDistributable.flatMap { it.destinationDir }
     val appImage = createDistributable.flatMap { it.destinationDir.dir(appImageLeaf) }
+
+    // --- runtime image: the locale-restricted jlink replaces Compose's createRuntimeImage --
+    // Compose 1.12.1's AbstractJLinkTask has no --include-locales, and PB27's miss reserved
+    // the convention plugin's own jlink step (11 jlink modules, open question 12). The
+    // replace keeps Compose's registered configure action (javaHome, modules,
+    // javaRuntimePropertiesFile, destinationDir — the same mechanism packageMsi/packageDmg
+    // use), so the destination dir stays the one Compose wires into createDistributable's
+    // --runtime-image and this task stays the image's single writer.
+    val createRuntimeImage = tasks.replace("createRuntimeImage", LocaleRestrictedJLinkTask::class.java)
+    createRuntimeImage.includedLocales.set(JLINK_INCLUDED_LOCALES)
 
     // The desktop entry and hicolor icons the DEB/RPM scriptlets install travel inside the
     // image through appResourcesRootDir (11 Links and files from the OS). The PNG set comes
