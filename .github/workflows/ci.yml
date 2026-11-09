@@ -107,7 +107,7 @@ jobs:
           --continue
       - name: Verify desktop JAR content identity
         run: |
-          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*' --tests '*DesktopAotTrainingTest*'
+          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*' --tests '*DesktopAotTraining*'
           python3 scripts/ci/tests/canonical-jar-hash.test.py
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
@@ -138,8 +138,11 @@ jobs:
           scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           scripts/ci/tests/desktop-packaging.test.sh
+          scripts/ci/tests/post-image-hook.test.sh
           scripts/ci/tests/build-desktop-release-windows.test.sh
           python3 scripts/ci/tests/desktop-package-variants.test.py
+          python3 scripts/ci/tests/extract-zip.test.py
+          python3 scripts/ci/tests/desktop-package-diagnostics.test.py
           python3 scripts/ci/tests/desktop-smoke-pipeline.test.py
           python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
@@ -176,6 +179,8 @@ jobs:
           python3 scripts/ci/tests/check-runtime-sources.test.py
           python3 scripts/ci/tests/smoke-start.test.py
           python3 scripts/ci/tests/network-capture.test.py
+          python3 scripts/ci/tests/benchmark-live-capture.test.py
+          python3 scripts/ci/tests/assert-benchmark-run.test.py
           python3 scripts/ci/tests/nightly-windows-identity.test.py
       - name: Preserve a formatting repair patch
         if: failure()
@@ -312,7 +317,7 @@ jobs:
             -PtestBuildType=release :app:dumpReleaseR8Inputs
           python3 scripts/ci/trace-instrumentation-abi.py --check
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :app:assembleBenchmarkRelease :benchmark:assembleBenchmarkRelease :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :app:assembleBenchmarkRelease :benchmark:assembleBenchmarkRelease :app:assembleNonMinifiedRelease :benchmark:assembleNonMinifiedRelease :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
@@ -572,6 +577,13 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - name: Check image scans with the macOS system Bash
+        if: runner.os == 'macOS'
+        run: >-
+          python3 scripts/ci/tests/check-desktop-image.test.py
+          DesktopImageGatesTest.test_macos_system_bash_runs_the_image_and_epoch_gates
+          DesktopImageGatesTest.test_macos_system_bash_rejects_a_drifted_classpath
+          DesktopImageGatesTest.test_macos_system_bash_rejects_an_epoch_probe_failure
       - name: Check smoke admission with the macOS system Bash
         if: runner.os == 'macOS'
         run: python3 scripts/ci/tests/smoke-start.test.py SmokeStartGateTest.test_macos_system_bash_runs_the_shipped_smoke_gate

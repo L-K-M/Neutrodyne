@@ -605,6 +605,11 @@ class DesktopAppGraphTest {
                 .single()
                 .order
         assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
+        // 10 Parked state: the start-up recovery (191) runs after the database open and before
+        // the sync scheduling arm (210).
+        assertThat(dbOrder).isLessThan(orders.getValue("SyncParkedRecoveryInitializer"))
+        assertThat(orders.getValue("SyncParkedRecoveryInitializer"))
+            .isLessThan(orders.getValue("DesktopSyncSchedulingInitializer"))
         assertThat(orders.getValue("DesktopDownloadIndexInitializer")).isEqualTo(130)
         assertThat(orders.getValue("DesktopDeferredDeletesInitializer")).isEqualTo(310)
         assertThat(orders.getValue("DesktopDownloadAlerts")).isEqualTo(310)
@@ -613,6 +618,12 @@ class DesktopAppGraphTest {
             .isLessThan(orders.getValue("DesktopDownloadIndexInitializer"))
         assertThat(orders.getValue("DesktopDownloadIndexInitializer"))
             .isLessThan(orders.getValue("DesktopRunnerInitializer"))
+        // 10 Durable apply effects: the start drain (band 160) precedes the runner and the
+        // sync scheduling arm, so pending remote settings apply before any push.
+        assertThat(orders.getValue("SyncStartupDrainInitializer"))
+            .isLessThan(orders.getValue("DesktopRunnerInitializer"))
+        assertThat(orders.getValue("SyncStartupDrainInitializer"))
+            .isLessThan(orders.getValue("DesktopSyncSchedulingInitializer"))
     }
 
     /**
@@ -625,6 +636,19 @@ class DesktopAppGraphTest {
         runBlocking { graph.databaseOpener.awaitOpen() }
 
         assertThat(graph.credentialLookup).isSameInstanceAs(graph.secretStore)
+    }
+
+    /**
+     * MS2 wiring: the desktop graph's post-ingest hook must be 10's `SyncParkedStateApplier` —
+     * never the M1a `None` default, whose silent drop lost parked records behind the cursor.
+     * Resolving it must stay cheap (01 DI rule 7): the database is not open yet, and the hook
+     * defers it — an eager database edge here deadlocked resolution before the start-up gate.
+     */
+    @Test
+    fun theSyncIngestHookIsTheParkedStateApplier() {
+        assertThat(graph.syncIngestHook)
+            .isInstanceOf(ch.lkmc.neutrodyne.sync.impl.SyncParkedStateApplier::class.java)
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
     }
 
     /**

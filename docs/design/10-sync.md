@@ -941,7 +941,7 @@ Each field's clock is the wire form of its row's `hlc` and **row's `nodeId`**. L
 
 - **Stubs.** An `episode` record that is effectively in progress or favourite, or an `upnext`/`session` reference, whose episode is not ingested yet but whose hints include `enc` or `ytId`, becomes a stub through 02's stub insert ([02 Restore matching](02-data-model.md#restore-matching): `inFeed = 0`, `isNew = 0`, `contentHash = 0`). Played-only and empty records never create stubs, so D23 retention keeps working.
 - **Parked.** Everything else that cannot be resolved is stored in `sync_parked` (`podcastSyncId`, `identityKey`, `guid`, `enclosureKey = UrlNormalizer.forIdentity(enc)`, the record JSON, `receivedAt`): episode records of known podcasts not yet ingested, and `member` and `upnext` records whose podcast is missing (members use `identityKey = "@member:" + groupUuid`).
-- **Release.** 03's ingestion calls `SyncIngestHook.afterIngest(podcastId)` after inserting episodes; `SyncParkedStateApplier` loads the podcast's parked rows, matches them with 02's restore ladder and applies the matched ones with `applying = 1`. Podcast or group inserts by `SyncApplier` release their parked members in the same transaction.
+- **Release.** 03's ingestion calls `SyncIngestHook.afterIngest(podcastId)` after inserting episodes; `SyncParkedStateApplier` loads the podcast's parked rows, matches them with 02's restore ladder and applies the matched ones with `applying = 1`. Podcast or group inserts by `SyncApplier` release their parked members in the same transaction. A retry re-reads each journal row after acquiring the write transaction: unlink or expiry can remove it, and another page can add fields after the initial read. Removed rows are skipped; accumulated fields are applied before deleting the journal row.
 - **Expiry.** Parked rows are deleted with their podcast's tombstone and by `db-maintenance` after 180 days (02).
 
 ### Sync round
@@ -1220,15 +1220,29 @@ completed link deletes it. Deviations the current code forces:
   episode and setting winners; the settings journaling
   (`pendingSetting`) runs after `mergeStaged` returns rather than inside
   each chunk transaction; the marker lives in `sync_clock` and is
-  repeatable after interruption. Boundary (2026-11-08): the merge
-  itself already drains those markers before it completes, through the
-  one app-scoped `SyncApplyEffects` bound with the shared
-  `SettingsWriteCoordinator`, so a journaled remote value serializes
-  with local sets under 01's per-key lock; the separate
-  at-each-start drain for normal rounds is still unwired —
-  `SyncEngine` does not run `drainSettings` yet, so a marker left
-  behind waits for the next link merge or the later start drain.
-  Ordinary rounds and the manual resync do not drain those markers yet.
+  repeatable after interruption. The merge itself drains those markers
+  before it completes, through the one app-scoped `SyncApplyEffects`
+  bound with the shared `SettingsWriteCoordinator`, so a journaled
+  remote value serializes with local sets under 01's per-key lock.
+  Boundary (2026-11-08, settings-effect lifecycle): the settings half
+  of the drain is wired everywhere a page commits. `SyncEngine` drains
+  committed markers before a round's first request (a local retry, so
+  it recovers while offline) and right after every applied page,
+  including each `hasMore` page; the manual resync drains between its
+  pull and the re-assertion, so the replay keeps the stored complete
+  clock instead of re-reading DataStore; both platforms drain at each
+  start through the band-160 `SyncStartupDrainInitializer` (01
+  Application start-up), while linked, before the scheduling band arms
+  any push; and enabling "Sync playback settings" drains what the
+  switch held pending. Every drain reads the persisted switch live
+  (`SyncServerAddress.syncPlaybackSettings()`), never `SyncFlags`'
+  late cache, and checks again after acquiring each key's write lock.
+  A key already being written can complete; waiting and later keys
+  stay pending once the switch is off. Unlink clears `sync_clock`,
+  so the startup drain cannot resurrect effects from an old account.
+  Still pending: the credential half (`pendingAuth`,
+  `CredentialCommitCoordinator`) and `SettingsCapture.install`'s
+  production wiring (the capture side, next slice).
 - The local seed now covers groups, members and Up next too, so an empty
   account's upload includes them (the 2026-11-04 shortcut uploaded only
   podcasts and episodes).
@@ -2418,7 +2432,7 @@ Each scenario is a test; the property test generates the first four at random, t
 | MS2 AC2 / AC3 / AC4 | `CrossDeviceSyncTest` / `FirstLinkMergerTest` / `MassChangeGuardTest` and E12 |
 | MS2 AC5 | `LocalNetworkPermissionGateTest` plus S17 on a physical Android 17 phone |
 | MS2 AC6 / AC7 | 05's `RestoreWhileLinkedTest` / `SyncDisclosure` and `auth` capture tests in `SyncCaptureTest` |
-| MS2 AC8 | 02's `SyncBookkeepingTest`, `FirstLinkMergerTest`, `ChangeBuilderTest`, `SyncApplierTest`, `SyncApplyEffectsTest` |
+| MS2 AC8 | 02's `SyncBookkeepingTest`, `FirstLinkMergerTest`, `ChangeBuilderTest`, `SyncApplierTest`, `SyncApplyEffectsTest`, `SyncEngineEffectsDrainTest` |
 | MS3 AC1–AC4 | E12 timing (PB31) / `SessionAdopterTest` and the cross-device checklist / 06's `RemotePlayedGuard` tests / S17 and the SSE gating test |
 | M11 AC14 | E12 plus the manual checklist with a phone, a desktop on each OS and a server ([Cross-device journey](#cross-device-journey)) |
 

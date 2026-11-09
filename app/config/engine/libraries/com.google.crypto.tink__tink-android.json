@@ -1,0 +1,7 @@
+{
+  "_comment": "tink-android 1.23.0 jar; Apache-2.0, upstream ships no NOTICE (attribution per 4(d) practice)",
+  "uniqueId": "com.google.crypto.tink:tink-android",
+  "licenses": [
+    "Apache-2.0-tink-android-NOTICE"
+  ]
+}

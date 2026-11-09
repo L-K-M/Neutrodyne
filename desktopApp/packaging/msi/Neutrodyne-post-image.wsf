@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense
+
+     Neutrodyne-post-image.wsf — jpackage's post-image hook for the Windows MSI
+     (11 AOT cache, Windows MSI). JDK 25's packaging pipeline copies the app
+     image into its private staging tree without COPY_ATTRIBUTES
+     (PackagingPipeline.copyAppImage → PathGroup.copy), so every staged file's
+     modification time becomes the packaging time and the trained archive's
+     recorded classpath-JAR timestamps no longer match: a strict
+     -XX:AOTMode=on launch would fail before main with "timestamp has changed".
+     The supported <app name>-post-image.wsf hook runs on that staging copy
+     after the copy and before WiX builds the MSI; this script restores the
+     fixed epoch trainAotCache wrote. Written against the pinned JDK 25
+     pipeline sources; jpackage's own templates are GPL-2.0+CE and never copied
+     (D3). It fails closed: an invalid staging context or a file timestamp
+     that cannot be set aborts the packaging rather than ship an installer
+     whose strict cache fails.
+
+     JScript, not VBScript, so the path read from the environment is data:
+     it travels through FileSystemObject/Shell method arguments and is never
+     concatenated into executable command text. Spaces and Unicode survive.
+     Only supported COM APIs are used: the environment comes from the
+     documented WshShell.Environment property (the WScript object exposes no
+     Environment collection), file timestamps go through the writable
+     Shell FolderItem.ModifyDate (FSO's File.DateLastModified is read-only),
+     and every write is verified against that read-only property.
+     The epoch is UTC — 318211200000 ms (1980-02-01T00:00:00Z), the
+     AOT_IMAGE_TIMESTAMP_MS the training task wrote; new Date(ms) builds the
+     Date from the UTC instant, so the local-time components the Shell applies
+     are correct in any packaging timezone. -->
+<package>
+  <job id="neutrodyne-post-image">
+    <script language="JScript"><![CDATA[
+var epochMs = 318211200000;
+var reparsePoint = 0x400;
+
+try {
+    var dir = WScript.CreateObject("WScript.Shell")
+        .Environment("Process").Item("JpAppImageDir");
+    if (dir === null || dir === undefined || dir === "") {
+        throw new Error("JpAppImageDir is not set");
+    }
+
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    if (!fso.FolderExists(dir)) {
+        throw new Error("JpAppImageDir is not a staging directory: " + dir);
+    }
+
+    // JDK 25's Windows pipeline names JpAppImageDir the app image itself:
+    // WinPackagingPipeline stages Package::appImageLayout with the launcher
+    // at the image root and app/ and runtime/ directly below it (the
+    // copyAppImage step is noaction for --app-image); the --install-dir value
+    // ("Neutrodyne-App") names the installed tree under INSTALLDIR, not the
+    // staging layout. Require the trained layout — launcher, .cfg with the
+    // -XX:AOTCache read flag, archive and classpath JARs — or refuse: a
+    // pass-through would ship a strict-mode failure.
+    var app = dir;
+    var cfg = app + "\\app\\Neutrodyne.cfg";
+    var aot = app + "\\app\\neutrodyne.aot";
+    if (!fso.FileExists(app + "\\Neutrodyne.exe")) {
+        throw new Error("no staged launcher at " + app + "\\Neutrodyne.exe");
+    }
+    if (!fso.FileExists(cfg)) {
+        throw new Error("no staged launcher config at " + cfg);
+    }
+    if (!fso.FileExists(aot)) {
+        throw new Error("no trained AOT archive at " + aot);
+    }
+    var cfgText = fso.OpenTextFile(cfg, 1, false, 0).ReadAll();
+    if (cfgText.indexOf("java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot") < 0) {
+        throw new Error("the staged .cfg carries no -XX:AOTCache read flag");
+    }
+    var appDir = fso.GetFolder(app + "\\app");
+    var hasJar = false;
+    var jars = new Enumerator(appDir.Files);
+    for (; !jars.atEnd(); jars.moveNext()) {
+        var candidate = jars.item();
+        if (candidate.Name.match(/\.jar$/i)) {
+            hasJar = true;
+            break;
+        }
+    }
+    if (!hasJar) {
+        throw new Error("no classpath JARs under " + app + "\\app");
+    }
+
+    // Restore the fixed epoch on every staged file — the same value the
+    // trained image carries — so the WiX payload records it. Symbolic links
+    // (reparse points) are skipped entirely: their targets are never followed
+    // and their own timestamps stay untouched, matching trainAotCache's
+    // normalization. FolderItem.ModifyDate is the supported writable file
+    // timestamp; for folders it is get-only, so directory stamping stays
+    // best-effort and never aborts — the strict cache binds file timestamps
+    // and the MSI's installed directories are recreated at install time.
+    var shell = new ActiveXObject("Shell.Application");
+    var epoch = new Date(epochMs);
+
+    function setItemTime(path, fatal) {
+        var parent = fso.GetParentFolderName(path);
+        var name = fso.GetFileName(path);
+        var folder = shell.Namespace(parent);
+        var item = folder === null || folder === undefined
+            ? null
+            : folder.ParseName(name);
+        if (item === null || item === undefined) {
+            var missing = "cannot resolve " + path + " in the Shell namespace";
+            if (fatal) {
+                throw new Error(missing);
+            }
+            WScript.Echo("Neutrodyne-post-image: " + missing);
+            return;
+        }
+        try {
+            // COM requires VT_DATE; a JScript Date object produces a type mismatch.
+            item.ModifyDate = epoch.getVarDate();
+        } catch (e) {
+            var failed = "cannot set the timestamp for " + path + ": " + e.message;
+            if (fatal) {
+                throw new Error(failed);
+            }
+            WScript.Echo("Neutrodyne-post-image: " + failed);
+            return;
+        }
+        if (!fatal) {
+            return;
+        }
+        // ModifyDate does not surface every write failure as an exception, so
+        // verify against the read-only FSO timestamp: the strict cache binds
+        // these values exactly and a silently unapplied stamp would ship a
+        // broken installer.
+        var actual = new Date(fso.GetFile(path).DateLastModified);
+        if (actual.getTime() !== epochMs) {
+            throw new Error("the timestamp for " + path + " did not take: " + actual);
+        }
+    }
+
+    function walk(folder) {
+        var files = new Enumerator(folder.Files);
+        for (; !files.atEnd(); files.moveNext()) {
+            var file = files.item();
+            if ((file.Attributes & reparsePoint) === 0) {
+                setItemTime(file.Path, true);
+            }
+        }
+        var subs = new Enumerator(folder.SubFolders);
+        for (; !subs.atEnd(); subs.moveNext()) {
+            var sub = subs.item();
+            if ((sub.Attributes & reparsePoint) === 0) {
+                walk(sub);
+                setItemTime(sub.Path, false);
+            }
+        }
+    }
+
+    walk(fso.GetFolder(dir));
+    setItemTime(dir, false);
+    WScript.Quit(0);
+} catch (e) {
+    WScript.Echo("Neutrodyne-post-image: " + e.message);
+    WScript.Quit(1);
+}
+    ]]></script>
+  </job>
+</package>

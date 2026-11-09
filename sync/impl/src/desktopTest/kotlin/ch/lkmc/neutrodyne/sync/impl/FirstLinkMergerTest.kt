@@ -1083,11 +1083,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1141,11 +1137,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1217,11 +1209,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1258,11 +1246,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1296,11 +1280,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1343,6 +1323,40 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * 10 Durable apply effects, resync half: the pull's committed `pendingSetting` drains
+     * before the re-assertion, so DataStore holds the server value, and the re-assert
+     * replays the stored raw clock — the server's node, counter and value — without any
+     * fresh local capture of the drained value (no echo).
+     */
+    @Test
+    fun resyncDrainsPendingSettingsBeforeTheReassertion() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val port = StoringSettingsSyncPort()
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val remoteClock = Hlc.of(october, 5, remote)
+                val client = ScriptedClient(listOf(settingRecord(key, 15_000L, remoteClock)))
+                val merger = mergerOf(db, client, FakeLibraryMerger(), effects = newEffects(db, port))
+
+                val result = merger.resync()
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertEquals(listOf(key to "15000"), port.applied)
+                assertNull(pendingSetting(db, key.name))
+                val replay = db.syncOutboxDao().get("setting", key.name, "v")
+                assertNotNull(replay, "the re-assertion replays the setting with its stored clock")
+                assertEquals(remoteClock.packed, replay.hlc)
+                assertEquals(remote.value, replay.nodeId)
+                assertEquals(ch.lkmc.neutrodyne.core.database.SyncCaptureKind.REPLAY, replay.captureKind)
+                assertEquals("15000", replay.value)
+            } finally {
+                db.close()
+            }
+        }
+
     /** The resync holds the same flag for its whole pull-and-reassert duration. */
     @Test
     fun resyncMarksSyncActivityUntilItReturns() =
@@ -1371,11 +1385,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1407,11 +1417,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1445,11 +1451,7 @@ class FirstLinkMergerTest {
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
                         effects =
-                            SyncApplyEffects(
-                                db,
-                                FakeSettingsSyncPort(),
-                                TestSettingsWriteCoordinator(),
-                            ),
+                            newEffects(db),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1492,7 +1494,7 @@ class FirstLinkMergerTest {
         port: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort = FakeSettingsSyncPort(),
         coordinator: ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator =
             TestSettingsWriteCoordinator(),
-    ): SyncApplyEffects = SyncApplyEffects(db, port, coordinator)
+    ): SyncApplyEffects = SyncApplyEffects(db, port, coordinator) { true }
 
     private suspend fun link(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
@@ -1617,6 +1619,7 @@ class FirstLinkMergerTest {
             gate =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeLocalNetworkGate(),
+            effects = newEffects(db),
         )
     }
 

@@ -248,6 +248,7 @@ internal class FeedRefresher(
             flushFetchStates()
             var targetId = podcastId
             var merged = false
+            var reparentedByMerge = 0
             var committed: Pair<DueFeed, IngestResult>?
             while (true) {
                 try {
@@ -284,7 +285,8 @@ internal class FeedRefresher(
                 } catch (collision: FeedMoveCollision) {
                     // The commit block has unwound before credential cleanup acquires its coordinator.
                     val survivor = moves.mergeCollision(targetId, collision) ?: continue
-                    targetId = survivor.id
+                    targetId = survivor.feed.id
+                    reparentedByMerge += survivor.reparentedEpisodes
                     merged = true
                 }
             }
@@ -295,6 +297,7 @@ internal class FeedRefresher(
                     adapters.getValue(SourceType.RSS),
                     ingest,
                     initialFetch = feed.initialFetch || feed.status == PodcastStatus.PENDING_FIRST_FETCH,
+                    reparentedByMerge = reparentedByMerge,
                 )
                 // Scheduling cannot undo the committed edit, as in the subscribe path.
                 suspendRunCatching { scheduler().reschedulePeriodic() }
@@ -718,6 +721,10 @@ internal class FeedRefresher(
                         lastParseOk = refreshed.lastParseOk,
                     ),
                 )
+                // 10 Parked state: a pre-run merge that re-parented episodes changed the
+                // survivor's matching surface with no ingest of its own — release its parked
+                // rows; a merge that matched everything re-parented nothing and stays silent.
+                if ((move?.reparentedEpisodes ?: 0) > 0) announceReparentedMerge(refreshed.id)
                 move?.mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.NotModified
             }
 
@@ -763,6 +770,9 @@ internal class FeedRefresher(
                 if (refreshed.sourceType == SourceType.YOUTUBE_CHANNEL) {
                     emitAnnouncement(refreshed.id, promoted, false)
                 }
+                // 10 Parked state: as on NotModified, only a merge that actually re-parented
+                // episodes releases parked rows.
+                if ((move?.reparentedEpisodes ?: 0) > 0) announceReparentedMerge(refreshed.id)
                 move?.mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.Unchanged
             }
 
@@ -813,6 +823,7 @@ internal class FeedRefresher(
         if (moves.willMove(feed.id, newFeedUrl ?: permanentUrl)) flushFetchStates()
         var target = feed
         var mergedInto: Long? = null
+        var reparentedByMerge = 0
         var mode: IngestMode
         var ingest: IngestResult
         while (true) {
@@ -841,8 +852,9 @@ internal class FeedRefresher(
                 // The failed ingest released Room; flush before the merger changes its survivor.
                 flushFetchStates()
                 val survivor = moves.mergeCollision(target.id, collision) ?: continue
-                target = survivor
-                mergedInto = survivor.id
+                target = survivor.feed
+                mergedInto = survivor.feed.id
+                reparentedByMerge += survivor.reparentedEpisodes
                 mergedThisRun = true
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -900,7 +912,13 @@ internal class FeedRefresher(
             return mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.Failed(emptyKind, null)
         }
 
-        announceIngest(target, adapter, ingest, initialFetch = mode == IngestMode.INITIAL)
+        announceIngest(
+            target,
+            adapter,
+            ingest,
+            initialFetch = mode == IngestMode.INITIAL,
+            reparentedByMerge = reparentedByMerge,
+        )
         if (mergedInto != null) return FeedOutcome.Merged(mergedInto)
 
         val realGuid = result.feed.podcastGuid?.let(PodcastGuid::parse)
@@ -1293,16 +1311,20 @@ internal class FeedRefresher(
 
     /**
      * Step 11 of 03's diff algorithm (hook → adapter filter → emit) under `NonCancellable`, so a
-     * deadline cancel inside `afterIngest` never loses the event.
+     * deadline cancel inside `afterIngest` never loses the event. The hook fires only when the
+     * commit changed the episode-matching surface: rows inserted or re-keyed by the ingest, or
+     * rows a collision merge re-parented into this feed unmatched — a zero-change commit cannot
+     * newly enable parked matching, so it stays silent (10 Parked state and stubs).
      */
     private suspend fun announceIngest(
         feed: DueFeed,
         adapter: SourceAdapter,
         ingest: IngestResult,
         initialFetch: Boolean,
+        reparentedByMerge: Int = 0,
     ) {
         withContext(NonCancellable) {
-            if (ingest.inserted.isNotEmpty() || ingest.rekeyed > 0) {
+            if (ingest.inserted.isNotEmpty() || ingest.rekeyed > 0 || reparentedByMerge > 0) {
                 try {
                     syncHook.afterIngest(feed.id)
                 } catch (e: Throwable) {
@@ -1312,6 +1334,17 @@ internal class FeedRefresher(
         }
         val announceIds = callAfterIngest(feed, adapter, ingest.inserted, ingest.newIds)
         emitAnnouncement(feed.id, if (initialFetch) ingest.inserted else announceIds, initialFetch)
+    }
+
+    /** The pre-run merge arm of step 11: no ingest ran, only the merge moved rows. */
+    private suspend fun announceReparentedMerge(podcastId: Long) {
+        withContext(NonCancellable) {
+            try {
+                syncHook.afterIngest(podcastId)
+            } catch (e: Throwable) {
+                Log.w(TAG, e) { "sync hook failed for podcast $podcastId" }
+            }
+        }
     }
 
     private suspend fun emitAnnouncement(

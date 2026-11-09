@@ -96,6 +96,7 @@ object SyncBindings {
         tokens: SyncTokenStore,
         activity: SyncActivityState,
         gate: LocalNetworkGate,
+        effects: SyncApplyEffects,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -108,6 +109,7 @@ object SyncBindings {
             tokens = tokens,
             activity = activity,
             gate = gate,
+            effects = effects,
         )
 
     /**
@@ -140,6 +142,9 @@ object SyncBindings {
      * The durable apply-effects drainer (10). Every drain takes the one app-scoped
      * [SettingsWriteCoordinator] `:core:data` binds for local sets/resets and a linked
      * restore, so a journaled remote setting never interleaves a local write for its key.
+     * The switch gate is the persisted `SyncServerAddress.syncPlaybackSettings()` read, live
+     * per drain — never `SyncFlags`' late cache, whose default would apply markers a device
+     * keeps deliberately pending.
      */
     @Provides
     @SingleIn(AppScope::class)
@@ -147,7 +152,8 @@ object SyncBindings {
         db: NeutrodyneDatabase,
         settings: SettingsSyncPort,
         writeLocks: SettingsWriteCoordinator,
-    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks)
+        address: SyncServerAddress,
+    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks, { address.syncPlaybackSettings() })
 
     /**
      * The first-link merge; the controller drives it from the link state machine. The

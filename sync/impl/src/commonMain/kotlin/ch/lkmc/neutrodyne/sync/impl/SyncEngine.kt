@@ -80,6 +80,7 @@ class SyncEngine(
     private val tokens: SyncTokenStore,
     private val activity: SyncActivityState,
     private val gate: LocalNetworkGate,
+    private val effects: SyncApplyEffects,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -116,6 +117,10 @@ class SyncEngine(
         if (db.syncStateDao().get()?.lastError == SYNC_ERROR_REVOKED) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
+        // 10 Durable apply effects: a marker an earlier committed page left behind retries before
+        // this round's first request — the drain is local (Room and DataStore), so it recovers
+        // while offline too, and the push below can never echo over an unapplied server value.
+        effects.drainSettings()
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -138,6 +143,9 @@ class SyncEngine(
             db.withWriteTransaction { handleResults(changes, response.results) }
             applied += response.records.size
             val page = applier.applyPage(response.records, roundId)
+            // 10 Pull and apply step 5: the committed page's settings effects drain right after
+            // the commit, under the same per-key lock a local set takes.
+            effects.drainSettings()
             stale += page.stale
             held += page.held
             pulled += response.records.size
@@ -152,6 +160,8 @@ class SyncEngine(
                 applied += next.records.size
                 pulled += next.records.size
                 applier.applyPage(next.records, roundId)
+                // Each later page's effects drain with its own commit, not only at the round's end.
+                effects.drainSettings()
                 raiseHlc(next.records)
                 storeCursor(next.cursor)
                 cursor = next.cursor
