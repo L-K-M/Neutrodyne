@@ -19,14 +19,17 @@ import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.window.rememberNeutrodyneWindowState
 import ch.lkmc.neutrodyne.desktop.window.toGateState
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.compose.resources.stringResource
 import java.awt.GraphicsEnvironment
+import java.io.File
 import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 /**
@@ -35,21 +38,38 @@ import kotlin.time.TimeSource
  * fresh temporary `AppDirs` root, the graph, the initializers except the host's OS
  * registrations (`ShellJourney` skips those), the window and its first frame,
  * one `SMOKE {json}` line, exit 0 — or exit 1 naming the failed step; a watchdog exits 1 after
- * 60 s. Under `java.awt.headless=true` the window step is skipped and the JSON says so.
+ * 60 s (300 s when the engine proof is armed: a cold bundled compile fits inside it). Under
+ * `java.awt.headless=true` the window step is skipped and the JSON says so.
+ *
+ * Step 6's MD3 slice: `-Dneutrodyne.smoke.engineReplay=<recorded scenario dir>` — passed by
+ * `smoke-start.sh --engine-replay` — additionally runs the packaged engine proof
+ * ([EngineSmokeProof]) and reports its evidence in the `engine` field; the step fails the
+ * run when the proof cannot run or fails. An image built without the engine never gets the
+ * property, keeps `engine` in `pending` and changes nothing else.
  *
  * Still pending from 11's step list (the milestone rows): the five destinations through
- * `AppNavigator`, FFmpeg, `ndmedia`, the engine child, the D-Bus step and the RSS line —
- * the JSON lists them as pending.
+ * `AppNavigator`, FFmpeg, `ndmedia`, the D-Bus step and the RSS line — the JSON lists them
+ * as pending.
  */
 internal class SmokeMode(
     private val output: (String) -> Unit = ::println,
     /** Shows the real window, returns the first-frame delay in ms (null = skipped headless). */
     private val windowStep: (DesktopAppGraph) -> Long? = Companion::openWindowAndAwaitFirstFrame,
+    /** The engine step's proof lookup and run; a seam for the report-shape tests. */
+    private val engineStep: (DesktopAppGraph, File) -> JsonObject = Companion::runEngineProof,
 ) {
     fun run(): Int {
+        val replayDir = engineReplayDir()
         val journey =
             try {
-                ShellJourney(SMOKE_TEMP_PREFIX)
+                ShellJourney(
+                    SMOKE_TEMP_PREFIX,
+                    if (replayDir != null) {
+                        ENGINE_WATCHDOG_TIMEOUT
+                    } else {
+                        ShellJourney.DEFAULT_WATCHDOG_TIMEOUT
+                    },
+                )
             } catch (t: Throwable) {
                 Log.e(TAG, t) { "smoke run failed" }
                 output(
@@ -57,6 +77,7 @@ internal class SmokeMode(
                         null,
                         emptyMap(),
                         windowOpened = null,
+                        engine = null,
                         failure = t.message ?: t.javaClass.simpleName,
                     )}",
                 )
@@ -71,8 +92,14 @@ internal class SmokeMode(
             val windowOpened = firstFrameMs != null
             if (windowOpened) journey.timings[FIRST_FRAME_STEP] = firstFrameMs
 
+            // 11 step 6's MD3 slice: the armed engine proof; unarmed runs skip it and
+            // keep "engine" in the pending list.
+            val engine = replayDir?.let { dir -> journey.step("engine") { engineStep(journey.graph!!, dir) } }
+
             journey.cleanUp()
-            output("SMOKE ${smokeJson(buildInfo, journey.timings, windowOpened, failure = null)}")
+            output(
+                "SMOKE ${smokeJson(buildInfo, journey.timings, windowOpened, engine, failure = null)}",
+            )
             EXIT_OK
         } catch (t: Throwable) {
             Log.e(TAG, t) { "smoke run failed" }
@@ -82,6 +109,7 @@ internal class SmokeMode(
                     info,
                     journey.timings,
                     windowOpened = null,
+                    engine = null,
                     failure =
                         t.message ?: t.javaClass.simpleName,
                 )}",
@@ -106,6 +134,15 @@ internal class SmokeMode(
         /** 11's only test entry point switch. */
         const val SYSTEM_PROPERTY = "neutrodyne.smoke"
 
+        /**
+         * `-Dneutrodyne.smoke.engineReplay=<recorded scenario dir>`: the packaged engine
+         * proof's arming property (MD3 AC2). `smoke-start.sh --engine-replay` injects it
+         * through `JAVA_TOOL_OPTIONS` like [SYSTEM_PROPERTY]; the engine bindings arm
+         * `StdioReplayArming` only while [isEnabled] also holds, so production runs keep
+         * the documented null arming.
+         */
+        const val ENGINE_REPLAY_PROPERTY = "neutrodyne.smoke.engineReplay"
+
         /** The first-frame figure's step name (11 step 8). */
         internal const val FIRST_FRAME_STEP = "firstFrameMs"
 
@@ -123,7 +160,11 @@ internal class SmokeMode(
         internal const val AOT_CACHE_NOT_CONFIGURED = "not-configured"
         internal const val AOT_CACHE_UNVERIFIED = "unverified"
 
-        /** Steps 11 defines that this milestone cannot run yet (11 Smoke mode). */
+        /** The engine-armed journey's bound: compile (120 s) plus start, resolve and slack. */
+        private val ENGINE_WATCHDOG_TIMEOUT = 300.seconds
+
+        /** Steps 11 defines that this milestone cannot run yet (11 Smoke mode). A proven
+         * engine step drops its own entry from one run's `pending` field. */
         internal val PENDING_STEPS =
             listOf(
                 "destinations",
@@ -136,6 +177,30 @@ internal class SmokeMode(
 
         /** `-Dneutrodyne.smoke` is read exactly like this (11 Start-up sequence step 1). */
         fun isEnabled(property: String?): Boolean = property == "true"
+
+        /** The armed engine replay directory, or null for a run without the engine step. */
+        internal fun engineReplayDir(
+            smoke: String? = System.getProperty(SYSTEM_PROPERTY),
+            replay: String? = System.getProperty(ENGINE_REPLAY_PROPERTY),
+        ): File? =
+            replay
+                ?.takeUnless(String::isBlank)
+                ?.takeIf { isEnabled(smoke) }
+                ?.let(::File)
+
+        /**
+         * The production engine step: the graph's engine-build binding carries the proof;
+         * without it the armed run fails — a no-engine image cannot satisfy the contract.
+         */
+        private fun runEngineProof(
+            graph: DesktopAppGraph,
+            replayDir: File,
+        ): JsonObject {
+            val proof =
+                graph.engineSmokeProof
+                    ?: error("engine replay is armed but this image carries no engine bindings")
+            return runBlocking { proof.run(replayDir) }
+        }
 
         /** The smoke journey: open the window, take the first-frame figure, close it again. */
         private fun openWindowAndAwaitFirstFrame(graph: DesktopAppGraph): Long? = openWindow(graph) { }
@@ -208,12 +273,14 @@ internal class SmokeMode(
         /**
          * The one-line report (11 step 8), in the test's reach for shape checks. [windowOpened]
          * is null when the run failed before the window step; otherwise the `window` field says
-         * whether it opened or was skipped headless.
+         * whether it opened or was skipped headless. [engine] is the engine proof's evidence
+         * object; a run that proved it drops `engine` from the `pending` list.
          */
         internal fun smokeJson(
             buildInfo: BuildInfo?,
             timings: Map<String, Long>,
             windowOpened: Boolean?,
+            engine: JsonObject?,
             failure: String?,
         ): String {
             val desktop = buildInfo?.desktop
@@ -232,8 +299,16 @@ internal class SmokeMode(
                             JsonPrimitive(if (windowOpened) WINDOW_OPENED else WINDOW_SKIPPED_HEADLESS),
                         )
                     }
+                    if (engine != null) put("engine", engine)
                     put("aotCache", JsonPrimitive(aotCacheState()))
-                    put("pending", JsonPrimitive(PENDING_STEPS.joinToString(",")))
+                    put(
+                        "pending",
+                        JsonPrimitive(
+                            PENDING_STEPS
+                                .filter { engine == null || it != "engine" }
+                                .joinToString(","),
+                        ),
+                    )
                     if (failure != null) put("failed", JsonPrimitive(failure))
                 }
             return JsonObject(json).toString()

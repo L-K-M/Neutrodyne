@@ -1086,6 +1086,45 @@ class DesktopPackagingTest {
     }
 
     @Test
+    fun `the staged engine check binds the interpreter and shared inputs per target`() {
+        for (target in DesktopPackagingTarget.entries) {
+            val root = Files.createTempDirectory("staged-engine").toFile()
+            try {
+                stageCompleteEngine(root, target)
+                assertEquals(emptyList(), stagedEngineProblems(target, root), target.id)
+
+                val interpreter =
+                    if (target.osWire == "windows") "python.exe" else "bin/python3"
+                File(root, "${target.id}/engine/python/$interpreter").delete()
+                val problems = stagedEngineProblems(target, root)
+                assertTrue(
+                    problems.any { it.contains(interpreter) },
+                    "${target.id}: ${problems.joinToString()}",
+                )
+            } finally {
+                root.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `the staged engine check fails closed on an empty tree`() {
+        val target = DesktopPackagingTarget.MACOS_ARM64
+        val root = Files.createTempDirectory("staged-engine").toFile()
+        try {
+            val problems = stagedEngineProblems(target, root)
+            assertTrue(
+                problems.any { it.contains("bin/python3") } &&
+                    problems.any { it.contains("common/engine/cacert.pem") } &&
+                    problems.any { it.contains("common/engine/shim/neutrodyne_ytx") },
+                problems.joinToString(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `the staged natives check fails closed on an empty tree`() {
         for (target in DesktopPackagingTarget.entries) {
             val root = Files.createTempDirectory("staged-natives").toFile()
@@ -1911,6 +1950,56 @@ class DesktopPackagingTest {
         }
     }
 
+    @Test
+    fun `bundled Python permissions precede image trimming and training`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.MACOS_ARM64)
+        try {
+            val project = fixture.project
+            val youtube =
+                ProjectBuilder
+                    .builder()
+                    .withParent(project)
+                    .withName("youtube")
+                    .build()
+            val desktop =
+                ProjectBuilder
+                    .builder()
+                    .withParent(youtube)
+                    .withName("ytdlp-desktop")
+                    .build()
+            for (name in listOf("fetchPythonStandalone", "trimPythonStandalone", "syncEngineResources")) {
+                desktop.tasks.register(name)
+            }
+            val native = project.project(":playback:native")
+            native.tasks.register("buildFfmpeg")
+            native.tasks.register("buildNdmedia")
+            project.tasks.register("exportLibraryDefinitions")
+
+            fun ancestors(task: org.gradle.api.Task): Set<org.gradle.api.Task> {
+                val visited = linkedSetOf<org.gradle.api.Task>()
+
+                fun visit(current: org.gradle.api.Task) {
+                    for (dependency in current.taskDependencies.getDependencies(current)) {
+                        if (visited.add(dependency)) visit(dependency)
+                    }
+                }
+                visit(task)
+                return visited
+            }
+
+            val restore = project.tasks.getByName("restoreDesktopPythonPermissions")
+            val create = project.tasks.getByName("createDistributable")
+            val train = project.tasks.getByName("trainAotCache")
+            assertTrue(restore in ancestors(train), "AOT training can launch before bundled Python is executable")
+            assertTrue(create in ancestors(restore), "permissions must be restored on the created image")
+            project.tasks.findByName("trimSkikoStub")?.let { trim ->
+                assertTrue(restore in ancestors(trim), "image resealing can precede restored Python modes")
+            }
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
     /** Serializes the Compose `JvmRuntimeProperties` the task's `initState()` reads. */
     private fun writeRuntimeProperties(target: File) {
         val clazz =
@@ -2084,6 +2173,39 @@ class DesktopPackagingTest {
                 parentFile.mkdirs()
                 writeText("x")
             }
+        }
+    }
+
+    /** A complete staged `desktop-resources` engine payload for [target] under [root]. */
+    private fun stageCompleteEngine(
+        root: File,
+        target: DesktopPackagingTarget,
+    ) {
+        val interpreter =
+            if (target.osWire == "windows") "python.exe" else "bin/python3"
+        File(root, "${target.id}/engine/python/$interpreter").apply {
+            parentFile.mkdirs()
+            writeBytes(byteArrayOf(3))
+        }
+        val engine = File(root, "common/engine")
+        for (
+        name in
+        listOf(
+            "cacert.pem",
+            "ytdlp/yt-dlp",
+            "ytdlp/bundled.json",
+            "keys/engine-manifest-ed25519.pub",
+            "keys/yt-dlp-release-key.asc",
+        )
+        ) {
+            File(engine, name).apply {
+                parentFile.mkdirs()
+                writeBytes(byteArrayOf(4))
+            }
+        }
+        File(engine, "shim/neutrodyne_ytx/__init__.py").apply {
+            parentFile.mkdirs()
+            writeBytes(byteArrayOf(5))
         }
     }
 

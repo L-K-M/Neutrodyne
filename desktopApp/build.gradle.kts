@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.provider.MapProperty
+import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.getByType
 import org.jetbrains.compose.ComposeExtension
 import org.jetbrains.compose.desktop.DesktopExtension
@@ -71,6 +72,11 @@ val youtubeEngine =
         .get()
         .toBoolean()
 
+// Verify the selected variant, including command-line overrides, independently of the resource.
+tasks.withType<Test>().configureEach {
+    systemProperty("neutrodyne.test.youtubeEngine", youtubeEngine.toString())
+}
+
 dependencies {
     for (feature in listOf(
         "feeds",
@@ -117,7 +123,11 @@ dependencies {
     )) {
         implementation(project(module))
     }
-    if (youtubeEngine) implementation(project(":youtube:ytdlp-desktop"))
+    if (youtubeEngine) {
+        implementation(project(":youtube:ytdlp-desktop"))
+        // The bindings module names the shared engine classes directly (YtDlpEngine, store).
+        implementation(project(":youtube:engine"))
+    }
 
     implementation(compose.desktop.currentOs)
     // The generated Res class of the shell's own Compose resources (see below)
@@ -239,6 +249,12 @@ sourceSets.named("main") {
     )
     // The AboutLibraries export lands beside it; processResources depends on the export task.
     resources.srcDir(layout.buildDirectory.dir("generated/aboutLibraries"))
+    // Engine-backed vs external YouTube bindings, like the Android variant switch (11).
+    kotlin.srcDir(
+        layout.projectDirectory.dir(
+            if (youtubeEngine) "src/youtubeEngine/kotlin" else "src/noYouTubeEngine/kotlin",
+        ),
+    )
 }
 
 tasks.named("processResources") { dependsOn("exportLibraryDefinitions") }
@@ -412,6 +428,7 @@ tasks.register("md0ProbeImage") {
 // Controller/UI tests share the JDK 25 hardware-free engine double.
 kotlin.sourceSets.named("test") {
     kotlin.srcDir(rootProject.file("core/testing/src/desktopEngineMain/kotlin"))
+    if (youtubeEngine) kotlin.srcDir("src/youtubeEngineTest/kotlin")
 }
 
 tasks.matching { it.name == "run" }.configureEach {

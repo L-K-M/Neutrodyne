@@ -22,6 +22,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
@@ -37,6 +38,7 @@ import kotlin.time.TimeSource
  */
 internal class ShellJourney(
     tempPrefix: String,
+    private val watchdogTimeout: Duration = DEFAULT_WATCHDOG_TIMEOUT,
     createRoot: (String) -> Path = { Files.createTempDirectory(it) },
 ) {
     val timings = LinkedHashMap<String, Long>()
@@ -130,16 +132,16 @@ internal class ShellJourney(
         }
     }
 
-    /** A daemon thread that ends a hanging run (11: the watchdog exits 1 after 60 s). */
+    /** A daemon thread that ends a hanging run (11: the watchdog exits 1 after the budget). */
     private fun armWatchdog(): Thread {
         val watchdog =
             Thread({
                 try {
-                    Thread.sleep(WATCHDOG_TIMEOUT.inWholeMilliseconds)
+                    Thread.sleep(watchdogTimeout.inWholeMilliseconds)
                 } catch (_: InterruptedException) {
                     return@Thread
                 }
-                System.err.println("journey exceeded $WATCHDOG_TIMEOUT; exiting")
+                System.err.println("journey exceeded $watchdogTimeout; exiting")
                 Runtime.getRuntime().halt(EXIT_HALT)
             }, THREAD_NAME)
         watchdog.isDaemon = true
@@ -152,11 +154,13 @@ internal class ShellJourney(
         watchdog.join()
     }
 
-    private companion object {
+    companion object {
         private const val TAG = "ShellJourney"
         private const val THREAD_NAME = "smoke-watchdog"
         private const val EXIT_HALT = 1
-        private val WATCHDOG_TIMEOUT = 60.seconds
+
+        /** 11's 60 s budget; the engine-armed smoke run passes a larger bound. */
+        val DEFAULT_WATCHDOG_TIMEOUT = 60.seconds
         private val RUNNER_GRACE = 3.seconds
     }
 }

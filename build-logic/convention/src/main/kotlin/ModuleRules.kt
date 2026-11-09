@@ -73,7 +73,7 @@ internal fun Project.configureModuleGraphAssert() {
                 ":youtube:ytdlp -> :youtube:(engine|api)",
                 ":youtube:ytdlp -> :core:(model|common|datastore|network:okhttp)",
                 ":youtube:ytdlp-desktop -> :youtube:(engine|api)",
-                ":youtube:ytdlp-desktop -> :core:(model|common|datastore)",
+                ":youtube:ytdlp-desktop -> :core:(model|common|datastore|network:okhttp)",
                 ":youtube:engine -> :youtube:api",
                 ":youtube:engine -> :core:(model|common)",
                 ":feeds:jvm -> :feeds",

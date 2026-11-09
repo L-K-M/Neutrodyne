@@ -167,6 +167,8 @@ class DesktopSmokePipelineTest(unittest.TestCase):
         # Guard against extracting the wrong block, without mirroring it.
         self.assertIn("smoke-start.sh", self.step)
         self.assertIn("check-runtime-sources.sh", self.step)
+        # MD3 AC2: the step must arm the packaged recorded-resolve proof.
+        self.assertIn("--engine-replay=", self.step)
 
     def write(self, relative, contents):
         path = self.root / relative

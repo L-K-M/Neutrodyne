@@ -121,6 +121,13 @@ interface DesktopAppGraph {
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
 
+    /**
+     * MD3 AC2's packaged engine proof (11 Smoke mode step 6): bound in engine builds,
+     * null in the emergency no-engine build. It stays inert until the packaged smoke
+     * arms the replay fixture.
+     */
+    val engineSmokeProof: ch.lkmc.neutrodyne.desktop.smoke.EngineSmokeProof?
+
     /** Database-backed; resolve only after the database open gate (M9a health binding). */
     val youTubeHealth: YouTubeHealth
 
@@ -140,6 +147,9 @@ interface DesktopAppGraph {
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
+
+    /** The portable settings store; journey tests toggle engine availability through it. */
+    val settingsStore: ch.lkmc.neutrodyne.core.datastore.SettingsStore
 
     /** The user-facing refresh port (11 Menus' File › Refresh, Ctrl/Cmd+R / F5). */
     val refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController
