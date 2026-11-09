@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.RejectReason
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
@@ -39,6 +40,7 @@ class FakePlaybackController(
         data class Transport(
             val action: Action,
             val positionMs: Long? = null,
+            val origin: PlayOrigin = PlayOrigin.UI,
         ) : Call
 
         data class Speed(
@@ -115,8 +117,8 @@ class FakePlaybackController(
         return playResult
     }
 
-    override suspend fun play(): PlayResult {
-        calls += Call.Transport(Action.PLAY)
+    override suspend fun play(origin: PlayOrigin): PlayResult {
+        calls += Call.Transport(Action.PLAY, origin = origin)
         return playResult
     }
 
@@ -125,8 +127,8 @@ class FakePlaybackController(
         calls += Call.Transport(Action.PAUSE)
     }
 
-    override fun togglePlayPause() {
-        calls += Call.Transport(Action.TOGGLE)
+    override fun togglePlayPause(origin: PlayOrigin) {
+        calls += Call.Transport(Action.TOGGLE, origin = origin)
     }
 
     override fun seekTo(positionMs: Long) {

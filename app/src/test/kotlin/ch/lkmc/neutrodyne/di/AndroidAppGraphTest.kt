@@ -469,6 +469,18 @@ class AndroidAppGraphTest {
     }
 
     /**
+     * MS3 wiring: the app graph's pull before play must be sync's `PrePlaySyncImpl` — never the
+     * `None` default, which would never refresh the current remote state. Resolving it must stay
+     * cheap (01 DI rule 7): the database is not open yet, and the hook defers it.
+     */
+    @Test
+    fun thePrePlaySyncIsTheSyncImpl() {
+        assertThat(graph.prePlaySync)
+            .isInstanceOf(ch.lkmc.neutrodyne.sync.impl.PrePlaySyncImpl::class.java)
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    /**
      * M3 C1: `ExportRepository` binds through the Android seam — `prepare` mints the cache
      * file AND a `content://{applicationId}.fileprovider/export/…` URI resolved by the
      * manifest's FileProvider, proving the authority and the `export/` root end to end.

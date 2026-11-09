@@ -73,7 +73,7 @@ object Md0Probe {
                     val store = FakePositionStore()
                     val saver = PositionSaver(store, clock, PlayedRule())
                     saver.load(1, clock.now(), PositionSource.DOWNLOAD)
-                    saver.startPositionApplied()
+                    saver.startPositionApplied(0)
                     saver.onPlaying()
                     var paused = false
                     val safety =
