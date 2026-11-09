@@ -421,6 +421,7 @@ class TwoClientWireTest {
             )
         private val writeLocks = PerKeySettingsLocks()
         private val credentials = FakeCredentialCommitCoordinator()
+        private val notices = SyncNoticeBus()
         private val capture = SettingsCapture(db, settingsPort, writeLocks) { true }
         private val effects =
             SyncApplyEffects(
@@ -457,6 +458,8 @@ class TwoClientWireTest {
                     channelSync = NoGroupChannels,
                     sharePasswords = { false },
                     coordinator = credentials,
+                    notices = notices,
+                    deviceNames = DeviceNames { client.devices() },
                 )
             engine =
                 SyncEngine(
@@ -472,7 +475,7 @@ class TwoClientWireTest {
                     gate = DesktopSyncLocalNetworkGate(),
                     effects = effects,
                     capture = capture,
-                    notices = SyncNoticeBus(),
+                    notices = notices,
                 )
             lane =
                 DesktopSyncLane(
