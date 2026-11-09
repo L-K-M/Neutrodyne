@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.PrePlaySync
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
@@ -76,6 +78,7 @@ class PlayStarter(
     private val startPosition: StartPositionRule,
     private val playedRule: PlayedRule,
     private val gates: Set<StartGate> = emptySet(),
+    private val prePlay: Provider<PrePlaySync> = Provider { PrePlaySync.None },
 ) {
     private data class Selection(
         val id: Long,
@@ -89,7 +92,16 @@ class PlayStarter(
         val membership: StartMembership = StartMembership.ANY,
     )
 
-    /** No pull-before-play in M4. MS3's UI-only pull belongs before this operation. */
+    /**
+     * MS3's pull before play: visible-UI start paths call this BEFORE [start] so the newest
+     * synced position lands in the stores before planning. UI only — notification buttons,
+     * media keys, Android Auto, resumption and the desktop's OS sessions never call it. The
+     * provider resolves lazily: the sync graph is never a construction-time or unconfigured
+     * cost, and the sync-to-playback DI edge stays one-directional.
+     */
+    suspend fun beforeUiStart() = prePlay().beforeStart()
+
+    /** Read-only planning/gates precede all writes. Adapters bracket this call with planner own writes. */
     suspend fun start(
         request: StartRequest,
         loadedEpisodeId: Long? = null,

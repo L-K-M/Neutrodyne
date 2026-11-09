@@ -86,10 +86,13 @@ internal class PositionTracker(
         saver.load(episodeId, currentSinceMs, streamSource(episodeId), replay, allowed)
     }
 
-    fun startPositionApplied() {
-        saver.startPositionApplied()
+    fun startPositionApplied(positionMs: Long) {
+        saver.startPositionApplied(positionMs)
         if (player?.isPlaying == true) onIsPlayingChanged(true)
     }
+
+    /** Capture before reading so a queued own save cannot turn an old row into a pickup. */
+    fun capturePausedPickup(episodeId: Long): ((Long) -> Long?)? = saver.capturePausedPickup(episodeId)
 
     fun clear() {
         loadedId = null

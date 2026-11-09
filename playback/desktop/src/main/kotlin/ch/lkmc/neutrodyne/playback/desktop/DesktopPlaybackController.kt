@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.desktop.system.AudioRouteMonitor
 import ch.lkmc.neutrodyne.desktop.system.NoOpAudioRouteMonitor
 import ch.lkmc.neutrodyne.desktop.system.RouteEvent
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
@@ -41,6 +42,7 @@ import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.api.nextNowPlayingLoadId
 import ch.lkmc.neutrodyne.playback.core.ChapterIndex
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
+import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PlaybackExit
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PlayerWindow
@@ -98,6 +100,7 @@ class DesktopPlaybackController(
     private val runtimeFactory: () -> DesktopPlaybackRuntime,
     private val network: NetworkMonitor,
     private val remoteGuard: RemotePlayedGuard,
+    private val starterFactory: () -> PlayStarter,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val routeMonitor: AudioRouteMonitor = NoOpAudioRouteMonitor,
@@ -419,28 +422,53 @@ class DesktopPlaybackController(
         ticks.emit(snapshot)
     }
 
-    override suspend fun playEpisode(episodeId: Long): PlayResult = start(StartRequest.Episode(episodeId))
+    override suspend fun playEpisode(episodeId: Long): PlayResult =
+        start(StartRequest.Episode(episodeId), PlayOrigin.UI)
 
     override suspend fun playEpisodeAt(
         episodeId: Long,
         positionMs: Long,
-    ): PlayResult = start(StartRequest.Episode(episodeId, positionMs))
+    ): PlayResult = start(StartRequest.Episode(episodeId, positionMs), PlayOrigin.UI)
 
     override suspend fun playDownloads(startEpisodeId: Long?): PlayResult =
-        start(StartRequest.Downloads(startEpisodeId))
+        start(StartRequest.Downloads(startEpisodeId), PlayOrigin.UI)
 
     override suspend fun playFeed(
         source: FeedSource,
         filters: FeedFilters,
         order: FeedOrder,
         startEpisodeId: Long?,
-    ): PlayResult = start(StartRequest.Feed(source, filters, order, startEpisodeId))
+    ): PlayResult = start(StartRequest.Feed(source, filters, order, startEpisodeId), PlayOrigin.UI)
 
-    override suspend fun play(): PlayResult = start(StartRequest.Resume)
+    override suspend fun play(origin: PlayOrigin): PlayResult = start(StartRequest.Resume, origin)
 
-    private suspend fun start(request: StartRequest): PlayResult {
+    private suspend fun start(
+        request: StartRequest,
+        origin: PlayOrigin,
+    ): PlayResult {
         val ticket = intent.incrementAndGet()
+        prePlay(origin, ticket)
         return serial { startLocked(request, ticket) }
+    }
+
+    /**
+     * MS3 pull before play (10): runs outside the serial transition lock so OS commands, pause
+     * and a newer intent are never queued behind the wait. Supersession during the pull throws
+     * on the recheck; a pull failure is not a playback failure.
+     */
+    private suspend fun prePlay(
+        origin: PlayOrigin,
+        ticket: Long,
+    ) {
+        if (origin != PlayOrigin.UI) return
+        try {
+            starterFactory().beforeUiStart()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, failure) { "Pre-play pull failed" }
+        }
+        requireIntent(ticket)
     }
 
     private fun requireIntent(ticket: Long) {
@@ -481,6 +509,7 @@ class DesktopPlaybackController(
                     // replays it from the start (06's M5 note).
                     replayFromStart(currentId)
                 } else {
+                    if (outcome.seekPositionMs == null) applyPausedPickup(value, currentId, ticket)
                     wantPlaying = true
                     value.engine.play()
                 }
@@ -610,7 +639,7 @@ class DesktopPlaybackController(
             replay = row.playedAt != null,
             allowed = { remoteGuard.allowsSaves(row.episodeId) },
         )
-        value.saver.startPositionApplied()
+        value.saver.startPositionApplied(startMs)
         followSettings(row, group)
         followChapters(row.episodeId)
         pendingTracksKnown.remove(row.episodeId)?.let { applyTracksKnown(it) }
@@ -666,14 +695,28 @@ class DesktopPlaybackController(
         publish()
     }
 
-    override fun togglePlayPause() {
+    override fun togglePlayPause(origin: PlayOrigin) {
         val ticket = intent.incrementAndGet()
-        command {
-            requireIntent(ticket)
-            if (wantPlaying) {
-                userPause()
-            } else {
-                reportStart(startLocked(StartRequest.Resume, ticket))
+        scope.launch {
+            // The UI pull runs outside the transition lock; wantPlaying is confined to this
+            // dispatcher, and the serial block re-checks the intent anyway. A toggle that lands
+            // as a pause skips the pull entirely.
+            if (origin == PlayOrigin.UI && !wantPlaying) {
+                try {
+                    starterFactory().beforeUiStart()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Log.w(TAG, failure) { "Pre-play pull failed" }
+                }
+            }
+            guarded {
+                requireIntent(ticket)
+                if (wantPlaying) {
+                    userPause()
+                } else {
+                    reportStart(startLocked(StartRequest.Resume, ticket))
+                }
             }
         }
     }
@@ -729,7 +772,7 @@ class DesktopPlaybackController(
             }
         since = clock.now()
         value.saver.load(id, since, source, replay = true, allowed = { remoteGuard.allowsSaves(id) })
-        value.saver.startPositionApplied()
+        value.saver.startPositionApplied(0)
         completedBoundary = null
     }
 
@@ -1192,7 +1235,7 @@ class DesktopPlaybackController(
             replay = row.playedAt != null,
             allowed = { remoteGuard.allowsSaves(toId) },
         )
-        value.saver.startPositionApplied()
+        value.saver.startPositionApplied(0)
         checkSave(value.saver.onPlaying())
         followSettings(row, group)
         val saved = value.positions.observe(toId).first()
@@ -1241,6 +1284,27 @@ class DesktopPlaybackController(
             isPlaying = current.value?.isPlaying == true,
             playWhenReady = wantPlaying,
         )
+    }
+
+    // 06's paused-item pickup: a stored row outside this player's last write/apply —
+    // a sync pull or a restore — is taken up on resume. The item and playing state are
+    // rechecked after the suspend read, and a superseded intent abandons the seek.
+    private suspend fun applyPausedPickup(
+        value: DesktopPlaybackRuntime,
+        episodeId: Long?,
+        ticket: Long,
+    ) {
+        if (episodeId == null) return
+        if ((value.engine.state.value as? EngineState.Ready)?.playing == true) return
+        if (engineCurrentId != episodeId) return
+        val stored = value.positions.observe(episodeId).first() ?: return
+        requireIntent(ticket)
+        if ((value.engine.state.value as? EngineState.Ready)?.playing == true) return
+        if (engineCurrentId != episodeId) return
+        val pickup = value.saver.pickupPositionMs(episodeId, stored.positionMs) ?: return
+        value.engine.seekTo(pickup)
+        checkSave(value.saver.onSeek(pickup, durationMs, SeekOrigin.CORE))
+        publish(pickup)
     }
 
     private suspend fun publish(positionMs: Long = position()) {

@@ -57,6 +57,6 @@ class Md0SafetyTest {
     private fun saver(store: FakePositionStore): PositionSaver =
         PositionSaver(store, TestClock(nowMs = 1_000), PlayedRule()).apply {
             load(1, 1_000, PositionSource.DOWNLOAD)
-            startPositionApplied()
+            startPositionApplied(0)
         }
 }

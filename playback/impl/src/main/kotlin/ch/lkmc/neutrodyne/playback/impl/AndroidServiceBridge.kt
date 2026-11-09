@@ -304,6 +304,7 @@ internal class AndroidServiceBridge(
                         handedOff = true
                     } else {
                         outcome.seekPositionMs?.let(player::seekTo)
+                            ?: applyPausedPickup(player.episodeIdOrNull())
                     }
                     PlayResult.Started
                 }
@@ -698,6 +699,20 @@ internal class AndroidServiceBridge(
         access.applicationScope.launch(Dispatchers.Main.immediate, start = CoroutineStart.UNDISPATCHED) {
             withContext(NonCancellable) { applier.detach() }
         }
+    }
+
+    // 06's paused-item pickup: a stored row outside this player's last write/apply — a
+    // sync pull or a restore — is taken up on resume. The item and playing state are
+    // rechecked after the suspend read so a start or item change during the I/O cannot
+    // move a playing player or seek a wrong item.
+    private suspend fun applyPausedPickup(episodeId: Long?) {
+        if (episodeId == null || player.isPlaying || player.episodeIdOrNull() != episodeId) return
+        val decidePickup = tracker.capturePausedPickup(episodeId) ?: return
+        val stored = ports.positions.observe(episodeId).first() ?: return
+        if (player.isPlaying || player.episodeIdOrNull() != episodeId) return
+        val pickup = decidePickup(stored.positionMs) ?: return
+        tracker.coreSeek { player.seekTo(pickup) }
+        tracker.startPositionApplied(pickup)
     }
 
     private enum class StartApplication { COMMAND, MEDIA3 }
