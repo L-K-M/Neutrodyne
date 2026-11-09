@@ -23,7 +23,9 @@
 # once the engine ships (MD3), desktopApp/python-components.lock.
 #
 # Exit 0 = all checks pass; 1 = at least one violation (all violations are printed);
-# 2 = usage error. Prints the installed and package sizes for PB27 at the end.
+# 2 = usage error. Prints the installed and package sizes for PB27 and fails them
+# against the approved budgets: 500 MB installed / 200 MB downloaded per target
+# (decimal bytes, owner-approved 2026-11-09).
 
 set -euo pipefail
 
@@ -99,10 +101,35 @@ md5_of() {
     fi
 }
 
-dir_mib() {
+dir_bytes() {
     local kb
     kb="$(du -sk "$1" | cut -f1)"
-    echo $((kb / 1024))
+    echo $((kb * 1024))
+}
+
+# PB27 budgets, owner-approved 2026-11-09: 500 MB installed / 200 MB downloaded
+# per desktop target, in decimal bytes. The installed measure is the image
+# tree's allocated size (du -sk KiB * 1024); the package measure is the file's
+# stat byte size. MiB stays the printed unit; the comparisons run on bytes.
+INSTALLED_BUDGET_BYTES=500000000
+PACKAGE_BUDGET_BYTES=200000000
+
+check_installed_size() {
+    local img="$1" bytes
+    bytes="$(dir_bytes "$img")"
+    echo "size: installed $((bytes / 1048576)) MiB ($img)"
+    if [ "$bytes" -gt "$INSTALLED_BUDGET_BYTES" ]; then
+        fail "installed size $bytes bytes exceeds the PB27 budget of $INSTALLED_BUDGET_BYTES bytes (500 MB): $img"
+    fi
+}
+
+check_package_size() {
+    local pkg="$1" bytes
+    bytes="$(file_bytes "$pkg")"
+    echo "size: package $((bytes / 1048576)) MiB ($(basename "$pkg"))"
+    if [ "$bytes" -gt "$PACKAGE_BUDGET_BYTES" ]; then
+        fail "package size $bytes bytes exceeds the PB27 budget of $PACKAGE_BUDGET_BYTES bytes (200 MB): $(basename "$pkg")"
+    fi
 }
 
 # ver_gt A B — true when dotted version A is above B (sort -V is GNU-only).
@@ -915,6 +942,9 @@ scan_dir() {
     check_glibc "$img"
     check_no_tests "$img"
     check_codesign "$img"
+    # PB27 installed-side admission lives here so a directory input and every
+    # package format's extracted payload are checked once, in the same place.
+    check_installed_size "$img"
     if [ "$NO_ENGINE" = true ]; then
         local hit
         hit="$(find "$img" \( -name 'python*' -o -name 'yt-dlp*' -o -name '*ytdlp*.jar' \) -print -quit)"
@@ -1017,12 +1047,13 @@ for input in "${INPUTS[@]}"; do
     esac
 done
 
-# --- PB27 sizes --------------------------------------------------------------------
+# --- PB27 package sizes ------------------------------------------------------------
+# The download side of the budget: each package file's own bytes. The installed
+# side is admitted inside scan_dir — directory inputs and packages' extracted
+# payloads alike — so every admitted tree reports and fails on its budget once.
 for input in "${INPUTS[@]}"; do
-    if [ -d "$input" ]; then
-        echo "size: installed $(dir_mib "$input") MiB ($input)"
-    elif [ -f "$input" ]; then
-        echo "size: package $(( $(file_bytes "$input") / 1024 / 1024 )) MiB ($(basename "$input"))"
+    if [ -f "$input" ]; then
+        check_package_size "$input"
     fi
 done
 

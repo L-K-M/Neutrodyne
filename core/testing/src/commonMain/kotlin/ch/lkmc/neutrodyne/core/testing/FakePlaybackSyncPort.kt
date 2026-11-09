@@ -17,8 +17,9 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class FakePlaybackSyncPort(
     playing: Boolean = false,
+    private val episodeId: Long? = null,
 ) : PlaybackSyncPort {
-    private val _active = MutableStateFlow(PlaybackSyncActive(playing))
+    private val _active = MutableStateFlow(PlaybackSyncActive(playing, episodeId))
     override val active: StateFlow<PlaybackSyncActive> = _active.asStateFlow()
 
     private val _events = MutableSharedFlow<PlaybackSyncEvent>(extraBufferCapacity = 16)
@@ -27,8 +28,18 @@ class FakePlaybackSyncPort(
     /** `[episodeId, deviceName]` pairs reported through [onRemoteMarkedPlayed]. */
     val remotePlayed = mutableListOf<Pair<Long, String>>()
 
+    /** Episode ids whose rolled-back transaction reverted through [onRemoteMarkReverted]. */
+    val remoteReverted = mutableListOf<Long>()
+
     fun setPlaying(playing: Boolean) {
-        _active.value = PlaybackSyncActive(playing)
+        _active.value = PlaybackSyncActive(playing, _active.value.episodeId)
+    }
+
+    fun setActive(
+        episodeId: Long?,
+        isPlaying: Boolean,
+    ) {
+        _active.value = PlaybackSyncActive(isPlaying, episodeId)
     }
 
     suspend fun emit(event: PlaybackSyncEvent) {
@@ -40,5 +51,9 @@ class FakePlaybackSyncPort(
         deviceName: String,
     ) {
         remotePlayed += episodeId to deviceName
+    }
+
+    override suspend fun onRemoteMarkReverted(episodeId: Long) {
+        remoteReverted += episodeId
     }
 }
