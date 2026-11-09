@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PlayerWindow
 import ch.lkmc.neutrodyne.playback.core.PositionCapture
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
 import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
@@ -70,6 +71,7 @@ internal class QueueProjector(
     private val tracker: PositionTracker,
     private val applier: EffectivePlaybackApplier,
     private val history: PlaybackHistory,
+    private val remoteGuard: RemotePlayedGuard,
     private val clock: Clock,
     private val playerScope: CoroutineScope,
     private val io: CoroutineDispatcher,
@@ -78,6 +80,10 @@ internal class QueueProjector(
     private val resumePolicy: () -> SmartResumePolicy = { SmartResumePolicy.DISABLED },
     private val pauseAtBoundary: () -> Boolean = { false },
     private val boundaryCompleted: (Long) -> Unit = {},
+    /** Runs after a transition's session transaction commits (10's Transition boundary). */
+    private val afterTransition: (Long) -> Unit = {},
+    /** Runs after the end-of-session transaction commits (10's Stopped boundary). */
+    private val afterSessionEnd: () -> Unit = {},
     private val localChanges: LocalMediaChanges? = null,
 ) : Player.Listener {
     private var player: Player? = null
@@ -226,10 +232,14 @@ internal class QueueProjector(
             val built = build(desired)
             applier.prepareWindow(desired.mapNotNull { it.media }, input.groupId)
             bindSession(outcome.queue.sessionRevision())
+            val previousCurrent = entries.firstOrNull()?.item?.episodeId
             install(desired, built, outcome.startPositionMs, WindowPlayback.KEEP)
             planner.appliedOwnGeneration(outcome.queue.generation)
             knownGeneration = maxOf(knownGeneration, outcome.queue.generation)
             failedArrival = null
+            // The start transaction committed before install; a changed current is a transition.
+            val current = desired.firstOrNull()?.item?.episodeId
+            if (current != null && current != previousCurrent) afterTransition(current)
         }
 
     /**
@@ -304,11 +314,16 @@ internal class QueueProjector(
                         it.item.episodeId,
                         it.media?.playedAt != null,
                         it.media?.measuredDurationMs ?: it.media?.durationMs,
+                        allowed = saverAllowed(it.item.episodeId),
                     )
                 }
             }
             if (currentChanged) tracker.startPositionApplied()
             planner.appliedOwnGeneration(pending.revision.generation)
+            // The external set's session write committed when Media3 installed this timeline.
+            if (currentChanged) {
+                pending.entries.firstOrNull()?.let { afterTransition(it.item.episodeId) }
+            }
         }
         endOwnWrite(if (matched) pending.revision.generation else null)
         if (!matched && latest != null) refresh()
@@ -359,8 +374,13 @@ internal class QueueProjector(
             val beforeIndex = live.currentMediaItemIndex.coerceAtLeast(0)
             val window = playerWindow(live)
             val plan =
-                planner.plan(snapshot, media, window, resumePolicy = resumePolicy(), frozen = ::isCompletedBoundary)
-                    ?: return@withLock
+                planner.plan(
+                    snapshot,
+                    media,
+                    window,
+                    resumePolicy = resumePolicy(),
+                    frozen = { isCompletedBoundary(it) || remoteGuard.isFrozen(it) },
+                ) ?: return@withLock
             // Pause a foreign load before IO yields, so a discarded plan cannot later autoplay.
             if (plan.playback == WindowPlayback.LOAD_PAUSED && before == revision) live.pause()
             val built = build(plan.entries)
@@ -459,6 +479,7 @@ internal class QueueProjector(
                     it.item.episodeId,
                     it.media?.playedAt != null,
                     it.media?.measuredDurationMs ?: it.media?.durationMs,
+                    allowed = saverAllowed(it.item.episodeId),
                 )
                 tracker.startPositionApplied()
                 applier.applyFor(it.item.episodeId)
@@ -562,6 +583,7 @@ internal class QueueProjector(
             arrivalId,
             arrival.media?.playedAt != null,
             arrival.media?.measuredDurationMs ?: arrival.media?.durationMs,
+            allowed = saverAllowed(arrivalId),
         )
         beginOwnWrite()
         val since = tracker.currentSinceMs
@@ -588,6 +610,9 @@ internal class QueueProjector(
                         committedRevision = SessionRevision(arrivalId, it)
                         failedArrival = null
                         departed?.let { old -> history.record(old.item) }
+                        // The transition transaction committed: sync may push the outgoing
+                        // position now (06 Sync interplay's Transition boundary).
+                        afterTransition(arrivalId)
                     }
                     if (result.isFailure && player === live && live.episodeIdOrNull() == arrivalId) {
                         failedArrival = FailedArrival(arrivalId, knownGeneration)
@@ -757,13 +782,25 @@ internal class QueueProjector(
     private fun isCompletedBoundary(episodeId: Long): Boolean =
         completedBoundary == BoundaryCompletion(eventEpoch, episodeId, tracker.currentSinceMs)
 
+    /** The position-write gate a remote played mark freezes; re-read inside each save. */
+    private fun saverAllowed(episodeId: Long): () -> Boolean = { remoteGuard.allowsSaves(episodeId) }
+
+    /**
+     * The sync bridge asks for a re-projection after installing or lifting a freeze: the frozen
+     * predicate is re-read on the next plan, keeping or releasing the current item.
+     */
+    fun requestReproject() {
+        player?.let(::checkPlayerThread) ?: return
+        refresh()
+    }
+
     /** Seeking a retained completed item starts a replay; otherwise its saves stay rejected as played. */
     private fun replayCompletedBoundary() {
         val live = player ?: return
         val id = live.episodeIdOrNull() ?: return
         if (!isCompletedBoundary(id)) return
         completedBoundary = null
-        tracker.load(id, replay = true, durationMs = live.knownDuration())
+        tracker.load(id, replay = true, durationMs = live.knownDuration(), allowed = saverAllowed(id))
         tracker.startPositionApplied()
     }
 
@@ -815,6 +852,8 @@ internal class QueueProjector(
                         }.getOrNull()
                     generation?.let {
                         if (marker.epoch == eventEpoch) committedRevision = SessionRevision(null, it)
+                        // The end-of-session transaction committed (06's Stopped boundary).
+                        afterSessionEnd()
                     }
                 }
             } finally {

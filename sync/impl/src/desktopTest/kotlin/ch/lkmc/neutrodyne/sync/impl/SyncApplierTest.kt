@@ -8,18 +8,30 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncActive
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncEvent
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -34,6 +46,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** 10 Pull and apply: collection writes, the mass-change guard and idempotent re-application. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SyncApplierTest {
     private val node = NodeId("0000000000000001")
     private val remote = NodeId("0000000000000002")
@@ -409,14 +422,281 @@ class SyncApplierTest {
             }
         }
 
-    private fun applier(db: NeutrodyneDatabase): SyncApplier {
+    @Test
+    fun aWinningRemotePlayedMarkOnTheLoadedItemFreezesInsideTheTransactionAndNoticesAfterCommit() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(podcastId = podcastId, identityKey = "g:one") {
+                                    copy(title = "Episode one")
+                                },
+                            ),
+                        ).single()
+                val playback = FakePlaybackSyncPort()
+                playback.setActive(episodeId, isPlaying = true)
+                val notices = SyncNoticeBus()
+                val received = mutableListOf<SyncNotice>()
+                backgroundScope.launch(
+                    start = CoroutineStart.UNDISPATCHED,
+                ) { notices.shared.collect { received += it } }
+                val applier =
+                    applier(
+                        db,
+                        playback = playback,
+                        notices = notices,
+                        deviceNames =
+                            DeviceNames {
+                                listOf(
+                                    DeviceDto(
+                                        id = deviceId,
+                                        name = "Pixel",
+                                        platform = "android",
+                                        appVersion = null,
+                                        lastSeenAt = null,
+                                        current = false,
+                                        stale = false,
+                                    ),
+                                )
+                            },
+                    )
+
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            episodeRecord(
+                                podcastSyncId,
+                                "g:one",
+                                MatchHints(guid = "one"),
+                                "played" to bool(true),
+                                "playedAt" to int(9L),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                runCurrent()
+
+                assertEquals(listOf(episodeId to deviceId), playback.remotePlayed)
+                assertEquals(listOf(RemotePlayedMark(episodeId, deviceId)), result.remotePlayed)
+                assertTrue(playback.remoteReverted.isEmpty(), "a committed mark is never reverted")
+                val notice =
+                    received
+                        .filterIsInstance<SyncNotice.MarkedPlayedElsewhere>()
+                        .single()
+                assertEquals(episodeId, notice.episodeId)
+                assertEquals("Episode one", notice.title)
+                assertEquals("Pixel", notice.deviceName, "the device id resolves to its display name")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aPlayedMarkOnAnEpisodeThatIsNotLoadedReportsNoFreezeAndNoNotice() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val playback = FakePlaybackSyncPort()
+                playback.setActive(episodeId + 1, isPlaying = true)
+                val notices = SyncNoticeBus()
+                val received = mutableListOf<SyncNotice>()
+                backgroundScope.launch(
+                    start = CoroutineStart.UNDISPATCHED,
+                ) { notices.shared.collect { received += it } }
+                val applier = applier(db, playback = playback, notices = notices)
+
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            episodeRecord(
+                                podcastSyncId,
+                                "g:one",
+                                MatchHints(guid = "one"),
+                                "played" to bool(true),
+                                "playedAt" to int(9L),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                runCurrent()
+
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt, "the mark still applies")
+                assertTrue(playback.remotePlayed.isEmpty(), "only the loaded item freezes")
+                assertTrue(result.remotePlayed.isEmpty())
+                assertTrue(received.isEmpty(), "no notice without a freeze")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anOlderPlayedMarkHiddenByANewerPositionNeverFreezesAndNeverNotices() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val playback = FakePlaybackSyncPort()
+                playback.setActive(episodeId, isPlaying = true)
+                val notices = SyncNoticeBus()
+                val received = mutableListOf<SyncNotice>()
+                backgroundScope.launch(
+                    start = CoroutineStart.UNDISPATCHED,
+                ) { notices.shared.collect { received += it } }
+                val applier = applier(db, playback = playback, notices = notices)
+
+                // The `pos` clock (30) is newer than the `played` clock (10): the merged record
+                // derives in-progress, so the hidden mark must neither freeze nor notice.
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            episodeRecord(
+                                podcastSyncId,
+                                "g:one",
+                                MatchHints(guid = "one"),
+                                "played" to bool(true),
+                                "playedAt" to int(9L),
+                                "pos" to pos(5_000).let { it.copy(c = clock(30).toString()) },
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                runCurrent()
+
+                assertTrue(playback.remotePlayed.isEmpty(), "a hidden played mark never freezes")
+                assertTrue(result.remotePlayed.isEmpty())
+                assertTrue(received.isEmpty())
+                assertEquals(
+                    5_000L,
+                    db.positionDao().byEpisode(episodeId)?.positionMs,
+                    "the newer listening position won the merge",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aRolledBackPageRevertsOnlyItsOwnFreezeAndPostsNoNotice() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                // Page A's mark commits; page B's identical mark then rolls its transaction back.
+                val freezes = mutableMapOf<Long, Int>()
+                var failOnMark = false
+                val playback =
+                    object : PlaybackSyncPort {
+                        private val _active =
+                            MutableStateFlow(
+                                PlaybackSyncActive(true, episodeId),
+                            )
+                        override val active = _active
+                        override val events = flowOf<PlaybackSyncEvent>()
+
+                        override suspend fun onRemoteMarkedPlayed(
+                            episodeId: Long,
+                            deviceName: String,
+                        ) {
+                            freezes[episodeId] = (freezes[episodeId] ?: 0) + 1
+                            check(!failOnMark) { "injected apply failure" }
+                        }
+
+                        override suspend fun onRemoteMarkReverted(episodeId: Long) {
+                            val count = freezes[episodeId] ?: return
+                            if (count <= 1) freezes.remove(episodeId) else freezes[episodeId] = count - 1
+                        }
+                    }
+                val notices = SyncNoticeBus()
+                val received = mutableListOf<SyncNotice>()
+                backgroundScope.launch(
+                    start = CoroutineStart.UNDISPATCHED,
+                ) { notices.shared.collect { received += it } }
+                val applier = applier(db, playback = playback, notices = notices)
+
+                val committed =
+                    applier.applyPage(
+                        listOf(
+                            episodeRecord(
+                                podcastSyncId,
+                                "g:one",
+                                MatchHints(guid = "one"),
+                                "played" to bool(true),
+                                "playedAt" to int(9L),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                runCurrent()
+                assertEquals(1, committed.remotePlayed.size)
+                assertEquals(1, received.size)
+
+                failOnMark = true
+                val failure =
+                    runCatching {
+                        applier.applyPage(
+                            listOf(
+                                episodeRecord(
+                                    podcastSyncId,
+                                    "g:one",
+                                    MatchHints(guid = "one"),
+                                    "played" to bool(true),
+                                    "playedAt" to int(10L),
+                                ),
+                            ),
+                            roundId = now + 1,
+                        )
+                    }
+                assertTrue(failure.isFailure, "the injected apply failure propagates")
+                assertEquals(
+                    1,
+                    freezes[episodeId],
+                    "only the rolled-back contribution releases; the committed freeze stays",
+                )
+                assertEquals(1, received.size, "a failed page posts no further notice")
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt, "page B rolled back")
+            } finally {
+                db.close()
+            }
+        }
+
+    private fun applier(
+        db: NeutrodyneDatabase,
+        playback: PlaybackSyncPort = NoPlaybackSync,
+        notices: SyncNoticeBus = SyncNoticeBus(),
+        deviceNames: DeviceNames = DeviceNames { emptyList() },
+    ): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
             db = db,
             clock = TestClock(now),
             secrets = FakeSecretStore(),
             settings = settings,
-            playback = NoPlaybackSync,
+            playback = playback,
             syncIngestHook = SyncIngestHook.None,
             channelSync =
                 object : GroupChannelSync {
@@ -429,6 +709,8 @@ class SyncApplierTest {
 
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
+            notices = notices,
+            deviceNames = deviceNames,
             sharePasswords = { false },
         )
     }

@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PlayedRule
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
 import ch.lkmc.neutrodyne.playback.engine.EngineBackend
@@ -147,7 +148,13 @@ class DesktopNativePlaybackTest {
                 )
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             val controller =
-                DesktopPlaybackController(scope, clock, { runtime }, FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
+                DesktopPlaybackController(
+                    scope,
+                    clock,
+                    { runtime },
+                    FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                    RemotePlayedGuard(),
+                )
             try {
                 assertEquals(PlayResult.Started, controller.play())
                 withTimeout(10_000) {
@@ -275,6 +282,7 @@ class DesktopNativePlaybackTest {
                     clock,
                     { runtime },
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                    RemotePlayedGuard(),
                     routeMonitor = route,
                 )
             try {
@@ -417,7 +425,13 @@ class DesktopNativePlaybackTest {
                     )
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
                 val controller =
-                    DesktopPlaybackController(scope, clock, { runtime }, FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
+                    DesktopPlaybackController(
+                        scope,
+                        clock,
+                        { runtime },
+                        FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                        RemotePlayedGuard(),
+                    )
                 try {
                     assertEquals(PlayResult.Started, controller.play())
                     controller.pause()

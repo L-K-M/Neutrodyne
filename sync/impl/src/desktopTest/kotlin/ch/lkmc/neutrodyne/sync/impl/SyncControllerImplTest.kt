@@ -1184,6 +1184,8 @@ private class Harness(
 
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
+            notices = SyncNoticeBus(),
+            deviceNames = DeviceNames { emptyList() },
             sharePasswords = { flags.sharePasswords },
         )
     val activity = SyncActivityState()
@@ -1294,6 +1296,7 @@ private class Harness(
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
+            noticeBus = SyncNoticeBus(),
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,
         )

@@ -115,6 +115,13 @@ data class SessionRevision(
 interface PositionStore {
     fun observe(episodeId: Long): Flow<StoredPosition?>
 
+    /**
+     * The episode's `playedAt`/`startedAt` markers, including state-only episodes that have no
+     * position row. The remote-played unfreeze watch re-derives "effectively played" from it:
+     * `playedAt != null && startedAt == null` is played; a hidden mark or an unplayed state is not.
+     */
+    fun observeMarks(episodeId: Long): Flow<StoredEpisodeMarks?>
+
     /** Positive measured duration only; <=0 is unknown and ignored. Ensures state, preserves all
      * user marks/positions/feed duration, and writes only if absent or differing by >1 second.
      * Missing episodes are ignored; callers reject stale current occurrences before dispatch. */
@@ -153,9 +160,17 @@ interface PositionStore {
     )
 }
 
+data class StoredEpisodeMarks(
+    val playedAt: Long?,
+    val startedAt: Long?,
+)
+
 data class StoredPosition(
     val episodeId: Long,
     val positionMs: Long,
     val updatedAt: Long,
     val playedAt: Long?,
+    /** `episode_state.startedAt`: a played mark a newer position hides keeps `playedAt` but
+     * restores `startedAt`, which is what the remote-played unfreeze watch needs. */
+    val startedAt: Long? = null,
 )

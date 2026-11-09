@@ -370,6 +370,12 @@ class DesktopAppGraphTest {
             ).isEqualTo(SleepTimerState.Off)
             assertThat(graph.playbackStateSource.currentChapter.value).isNull()
             assertThat(graph.playbackController::class.simpleName).isEqualTo("DesktopPlaybackController")
+            // 06 Sync interplay: the engine's playback port is the controller's own port, so the
+            // scheduler reads the same player's state — never a stub.
+            assertThat(graph.playbackSyncPort).isSameInstanceAs(graph.desktopPlaybackController.syncPort)
+            assertThat(graph.playbackSyncPort).isNotSameInstanceAs(
+                ch.lkmc.neutrodyne.core.domain.NoPlaybackSync,
+            )
             graph.playbackController.pause()
             graph.playbackController.dismiss()
             assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)

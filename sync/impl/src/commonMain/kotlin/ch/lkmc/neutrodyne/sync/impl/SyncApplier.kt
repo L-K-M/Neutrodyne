@@ -56,6 +56,14 @@ data class SyncApplyResult(
     val parked: Int,
     val held: Int,
     val invalid: Int,
+    /** Remote played marks that hit the loaded item inside this page's committed transaction. */
+    val remotePlayed: List<RemotePlayedMark> = emptyList(),
+)
+
+/** A remote `played` the committed page projected onto the loaded item (10 Remote played marks). */
+data class RemotePlayedMark(
+    val episodeId: Long,
+    val by: String,
 )
 
 /** The parked `identityKey` of a membership row: `@member:<groupUuid>` (10 Parked state). */
@@ -75,6 +83,8 @@ class SyncApplier(
     private val syncIngestHook: SyncIngestHook,
     private val channelSync: GroupChannelSync,
     private val sharePasswords: () -> Boolean,
+    private val notices: SyncNoticeBus,
+    private val deviceNames: DeviceNames,
 ) {
     private val clockStore = SyncClockStore(db)
     private val matcher = EpisodeMatcher(db.backupDao())
@@ -88,28 +98,58 @@ class SyncApplier(
         var parked = 0
         var held = 0
         var invalid = 0
-        db.withWriteTransaction {
-            db.syncStateDao().withApplying {
-                val ordered = records.sortedBy { it.coll }
-                for (dto in ordered) {
-                    val result = applyRecord(dto, roundId)
-                    when (result) {
-                        is RecordOutcome.Applied -> applied++
-                        is RecordOutcome.Stale -> stale++
-                        is RecordOutcome.Parked -> parked++
-                        is RecordOutcome.Held -> held++
-                        is RecordOutcome.Invalid -> invalid++
+        val remotePlayed = mutableListOf<RemotePlayedMark>()
+        try {
+            db.withWriteTransaction<Unit> {
+                db.syncStateDao().withApplying<Unit> {
+                    val ordered = records.sortedBy { it.coll }
+                    for (dto in ordered) {
+                        val result = applyRecord(dto, roundId, remotePlayed)
+                        when (result) {
+                            is RecordOutcome.Applied -> applied++
+                            is RecordOutcome.Stale -> stale++
+                            is RecordOutcome.Parked -> parked++
+                            is RecordOutcome.Held -> held++
+                            is RecordOutcome.Invalid -> invalid++
+                        }
                     }
                 }
             }
+        } catch (failure: Throwable) {
+            // The marks the page installed never committed: undo exactly their freezes and post
+            // no notices. A mark an earlier page committed keeps its freeze untouched.
+            revertMarks(remotePlayed)
+            throw failure
         }
-        return SyncApplyResult(applied, stale, parked, held, invalid)
+        // Notices post only after the page's transaction committed (10 Remote played marks).
+        postMarks(remotePlayed)
+        return SyncApplyResult(applied, stale, parked, held, invalid, remotePlayed.toList())
+    }
+
+    /** Rolled-back marks release their freeze; the revert must not mask the apply's own failure. */
+    private suspend fun revertMarks(marks: List<RemotePlayedMark>) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            for (mark in marks) {
+                runCatching { playback.onRemoteMarkReverted(mark.episodeId) }
+            }
+        }
+    }
+
+    private suspend fun postMarks(marks: List<RemotePlayedMark>) {
+        for (mark in marks) {
+            val title = db.episodeDao().byId(mark.episodeId)?.title ?: continue
+            notices.post(
+                ch.lkmc.neutrodyne.sync.api.SyncNotice
+                    .MarkedPlayedElsewhere(mark.episodeId, title, deviceNames.name(mark.by) ?: mark.by),
+            )
+        }
     }
 
     private suspend fun applyRecord(
         dto: RecordDto,
         roundId: Long,
-    ): RecordOutcome = applyValidated(dto, roundId, journalParked = true)
+        remotePlayed: MutableList<RemotePlayedMark>,
+    ): RecordOutcome = applyValidated(dto, roundId, journalParked = true, remotePlayed)
 
     /**
      * One record through 10 Pull and apply steps 1-3. [journalParked] parks an unresolvable
@@ -120,6 +160,7 @@ class SyncApplier(
         dto: RecordDto,
         roundId: Long,
         journalParked: Boolean,
+        remotePlayed: MutableList<RemotePlayedMark>,
     ): RecordOutcome {
         val coll =
             runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: return RecordOutcome.Invalid
@@ -139,7 +180,7 @@ class SyncApplier(
                 SyncCollection.PODCAST -> applyPodcast(resolved, merge, roundId)
                 SyncCollection.GROUP -> applyGroup(resolved, merge, roundId)
                 SyncCollection.MEMBER -> applyMember(resolved, merge)
-                SyncCollection.EPISODE -> applyEpisode(resolved, merge)
+                SyncCollection.EPISODE -> applyEpisode(resolved, merge, dto.by ?: stored?.by, remotePlayed)
                 SyncCollection.UPNEXT -> applyUpNext(resolved, merge)
                 SyncCollection.SESSION -> applySession(resolved, merge)
                 SyncCollection.SETTING -> applySetting(resolved, merge)
@@ -497,6 +538,8 @@ class SyncApplier(
     private suspend fun applyEpisode(
         id: RecordId,
         merge: RecordMerge,
+        by: String?,
+        remotePlayed: MutableList<RemotePlayedMark>,
     ): RecordOutcome {
         val episodeId = id as RecordId.Episode
         val podcast =
@@ -527,14 +570,45 @@ class SyncApplier(
                     .byIdentityKey(
                         podcast.id,
                         episodeId.key.value,
-                    )?.let { applyEpisodeState(it.id, merge.record) }
+                    )?.let {
+                        applyEpisodeState(it.id, merge.record)
+                        reportRemotePlayedIfLoaded(it.id, merge, by, remotePlayed)
+                    }
             } else {
                 applyEpisodeState(idInserted, merge.record)
+                reportRemotePlayedIfLoaded(idInserted, merge, by, remotePlayed)
             }
             return RecordOutcome.Applied
         }
         applyEpisodeState(matched, merge.record)
+        reportRemotePlayedIfLoaded(matched, merge, by, remotePlayed)
         return RecordOutcome.Applied
+    }
+
+    /**
+     * 10 Remote played marks 2 + 06 Sync interplay rule 3: a mark on the loaded item whose merged
+     * state is effectively played freezes the loaded player, and only inside the applying
+     * transaction, so the freeze is already set when the mark's commit lands. An older mark a
+     * newer listening position hides derives to in-progress and calls nothing. The mark is also
+     * collected for the post-commit "Marked played on <device>" notice.
+     */
+    private suspend fun reportRemotePlayedIfLoaded(
+        episodeId: Long,
+        merge: RecordMerge,
+        by: String?,
+        remotePlayed: MutableList<RemotePlayedMark>,
+    ) {
+        if (EpisodeStateRules.derive(merge.record.fields).state !=
+            ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress.PLAYED
+        ) {
+            return
+        }
+        if (playback.active.value.episodeId != episodeId) return
+        // Register before the callback: a port that froze before throwing still gets its
+        // freeze released by the rollback's revert, and reverting a mark that never froze is
+        // a counted no-op.
+        remotePlayed += RemotePlayedMark(episodeId, by ?: "")
+        playback.onRemoteMarkedPlayed(episodeId, by ?: "")
     }
 
     private suspend fun applyEpisodeState(
@@ -763,7 +837,10 @@ class SyncApplier(
      * that still cannot resolve stays parked for the next ingest, dependency arrival or restart.
      * The caller owns the write transaction and `applying = 1`, so the projections stay echo-free.
      */
-    internal suspend fun applyParkedRows(rows: List<SyncParkedEntity>): SyncApplyResult {
+    internal suspend fun applyParkedRows(
+        rows: List<SyncParkedEntity>,
+        remotePlayed: MutableList<RemotePlayedMark> = mutableListOf(),
+    ): SyncApplyResult {
         var applied = 0
         var stale = 0
         var parked = 0
@@ -784,7 +861,7 @@ class SyncApplier(
                 invalid++
                 continue
             }
-            when (applyValidated(dto!!, roundId = 0L, journalParked = false)) {
+            when (applyValidated(dto!!, roundId = 0L, journalParked = false, remotePlayed)) {
                 RecordOutcome.Applied -> {
                     resolved += row.id
                     applied++
@@ -811,14 +888,24 @@ class SyncApplier(
             }
         }
         if (resolved.isNotEmpty()) db.syncParkedDao().delete(resolved)
-        return SyncApplyResult(applied, stale, parked, held, invalid)
+        return SyncApplyResult(applied, stale, parked, held, invalid, remotePlayed.toList())
     }
 
     /** [applyParkedRows] in its own write transaction with the capture triggers silenced. */
-    suspend fun applyParkedRecords(rows: List<SyncParkedEntity>): SyncApplyResult =
-        db.withWriteTransaction {
-            db.syncStateDao().withApplying { applyParkedRows(rows) }
-        }
+    suspend fun applyParkedRecords(rows: List<SyncParkedEntity>): SyncApplyResult {
+        val remotePlayed = mutableListOf<RemotePlayedMark>()
+        val result =
+            try {
+                db.withWriteTransaction<SyncApplyResult> {
+                    db.syncStateDao().withApplying<SyncApplyResult> { applyParkedRows(rows, remotePlayed) }
+                }
+            } catch (failure: Throwable) {
+                revertMarks(remotePlayed)
+                throw failure
+            }
+        postMarks(remotePlayed)
+        return result
+    }
 
     private fun decodeParked(row: SyncParkedEntity): RecordDto? =
         runCatching { SyncJson.decodeFromString(RecordDto.serializer(), row.record) }.getOrNull()

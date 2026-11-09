@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.StoredEpisodeMarks
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.MEASURED_DURATION_TOLERANCE_MS
 import ch.lkmc.neutrodyne.core.model.PositionSource
@@ -35,6 +36,13 @@ class FakePositionStore : PositionStore {
 
     override fun observe(episodeId: Long): Flow<StoredPosition?> =
         positions.map { it[episodeId] }.distinctUntilChanged()
+
+    override fun observeMarks(episodeId: Long): Flow<StoredEpisodeMarks?> =
+        positions
+            .map { map ->
+                map[episodeId]?.let { StoredEpisodeMarks(it.playedAt, it.startedAt) }
+                    ?: playedWithoutPosition[episodeId]?.let { StoredEpisodeMarks(it, null) }
+            }.distinctUntilChanged()
 
     private fun record(call: Call) {
         calls += call
@@ -97,7 +105,8 @@ class FakePositionStore : PositionStore {
             playedWithoutPosition.getOrPut(episodeId) { now }
             return
         }
-        positions.value = positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now, playedAt = now))
+        positions.value =
+            positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now, playedAt = now, startedAt = null))
     }
 
     override suspend fun markUnplayedForReplay(

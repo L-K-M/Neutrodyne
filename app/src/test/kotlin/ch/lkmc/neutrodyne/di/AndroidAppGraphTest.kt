@@ -226,6 +226,13 @@ class AndroidAppGraphTest {
             assertThat(graph.playbackController::class.simpleName).isEqualTo("PlaybackControllerImpl")
             assertThat(graph.playbackStateSource::class.simpleName).isEqualTo("PlaybackStateHub")
             assertThat(graph.playbackMaintenance::class.simpleName).isEqualTo("StreamingCache")
+            // 06 Sync interplay: the sync engine's playback port is the real service bridge, and
+            // resolving it must not start the service or open the database.
+            assertThat(graph.playbackSyncPort::class.simpleName).isEqualTo("PlaybackSyncBridge")
+            assertThat(graph.playbackSyncPort).isSameInstanceAs(graph.playbackSyncPort)
+            assertThat(graph.playbackSyncPort).isNotSameInstanceAs(
+                ch.lkmc.neutrodyne.core.domain.NoPlaybackSync,
+            )
             assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
             assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
             assertThat(

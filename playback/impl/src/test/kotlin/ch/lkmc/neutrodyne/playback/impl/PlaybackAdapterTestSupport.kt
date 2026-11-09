@@ -157,6 +157,10 @@ internal class AdapterFixture(
     val failures = mutableListOf<Exception>()
     val events = mutableListOf<PlaybackEvent>()
     val ticks = mutableListOf<PlaybackTick>()
+    val remoteGuard =
+        ch.lkmc.neutrodyne.playback.core
+            .RemotePlayedGuard()
+    val sync = PlaybackSyncBridge(remoteGuard, dev.zacsweers.metro.Provider { positions }, scope.backgroundScope)
     val tracker =
         PositionTracker(
             PositionSaver(positions, clock, PlayedRule()),
@@ -173,6 +177,8 @@ internal class AdapterFixture(
                 }
             },
             failures::add,
+            onCurrentChanged = remoteGuard::currentChanged,
+            afterPauseSave = sync::paused,
             onTick = ticks::add,
         )
     val settingsResolver = FakeEffectiveSettingsResolver()
@@ -197,6 +203,7 @@ internal class AdapterFixture(
             tracker,
             applier,
             PlaybackHistory(),
+            remoteGuard,
             clock,
             playerScope,
             Dispatchers.Unconfined,
@@ -204,6 +211,8 @@ internal class AdapterFixture(
             reportFailure = failures::add,
             boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
             resumePolicy = { resumePolicy },
+            afterTransition = sync::transitioned,
+            afterSessionEnd = sync::stopped,
             localChanges = local,
         )
 
@@ -211,6 +220,36 @@ internal class AdapterFixture(
         tracker.attach(player)
         projector.attach(player)
         applier.attach(exo)
+        sync.attach(notifyPlayer = projector::requestReproject)
+        // Mirrors AndroidServiceBridge.publish's active computation (STATE_IDLE = nothing loaded).
+        publishingActive = true
+        player.addListener(activePublisher)
+        publishActive()
+    }
+
+    private val activePublisher =
+        object : androidx.media3.common.Player.Listener {
+            override fun onEvents(
+                player: androidx.media3.common.Player,
+                events: androidx.media3.common.Player.Events,
+            ) {
+                publishActive()
+            }
+        }
+
+    /** Mirrors AndroidServiceBridge.publish's detached guard: teardown stops the publication. */
+    private var publishingActive = false
+
+    fun publishActive() {
+        if (!publishingActive) return
+        val id = player.episodeIdOrNull()
+        val loaded = id != null && player.playbackState != androidx.media3.common.Player.STATE_IDLE
+        sync.updateActive(id?.takeIf { loaded }, player.isPlaying)
+    }
+
+    fun stopActivePublisher() {
+        publishingActive = false
+        player.removeListener(activePublisher)
     }
 
     suspend fun seed(
@@ -264,8 +303,10 @@ internal class AdapterFixture(
     }
 
     suspend fun close() {
+        stopActivePublisher()
         projector.detach()
         val saved = tracker.detach(tracker.flush(PositionFlushReason.DESTROY))
+        sync.detachAfter(saved)
         applier.detach().join()
         scope.runCurrent()
         exo.release()

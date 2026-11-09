@@ -4,6 +4,9 @@ package ch.lkmc.neutrodyne.playback.desktop
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncActive
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncEvent
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.model.AddResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
@@ -44,6 +47,7 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaveResult
 import ch.lkmc.neutrodyne.playback.core.PreviousAction
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.RecoveryBudget
+import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
 import ch.lkmc.neutrodyne.playback.core.SeekOrigin
 import ch.lkmc.neutrodyne.playback.core.SleepTimerCore
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
@@ -63,10 +67,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -89,6 +96,7 @@ class DesktopPlaybackController(
     private val clock: Clock,
     private val runtimeFactory: () -> DesktopPlaybackRuntime,
     private val network: NetworkMonitor,
+    private val remoteGuard: RemotePlayedGuard,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val routeMonitor: AudioRouteMonitor = NoOpAudioRouteMonitor,
@@ -188,6 +196,46 @@ class DesktopPlaybackController(
     override val sleepTimer = mutableSleepTimer.asStateFlow()
     override val currentChapter = mutableCurrentChapter.asStateFlow()
 
+    private val syncActive = MutableStateFlow(PlaybackSyncActive(false))
+    private val boundaries = MutableSharedFlow<PlaybackSyncEvent>(extraBufferCapacity = EVENT_CAPACITY)
+
+    /**
+     * 06 Sync interplay's desktop [PlaybackSyncPort]: `active` follows the published current,
+     * `Paused`/`Stopped`/`Transition` boundaries emit only after their position save or session
+     * transaction committed, and a remote mark-played freezes the loaded item through
+     * [RemotePlayedGuard]. The port is a member forwarder because [PlaybackStateSource]'s own
+     * `events` property would clash with the port's.
+     */
+    val syncPort: PlaybackSyncPort =
+        object : PlaybackSyncPort {
+            override val active: StateFlow<PlaybackSyncActive> = syncActive.asStateFlow()
+
+            override val events: Flow<PlaybackSyncEvent> = boundaries.asSharedFlow()
+
+            override suspend fun onRemoteMarkedPlayed(
+                episodeId: Long,
+                deviceName: String,
+            ) = this@DesktopPlaybackController.onRemoteMarkedPlayed(episodeId, deviceName)
+
+            override suspend fun onRemoteMarkReverted(episodeId: Long) =
+                this@DesktopPlaybackController.onRemoteMarkReverted(episodeId)
+        }
+
+    private val unfreezeWatches = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+
+    /** 06 Sync interplay: a boundary reaches sync only after its save or transaction committed. */
+    private fun pausedBoundary() {
+        if (prepared) boundaries.tryEmit(PlaybackSyncEvent.Paused)
+    }
+
+    private fun stoppedBoundary() {
+        boundaries.tryEmit(PlaybackSyncEvent.Stopped)
+    }
+
+    private fun transitionBoundary(episodeId: Long) {
+        boundaries.tryEmit(PlaybackSyncEvent.Transition(episodeId))
+    }
+
     suspend fun initialize() {
         serial { ensureRuntime() }
     }
@@ -200,6 +248,16 @@ class DesktopPlaybackController(
         value.engine.setVolume(userVolume)
         sleepSampledAt = clock.elapsedRealtime()
         projector = DesktopQueueProjector(value.engine, value.resolver)
+        // A freeze a revert or an unfreeze cleared drops its watcher too.
+        scope.launch {
+            remoteGuard.frozen.collect {
+                for ((episodeId, job) in unfreezeWatches.entries) {
+                    if (!remoteGuard.isFrozen(episodeId) && unfreezeWatches.remove(episodeId, job)) {
+                        job.cancel()
+                    }
+                }
+            }
+        }
         scope.launch {
             combine(
                 value.planner.snapshots(),
@@ -314,6 +372,7 @@ class DesktopPlaybackController(
             engineCurrentId = null
             mutableCurrentChapter.value = null
             current.value = null
+            syncActive.value = PlaybackSyncActive(false)
             return
         }
         engineCurrentId = row.episodeId
@@ -426,6 +485,11 @@ class DesktopPlaybackController(
                 if (!projectStart(outcome.queue, outcome.startPositionMs, ticket)) return PlayResult.ServiceUnavailable
                 requireIntent(ticket)
                 if (old != null && old.episodeId != outcome.queue.current?.episodeId) history.record(old)
+                // The start's session transaction committed; a changed current is a transition.
+                outcome.queue.current
+                    ?.episodeId
+                    ?.takeIf { it != old?.episodeId }
+                    ?.let(::transitionBoundary)
                 wantPlaying = true
                 value.engine.play()
                 publish()
@@ -509,8 +573,11 @@ class DesktopPlaybackController(
             value.settings.followCurrent(null, null)
             effective.value = null
             current.value = null
+            syncActive.value = PlaybackSyncActive(false)
+            remoteGuard.currentChanged(null)
             return
         }
+        remoteGuard.currentChanged(row.episodeId)
         val group = context?.takeIf { it.type == ContextType.GROUP }?.id
         val settings = requireNotNull(value.settings.cached(row.podcastId, group))
         effective.value = settings
@@ -524,7 +591,13 @@ class DesktopPlaybackController(
             } else {
                 PositionSource.STREAM
             }
-        value.saver.load(row.episodeId, since, source, replay = row.playedAt != null)
+        value.saver.load(
+            row.episodeId,
+            since,
+            source,
+            replay = row.playedAt != null,
+            allowed = { remoteGuard.allowsSaves(row.episodeId) },
+        )
         value.saver.startPositionApplied()
         followSettings(row, group)
         followChapters(row.episodeId)
@@ -577,6 +650,7 @@ class DesktopPlaybackController(
         sampleSleep()
         applySleep(sleepTimerCore.paused())
         flushPause()
+        pausedBoundary()
         publish()
     }
 
@@ -623,7 +697,8 @@ class DesktopPlaybackController(
      * "current marked played" advance/end rule to it (Android passes the same freeze through
      * `QueueProjector`). A replay trigger clears the marker, so the rule resumes.
      */
-    private fun frozenForPlanner(episodeId: Long): Boolean = completedBoundary == episodeId
+    private fun frozenForPlanner(episodeId: Long): Boolean =
+        completedBoundary == episodeId || remoteGuard.isFrozen(episodeId)
 
     /**
      * Arms a replay of the completed boundary item. A fresh `since` lets its saves through the
@@ -641,7 +716,7 @@ class DesktopPlaybackController(
                 PositionSource.STREAM
             }
         since = clock.now()
-        value.saver.load(id, since, source, replay = true)
+        value.saver.load(id, since, source, replay = true, allowed = { remoteGuard.allowsSaves(id) })
         value.saver.startPositionApplied()
         completedBoundary = null
     }
@@ -681,6 +756,8 @@ class DesktopPlaybackController(
                     value.sessions.goBack(action.item, departure, clock.now())
                     if (!projectStart(value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE), 0)) return@command
                     history.consume(action.item)
+                    // The goBack transaction committed and the previous item is installed.
+                    transitionBoundary(action.item.episodeId)
                     wantPlaying = playing
                     if (playing) value.engine.play()
                 }
@@ -720,8 +797,13 @@ class DesktopPlaybackController(
             projection.apply(committed, emptyList(), listOf(WindowOp.Clear), currentId)
             wantPlaying = false
             loaded(0)
+            // The end-of-session transaction committed (06's Stopped boundary). `active` is
+            // already cleared: a release reading the port sees nothing playing any more.
+            stoppedBoundary()
             return
         }
+        // The transition transaction committed with the departure saved (06's Transition).
+        transitionBoundary(next.episodeId)
         val row = requireNotNull(entries[1].media)
         val saved = value.positions.observe(next.episodeId).first()
         val startMs =
@@ -785,7 +867,13 @@ class DesktopPlaybackController(
                 if (advancing) SleepTimerCore.Advancement.PLAYING else SleepTimerCore.Advancement.STOPPED,
             ),
         )
-        if (!advancing && (current.value?.isPlaying == true || state is EngineState.Error)) flushPause()
+        val wasAdvancing = current.value?.isPlaying == true
+        if (!advancing && (wasAdvancing || state is EngineState.Error)) {
+            flushPause()
+            // Advancing stopped without a user command (an error or a stall's end): the
+            // boundary follows the flush's save, like Android's onIsPlayingChanged(false).
+            if (wasAdvancing) pausedBoundary()
+        }
         publish()
     }
 
@@ -1070,6 +1158,9 @@ class DesktopPlaybackController(
             value.sessions.onTransition(departure, toId, arrival.item.origin, revision, clock.now()) ?: return
         value.planner.appliedOwnGeneration(generation)
         engineCurrentId = toId
+        remoteGuard.currentChanged(toId)
+        // The transition transaction committed with the departure saved (06's Transition).
+        transitionBoundary(toId)
         history.record(outgoing.item)
         followChapters(toId)
         pendingTracksKnown.remove(toId)?.let { applyTracksKnown(it) }
@@ -1082,7 +1173,13 @@ class DesktopPlaybackController(
         durationMs = row.measuredDurationMs ?: row.durationMs
         since = clock.now()
         val source = if (arrival.localUri != null) PositionSource.DOWNLOAD else PositionSource.STREAM
-        value.saver.load(toId, since, source, replay = row.playedAt != null)
+        value.saver.load(
+            toId,
+            since,
+            source,
+            replay = row.playedAt != null,
+            allowed = { remoteGuard.allowsSaves(toId) },
+        )
         value.saver.startPositionApplied()
         checkSave(value.saver.onPlaying())
         followSettings(row, group)
@@ -1203,7 +1300,63 @@ class DesktopPlaybackController(
                 context,
             )
         ticks.emit(snapshot)
+        syncActive.value = PlaybackSyncActive(playing, row.episodeId)
         evaluateChapter()
+    }
+
+    /**
+     * Freezes the loaded item through [RemotePlayedGuard]; it keeps playing and its saves stop at
+     * the write gate (06 Sync interplay: remote play position wins). Only the sync applier's
+     * transaction calls this, at its projection commit gate.
+     */
+    private suspend fun onRemoteMarkedPlayed(
+        episodeId: Long,
+        deviceName: String,
+    ) {
+        remoteGuard.freeze(episodeId)
+        watchUnfreeze(episodeId)
+    }
+
+    /** 10's pre-commit compensation: a rolled-back apply releases only its own freeze. */
+    private suspend fun onRemoteMarkReverted(episodeId: Long) {
+        remoteGuard.release(episodeId)
+    }
+
+    /**
+     * Lifts the freeze once the marked row stops being effectively played (a later played or
+     * listening mark overwrote it). The watch arms on the first effective played row so a revert
+     * or a reverted replay's rows do not lift a freeze they did not cause.
+     */
+    private fun watchUnfreeze(episodeId: Long) {
+        unfreezeWatches.remove(episodeId)?.cancel()
+        unfreezeWatches[episodeId] =
+            scope.launch {
+                try {
+                    var armed = false
+                    val positions = runtime?.positions ?: return@launch
+                    positions.observeMarks(episodeId).collect { row ->
+                        when {
+                            row != null && row.playedAt != null && row.startedAt == null -> {
+                                armed = true
+                            }
+
+                            armed -> {
+                                remoteGuard.lift(episodeId)
+                                throw CancellationException("unfrozen")
+                            }
+                        }
+                    }
+                } catch (expected: CancellationException) {
+                    // The lift itself, or a restart through a repeated freeze.
+                } catch (failure: Exception) {
+                    // A failed read keeps the freeze; stop-being-current still lifts it.
+                } finally {
+                    // A newer watch may already have replaced this one; keep its entry.
+                    if (unfreezeWatches[episodeId] === coroutineContext[Job]) {
+                        unfreezeWatches.remove(episodeId)
+                    }
+                }
+            }
     }
 
     private suspend fun flushPause() {
@@ -1242,6 +1395,7 @@ class DesktopPlaybackController(
                     wantPlaying = false
                     value.engine.pause()
                     flushPause()
+                    pausedBoundary()
                     publish()
                 }
 
@@ -1411,6 +1565,9 @@ class DesktopPlaybackController(
             wantPlaying = false
             loaded(0)
             history.clear()
+            // The dismissal transaction committed (06's Stopped boundary), after the save and
+            // the `active` clear — a release reading the port sees nothing playing any more.
+            stoppedBoundary()
         }
     }
 
@@ -1428,6 +1585,11 @@ class DesktopPlaybackController(
                 applySleep(sleepTimerCore.set(SleepTimerMode.Off, null))
                 try {
                     flushPause()
+                    // `active` clears before the quit boundary, so a release reading the port
+                    // sees nothing playing; the boundary itself still follows the final save.
+                    syncActive.value = PlaybackSyncActive(false)
+                    remoteGuard.currentChanged(null)
+                    stoppedBoundary()
                 } finally {
                     withContext(ioDispatcher) { value.engine.close() }
                 }

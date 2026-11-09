@@ -105,6 +105,7 @@ class SyncControllerImpl(
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
+    private val noticeBus: SyncNoticeBus,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
 ) : SyncController {
@@ -134,6 +135,12 @@ class SyncControllerImpl(
 
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
     override val notices: Flow<SyncNotice> = _notices
+
+    init {
+        // The engine's committed rounds post one-shot notices through the shared bus; relay them
+        // into the controller's own flow for the shells' snackbar collection.
+        scope.launch { noticeBus.shared.collect { _notices.emit(it) } }
+    }
 
     /** The running flow's cancellation handle and the answers the flow waits for. */
     private var linkJob: Job? = null

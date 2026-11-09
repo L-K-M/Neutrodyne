@@ -393,6 +393,8 @@ abstract class SyncEngineEffectsDrainTestBase {
 
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
+            notices = SyncNoticeBus(),
+            deviceNames = DeviceNames { emptyList() },
             sharePasswords = { false },
         )
 

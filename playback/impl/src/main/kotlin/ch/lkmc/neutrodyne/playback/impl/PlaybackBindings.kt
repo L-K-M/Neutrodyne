@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.PlaybackBeforeUnsubscribe
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
@@ -27,6 +28,9 @@ public object PlaybackBindings {
     @Provides internal fun state(value: PlaybackStateHub): PlaybackStateSource = value
 
     @Provides internal fun maintenance(value: StreamingCache): PlaybackMaintenance = value
+
+    /** The real sync port the service runtime feeds; the sync graph resolves it, never a stub. */
+    @Provides internal fun playbackSyncPort(value: PlaybackSyncBridge): PlaybackSyncPort = value
 
     @Provides @IntoSet
     internal fun gate(value: MeteredStreamingGate): StartGate = value

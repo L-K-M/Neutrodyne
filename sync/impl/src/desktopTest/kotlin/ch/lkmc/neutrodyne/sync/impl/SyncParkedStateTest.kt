@@ -871,6 +871,8 @@ class SyncParkedStateTest {
             playback = NoPlaybackSync,
             syncIngestHook = SyncIngestHook.None,
             channelSync = NoGroupChannelSync,
+            notices = SyncNoticeBus(),
+            deviceNames = DeviceNames { emptyList() },
             sharePasswords = { false },
         )
 

@@ -64,6 +64,9 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     /** 10's sync application service (Settings › Sync, the shell banners). */
     val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
 
+    /** 06 Sync interplay: the engine's playback side — the service bridge, never a stub. */
+    val playbackSyncPort: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
+
     /** 10's parked-state release hook `FeedRefresher` calls after each ingest (MS2). */
     val syncIngestHook: ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 
