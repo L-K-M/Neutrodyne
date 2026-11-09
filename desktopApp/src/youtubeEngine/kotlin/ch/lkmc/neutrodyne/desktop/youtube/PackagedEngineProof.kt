@@ -373,7 +373,7 @@ internal class PackagedEngineProof(
      * channel ID matches the recording and one stub episode carrying the recorded video ID
      * — the only state the real `playEpisode`/download flows need in the throwaway store.
      */
-    private suspend fun seedRecordedItem(): LongArray {
+    internal suspend fun seedRecordedItem(): LongArray {
         val db = database()
         val now = clock.now()
         val podcastId =
@@ -388,6 +388,9 @@ internal class PackagedEngineProof(
                     artworkKey = "proof-media",
                     status = PodcastStatus.ACTIVE,
                     initialFetch = false,
+                    // The live runner must never poll this fixture through the RSS client.
+                    nextRefreshAt = Long.MAX_VALUE,
+                    pagingComplete = true,
                     subscribedAt = now,
                 ),
             )
@@ -715,8 +718,7 @@ internal class PackagedEngineProof(
             return hex(digest)
         }
 
-        private fun hex(digest: MessageDigest): String =
-            digest.digest().joinToString("") { "%02x".format(it) }
+        private fun hex(digest: MessageDigest): String = digest.digest().joinToString("") { "%02x".format(it) }
 
         private const val TAG = "EngineProof"
         private const val RECORDED_VIDEO_ID = "aaaaaaaaaaA"
