@@ -64,6 +64,7 @@ abstract class SyncEngineEffectsDrainTestBase {
         val address: FakeSyncServerAddress,
         val engine: SyncEngine,
         val effects: SyncApplyEffects,
+        val capture: SettingsCapture,
     )
 
     private fun harness(
@@ -75,8 +76,13 @@ abstract class SyncEngineEffectsDrainTestBase {
         val address = FakeSyncServerAddress(serverUrl = "https://sync.example")
         address.updateSyncPlaybackSettings(switch)
         val clock = TestClock(now)
+        val writeLocks = TestSettingsWriteCoordinator()
         val effects =
-            SyncApplyEffects(db, port, TestSettingsWriteCoordinator()) {
+            SyncApplyEffects(db, port, writeLocks) {
+                address.syncPlaybackSettings()
+            }
+        val capture =
+            SettingsCapture(db, port, writeLocks) {
                 address.syncPlaybackSettings()
             }
         val engine =
@@ -95,8 +101,9 @@ abstract class SyncEngineEffectsDrainTestBase {
                 activity = SyncActivityState(),
                 gate = FakeLocalNetworkGate(),
                 effects = effects,
+                capture = capture,
             )
-        return DrainHarness(db, port, address, engine, effects)
+        return DrainHarness(db, port, address, engine, effects, capture)
     }
 
     @Test
@@ -344,7 +351,10 @@ abstract class SyncEngineEffectsDrainTestBase {
                 )
                 val h = harness(db, scriptedClient(syncRecords = emptyList()), port)
                 val initializer =
-                    SyncStartupDrainInitializer(dev.zacsweers.metro.Provider { h.effects })
+                    SyncStartupDrainInitializer(
+                        dev.zacsweers.metro.Provider { h.effects },
+                        dev.zacsweers.metro.Provider { h.capture },
+                    )
 
                 assertEquals(true, initializer.order in 101..199, "the drain belongs to the data band")
                 initializer.run()
@@ -363,6 +373,172 @@ abstract class SyncEngineEffectsDrainTestBase {
                         .second,
                 )
                 assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aCommittedLocalIntentMaterializesBeforeTheRoundSendsIt() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val port = FakeSettingsSyncPort().apply { current[key.name] = "5000" }
+                val client =
+                    scriptedClient(syncRecords = emptyList(), onSync = { changes ->
+                        assertTrue(port.applied.any { it == key to "20000" }, "materialize before sending")
+                        assertTrue(changes.any { it.coll == "setting" && it.fields["v"]?.v == JsonPrimitive(20000) })
+                    })
+                val h = harness(db, client, port)
+                h.capture.install()
+                port.recordLocal(key, 20000L)
+                val before = db.syncOutboxDao().get("setting", key.name, "v")!!
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+                assertNull(db.syncOutboxDao().get("setting", key.name, "v"))
+                val raw = SyncJson.decodeFromString<RawSyncRecord>(db.syncClockDao().get("setting", key.name)!!.clocks)
+                assertEquals(Hlc(before.hlc, NodeId(before.nodeId)).toString(), raw.settingHash?.clock)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anUnmaterializableIntentIsNotPushedOrAcknowledged() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val port =
+                    FakeSettingsSyncPort().apply {
+                        current[key.name] = "5000"
+                        remoteResult = false
+                    }
+                val client =
+                    scriptedClient(syncRecords = emptyList(), onSync = { changes ->
+                        assertTrue(changes.none { it.coll == "setting" }, "a failed write stays local and retryable")
+                    })
+                val h = harness(db, client, port)
+                h.capture.install()
+                port.recordLocal(key, 20000L)
+                val before = db.syncOutboxDao().get("setting", key.name, "v")!!
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+                assertEquals(before, db.syncOutboxDao().get("setting", key.name, "v"))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anAckCannotRelabelANewerOffSwitchWrite() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val port = FakeSettingsSyncPort().apply { current[key.name] = "5000" }
+                lateinit var h: DrainHarness
+                val client =
+                    scriptedClient(syncRecords = emptyList(), onSync = {
+                        kotlinx.coroutines.runBlocking {
+                            h.address.updateSyncPlaybackSettings(false)
+                            h.capture.reconcile()
+                            port.current[key.name] = "7000"
+                            port.recordLocal(key, 7000L)
+                            port.commitLocal(key, 7000L)
+                            port.emitLocal(key, 7000L, now)
+                        }
+                    })
+                h = harness(db, client, port)
+                h.capture.install()
+                port.recordLocal(key, 20000L)
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+                val raw = SyncJson.decodeFromString<RawSyncRecord>(db.syncClockDao().get("setting", key.name)!!.clocks)
+                assertEquals(settingBaselineHash("7000"), raw.settingHash?.hash, "preserve the newer baseline")
+                assertNull(raw.settingHash?.clock, "the off-write provenance must survive the old ack")
+                assertEquals(JsonPrimitive(20000), raw.state.fields["v"]?.v, "ack uses the sent snapshot")
+                h.address.updateSyncPlaybackSettings(true)
+                h.capture.reconcile()
+                assertEquals("20000", port.current[key.name], "the acknowledged account value wins on enable")
+                assertNull(db.syncOutboxDao().get("setting", key.name, "v"))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anOlderLinkedRestoreCannotAcquireAFreshClock() = olderRestore(RestoreWrite.COMMITTED)
+
+    @Test
+    fun anInterruptedOlderRestoreRecoversWithoutAFreshClock() = olderRestore(RestoreWrite.INTERRUPTED)
+
+    @Test
+    fun anOlderRestoreCommittedBeforeItsStoreWriteCannotAcquireAFreshClock() = olderRestore(RestoreWrite.NOT_STARTED)
+
+    private enum class RestoreWrite { COMMITTED, INTERRUPTED, NOT_STARTED }
+
+    private fun olderRestore(write: RestoreWrite) =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val accepted = Hlc.of(now, 1, remote)
+                val server = settingRecord(key, 9000L, accepted)
+                val sent = mutableListOf<List<ChangeDto>>()
+                val client =
+                    object : SyncClient by scriptedClient(syncRecords = emptyList()) {
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ChangeDto>,
+                        ): SyncResponse {
+                            sent += changes
+                            return SyncResponse(
+                                results = changes.mapIndexed { index, _ -> ChangeResultDto(index, "stale") },
+                                records = listOf(server),
+                                cursor = "c:00000001:5",
+                                hasMore = false,
+                                serverTime = "",
+                            )
+                        }
+                    }
+                val h = harness(db, client)
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+                h.capture.reconcile()
+                assertEquals("9000", h.port.current[key.name], "precondition: accepted value materialized")
+                val archiveCreatedAt = now - 100_000_000_000L
+                val before = h.port.currentSnapshot(key)!!
+                val origin =
+                    db.withWriteTransaction {
+                        assertTrue(db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, "15000"))
+                        h.port.recordCommitted(key, "15000", before)
+                    }
+                val historical = db.syncOutboxDao().get("setting", key.name, "v")!!
+                val older = Hlc(historical.hlc, NodeId(historical.nodeId))
+                assertTrue(older < accepted, "the archive is older than the accepted server setting")
+                h.port.remoteResult = write == RestoreWrite.COMMITTED
+                if (write != RestoreWrite.NOT_STARTED) {
+                    assertEquals(write == RestoreWrite.COMMITTED, h.port.applyRecorded(key, "15000", origin))
+                }
+                h.port.remoteResult = true
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+                val published =
+                    sent
+                        .flatten()
+                        .flatMap { it.fields.values }
+                        .mapNotNull { it.c }
+                        .map(Hlc::parse)
+                assertTrue(
+                    published.all { it <= older },
+                    "captureAt restore must not be re-stamped before push: $published vs $older",
+                )
+                h.capture.reconcile()
+                assertNull(
+                    db.syncOutboxDao().get("setting", key.name, "v"),
+                    "the old restore must never be re-captured with a fresh clock",
+                )
             } finally {
                 db.close()
             }
@@ -460,6 +636,7 @@ abstract class SyncEngineEffectsDrainTestBase {
         syncHasMore: Boolean = false,
         syncFailure: (() -> Throwable)? = null,
         pageRecords: List<RecordDto> = emptyList(),
+        onSync: ((List<ChangeDto>) -> Unit)? = null,
     ): SyncClient =
         object : SyncClient {
             override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
@@ -517,6 +694,7 @@ abstract class SyncEngineEffectsDrainTestBase {
                 since: String?,
                 changes: List<ChangeDto>,
             ): SyncResponse {
+                onSync?.invoke(changes)
                 syncFailure?.let { throw it() }
                 return SyncResponse(
                     results =

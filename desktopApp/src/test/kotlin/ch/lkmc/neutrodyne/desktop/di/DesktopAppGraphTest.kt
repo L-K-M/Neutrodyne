@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Test
 
@@ -312,20 +313,35 @@ class DesktopAppGraphTest {
                             copy(externalMediaId = "dQw4w9WgXcQ")
                         },
                     )
-                assertThat(graph.playbackController.playEpisode(video)).isEqualTo(
-                    PlayResult.NotPlayable(
-                        video,
-                        ch.lkmc.neutrodyne.playback.api.UnplayableReason
-                            .YouTubeExternal(ExternalReason.NOT_YET_AVAILABLE),
-                    ),
-                )
-                assertThat(
-                    graph.playbackController.playFeed(
-                        FeedSource.All,
-                        FeedFilters(),
-                        FeedOrder.NEWEST_FIRST,
-                    ),
-                ).isEqualTo(PlayResult.NothingToPlay(externalOnly = true))
+                if (buildInfo.youTubeEngineBundled) {
+                    // In-app playback capability makes the YouTube row a real candidate:
+                    // the stream resolve happens on the playback path, not at enqueue.
+                    assertThat(graph.playbackController.playEpisode(video)).isEqualTo(PlayResult.Started)
+                    // Feed play skips the media-less YouTube row, but it is no longer
+                    // external-only: the flag distinguishes "skipped YouTube" from RSS.
+                    assertThat(
+                        graph.playbackController.playFeed(
+                            FeedSource.All,
+                            FeedFilters(),
+                            FeedOrder.NEWEST_FIRST,
+                        ),
+                    ).isEqualTo(PlayResult.NothingToPlay(externalOnly = false))
+                } else {
+                    assertThat(graph.playbackController.playEpisode(video)).isEqualTo(
+                        PlayResult.NotPlayable(
+                            video,
+                            ch.lkmc.neutrodyne.playback.api.UnplayableReason
+                                .YouTubeExternal(ExternalReason.NOT_YET_AVAILABLE),
+                        ),
+                    )
+                    assertThat(
+                        graph.playbackController.playFeed(
+                            FeedSource.All,
+                            FeedFilters(),
+                            FeedOrder.NEWEST_FIRST,
+                        ),
+                    ).isEqualTo(PlayResult.NothingToPlay(externalOnly = true))
+                }
                 val podcast =
                     db.podcastDao().insertPodcast(
                         ch.lkmc.neutrodyne.core.testing.database
@@ -387,16 +403,42 @@ class DesktopAppGraphTest {
             graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
             graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
             graph.youtubeEngine.retryStart()
-            assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
-                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
-            )
-            assertThat(graph.youtubeEngine.status.value.version).isNull()
-            assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
-            assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
-            assertThat(
-                graph.youtubeCapabilities.capabilities.value.externalReason,
-            ).isEqualTo(ExternalReason.NOT_YET_AVAILABLE)
-            assertThat(graph.youtubeStreamResolver.resolveAudio("id", AudioPref())).isEqualTo(ResolveResult.Unsupported)
+            if (buildInfo.youTubeEngineBundled) {
+                // The real YtDlpEngine: nothing was prepared (initializers were not run),
+                // so it reports PREPARING with the bundled identity version. The consent
+                // boundary keeps STOPPED until the settings load publishes, so wait for
+                // that publish rather than racing it.
+                withTimeout(10_000) {
+                    graph.youtubeEngine.status.first {
+                        it.availability == ch.lkmc.neutrodyne.youtube.api.EngineAvailability.PREPARING
+                    }
+                    graph.youtubeCapabilities.capabilities.first { it.externalReason == null }
+                }
+                assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
+                    ch.lkmc.neutrodyne.youtube.api.EngineAvailability.PREPARING,
+                )
+                assertThat(graph.youtubeEngine.status.value.version).isEqualTo("2026.08.19")
+                assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
+                assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isTrue()
+                assertThat(graph.youtubeCapabilities.capabilities.value.externalReason).isNull()
+                // "id" is not a YouTube id: the real resolver rejects it before the host.
+                assertThat(graph.youtubeStreamResolver.resolveAudio("id", AudioPref())).isEqualTo(
+                    ResolveResult.Unavailable(ch.lkmc.neutrodyne.core.model.Availability.UNAVAILABLE),
+                )
+            } else {
+                assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
+                    ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
+                )
+                assertThat(graph.youtubeEngine.status.value.version).isNull()
+                assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
+                assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
+                assertThat(
+                    graph.youtubeCapabilities.capabilities.value.externalReason,
+                ).isEqualTo(ExternalReason.NOT_YET_AVAILABLE)
+                assertThat(
+                    graph.youtubeStreamResolver.resolveAudio("id", AudioPref()),
+                ).isEqualTo(ResolveResult.Unsupported)
+            }
             graph.youtubeStreamResolver.invalidate("id")
             graph.youtubeStreamResolver.invalidateAll()
             assertThat(graph.initializers).isNotEmpty()

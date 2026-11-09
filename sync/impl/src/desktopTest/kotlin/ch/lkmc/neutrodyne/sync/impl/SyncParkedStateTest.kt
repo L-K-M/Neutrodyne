@@ -862,12 +862,15 @@ class SyncParkedStateTest {
         private fun unsupported(): Nothing = error("not scripted")
     }
 
-    private fun applier(db: NeutrodyneDatabase): SyncApplier =
+    private fun applier(
+        db: NeutrodyneDatabase,
+        settingsPort: FakeSettingsSyncPort = FakeSettingsSyncPort(),
+    ): SyncApplier =
         SyncApplier(
             db = db,
             clock = TestClock(now),
             secrets = FakeSecretStore(),
-            settings = FakeSettingsSyncPort(),
+            settings = settingsPort,
             playback = NoPlaybackSync,
             syncIngestHook = SyncIngestHook.None,
             channelSync = NoGroupChannelSync,
@@ -926,11 +929,13 @@ class SyncParkedStateTest {
     private fun engine(
         db: NeutrodyneDatabase,
         client: SyncClient,
-    ): SyncEngine =
-        SyncEngine(
+    ): SyncEngine {
+        val settingsPort = FakeSettingsSyncPort()
+        val writeLocks = TestSettingsWriteCoordinator()
+        return SyncEngine(
             db = db,
             client = client,
-            applier = applier(db),
+            applier = applier(db, settingsPort),
             clock = TestClock(now),
             secrets = FakeSecretStore(),
             sharePasswords = { false },
@@ -960,8 +965,10 @@ class SyncParkedStateTest {
                 },
             activity = SyncActivityState(),
             gate = FakeLocalNetworkGate(),
-            effects = SyncApplyEffects(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
+            effects = SyncApplyEffects(db, settingsPort, writeLocks) { true },
+            capture = SettingsCapture(db, settingsPort, writeLocks) { true },
         )
+    }
 
     private suspend fun link(db: NeutrodyneDatabase) {
         db.withWriteTransaction {

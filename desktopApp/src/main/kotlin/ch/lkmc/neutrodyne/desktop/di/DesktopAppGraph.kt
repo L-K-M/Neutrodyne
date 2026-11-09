@@ -87,6 +87,9 @@ interface DesktopAppGraph {
     /** 06 Sync interplay: the engine's playback side — the controller's own port, never a stub. */
     val playbackSyncPort: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 
+    /** 10 Settings capture: the shared port the recorder installs into while linked. */
+    val settingsSyncPort: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+
     /** 10's parked-state release hook `FeedRefresher` calls after each ingest (MS2). */
     val syncIngestHook: ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 
@@ -143,6 +146,9 @@ interface DesktopAppGraph {
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
+
+    /** The portable settings store; journey tests toggle engine availability through it. */
+    val settingsStore: ch.lkmc.neutrodyne.core.datastore.SettingsStore
 
     /** The user-facing refresh port (11 Menus' File › Refresh, Ctrl/Cmd+R / F5). */
     val refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController

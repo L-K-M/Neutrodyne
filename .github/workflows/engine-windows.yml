@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Unlicense
+name: Windows engine permissions
+
+on:
+  pull_request:
+    paths:
+      - "youtube/engine/**"
+      - "youtube/ytdlp/src/test/**"
+      - ".github/workflows/engine-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  engine-windows:
+    name: Windows engine permission tests
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Compile protected sources on Windows
+        env:
+          PYTHONPATH: ${{ github.workspace }}/youtube/engine/python
+        run: python -m unittest discover -s youtube/engine/python/tests -p test_prepare.py -v
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - name: Android SDK for KMP configuration
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          sdk_dir="$(cygpath -w "$HOME/android-sdk")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Exercise real engine-store attributes
+        run: >-
+          ./gradlew.bat --no-daemon --max-workers=4 --no-build-cache
+          :youtube:engine:cleanTest :youtube:engine:test
+          --tests "*BundledEngineStoreTest*"
+      - name: Require the DOS regression cases to execute
+        shell: bash
+        run: |
+          python - <<'PYGATE'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          files = list(Path("youtube/engine/build/test-results/test").glob("TEST-*BundledEngineStoreTest.xml"))
+          if not files:
+              raise SystemExit("No engine-store test XML")
+          required = {
+              "compileProtectionMarksEveryEntryAndRemovalRestoresThem",
+              "dosStoreProtectionMarksDirectories",
+              "abortRestoresADosProtectedTree",
+          }
+          executed = set()
+          for path in files:
+              root = ET.parse(path).getroot()
+              if any(int(root.get(key, "0")) for key in ("failures", "errors")):
+                  raise SystemExit("Engine-store tests failed")
+              for case in root.findall("testcase"):
+                  if case.find("skipped") is None:
+                      executed.add(case.get("name"))
+          if not required <= executed:
+              raise SystemExit(f"Missing executed DOS cases: {sorted(required - executed)}")
+          print("All required Windows engine-store cases executed")
+          PYGATE
+      - name: Retain engine-store test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-engine-permissions
+          path: youtube/engine/build/test-results/
+          if-no-files-found: ignore

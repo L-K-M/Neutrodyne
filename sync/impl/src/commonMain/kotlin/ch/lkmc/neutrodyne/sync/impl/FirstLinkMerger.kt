@@ -908,14 +908,14 @@ class FirstLinkMerger(
                     val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
                     val rid = runCatching { RecordId.fromWire(coll, dto.id) }.getOrNull()?.rid ?: continue
                     val incoming = runCatching { ProtocolValidation.record(dto) }.getOrNull() ?: continue
-                    val stored = clockStore.get(coll.wire, rid)?.state
-                    val merged = SyncRecordMerger.merge(stored, null, incoming)
+                    val stored = clockStore.get(coll.wire, rid)
+                    val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
                     clockStore.put(
                         coll.wire,
                         rid,
-                        RawSyncRecord(
+                        (stored ?: RawSyncRecord(merged.record)).copy(
                             state = merged.record,
-                            by = dto.by ?: clockStore.get(coll.wire, rid)?.by,
+                            by = dto.by ?: stored?.by,
                         ),
                     )
                 }
@@ -980,7 +980,7 @@ class FirstLinkMerger(
                     clockStore.put(
                         SyncCollection.SETTING.wire,
                         key.name,
-                        RawSyncRecord(
+                        (stored ?: RawSyncRecord(record)).copy(
                             state = record,
                             pendingSetting = PendingSetting(value.toString(), record.maxClock?.toString() ?: ""),
                         ),

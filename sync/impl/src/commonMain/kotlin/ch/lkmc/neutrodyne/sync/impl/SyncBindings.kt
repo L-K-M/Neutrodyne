@@ -98,6 +98,7 @@ object SyncBindings {
         activity: SyncActivityState,
         gate: LocalNetworkGate,
         effects: SyncApplyEffects,
+        capture: SettingsCapture,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -111,6 +112,7 @@ object SyncBindings {
             activity = activity,
             gate = gate,
             effects = effects,
+            capture = capture,
         )
 
     /**
@@ -155,6 +157,21 @@ object SyncBindings {
         writeLocks: SettingsWriteCoordinator,
         address: SyncServerAddress,
     ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks, { address.syncPlaybackSettings() })
+
+    /**
+     * 10 Settings capture: the recorder and the materialization baseline the shared port
+     * carries. [SettingsCapture.reconcile] reads the persisted link and switch live at every
+     * lifecycle edge — the start drain, the link's completion, both switch edges, unlink and
+     * revocation — never `SyncFlags`' late cache.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun settingsCapture(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+        writeLocks: SettingsWriteCoordinator,
+        address: SyncServerAddress,
+    ): SettingsCapture = SettingsCapture(db, settings, writeLocks, { address.syncPlaybackSettings() })
 
     /**
      * The first-link merge; the controller drives it from the link state machine. The

@@ -190,11 +190,7 @@ class SyncApplier(
                 if (coll == SyncCollection.SETTING) {
                     // The marker carries the value's JSON text, not the bare primitive content: the
                     // drain forwards it to SettingsSyncPort, which decodes the key's wire shape.
-                    val text =
-                        merge.record.fields["v"]
-                            ?.v
-                            ?.toString()
-                    text?.let { PendingSetting(it, merge.record.maxClock?.toString() ?: "") }
+                    settingPendingMarker(stored, merge.record)
                 } else {
                     null
                 }
@@ -204,8 +200,13 @@ class SyncApplier(
                 RawSyncRecord(
                     state = merge.record,
                     by = dto.by ?: stored?.by,
+                    authReference = stored?.authReference,
+                    redirect = stored?.redirect,
+                    alias = stored?.alias,
+                    settingHash = stored?.settingHash,
                     pendingSetting = pendingSetting ?: stored?.pendingSetting,
                     pendingAuth = stored?.pendingAuth,
+                    settingIntent = stored?.settingIntent,
                 ),
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)
@@ -739,32 +740,33 @@ class SyncApplier(
         merge: RecordMerge,
     ): RecordOutcome {
         val key = (id as RecordId.Setting).key
-        val settingKey =
-            ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys.list
-                .firstOrNull { it.name == key }
-                ?: return RecordOutcome.Invalid
-        val value =
-            merge.record.fields["v"]
-                ?.v
-                ?.toString() ?: return RecordOutcome.Stale
-        val pending = storedPending(settingKey.name) ?: PendingSetting(value, merge.record.maxClock?.toString() ?: "")
-        db.syncClockDao().upsert(
-            ch.lkmc.neutrodyne.core.database.SyncClockEntity(
-                SyncCollection.SETTING.wire,
-                key,
-                SyncJson.encodeToString(
-                    RawSyncRecord.serializer(),
-                    RawSyncRecord(
-                        state = merge.record,
-                        pendingSetting = pending,
-                    ),
-                ),
-            ),
-        )
+        ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys.list
+            .firstOrNull { it.name == key }
+            ?: return RecordOutcome.Invalid
+        merge.record.fields["v"]
+            ?.v ?: return RecordOutcome.Stale
+        // The shared put journals the marker: the value's JSON text at the merged winner's
+        // clock, keeping an undrained stored marker at least as new (settingPendingMarker).
         return RecordOutcome.Applied
     }
 
-    private suspend fun storedPending(key: String): PendingSetting? = null
+    /**
+     * 10 Durable apply effects: the marker this record's page journals. An undrained stored
+     * marker at least as new as the record's merged winner keeps its identity — a replay cannot
+     * reset the effect's completion comparison (clock equality); anything older is re-created
+     * from the merged winner.
+     */
+    private fun settingPendingMarker(
+        stored: RawSyncRecord?,
+        record: RecordState,
+    ): PendingSetting? {
+        val text = record.fields["v"]?.v?.toString() ?: return stored?.pendingSetting
+        val fresh = PendingSetting(text, record.maxClock?.toString() ?: "")
+        val storedPending = stored?.pendingSetting ?: return fresh
+        val storedClock = runCatching { Hlc.parse(storedPending.clock) }.getOrNull() ?: return fresh
+        val freshClock = runCatching { Hlc.parse(fresh.clock) }.getOrNull() ?: return storedPending
+        return if (storedClock >= freshClock) storedPending else fresh
+    }
 
     // --- Parked state (10 Parked state and stubs) ---------------------------------------------------
 
