@@ -35,8 +35,7 @@ object SyncBindings {
     /** 10 Now playing and handoff: the card's writer-name lookup rides the account client. */
     @Provides
     @SingleIn(AppScope::class)
-    fun deviceNames(client: Provider<SyncClient>): DeviceNames =
-        ClientDeviceNames { client().devices() }
+    fun deviceNames(client: Provider<SyncClient>): DeviceNames = ClientDeviceNames { client().devices() }
 
     /** 10 Now playing and handoff: the durable-session adopter behind `remoteSession`. */
     @Provides

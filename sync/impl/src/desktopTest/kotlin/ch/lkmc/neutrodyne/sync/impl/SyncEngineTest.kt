@@ -371,11 +371,16 @@ class SyncEngineTest {
                 a.round()
 
                 // B plays its own episode: the session capture pushes `episode` + `context`.
-                val bPodcast = b.db.podcastDao().bySyncId(syncId("0b"))!!.id
+                val bPodcast =
+                    b.db
+                        .podcastDao()
+                        .bySyncId(syncId("0b"))!!
+                        .id
                 val bEpisode = b.addEpisode(bPodcast, "g:one")
                 b.db.withWriteTransaction {
                     b.db.playSessionDao().ensureNow(NOW)
-                    b.db.playSessionDao()
+                    b.db
+                        .playSessionDao()
                         .restoreSession(
                             currentEpisodeId = bEpisode,
                             contextType = null,

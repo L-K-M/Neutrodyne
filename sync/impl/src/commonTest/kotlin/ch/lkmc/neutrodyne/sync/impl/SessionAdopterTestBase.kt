@@ -383,7 +383,11 @@ abstract class SessionAdopterTestBase {
                     remoteSession(
                         PODCAST_SYNC,
                         EPISODE_KEY,
-                        context = contextJson("type" to JsonPrimitive("PODCAST"), "podcast" to JsonPrimitive(PODCAST_SYNC)),
+                        context =
+                            contextJson(
+                                "type" to JsonPrimitive("PODCAST"),
+                                "podcast" to JsonPrimitive(PODCAST_SYNC),
+                            ),
                     ),
                     OTHER_DEVICE,
                 )
@@ -497,7 +501,16 @@ abstract class SessionAdopterTestBase {
                 seedLink(db)
                 seedPodcastAndEpisode(db)
                 val gate = CompletableDeferred<Unit>()
-                val adopter = testSessionAdopter(db, TestClock(NOW), names = DeviceNames { gate.await(); "B" })
+                val adopter =
+                    testSessionAdopter(
+                        db,
+                        TestClock(NOW),
+                        names =
+                            DeviceNames {
+                                gate.await()
+                                "B"
+                            },
+                    )
                 storeRaw(db, remoteSession(PODCAST_SYNC, EPISODE_KEY), OTHER_DEVICE)
                 adopter.evaluate()
 
@@ -524,7 +537,16 @@ abstract class SessionAdopterTestBase {
                 seedLink(db)
                 seedPodcastAndEpisode(db)
                 val gate = CompletableDeferred<Unit>()
-                val adopter = testSessionAdopter(db, TestClock(NOW), names = DeviceNames { gate.await(); "B" })
+                val adopter =
+                    testSessionAdopter(
+                        db,
+                        TestClock(NOW),
+                        names =
+                            DeviceNames {
+                                gate.await()
+                                "B"
+                            },
+                    )
                 storeRaw(db, remoteSession(PODCAST_SYNC, EPISODE_KEY), OTHER_DEVICE)
                 adopter.evaluate()
 
@@ -550,7 +572,16 @@ abstract class SessionAdopterTestBase {
                 seedLink(db)
                 val podcast = seedPodcastAndEpisode(db)
                 val gate = CompletableDeferred<Unit>()
-                val adopter = testSessionAdopter(db, TestClock(NOW), names = DeviceNames { gate.await(); "B" })
+                val adopter =
+                    testSessionAdopter(
+                        db,
+                        TestClock(NOW),
+                        names =
+                            DeviceNames {
+                                gate.await()
+                                "B"
+                            },
+                    )
                 storeRaw(db, remoteSession(PODCAST_SYNC, EPISODE_KEY), OTHER_DEVICE)
                 adopter.evaluate()
 
@@ -606,7 +637,11 @@ abstract class SessionAdopterTestBase {
                             fields =
                                 mapOf(
                                     "episode" to FieldValue(episodeRef(PODCAST_SYNC, OTHER_KEY), ourClock.toString()),
-                                    "context" to FieldValue(contextJson("type" to JsonPrimitive("EXTERNAL")), ourClock.toString()),
+                                    "context" to
+                                        FieldValue(
+                                            contextJson("type" to JsonPrimitive("EXTERNAL")),
+                                            ourClock.toString(),
+                                        ),
                                 ),
                         ),
                     ),
@@ -617,7 +652,13 @@ abstract class SessionAdopterTestBase {
                 val raw = SyncClockStore(db).get(SESSION_WIRE, SESSION_RID)
                 assertEquals(
                     THIS_NODE,
-                    raw?.state?.fields?.get("episode")?.c?.nodeId?.value,
+                    raw
+                        ?.state
+                        ?.fields
+                        ?.get("episode")
+                        ?.c
+                        ?.nodeId
+                        ?.value,
                     "the ack merges the sent literal into raw, so the echo gap cannot revert it",
                 )
                 adopter.evaluate()

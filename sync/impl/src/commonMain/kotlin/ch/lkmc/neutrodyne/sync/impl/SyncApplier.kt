@@ -135,10 +135,22 @@ class SyncApplier(
                                     applied++
                                     if (dto.coll == SyncCollection.SESSION.wire) sessionApplied = true
                                 }
-                                is RecordOutcome.Stale -> stale++
-                                is RecordOutcome.Parked -> parked++
-                                is RecordOutcome.Held -> held++
-                                is RecordOutcome.Invalid -> invalid++
+
+                                is RecordOutcome.Stale -> {
+                                    stale++
+                                }
+
+                                is RecordOutcome.Parked -> {
+                                    parked++
+                                }
+
+                                is RecordOutcome.Held -> {
+                                    held++
+                                }
+
+                                is RecordOutcome.Invalid -> {
+                                    invalid++
+                                }
                             }
                         }
                     }

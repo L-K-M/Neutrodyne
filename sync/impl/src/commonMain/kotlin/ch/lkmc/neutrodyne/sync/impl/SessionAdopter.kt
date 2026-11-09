@@ -291,8 +291,13 @@ class SessionAdopter
                     )
                 }
 
-                "ALL", "UNGROUPED", "DOWNLOADS" -> contextBase(context, ContextType.valueOf(type), null)
-                else -> contextBase(context, ContextType.EXTERNAL, null)
+                "ALL", "UNGROUPED", "DOWNLOADS" -> {
+                    contextBase(context, ContextType.valueOf(type), null)
+                }
+
+                else -> {
+                    contextBase(context, ContextType.EXTERNAL, null)
+                }
             }
         }
 

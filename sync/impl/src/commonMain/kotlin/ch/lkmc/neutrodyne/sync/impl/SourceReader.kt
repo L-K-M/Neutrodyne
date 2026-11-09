@@ -116,25 +116,28 @@ class SourceReader(
      * filters {flags, media}, minSortDate, anchor {p, k}, anchorSortDate}`). Groups publish by
      * `uuid`, podcasts by `syncId`; an unresolvable or cleared context degrades to `EXTERNAL`.
      */
-    private suspend fun sessionContext(
-        session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity,
-    ): JsonObject {
+    private suspend fun sessionContext(session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity): JsonObject {
         val scoped =
             when (session.contextType) {
-                ContextType.GROUP ->
+                ContextType.GROUP -> {
                     session.contextId
                         ?.let { db.groupDao().groupById(it)?.uuid }
                         ?.let { "GROUP" to ("group" to it) }
+                }
 
-                ContextType.PODCAST ->
+                ContextType.PODCAST -> {
                     session.contextId
                         ?.let { db.podcastDao().byId(it)?.syncId }
                         ?.let { "PODCAST" to ("podcast" to it) }
+                }
 
-                ContextType.ALL, ContextType.UNGROUPED, ContextType.DOWNLOADS ->
+                ContextType.ALL, ContextType.UNGROUPED, ContextType.DOWNLOADS -> {
                     session.contextType!!.name to null
+                }
 
-                else -> null
+                else -> {
+                    null
+                }
             } ?: return JsonObject(mapOf("type" to JsonPrimitive("EXTERNAL")))
         return JsonObject(
             buildMap {
@@ -158,9 +161,7 @@ class SourceReader(
     }
 
     /** The context anchor as `{p, k}` — dropped when the anchor row is gone. */
-    private suspend fun sessionAnchor(
-        session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity,
-    ): JsonObject? {
+    private suspend fun sessionAnchor(session: ch.lkmc.neutrodyne.core.database.PlaySessionEntity): JsonObject? {
         val anchor = session.contextAnchorEpisodeId?.let { db.episodeDao().byId(it) } ?: return null
         val podcast = db.podcastDao().byId(anchor.podcastId) ?: return null
         return JsonObject(
