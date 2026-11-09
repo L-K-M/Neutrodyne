@@ -1950,6 +1950,56 @@ class DesktopPackagingTest {
         }
     }
 
+    @Test
+    fun `bundled Python permissions precede image trimming and training`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.MACOS_ARM64)
+        try {
+            val project = fixture.project
+            val youtube =
+                ProjectBuilder
+                    .builder()
+                    .withParent(project)
+                    .withName("youtube")
+                    .build()
+            val desktop =
+                ProjectBuilder
+                    .builder()
+                    .withParent(youtube)
+                    .withName("ytdlp-desktop")
+                    .build()
+            for (name in listOf("fetchPythonStandalone", "trimPythonStandalone", "syncEngineResources")) {
+                desktop.tasks.register(name)
+            }
+            val native = project.project(":playback:native")
+            native.tasks.register("buildFfmpeg")
+            native.tasks.register("buildNdmedia")
+            project.tasks.register("exportLibraryDefinitions")
+
+            fun ancestors(task: org.gradle.api.Task): Set<org.gradle.api.Task> {
+                val visited = linkedSetOf<org.gradle.api.Task>()
+
+                fun visit(current: org.gradle.api.Task) {
+                    for (dependency in current.taskDependencies.getDependencies(current)) {
+                        if (visited.add(dependency)) visit(dependency)
+                    }
+                }
+                visit(task)
+                return visited
+            }
+
+            val restore = project.tasks.getByName("restoreDesktopPythonPermissions")
+            val create = project.tasks.getByName("createDistributable")
+            val train = project.tasks.getByName("trainAotCache")
+            assertTrue(restore in ancestors(train), "AOT training can launch before bundled Python is executable")
+            assertTrue(create in ancestors(restore), "permissions must be restored on the created image")
+            project.tasks.findByName("trimSkikoStub")?.let { trim ->
+                assertTrue(restore in ancestors(trim), "image resealing can precede restored Python modes")
+            }
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
     /** Serializes the Compose `JvmRuntimeProperties` the task's `initState()` reads. */
     private fun writeRuntimeProperties(target: File) {
         val clazz =

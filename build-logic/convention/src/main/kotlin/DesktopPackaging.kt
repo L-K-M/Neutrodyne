@@ -1346,7 +1346,6 @@ abstract class RestoreDesktopPythonPermissions : DefaultTask() {
     }
 }
 
-
 /**
  * Compose's `createRuntimeImage` with `jdk.localedata` restricted to the shipped locales
  * (11 jlink modules; PB27's miss reserved the convention plugin's own jlink step, open
@@ -1740,6 +1739,7 @@ internal fun Project.registerDesktopPackagingTasks(
         val restorePythonPermissions =
             tasks.register<RestoreDesktopPythonPermissions>("restoreDesktopPythonPermissions") {
                 group = "build"
+                dependsOn(createDistributable)
                 description =
                     "Restores the executable bit on the bundled Python tree inside the app image (11 Image scan rules)."
                 stagedPython.set(layout.buildDirectory.dir("desktop-resources/${target.id}/engine/python"))
@@ -1756,6 +1756,11 @@ internal fun Project.registerDesktopPackagingTasks(
                 )
             }
         tasks.named("createDistributable") { finalizedBy(restorePythonPermissions) }
+        // Training is another image finalizer; registration order does not order finalizers.
+        // Restore executable modes before image resealing and before the training launch.
+        tasks.matching { it.name == "trimSkikoStub" || it.name == "trainAotCache" }.configureEach {
+            dependsOn(restorePythonPermissions)
+        }
     }
     // Compose merges appResourcesRootDir/{common,<os>,<os>-<arch>} into the image through its own
     // Sync; ours must run first or Gradle flags the shared output dir as an implicit dependency.
