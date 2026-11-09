@@ -94,8 +94,8 @@ class StdioYtxTransport(
     private var idle: Job? = null
 
     init {
-        // A child can still be compiling when the graph stops. Make its OS-level exit part
-        // of the scope join, before ShellJourney removes the engine's temporary files.
+        // A child can still be compiling when the graph stops. Await its bounded OS-level
+        // shutdown before the scope joins and ShellJourney removes temporary files.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()

@@ -183,9 +183,18 @@ class YtxChild internal constructor(
     }
 
     fun destroyForcibly() {
-        process.destroyForcibly()
-        check(process.waitFor(EXIT_WAIT_MS, TimeUnit.MILLISECONDS)) {
-            "the engine child did not exit after forced shutdown"
+        val exited =
+            try {
+                process.destroyForcibly()
+                process.waitFor(EXIT_WAIT_MS, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                false
+            }
+        if (!exited) {
+            // Shutdown callers must still complete slots and keep status collectors alive.
+            // Callers requiring proof of exit also inspect isAlive/awaitExit themselves.
+            Log.w(TAG) { "the engine child did not exit within ${EXIT_WAIT_MS}ms after forced shutdown" }
         }
     }
 
@@ -279,6 +288,8 @@ class YtxChild internal constructor(
     }
 
     private companion object {
+        const val TAG = "YtxChild"
+
         /** One framed line inbound or outbound, per 11 "Stdio protocol". */
         const val LINE_BYTES = 256 * 1024
         const val READ_CHUNK = 8 * 1024
