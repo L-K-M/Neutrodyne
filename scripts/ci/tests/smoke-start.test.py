@@ -32,6 +32,7 @@ Run: python3 scripts/ci/tests/smoke-start.test.py
 Exit 0 = every contract holds; 1 = at least one regression.
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -622,6 +623,150 @@ class SmokeStartGateTest(unittest.TestCase):
         rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
         self.assertNotEqual(0, rc)
         self.assertEqual("", out)
+
+    # --- armed media-scenario contracts (MD3 AC2's media slice) -----------------
+    #
+    # A scenario carrying media.json arms the whole loopback media chain: the
+    # gate recomputes the expected composition digest and chunk list from the
+    # scenario itself, so the fake evidence below must satisfy real checks, not
+    # merely present the right field names.
+
+    MEDIA_TOTAL = 22_020_219
+
+    def make_media_scenario(self):
+        """A media scenario dir: http.json's presence, media.json's spec and the
+        real head file the gate recomputes the composition digest from."""
+        scenario = self.root / "scenario"
+        scenario.mkdir()
+        (scenario / "http.json").write_text('{"exchanges":[]}', encoding="utf-8")
+        head = b"\x00\x00\x00\x18ftypM4A " + b"real-head" * 128
+        (scenario / "media-head.m4a").write_bytes(head)
+        (scenario / "media.json").write_text(json.dumps({
+            "total": self.MEDIA_TOTAL,
+            "head": "media-head.m4a",
+            "headSha256": hashlib.sha256(head).hexdigest(),
+        }), encoding="utf-8")
+        return scenario, head
+
+    def composed_sha256(self, head, total):
+        """FixtureMediaBytes' composition, re-derived to build honest fixtures."""
+        padding = total - len(head)
+        if padding <= 0xFFFFFFFF:
+            box = padding.to_bytes(4, "big") + b"free"
+        else:
+            box = b"\x00\x00\x00\x01" + b"free" + padding.to_bytes(8, "big")
+        digest = hashlib.sha256()
+        digest.update(head)
+        digest.update(box)
+        remaining = padding - len(box)
+        zeros = b"\0" * (1 << 20)
+        while remaining > 0:
+            take = min(remaining, len(zeros))
+            digest.update(zeros[:take])
+            remaining -= take
+        return digest.hexdigest()
+
+    def expected_chunks(self, total):
+        chunk, ranges, offset = 10 * 1024 * 1024, [], 0
+        while offset < total:
+            ranges.append(f"bytes={offset}-{min(offset + chunk, total) - 1}")
+            offset += chunk
+        return ranges
+
+    def media_evidence(self, img, head, **overrides):
+        evidence = {
+            "urlHost": "127.0.0.1",
+            "playback": {"stream": "YOUTUBE", "phase": "READY",
+                         "playing": True, "positionMs": 612},
+            "download": {"state": "COMPLETED", "bytes": self.MEDIA_TOTAL,
+                         "chunks": self.expected_chunks(self.MEDIA_TOTAL),
+                         "sha256": self.composed_sha256(head, self.MEDIA_TOTAL)},
+        }
+        evidence.update(overrides)
+        return evidence
+
+    def test_engine_replay_media_scenario_passes(self):
+        img, cfg = self.make_engine_image()
+        replay, head = self.make_media_scenario()
+        line = self.engine_evidence(img, **self.media_evidence(img, head))
+        self.behave(lines=[line], exit_code=0)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertEqual(0, rc, err)
+        self.assertEqual(line + "\n", out)
+
+    def test_engine_replay_media_rejects_resolve_only_evidence(self):
+        img, cfg = self.make_engine_image()
+        replay, _ = self.make_media_scenario()
+        # A resolve-only report against a media scenario is a missing proof.
+        self.behave(lines=[self.engine_evidence(img)], exit_code=0)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assertIn("engine evidence", err)
+
+    def test_engine_replay_media_rejects_wrong_evidence(self):
+        img, cfg = self.make_engine_image()
+        replay, head = self.make_media_scenario()
+        cases = {
+            "non-loopback host": {"urlHost": "media.example.invalid"},
+            "missing playback": {"playback": None},
+            "playback not playing": {
+                "playback": {"stream": "YOUTUBE", "phase": "READY",
+                             "playing": False, "positionMs": 900}},
+            "playback wrong stream": {
+                "playback": {"stream": "LOCAL", "phase": "READY",
+                             "playing": True, "positionMs": 900}},
+            "playback under 500 ms": {
+                "playback": {"stream": "YOUTUBE", "phase": "READY",
+                             "playing": True, "positionMs": 499}},
+            "missing download": {"download": None},
+            "download not completed": {
+                "download": {"state": "DOWNLOADING", "bytes": self.MEDIA_TOTAL,
+                             "chunks": self.expected_chunks(self.MEDIA_TOTAL),
+                             "sha256": self.composed_sha256(head, self.MEDIA_TOTAL)}},
+            "download wrong bytes": {
+                "download": {"state": "COMPLETED", "bytes": self.MEDIA_TOTAL - 1,
+                             "chunks": self.expected_chunks(self.MEDIA_TOTAL),
+                             "sha256": self.composed_sha256(head, self.MEDIA_TOTAL)}},
+            "download missing chunk": {
+                "download": {"state": "COMPLETED", "bytes": self.MEDIA_TOTAL,
+                             "chunks": self.expected_chunks(self.MEDIA_TOTAL)[:-1],
+                             "sha256": self.composed_sha256(head, self.MEDIA_TOTAL)}},
+            "download extra chunk": {
+                "download": {"state": "COMPLETED", "bytes": self.MEDIA_TOTAL,
+                             "chunks": self.expected_chunks(self.MEDIA_TOTAL)
+                             + ["bytes=0-99"],
+                             "sha256": self.composed_sha256(head, self.MEDIA_TOTAL)}},
+            "download out-of-order chunks": {
+                "download": {"state": "COMPLETED", "bytes": self.MEDIA_TOTAL,
+                             "chunks": [self.expected_chunks(self.MEDIA_TOTAL)[1],
+                                        self.expected_chunks(self.MEDIA_TOTAL)[0],
+                                        self.expected_chunks(self.MEDIA_TOTAL)[2]],
+                             "sha256": self.composed_sha256(head, self.MEDIA_TOTAL)}},
+            "download wrong digest": {
+                "download": {"state": "COMPLETED", "bytes": self.MEDIA_TOTAL,
+                             "chunks": self.expected_chunks(self.MEDIA_TOTAL),
+                             "sha256": "0" * 64}},
+        }
+        for name, override in cases.items():
+            with self.subTest(case=name):
+                line = self.engine_evidence(img, **self.media_evidence(img, head, **override))
+                self.behave(lines=[line], exit_code=0)
+                rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+                self.assertNotEqual(0, rc, name)
+                self.assertEqual("", out, name)
+                self.assertIn("engine evidence", err, name)
+
+    def test_engine_replay_media_rejects_a_corrupt_scenario(self):
+        img, cfg = self.make_engine_image()
+        replay, head = self.make_media_scenario()
+        (replay / "media.json").write_text("{not json", encoding="utf-8")
+        line = self.engine_evidence(img, **self.media_evidence(img, head))
+        self.behave(lines=[line], exit_code=0)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), replay=replay)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assertIn("engine evidence", err)
 
     def test_crlf_cfg_is_parsed(self):
         original = CFG_ABSENT_NEWLINE.replace(b"\n", b"\r\n")
