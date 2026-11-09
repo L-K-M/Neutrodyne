@@ -22,8 +22,11 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -32,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -88,6 +92,18 @@ class StdioYtxTransport(
     private val pending = mutableMapOf<Long, Pending>()
     private var waiting = 0
     private var idle: Job? = null
+
+    init {
+        // A child can still be compiling when the graph stops. Await its bounded OS-level
+        // shutdown before the scope joins and ShellJourney removes temporary files.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { shutdown() }
+            }
+        }
+    }
 
     override suspend fun call(
         method: YtxMethod,
@@ -455,9 +471,14 @@ class StdioYtxTransport(
             if (exit == HostExit.IDLE_STOP) {
                 // EOF is the documented exit path; destroyForcibly is only the 2 s fallback.
                 dead.closeStdin()
-                scope.launch {
-                    delay(IDLE_GRACE_MS)
-                    dead.destroyForcibly()
+                scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        delay(IDLE_GRACE_MS)
+                    } finally {
+                        // This child is already detached from `child`; scope cancellation
+                        // must also reap it rather than cancel its only kill fallback.
+                        dead.destroyForcibly()
+                    }
                 }
             } else {
                 dead.destroyForcibly()

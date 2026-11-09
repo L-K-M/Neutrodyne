@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.ytdlpdesktop
 
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
+import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
 import ch.lkmc.neutrodyne.youtube.engine.HostExit
 import ch.lkmc.neutrodyne.youtube.engine.HostState
 import ch.lkmc.neutrodyne.youtube.engine.YtDlpErrorMapper
 import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
+import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -29,6 +36,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -46,6 +54,183 @@ class YtxProcessTest {
     }
 
     private fun fixture(): StdioFixture = StdioFixture(tempRoot("proc").also { roots += it })
+
+    @Test fun forcedShutdownTimeoutIsReportedWithoutThrowing() {
+        val warnings = CopyOnWriteArrayList<String>()
+        val process =
+            object : FakeProcess(byteArrayOf()) {
+                var killed = false
+                var waitMs = 0L
+
+                override fun destroyForcibly(): Process = apply { killed = true }
+
+                override fun waitFor(
+                    timeout: Long,
+                    unit: TimeUnit,
+                ): Boolean {
+                    waitMs = unit.toMillis(timeout)
+                    return false
+                }
+            }
+        val child =
+            YtxChild(
+                process,
+                {},
+                object : YtxChild.Listener {
+                    override fun onMessage(message: JsonObject) = Unit
+
+                    override fun onProtocolViolation(reason: String) = Unit
+
+                    override fun onExit(code: Int) = Unit
+                },
+            )
+        Log.install(LogSink { level, _, message -> if (level == LogLevel.WARN) warnings += message })
+        try {
+            val result = runCatching { child.destroyForcibly() }
+
+            assertNull(result.exceptionOrNull(), "shutdown must let its callers finish transport bookkeeping")
+            assertTrue(process.killed)
+            assertEquals(2_000L, process.waitMs)
+            assertTrue(warnings.any { it.contains("did not exit") && it.contains("2000") })
+        } finally {
+            Log.install()
+        }
+    }
+
+    @Test fun interruptedForcedShutdownPreservesTheInterruptWithoutThrowing() {
+        val child =
+            YtxChild(
+                object : FakeProcess(byteArrayOf()) {
+                    override fun destroyForcibly(): Process = this
+
+                    override fun waitFor(
+                        timeout: Long,
+                        unit: TimeUnit,
+                    ): Boolean = throw InterruptedException("fixture")
+                },
+                {},
+                object : YtxChild.Listener {
+                    override fun onMessage(message: JsonObject) = Unit
+
+                    override fun onProtocolViolation(reason: String) = Unit
+
+                    override fun onExit(code: Int) = Unit
+                },
+            )
+        try {
+            val result = runCatching { child.destroyForcibly() }
+
+            assertNull(result.exceptionOrNull())
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test fun applicationScopeShutdownWaitsForTheReadyChildToExit() =
+        runBlocking {
+            val fixture = fixture()
+            fixture.serve(SharedEngine.lib)
+            val transport = fixture.transport(idleStopMs = 60_000)
+            var child: YtxChild? = null
+            try {
+                assertEquals(ECHO_RESULT, transport.callForTest("_echo", ECHOED, fixture.deadline(30_000)))
+                child = assertNotNull(fixture.spawner.last)
+                assertTrue(child.isAlive)
+
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+
+                // ShellJourney removes the engine files as soon as the application scope joins.
+                assertFalse(child.isAlive, "the child must stop before its data tree can be removed")
+                assertEquals(HostExit.SHUTDOWN, transport.status.value.lastExit)
+            } finally {
+                transport.shutdown()
+                child?.destroyForcibly()
+                child?.awaitExit(10_000)
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+            }
+        }
+
+    @Test fun applicationScopeShutdownWaitsForTheCompilingChildToExit() =
+        runBlocking {
+            val fixture = fixture()
+            val store = BundledEngineStore(fixture.paths, 1, fixture.clock)
+            store.prepareBundled()
+            val transport =
+                StdioYtxTransport(
+                    fixture.spawner,
+                    store,
+                    fixture.settings,
+                    arming = null,
+                    debugHooks = true,
+                    clock = fixture.clock,
+                    scope = fixture.scope,
+                    ping = fixture.ping,
+                )
+            var child: YtxChild? = null
+            try {
+                fixture.scope.async {
+                    runCatching { transport.call(YtxMethod.PING, fixture.ping.toJson(), fixture.deadline(120_000)) }
+                }
+                withTimeout(30_000) { transport.status.first { it.pid != null } }
+                child = assertNotNull(fixture.spawner.last)
+                assertTrue(child.isAlive)
+
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+
+                assertFalse(child.isAlive, "compile must stop before its library can be removed")
+            } finally {
+                transport.shutdown()
+                child?.destroyForcibly()
+                child?.awaitExit(10_000)
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+            }
+        }
+
+    @Test fun applicationScopeShutdownReapsTheChildInsideItsIdleGracePeriod() =
+        runBlocking {
+            val fixture = fixture()
+            fixture.serve(SharedEngine.lib)
+            val spawner =
+                SpySpawner(
+                    YtxProcess(
+                        { fixture.python },
+                        fixture.paths,
+                        spawn = { _, _, _ ->
+                            ProcessBuilder(fixture.python.executable.absolutePath, "-I", "-c", SLOW_EOF_CHILD).start()
+                        },
+                    ),
+                )
+            val transport =
+                StdioYtxTransport(
+                    spawner,
+                    fixture.store,
+                    fixture.settings,
+                    arming = null,
+                    debugHooks = true,
+                    clock = fixture.clock,
+                    scope = fixture.scope,
+                    ping = fixture.ping,
+                    idleStopMs = 100,
+                )
+            var child: YtxChild? = null
+            try {
+                transport.prewarm(PrewarmReason.SCREEN)
+                withTimeout(30_000) { transport.status.first { it.state == HostState.READY } }
+                child = assertNotNull(spawner.last)
+                withTimeout(10_000) { transport.status.first { it.lastExit == HostExit.IDLE_STOP } }
+                assertTrue(child.isAlive, "the fixture deliberately ignores stdin EOF")
+
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+
+                assertFalse(child.isAlive, "cancellation must retain the idle child's kill fallback")
+            } finally {
+                transport.shutdown()
+                child?.destroyForcibly()
+                child?.awaitExit(10_000)
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+            }
+        }
 
     @Test fun killedChildMidCallYieldsTransientAndNextCallRestarts() =
         runBlocking {
@@ -321,6 +506,16 @@ class YtxProcessTest {
     }
 
     private companion object {
+        val SLOW_EOF_CHILD =
+            """
+            import json, sys, time
+            print(json.dumps({'t':'hello','state':'ready'}), flush=True)
+            for line in sys.stdin:
+                frame = json.loads(line)
+                print(json.dumps({'t':'ok','id':frame['id'],'r':{'ready':True}}), flush=True)
+            time.sleep(60)
+            """.trimIndent()
+
         const val VIDEO = "aaaaaaaaaaA"
         val EMPTY = JsonObject(emptyMap())
         val ECHOED = buildJsonObject { put("probe", "ok") }
@@ -329,7 +524,7 @@ class YtxProcessTest {
 }
 
 /** A canned stdout/stderr stream standing in for a dead or misbehaving child's output. */
-private class FakeProcess(
+private open class FakeProcess(
     stdout: ByteArray,
     stderr: ByteArray = byteArrayOf(),
 ) : Process() {

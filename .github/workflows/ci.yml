@@ -107,7 +107,7 @@ jobs:
           --continue
       - name: Verify desktop JAR content identity
         run: |
-          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*' --tests '*DesktopAotTrainingTest*'
+          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*' --tests '*DesktopAotTraining*'
           python3 scripts/ci/tests/canonical-jar-hash.test.py
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
@@ -138,8 +138,10 @@ jobs:
           scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           scripts/ci/tests/desktop-packaging.test.sh
+          scripts/ci/tests/post-image-hook.test.sh
           scripts/ci/tests/build-desktop-release-windows.test.sh
           python3 scripts/ci/tests/desktop-package-variants.test.py
+          python3 scripts/ci/tests/extract-zip.test.py
           python3 scripts/ci/tests/desktop-package-diagnostics.test.py
           python3 scripts/ci/tests/desktop-smoke-pipeline.test.py
           python3 scripts/ci/tests/check-desktop-image.test.py
@@ -580,6 +582,13 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - name: Check image scans with the macOS system Bash
+        if: runner.os == 'macOS'
+        run: >-
+          python3 scripts/ci/tests/check-desktop-image.test.py
+          DesktopImageGatesTest.test_macos_system_bash_runs_the_image_and_epoch_gates
+          DesktopImageGatesTest.test_macos_system_bash_rejects_a_drifted_classpath
+          DesktopImageGatesTest.test_macos_system_bash_rejects_an_epoch_probe_failure
       - name: Check smoke admission with the macOS system Bash
         if: runner.os == 'macOS'
         run: python3 scripts/ci/tests/smoke-start.test.py SmokeStartGateTest.test_macos_system_bash_runs_the_shipped_smoke_gate

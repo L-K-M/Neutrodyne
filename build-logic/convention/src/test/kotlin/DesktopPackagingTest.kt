@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.GradleException
+import org.gradle.api.file.FileCollection
+import org.gradle.api.file.FileSystemLocation
+import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.testfixtures.ProjectBuilder
+import org.gradle.work.FileChange
+import org.gradle.work.InputChanges
+import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
@@ -12,9 +19,12 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Packaging helpers of 11 (Packaging pipeline, Links and files from the OS):
@@ -660,6 +670,350 @@ class DesktopPackagingTest {
         }
     }
 
+    @Test
+    fun `the macos stub record omits the foreign-architecture native from the expected stub`() {
+        val root = Files.createTempDirectory("skiko-trim").toFile()
+        try {
+            // The pinned macos-arm64 artifact's measured layout (skiko 0.150.1):
+            // the target's native pair plus the other macOS architecture's pair.
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-macos-arm64-0.150.1.jar",
+                    zipBytes(entries),
+                )
+
+            classpathManifestTask(root, source).write()
+
+            val parts = File(root, "manifest-stubs.txt").readLines().single().split("  ")
+            // The expected stub is the source minus the extracted pair AND the
+            // foreign pair: the derived stub ships no other-architecture native.
+            val expected =
+                entries.filter { !it.first.startsWith(native) && !it.first.startsWith(foreign) }
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "expected.jar", zipBytes(expected))),
+                parts[0],
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko foreign-native rule matches the pinned upstream artifacts`() {
+        // Measured 2026-11-09 on the four skiko-awt-runtime 0.150.1 artifacts: only the
+        // macOS jar carries another matrix architecture's native beside the target's;
+        // the linux and windows jars ship exactly their extracted set.
+        assertEquals(setOf("libskiko-macos-x64.dylib"), skikoForeignNames("macos", "arm64"))
+        assertEquals(setOf("libskiko-macos-arm64.dylib"), skikoForeignNames("macos", "x64"))
+        assertEquals(emptySet(), skikoForeignNames("linux", "x64"))
+        assertEquals(emptySet(), skikoForeignNames("linux", "arm64"))
+        assertEquals(emptySet(), skikoForeignNames("windows", "x64"))
+    }
+
+    @Test
+    fun `the skiko stub derivation removes the declared foreign natives`() {
+        val root = Files.createTempDirectory("skiko-removed").toFile()
+        try {
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-macos-arm64-0.150.1.jar",
+                    zipBytes(entries),
+                )
+
+            val derivation =
+                CanonicalJarHash.stubOf(source, setOf(native), setOf(foreign))
+
+            // The expected stub keeps exactly the non-native entries: the foreign pair
+            // is gone with its .sha256 sibling, like the extracted pair before it.
+            val remaining = entries.take(2)
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "stub.jar", zipBytes(remaining))),
+                derivation.expectedHash,
+            )
+            assertEquals(listOf(native, "$native.sha256"), derivation.extracted.map { it.first })
+            assertEquals(
+                listOf(foreign, "$foreign.sha256"),
+                derivation.removed.map { it.first },
+            )
+            assertEquals(
+                sha256Hex("NATIVE-X64".toByteArray()),
+                derivation.removed.single { it.first == foreign }.second,
+            )
+            // The removal is the extraction's mirror: refusing a name claimed by both.
+            assertFailsWith<IllegalArgumentException> {
+                CanonicalJarHash.stubOf(source, setOf(native, foreign), setOf(foreign))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the classpath manifest records the removed skiko entries`() {
+        val root = Files.createTempDirectory("skiko-removed-manifest").toFile()
+        try {
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val macEntries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val macSource =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(macEntries))
+            val linuxEntries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    "libskiko-linux-x64.so" to "NATIVE-X64".toByteArray(),
+                    "libskiko-linux-x64.so.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val linuxSource =
+                writeJar(root, "skiko-awt-runtime-linux-x64-0.150.1.jar", zipBytes(linuxEntries))
+
+            classpathManifestTask(root, macSource, linuxSource).write()
+
+            val lines = File(root, "manifest-stubs.txt").readLines()
+            assertEquals(2, lines.size)
+            val mac = lines.single { it.contains("macos-arm64") }.split("  ")
+            assertEquals(4, mac.size)
+            assertTrue(mac[3].startsWith("removed:libskiko-macos-x64.dylib="))
+            // The trimmed expectation is the source minus both native pairs.
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "mac-stub.jar", zipBytes(macEntries.take(2)))),
+                mac[0],
+            )
+            // A target whose upstream jar carries no foreign native keeps the
+            // three-field record: the trim is a no-op there, not a hidden change.
+            val linux = lines.single { it.contains("linux-x64") }.split("  ")
+            assertEquals(3, linux.size)
+            assertEquals(
+                CanonicalJarHash.of(
+                    writeJar(
+                        root,
+                        "linux-stub.jar",
+                        zipBytes(linuxEntries.filter { !it.first.startsWith("libskiko-linux-x64.so") }),
+                    ),
+                ),
+                linux[0],
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim rewrites only the foreign natives`() {
+        val root = Files.createTempDirectory("skiko-trim-fn").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(entries))
+            // Compose's repack: the extracted pair out of the jar, into the app dir.
+            val stubBytes = zipBytes(entries.filter { !it.first.startsWith(native) })
+            val stub = writeJar(appDir, "skiko-awt-runtime-macos-arm64-0.150.1-cafe1.jar", stubBytes)
+            File(appDir, native).writeBytes("NATIVE-ARM64".toByteArray())
+            File(appDir, "$native.sha256").writeBytes("0".repeat(64).toByteArray())
+            var resigned = 0
+
+            val outcome =
+                trimSkikoStub(image, source, "macos", "arm64") { resigned++ }
+
+            assertEquals(stub, outcome.stubFile)
+            assertEquals(listOf(foreign, "$foreign.sha256"), outcome.removed)
+            assertTrue(outcome.afterBytes < outcome.beforeBytes)
+            assertEquals(1, resigned)
+            val trimmed = CanonicalJarHash.stubOf(source, setOf(native), setOf(foreign))
+            assertEquals(trimmed.expectedHash, CanonicalJarHash.of(stub))
+            // The extracted native beside the stub keeps its byte identity.
+            assertEquals("NATIVE-ARM64", File(appDir, native).readText())
+            // Re-running is a no-op that does not reseal.
+            val rerun = trimSkikoStub(image, source, "macos", "arm64") { resigned++ }
+            assertEquals(emptyList(), rerun.removed)
+            assertEquals(outcome.afterBytes, rerun.afterBytes)
+            assertEquals(1, resigned)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim refuses a stub that is not the source's repack`() {
+        val root = Files.createTempDirectory("skiko-trim-evil").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(entries))
+            // A stub with an added class entry: the malicious-removal/addition case.
+            val evil =
+                zipBytes(
+                    entries.filter { !it.first.startsWith(native) } +
+                        ("org/unchecked/Surprise.class" to "EVIL".toByteArray()),
+                )
+            writeJar(appDir, "skiko-awt-runtime-macos-arm64-0.150.1-bad1.jar", evil)
+
+            val failure =
+                assertFailsWith<GradleException> {
+                    trimSkikoStub(image, source, "macos", "arm64") {}
+                }
+            assertTrue(
+                failure.message!!.contains("is not Compose's repack"),
+                failure.message,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim refuses a source without the declared foreign native`() {
+        val root = Files.createTempDirectory("skiko-trim-missing").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            // A future macos artifact that ships only its own arch: the declared
+            // foreign entry no longer exists, so no arbitrary removal may happen.
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.160.0.jar", zipBytes(entries))
+
+            val failure =
+                assertFailsWith<GradleException> {
+                    trimSkikoStub(image, source, "macos", "arm64") {}
+                }
+            assertTrue(
+                failure.message!!.contains("no longer carries the foreign native"),
+                failure.message,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim refuses a stub that would keep a native`() {
+        val root = Files.createTempDirectory("skiko-trim-leftover").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            // A source that also carries a cross-OS native the rule does not name:
+            // the derived stub would ship it, so the trim fails instead.
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                    "libskiko-linux-x64.so" to "NATIVE-LINUX".toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(entries))
+
+            val failure =
+                assertFailsWith<GradleException> {
+                    trimSkikoStub(image, source, "macos", "arm64") {}
+                }
+            assertTrue(
+                failure.message!!.contains("would still carry the native entry"),
+                failure.message,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim is a no-op for a target without foreign natives`() {
+        val root = Files.createTempDirectory("skiko-trim-linux").toFile()
+        try {
+            val image = File(root, "Neutrodyne")
+            val appDir = File(image, "lib/app")
+            appDir.mkdirs()
+            val native = "libskiko-linux-x64.so"
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-X64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-linux-x64-0.150.1.jar", zipBytes(entries))
+            val stubBytes = zipBytes(entries.filter { !it.first.startsWith(native) })
+            val stub = writeJar(appDir, "skiko-awt-runtime-linux-x64-0.150.1-feed2.jar", stubBytes)
+            val before = stub.readBytes()
+
+            val outcome = trimSkikoStub(image, source, "linux", "x64") { fail("no reseal off macOS") }
+
+            assertEquals(emptyList(), outcome.removed)
+            assertTrue(before.contentEquals(stub.readBytes()))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     // ----- the image's native/ and licenses/ payloads (11 Resources layout) -----
 
     @Test
@@ -869,6 +1223,904 @@ class DesktopPackagingTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    /**
+     * The post-image hook installer names the script exactly as jpackage's `ScriptRunner`
+     * looks it up (`<app name>-post-image<ext>`) and fails closed when the shipped hook is
+     * missing — packaging without it would ship a strict-cache failure.
+     */
+    @Test
+    fun `the post-image hook installer names the script for jpackage`() {
+        val root = Files.createTempDirectory("post-image-hook").toFile()
+        try {
+            val hook = File(root, "shipped.sh").apply { writeText("#!/bin/sh\n") }
+            val resources = File(root, "resources").apply { mkdirs() }
+
+            writePostImageHook(hook, "Neutrodyne", ".sh", resources)
+            assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.sh").readText())
+
+            writePostImageHook(hook, "Neutrodyne", ".wsf", resources)
+            assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.wsf").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * The replaced Compose task drives the hook installation through Compose's own
+     * `run()` → `prepareWorkingDir()`: after the base clears and repopulates the resource
+     * directory, the hook lands under the exact name jpackage's `ScriptRunner` looks up.
+     * A fake jpackage executable stands in for the JDK tool, so the task's real
+     * configuration path (initState, prepareWorkingDir, makeArgs) runs without a JDK.
+     */
+    @Test
+    fun `the AOT package task installs the hook during prepareWorkingDir`() {
+        val projectDir = Files.createTempDirectory("aot-package-task").toFile()
+        try {
+            val project = ProjectBuilder.builder().withProjectDir(projectDir).build()
+            val hook = File(projectDir, "shipped.sh").apply { writeText("#!/bin/sh\n") }
+            val runtimeProperties = File(projectDir, "runtime.properties")
+            writeRuntimeProperties(runtimeProperties)
+            val fakeJdk = File(projectDir, "fake-jdk")
+            val fakeBin = File(fakeJdk, "bin").apply { mkdirs() }
+            // The fake tool produces the package file checkResult() looks for. The
+            // Compose runner invokes it as `jpackage @<args-file>` (one arg per line).
+            File(fakeBin, "jpackage").apply {
+                writeText(
+                    """
+                    #!/bin/sh
+                    dest=""
+                    want_dest=0
+                    for arg in "${'$'}@"; do
+                      case "${'$'}arg" in
+                        @*)
+                          while IFS= read -r line; do
+                            if [ "${'$'}want_dest" = 1 ]; then
+                              # the argfile quotes each value
+                              dest="${'$'}line"
+                              dest="${'$'}{dest#\"}"
+                              dest="${'$'}{dest%\"}"
+                              want_dest=0
+                            fi
+                            case "${'$'}line" in --dest) want_dest=1 ;; esac
+                          done < "${'$'}{arg#@}"
+                          ;;
+                      esac
+                    done
+                    mkdir -p "${'$'}dest"
+                    printf 'DMG\n' > "${'$'}dest/Neutrodyne.dmg"
+                    exit 0
+                    """.trimIndent(),
+                )
+                setExecutable(true, false)
+            }
+            val task =
+                project.tasks
+                    .register("packageDmg", DmgAotTimestampJPackageTask::class.java)
+                    .get()
+            task.postImageHook.set(hook)
+            task.packageName.set("Neutrodyne")
+            task.launcherMainClass.set("ch.lkmc.neutrodyne.desktop.MainKt")
+            task.packageVersion.set("1.0.0")
+            task.appImage.set(File(projectDir, "app").apply { mkdirs() })
+            task.javaHome.set(fakeJdk.absolutePath)
+            task.javaRuntimePropertiesFile.set(runtimeProperties)
+            task.destinationDir.set(File(projectDir, "dest"))
+            task.verbose.set(false)
+
+            task.run(EmptyInputChanges)
+
+            val resources =
+                project.layout.buildDirectory
+                    .dir("compose/tmp/resources")
+                    .get()
+                    .asFile
+            assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.sh").readText())
+        } finally {
+            projectDir.deleteRecursively()
+        }
+    }
+
+    // ----- the installer tasks consume the trained image (11 AOT cache) ---------
+
+    /**
+     * `registerDesktopPackagingTasks` is the production wiring of every packaging task; this
+     * fixture drives it on a ProjectBuilder project that carries the tasks and files it
+     * reads, so the replaced `packageMsi`/`packageDmg` tasks are the real, production-wired
+     * objects. The trained image is fabricated at `createDistributable`'s destination with
+     * the exact layout the training task leaves ([aotImageLayout]: launcher, `.cfg` with the
+     * `-XX:AOTCache` read flag, the trained archive and a classpath JAR).
+     */
+    private class TrainedImagePackagingFixture(
+        val project: org.gradle.api.Project,
+        val distributableDir: File,
+    )
+
+    private fun trainedImagePackagingFixture(target: DesktopPackagingTarget): TrainedImagePackagingFixture {
+        val projectDir = Files.createTempDirectory("trained-packaging").toFile()
+        // registerDesktopPackagingTasks reads the version property at wiring time; both
+        // property locations ProjectBuilder consults carry it.
+        File(projectDir, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        val gradleHome = File(projectDir, "gradle-home").apply { mkdirs() }
+        File(gradleHome, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        val project =
+            ProjectBuilder
+                .builder()
+                .withProjectDir(projectDir)
+                .withGradleUserHomeDir(gradleHome)
+                .build()
+        val playback =
+            ProjectBuilder
+                .builder()
+                .withParent(project)
+                .withName("playback")
+                .build()
+        val nativeProject =
+            ProjectBuilder
+                .builder()
+                .withParent(playback)
+                .withName("native")
+                .build()
+        File(nativeProject.projectDir, "native-components.lock").apply {
+            parentFile.mkdirs()
+            writeText("[ffmpeg]\nversion = \"9.0.2\"\n")
+        }
+
+        val distributableDir = File(projectDir, "binaries")
+        // Compose registers createRuntimeImage alongside createDistributable; the wiring's
+        // replace targets it, so the fixture registers the same abstract base Compose does.
+        project.tasks.register("createRuntimeImage", AbstractJLinkTask::class.java)
+        project.tasks
+            .register("createDistributable", FixtureCreateDistributableTask::class.java) {
+                this.destinationDir.set(distributableDir)
+            }.get()
+        project.tasks
+            .register("setupBundledRuntime", SetupBundledRuntime::class.java) {
+                this.home.set(File(projectDir, "bundled-runtime/jdk"))
+            }.get()
+        project.configurations.create("runtimeClasspath")
+        project.tasks.register("jar", org.gradle.api.tasks.bundling.Jar::class.java)
+        // The Compose plugin has already registered packageMsi/packageDmg when the
+        // convention plugin's afterEvaluate wiring runs and replaces them; Gradle 9's
+        // replace needs a compatible declared type, so the fixture registers the final
+        // types (the production replace of Compose's AbstractJPackageTask registration is
+        // proven by the real Windows run's hook installation).
+        project.tasks.register("packageMsi", MsiAotTimestampJPackageTask::class.java)
+        project.tasks.register("packageDmg", DmgAotTimestampJPackageTask::class.java)
+
+        project.registerDesktopPackagingTasks(
+            target,
+            BundledRuntimeLock(
+                vendor = "Eclipse Adoptium",
+                vendorVersion = "Temurin-25.0.4.1+1",
+                version = "25.0.4.1+1",
+                javaVersion = "25",
+                archiveUrl = "https://example.invalid/jdk",
+                sha256 = "00",
+            ),
+        )
+
+        fabricateTrainedImage(distributableDir, target)
+        return TrainedImagePackagingFixture(project, distributableDir)
+    }
+
+    /** A concrete createDistributable stand-in: the wiring consumes only its destinationDir. */
+    abstract class FixtureCreateDistributableTask :
+        org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask(
+            org.jetbrains.compose.desktop.application.dsl.TargetFormat.AppImage,
+        )
+
+    /** The trained image createDistributable + trainAotCache leave, per [aotImageLayout]. */
+    private fun fabricateTrainedImage(
+        distributableDir: File,
+        target: DesktopPackagingTarget,
+    ) {
+        val layout = aotImageLayout(target.osWire)
+        val image =
+            File(
+                distributableDir,
+                if (target == DesktopPackagingTarget.MACOS_ARM64) "$DESKTOP_PACKAGE_NAME.app" else DESKTOP_PACKAGE_NAME,
+            )
+        File(image, layout.launcher).apply {
+            parentFile.mkdirs()
+            writeBytes(byteArrayOf(1))
+        }
+        File(image, layout.cfg).apply {
+            parentFile.mkdirs()
+            writeText(
+                "[Application]\n" +
+                    "[JavaOptions]\n" +
+                    "java-options=-XX:AOTCache=${'$'}APPDIR/$AOT_CACHE_FILE\n",
+            )
+        }
+        File(image, "${layout.appDir}/$AOT_CACHE_FILE").apply {
+            parentFile.mkdirs()
+            writeBytes(ByteArray(16) { it.toByte() })
+        }
+        File(image, "${layout.appDir}/app-85f294.jar").apply {
+            parentFile.mkdirs()
+            writeBytes(zipBytes(listOf("A.class" to "CODE".toByteArray())))
+        }
+        File(image, layout.runtimeRelease).apply {
+            parentFile.mkdirs()
+            writeText("JAVA_VERSION=\"25.0.4.1\"\n")
+        }
+    }
+
+    /**
+     * The value Compose's `makeArgs` emits for `--app-image` from the configured
+     * [configured] directory: on a macOS host (any format, pinned plugin) it appends
+     * `<name>.app` as a child; non-macOS hosts pass the configured directory itself.
+     */
+    private fun hostAppImageArg(configured: File): String =
+        if (System.getProperty("os.name") == "Mac OS X") {
+            File(configured, DESKTOP_PACKAGE_NAME + ".app").path
+        } else {
+            configured.path
+        }
+
+    /**
+     * Runs a production-wired package task through Compose's real `run()` with a fake
+     * `jpackage` that records the argument file it was handed, and returns those argv
+     * tokens (each args-file line's quotes stripped). The runtime files and main-jar
+     * properties mirror what Compose's own configure action sets in the real build, so a
+     * fresh-image argv (the defect) is produced unchanged when the wiring leaves `appImage`
+     * unset.
+     */
+    private fun runPackagingTask(
+        fixture: TrainedImagePackagingFixture,
+        name: String,
+    ): List<String> {
+        val task =
+            fixture.project.tasks
+                .named(name, AotTimestampJPackageTask::class.java)
+                .get()
+        val projectDir = fixture.project.projectDir
+        val fakeBin = File(projectDir, "fake-jdk-${task.name}/bin").apply { mkdirs() }
+        File(fakeBin, "jpackage").apply {
+            writeText(
+                """
+                #!/bin/sh
+                dest=""
+                want_dest=0
+                args_file=""
+                for arg in "${'$'}@"; do
+                  case "${'$'}arg" in
+                    @*) args_file="${'$'}{arg#@}" ;;
+                  esac
+                done
+                while IFS= read -r line; do
+                  if [ "${'$'}want_dest" = 1 ]; then
+                    dest="${'$'}line"
+                    dest="${'$'}{dest#\"}"
+                    dest="${'$'}{dest%\"}"
+                    want_dest=0
+                  fi
+                  case "${'$'}line" in --dest) want_dest=1 ;; esac
+                done < "${'$'}args_file"
+                mkdir -p "${'$'}dest"
+                cp "${'$'}args_file" "${'$'}dest/argv.txt"
+                printf 'fake' > "${'$'}dest/Neutrodyne-0.1.0.msi"
+                printf 'fake' > "${'$'}dest/Neutrodyne-0.1.0.dmg"
+                exit 0
+                """.trimIndent(),
+            )
+            setExecutable(true, false)
+        }
+        val hook = File(projectDir, "hook-${task.name}.sh").apply { writeText("#!/bin/sh\n") }
+        val mainJar = File(projectDir, "main-${task.name}.jar")
+        mainJar.writeBytes(zipBytes(listOf("Main.class" to "MAIN".toByteArray())))
+        writeRuntimeProperties(File(projectDir, "runtime-${task.name}.properties"))
+        task.postImageHook.set(hook)
+        task.packageName.set(DESKTOP_PACKAGE_NAME)
+        task.launcherMainClass.set("ch.lkmc.neutrodyne.desktop.MainKt")
+        task.packageVersion.set("0.1.0")
+        task.launcherMainJar.set(mainJar)
+        task.files.from(mainJar)
+        task.javaHome.set(fakeBin.parentFile.absolutePath)
+        task.javaRuntimePropertiesFile.set(File(projectDir, "runtime-${task.name}.properties"))
+        task.destinationDir.set(File(projectDir, "dest-${task.name}"))
+
+        task.run(EmptyInputChanges)
+
+        return File(projectDir, "dest-${task.name}/argv.txt")
+            .readLines()
+            .map { line -> line.removePrefix("\"").removeSuffix("\"") }
+    }
+
+    /**
+     * The wired `packageMsi` must hand jpackage the trained app image (`--app-image`), not
+     * Compose's fresh-image layout (`--input` libs + `--main-jar`): a fresh image carries no
+     * trained `neutrodyne.aot`, the post-image WSF correctly fails it closed, and the MSI
+     * never reaches WiX (Windows run 42509091764, job 128818030637). This runs the real
+     * production wiring and Compose's real argument builder against a capturing fake
+     * jpackage; on a macOS host Compose's makeArgs appends the `.app` leaf to any
+     * `--app-image` value (a host quirk of the pinned plugin; Windows passes the image
+     * directory itself).
+     */
+    @Test
+    fun `packageMsi jpackages the trained app image not a fresh jar image`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.WINDOWS_X64)
+        try {
+            val argv = runPackagingTask(fixture, "packageMsi")
+
+            val appImage = argv.indexOf("--app-image")
+            assertTrue(appImage >= 0, "no --app-image in: ${argv.joinToString(" ")}")
+            assertEquals(
+                hostAppImageArg(File(fixture.distributableDir, DESKTOP_PACKAGE_NAME)),
+                argv[appImage + 1],
+            )
+            assertFalse("--input" in argv, "fresh-image --input in: ${argv.joinToString(" ")}")
+            assertFalse("--main-jar" in argv, "fresh-image --main-jar in: ${argv.joinToString(" ")}")
+            assertFalse("--runtime-image" in argv, "fresh-image --runtime-image in: ${argv.joinToString(" ")}")
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The wired `packageDmg` must consume the trained `.app` bundle the same way: Compose's
+     * `makeArgs` derives `--app-image <destinationDir>/<name>.app` from the configured
+     * `appImage` on a macOS host, so the wiring pins the destination directory itself.
+     */
+    @Test
+    fun `packageDmg jpackages the trained app bundle not a fresh jar image`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.MACOS_ARM64)
+        try {
+            val argv = runPackagingTask(fixture, "packageDmg")
+
+            val appImage = argv.indexOf("--app-image")
+            assertTrue(appImage >= 0, "no --app-image in: ${argv.joinToString(" ")}")
+            assertEquals(hostAppImageArg(fixture.distributableDir), argv[appImage + 1])
+            assertFalse("--input" in argv, "fresh-image --input in: ${argv.joinToString(" ")}")
+            assertFalse("--main-jar" in argv, "fresh-image --main-jar in: ${argv.joinToString(" ")}")
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    // ----- the runtime image producer: the locale restriction of 11 jlink modules ---------
+
+    /** The production shape around createRuntimeImage on a ProjectBuilder project. */
+    private class RuntimeImageFixture(
+        val project: org.gradle.api.Project,
+        val fakeJdk: File,
+        val runtimeDir: File,
+        val createRuntimeImageProvider: TaskProvider<AbstractJLinkTask>,
+        val createDistributable: FixtureCreateDistributableTask,
+    )
+
+    /**
+     * Mirrors Compose 1.12.1's own wiring on a ProjectBuilder project: `createRuntimeImage`
+     * registered as the abstract [AbstractJLinkTask] with the configure action Compose's
+     * `configureCommonJvmDesktopTasks` attaches (javaHome, modules, destinationDir — the
+     * application data the convention plugin sets), and `createDistributable` wired to it
+     * the way Compose's `configurePackageTask` does (dependsOn the provider and
+     * `--runtime-image` from the same provider's destinationDir). [registerDesktopPackagingTasks]
+     * then runs against this exactly as in the real build, so what the assertions exercise
+     * is the production wiring, not a stand-in task.
+     */
+    private fun runtimeImageFixture(
+        target: DesktopPackagingTarget,
+        destinationDir: File? = null,
+        withoutEngine: Boolean = false,
+    ): RuntimeImageFixture {
+        val projectDir = Files.createTempDirectory("runtime-image").toFile()
+        File(projectDir, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        if (withoutEngine) {
+            File(projectDir, "gradle.properties").appendText("neutrodyne.youtubeEngine=false\n")
+        }
+        val gradleHome = File(projectDir, "gradle-home").apply { mkdirs() }
+        File(gradleHome, "gradle.properties").writeText("neutrodyne.versionName=0.1.0\n")
+        val project =
+            ProjectBuilder
+                .builder()
+                .withProjectDir(projectDir)
+                .withGradleUserHomeDir(gradleHome)
+                .build()
+        val playback =
+            ProjectBuilder
+                .builder()
+                .withParent(project)
+                .withName("playback")
+                .build()
+        val nativeProject =
+            ProjectBuilder
+                .builder()
+                .withParent(playback)
+                .withName("native")
+                .build()
+        File(nativeProject.projectDir, "native-components.lock").apply {
+            parentFile.mkdirs()
+            writeText("[ffmpeg]\nversion = \"9.0.2\"\n")
+        }
+
+        val fakeJdk = File(projectDir, "fake-jdk")
+        File(fakeJdk, "bin").apply { mkdirs() }
+        val runtimeDir = (destinationDir ?: File(projectDir, "compose/tmp/runtime")).apply { mkdirs() }
+
+        val createRuntimeImage =
+            project.tasks.register("createRuntimeImage", AbstractJLinkTask::class.java) {
+                this.javaHome.set(fakeJdk.absolutePath)
+                this.modules.set(JLINK_MODULES)
+                this.includeAllModules.set(false)
+                this.destinationDir.set(runtimeDir)
+            }
+        val createDistributable =
+            project.tasks
+                .register(
+                    "createDistributable",
+                    FixtureCreateDistributableTask::class.java,
+                ) {
+                    this.dependsOn(createRuntimeImage)
+                    this.destinationDir.set(File(projectDir, "binaries"))
+                    this.runtimeImage.set(createRuntimeImage.flatMap { task -> task.destinationDir })
+                }.get()
+        project.tasks.register("packageMsi", MsiAotTimestampJPackageTask::class.java)
+        project.tasks.register("packageDmg", DmgAotTimestampJPackageTask::class.java)
+        project.configurations.create("runtimeClasspath")
+        project.tasks.register("jar", org.gradle.api.tasks.bundling.Jar::class.java)
+        project.tasks.register("setupBundledRuntime", SetupBundledRuntime::class.java) {
+            home.set(File(projectDir, "bundled-runtime/jdk"))
+        }
+
+        project.registerDesktopPackagingTasks(
+            target,
+            BundledRuntimeLock(
+                vendor = "Eclipse Adoptium",
+                vendorVersion = "Temurin-25.0.4.1+1",
+                version = "25.0.4.1+1",
+                javaVersion = "25",
+                archiveUrl = "https://example.invalid/jdk",
+                sha256 = "00",
+            ),
+        )
+        return RuntimeImageFixture(project, fakeJdk, runtimeDir, createRuntimeImage, createDistributable)
+    }
+
+    /**
+     * Runs the production-wired `createRuntimeImage` through Compose's real `run()` with a
+     * fake `jlink` that records the argument file it was handed (one token per line, values
+     * quoted when they contain spaces) and the tool path it was invoked as. Returns the argv
+     * tokens with the argfile's value quoting stripped, paired with that tool path — the
+     * javaHome JDK selection shows up as the executed binary.
+     */
+    private fun runCreateRuntimeImage(fixture: RuntimeImageFixture): Pair<List<String>, String> {
+        val capture = File(fixture.project.projectDir, "captured").apply { mkdirs() }
+        File(fixture.fakeJdk, "bin/jlink").apply {
+            writeText(
+                """
+                #!/bin/sh
+                args_file=""
+                for arg in "${'$'}@"; do
+                  case "${'$'}arg" in @*) args_file="${'$'}{arg#@}" ;; esac
+                done
+                cp "${'$'}args_file" "${capture.absolutePath}/argv.txt"
+                printf '%s\n' "${'$'}0" > "${capture.absolutePath}/tool.txt"
+                exit 0
+                """.trimIndent(),
+            )
+            setExecutable(true, false)
+        }
+        val task =
+            fixture.project.tasks
+                .named("createRuntimeImage", AbstractJLinkTask::class.java)
+                .get()
+        task.run(EmptyInputChanges)
+
+        val argv =
+            File(capture, "argv.txt").readLines().map { line ->
+                line.removePrefix("\"").removeSuffix("\"")
+            }
+        return argv to File(capture, "tool.txt").readText().trim()
+    }
+
+    /**
+     * The runtime image producer must restrict `jdk.localedata` to the shipped locales
+     * (`--include-locales=en,de`, 11 jlink modules; PB27's miss reserved the convention
+     * plugin's own jlink step — Compose 1.12.1's `AbstractJLinkTask` has no such option).
+     * Without the restriction the module ships whole: measured 26.5 MB more installed.
+     */
+    @Test
+    fun `the runtime image producer restricts jdk locale data to the shipped locales`() {
+        val fixture = runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64)
+        try {
+            val (argv, _) = runCreateRuntimeImage(fixture)
+
+            val locales = argv.indexOf("--include-locales")
+            assertTrue(locales >= 0, "no --include-locales in: ${argv.joinToString(" ")}")
+            assertEquals("en,de", argv[locales + 1])
+            val output = argv.indexOf("--output")
+            assertTrue(output > locales, "--include-locales after --output in: ${argv.joinToString(" ")}")
+            assertFalse(
+                "--compress" in argv,
+                "--compress grows the download size (measured): ${argv.joinToString(" ")}",
+            )
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The restriction changes nothing else: the argv handed to jlink stays exactly the
+     * Compose flags (module list in DSL order, the four strip options, `--output`) plus
+     * the one locale pair, and the executed tool is the javaHome JDK's own `jlink` — the
+     * bundled runtime the convention plugin pins, never the Gradle VM.
+     */
+    @Test
+    fun `the runtime image producer keeps the exact compose flags module list and jdk`() {
+        val fixture = runtimeImageFixture(DesktopPackagingTarget.LINUX_X64)
+        try {
+            val (argv, tool) = runCreateRuntimeImage(fixture)
+
+            val expected =
+                buildList {
+                    for (module in JLINK_MODULES) {
+                        add("--add-modules")
+                        add(module)
+                    }
+                    add("--strip-debug")
+                    add("--no-header-files")
+                    add("--no-man-pages")
+                    add("--strip-native-commands")
+                    add("--include-locales")
+                    add("en,de")
+                    add("--output")
+                    add(fixture.runtimeDir.absolutePath)
+                }
+            assertEquals(expected, argv)
+            assertEquals(File(fixture.fakeJdk, "bin/jlink").absolutePath, tool)
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Compose hands jlink an argument file (one token per line, values with spaces
+     * quoted); the inserted locale pair must not disturb that. A destination directory
+     * with spaces stands in for the Windows `Program Files` case: `--output` still
+     * round-trips to the exact path and the locale list stays one unquoted token.
+     */
+    @Test
+    fun `the locale restriction keeps spaced destination paths intact`() {
+        val spacedRuntimeDir =
+            File(Files.createTempDirectory("runtime-image-spaced").toFile(), "dir with spaces/runtime")
+        val fixture =
+            runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64, destinationDir = spacedRuntimeDir)
+        try {
+            val (argv, _) = runCreateRuntimeImage(fixture)
+
+            val output = argv.indexOf("--output")
+            assertTrue(output >= 0, "no --output in: ${argv.joinToString(" ")}")
+            assertEquals(spacedRuntimeDir.absolutePath, argv[output + 1])
+            val locales = argv.indexOf("--include-locales")
+            assertTrue(locales >= 0, "no --include-locales in: ${argv.joinToString(" ")}")
+            assertEquals("en,de", argv[locales + 1])
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+            spacedRuntimeDir.parentFile.deleteRecursively()
+        }
+    }
+
+    /**
+     * The runtime image is engine-independent: `-Pneutrodyne.youtubeEngine=false` omits
+     * the YouTube engine host from the image but must not change the jlink invocation —
+     * one module list and one locale set serve every build of a target. (The `--output`
+     * value differs per fixture temp dir, so the comparison drops the trailing pair.)
+     */
+    @Test
+    fun `the locale restriction is independent of the youtube engine property`() {
+        val withEngine = runtimeImageFixture(DesktopPackagingTarget.LINUX_X64)
+        val withoutEngine = runtimeImageFixture(DesktopPackagingTarget.LINUX_X64, withoutEngine = true)
+        try {
+            val (argvWithEngine, _) = runCreateRuntimeImage(withEngine)
+            val (argvWithoutEngine, _) = runCreateRuntimeImage(withoutEngine)
+
+            val locales = argvWithEngine.indexOf("--include-locales")
+            assertTrue(locales >= 0, "no --include-locales in: ${argvWithEngine.joinToString(" ")}")
+            // Everything up to and including the locale pair; --output/--output-dir vary by fixture.
+            assertEquals(
+                argvWithEngine.subList(0, locales + 2),
+                argvWithoutEngine.subList(0, locales + 2),
+            )
+        } finally {
+            withEngine.project.projectDir.deleteRecursively()
+            withoutEngine.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The production wiring replaces Compose's `createRuntimeImage` with the locale-restricted
+     * type (the mechanism `packageMsi`/`packageDmg` established): the Compose configure action
+     * survives the replace — javaHome, the module list and the destination dir keep the values
+     * the Compose registration set — exactly one jlink task exists (one writer of the runtime
+     * image), and `createDistributable` still consumes that task's destination dir as its
+     * `--runtime-image`, with `trainAotCache` downstream of the image it builds from it.
+     */
+    @Test
+    fun `the replaced jlink task owns the runtime image with compose wiring intact`() {
+        val fixture = runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64)
+        try {
+            val producer = fixture.project.tasks.getByName("createRuntimeImage")
+            assertTrue(producer is LocaleRestrictedJLinkTask, "createRuntimeImage is ${producer.javaClass.name}")
+            producer as LocaleRestrictedJLinkTask
+            assertEquals(JLINK_INCLUDED_LOCALES, producer.includedLocales.get())
+            assertEquals(fixture.fakeJdk.absolutePath, producer.javaHome.get())
+            assertEquals(JLINK_MODULES, producer.modules.get())
+            assertEquals(
+                fixture.runtimeDir.absolutePath,
+                producer.destinationDir
+                    .get()
+                    .asFile.absolutePath,
+            )
+
+            val jlinkTasks =
+                fixture.project.tasks
+                    .withType(AbstractJLinkTask::class.java)
+                    .map { task -> task.name }
+            assertEquals(listOf("createRuntimeImage"), jlinkTasks)
+
+            assertEquals(
+                fixture.runtimeDir.absolutePath,
+                fixture.createDistributable.runtimeImage
+                    .get()
+                    .asFile.absolutePath,
+            )
+            val depNames =
+                fixture.createDistributable.dependsOn.map { dependency ->
+                    (dependency as? TaskProvider<*>)?.name ?: dependency.toString()
+                }
+            assertTrue("createRuntimeImage" in depNames, depNames.toString())
+            val trainAotCache =
+                fixture.project.tasks
+                    .named("trainAotCache")
+                    .get()
+            val trainDeps =
+                trainAotCache.dependsOn.map { dependency ->
+                    (dependency as? TaskProvider<*>)?.name ?: dependency.toString()
+                }
+            assertTrue("createDistributable" in trainDeps, trainDeps.toString())
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * The wired installers and the training task must share one tree: each installer's
+     * `appImage` names the trained image (`createDistributable`'s destination plus the
+     * image leaf, per the target's [aotImageLayout]), that tree carries the trained
+     * layout (launcher, `.cfg` with the read flag, archive), and neither installer runs
+     * before `createDistributable` and `trainAotCache` have produced it. A leaf mismatch
+     * (image vs bundle vs install dir) would train one tree and package another.
+     */
+    @Test
+    fun `the trained archive lives inside the image each installer packages`() {
+        for (target in listOf(DesktopPackagingTarget.WINDOWS_X64, DesktopPackagingTarget.MACOS_ARM64)) {
+            val fixture = trainedImagePackagingFixture(target)
+            try {
+                val layout = aotImageLayout(target.osWire)
+                val imageLeaf =
+                    if (target ==
+                        DesktopPackagingTarget.MACOS_ARM64
+                    ) {
+                        "$DESKTOP_PACKAGE_NAME.app"
+                    } else {
+                        DESKTOP_PACKAGE_NAME
+                    }
+                val msi =
+                    fixture.project.tasks
+                        .named("packageMsi", MsiAotTimestampJPackageTask::class.java)
+                        .get()
+                assertEquals(
+                    File(fixture.distributableDir, imageLeaf).path,
+                    msi.appImage
+                        .get()
+                        .asFile.path,
+                    target.id,
+                )
+                val trainedTree = msi.appImage.get().asFile
+                assertTrue(File(trainedTree, "${layout.appDir}/$AOT_CACHE_FILE").isFile, target.id)
+                assertTrue(File(trainedTree, layout.cfg).isFile, target.id)
+                assertTrue(File(trainedTree, layout.launcher).isFile, target.id)
+
+                val dmg =
+                    fixture.project.tasks
+                        .named("packageDmg", DmgAotTimestampJPackageTask::class.java)
+                        .get()
+                assertEquals(
+                    fixture.distributableDir.path,
+                    dmg.appImage
+                        .get()
+                        .asFile.path,
+                    target.id,
+                )
+
+                for (consumer in listOf<org.gradle.api.Task>(msi, dmg)) {
+                    val names =
+                        consumer.dependsOn.map { dependency ->
+                            (dependency as? org.gradle.api.tasks.TaskProvider<*>)?.name ?: dependency.toString()
+                        }
+                    assertTrue("trainAotCache" in names, "${consumer.name} (${target.id}): $names")
+                    assertTrue("createDistributable" in names, "${consumer.name} (${target.id}): $names")
+                }
+            } finally {
+                fixture.project.projectDir.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `bundled Python permissions precede image trimming and training`() {
+        val fixture = trainedImagePackagingFixture(DesktopPackagingTarget.MACOS_ARM64)
+        try {
+            val project = fixture.project
+            val youtube =
+                ProjectBuilder
+                    .builder()
+                    .withParent(project)
+                    .withName("youtube")
+                    .build()
+            val desktop =
+                ProjectBuilder
+                    .builder()
+                    .withParent(youtube)
+                    .withName("ytdlp-desktop")
+                    .build()
+            for (name in listOf("fetchPythonStandalone", "trimPythonStandalone", "syncEngineResources")) {
+                desktop.tasks.register(name)
+            }
+            val native = project.project(":playback:native")
+            native.tasks.register("buildFfmpeg")
+            native.tasks.register("buildNdmedia")
+            project.tasks.register("exportLibraryDefinitions")
+
+            fun ancestors(task: org.gradle.api.Task): Set<org.gradle.api.Task> {
+                val visited = linkedSetOf<org.gradle.api.Task>()
+
+                fun visit(current: org.gradle.api.Task) {
+                    for (dependency in current.taskDependencies.getDependencies(current)) {
+                        if (visited.add(dependency)) visit(dependency)
+                    }
+                }
+                visit(task)
+                return visited
+            }
+
+            val restore = project.tasks.getByName("restoreDesktopPythonPermissions")
+            val create = project.tasks.getByName("createDistributable")
+            val train = project.tasks.getByName("trainAotCache")
+            assertTrue(restore in ancestors(train), "AOT training can launch before bundled Python is executable")
+            assertTrue(create in ancestors(restore), "permissions must be restored on the created image")
+            project.tasks.findByName("trimSkikoStub")?.let { trim ->
+                assertTrue(restore in ancestors(trim), "image resealing can precede restored Python modes")
+            }
+        } finally {
+            fixture.project.projectDir.deleteRecursively()
+        }
+    }
+
+    /** Serializes the Compose `JvmRuntimeProperties` the task's `initState()` reads. */
+    private fun writeRuntimeProperties(target: File) {
+        val clazz =
+            Class.forName("org.jetbrains.compose.desktop.application.internal.JvmRuntimeProperties")
+        val constructor = clazz.constructors.first { it.parameterTypes.size == 2 }
+        val instance = constructor.newInstance(25, listOf("java.base"))
+        java.io.ObjectOutputStream(target.outputStream()).use { it.writeObject(instance) }
+    }
+
+    @Test
+    fun `the post-image hook installer fails closed on a missing hook`() {
+        val root = Files.createTempDirectory("post-image-hook-missing").toFile()
+        try {
+            val resources = File(root, "resources").apply { mkdirs() }
+            assertFailsWith<GradleException> {
+                writePostImageHook(File(root, "absent.sh"), "Neutrodyne", ".sh", resources)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * `addUtcTimestamps` rewrites a DOS-time-only ZIP — what the commons-compress
+     * producer behind Gradle's Zip writes — so every entry also carries the
+     * Info-ZIP 0x5455 extended timestamp: UTC seconds an extractor in any
+     * timezone decodes to the one instant the DOS local time meant here.
+     */
+    @Test
+    fun `addUtcTimestamps adds the UTC extended timestamp field`() {
+        val root = Files.createTempDirectory("utc-timestamps").toFile()
+        try {
+            val zip = File(root, "plain.zip")
+            zip.writeBytes(dosOnlyZip("Neutrodyne/app/tiny.jar", byteArrayOf(7, 8, 9)))
+
+            addUtcTimestamps(zip)
+
+            java.util.zip.ZipFile(zip).use { archive ->
+                val entry = archive.getEntry("Neutrodyne/app/tiny.jar")
+                assertNotNull(entry)
+                assertEquals(byteArrayOf(7, 8, 9).toList(), archive.getInputStream(entry).readBytes().toList())
+                // The recorded instant is the DOS local time decoded on this
+                // host; the 0x5455 field must pin exactly that instant as UTC.
+                val expectedUtc =
+                    java.time.LocalDateTime
+                        .of(1980, 2, 1, 0, 0)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toEpochSecond()
+                assertEquals(expectedUtc, extendedTimestampUtc(entry.extra))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * A minimal valid ZIP with one STORED entry whose only timestamp is the
+     * MS-DOS field (1980-02-01 00:00:00, local) — no 0x5455 extra. This is what
+     * Gradle's Zip leaves on disk; [addUtcTimestamps] has to add the UTC field.
+     */
+    private fun dosOnlyZip(
+        name: String,
+        data: ByteArray,
+    ): ByteArray {
+        val nameBytes = name.toByteArray(Charsets.US_ASCII)
+        val crc =
+            java.util.zip
+                .CRC32()
+                .also { it.update(data) }
+                .value
+                .toInt()
+        val buffer =
+            ByteBuffer
+                .allocate(30 + nameBytes.size + data.size + 46 + nameBytes.size + 22)
+                .order(ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(0x04034B50) // local header
+        buffer.putShort(20).putShort(0).putShort(0) // version, flags, STORED
+        buffer.putShort(0).putShort(0x41) // 00:00:00, 1980-02-01
+        buffer.putInt(crc).putInt(data.size).putInt(data.size)
+        buffer.putShort(nameBytes.size.toShort()).putShort(0) // name len, no extra
+        buffer.put(nameBytes).put(data)
+        buffer.putInt(0x02014B50) // central header
+        buffer
+            .putShort(20)
+            .putShort(20)
+            .putShort(0)
+            .putShort(0)
+        buffer.putShort(0).putShort(0x41)
+        buffer.putInt(crc).putInt(data.size).putInt(data.size)
+        buffer.putShort(nameBytes.size.toShort()).putShort(0).putShort(0)
+        buffer
+            .putShort(0)
+            .putShort(0)
+            .putInt(0)
+            .putInt(0)
+        buffer.put(nameBytes)
+        buffer.putInt(0x06054B50) // end of central directory
+        buffer
+            .putShort(0)
+            .putShort(0)
+            .putShort(1)
+            .putShort(1)
+        buffer.putInt(46 + nameBytes.size).putInt(30 + nameBytes.size + data.size)
+        buffer.putShort(0)
+        return buffer.array()
+    }
+
+    /** The UTC seconds the entry's 0x5455 extended timestamp records, or null. */
+    private fun extendedTimestampUtc(extra: ByteArray?): Long? {
+        val fields = ByteBuffer.wrap(extra ?: return null).order(ByteOrder.LITTLE_ENDIAN)
+        while (fields.remaining() >= 4) {
+            val id = fields.short.toInt() and 0xFFFF
+            val size = fields.short.toInt() and 0xFFFF
+            if (size > fields.remaining()) return null
+            if (id == 0x5455 && size >= 5) {
+                fields.get() // flags
+                return fields.int.toLong() and 0xFFFFFFFFL
+            }
+            fields.position(fields.position() + size)
+        }
+        return null
     }
 
     /**
@@ -1179,6 +2431,14 @@ class DesktopPackagingTest {
 
     private fun sha256Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private object EmptyInputChanges : InputChanges {
+        override fun isIncremental(): Boolean = false
+
+        override fun getFileChanges(property: FileCollection): Iterable<FileChange> = emptyList()
+
+        override fun getFileChanges(property: Provider<out FileSystemLocation>): Iterable<FileChange> = emptyList()
+    }
 
     private companion object {
         private const val TAR_BLOCK_BYTES = 512

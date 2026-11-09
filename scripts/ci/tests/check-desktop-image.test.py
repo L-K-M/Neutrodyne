@@ -40,7 +40,9 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import tarfile
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -77,6 +79,7 @@ class Fixture:
             "check-runtime-sources.sh",
             "make-runtime-sources-md.sh",
             "canonical-jar-hash.py",
+            "extract-zip.py",
         ):
             shutil.copy2(CI / script, root / "scripts/ci" / script)
         shutil.copy2(
@@ -92,6 +95,15 @@ class Fixture:
         ):
             (root / lock).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / lock, root / lock)
+        # make-runtime-sources-md.sh reads the jlink module and locale lists from
+        # the convention plugin source when no image is given (and the locale list
+        # always), so the fixture repo carries that file too.
+        plugin_src = (
+            REPO
+            / "build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt"
+        )
+        (root / "build-logic/convention/src/main/kotlin").mkdir(parents=True)
+        shutil.copy2(plugin_src, root / "build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt")
         (root / "desktopApp/build/desktop-packaging").mkdir(parents=True)
         (root / "fakebin").mkdir()
         self.env = {
@@ -195,11 +207,11 @@ class Fixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
 
-    def run(self, *args, env_extra=None) -> subprocess.CompletedProcess:
+    def run(self, *args, env_extra=None, executable_shell="bash") -> subprocess.CompletedProcess:
         env = dict(self.env)
         env.update(env_extra or {})
         return subprocess.run(
-            ["bash", *map(str, args)],
+            [executable_shell, *map(str, args)],
             cwd=self.root, env=env, capture_output=True, text=True, timeout=120,
         )
 
@@ -229,6 +241,17 @@ class Fixture:
         return {f"skiko-windows-{arch}.dll", "icudtl.dat"}
 
     @staticmethod
+    def skiko_removed(os_arch: str) -> set:
+        """The foreign-architecture natives the build's trim removes from the
+        derived stub (DesktopPackaging.kt skikoForeignNames): of the pinned
+        0.150.1 artifacts only the macOS jar carries another arch's native."""
+        os_name, arch = os_arch.split("-")
+        if os_name != "macos":
+            return set()
+        other = "x64" if arch == "arm64" else "arm64"
+        return {f"libskiko-macos-{other}.dylib"}
+
+    @staticmethod
     def default_skiko_entries(os_arch: str) -> list:
         """A source runtime jar: META-INF, the target native pair, and another arch's
         native that stays in the repacked stub (the real macos-arm64 jar carries both)."""
@@ -252,30 +275,44 @@ class Fixture:
             entries.append(("icudtl.dat", b"ICU"))
         return entries
 
-    def skiko_source(self, os_arch="linux-x64", version="0.9.30", entries=None) -> list:
+    def skiko_source(self, os_arch="linux-x64", version="0.9.30", entries=None,
+                     trimmed=False) -> list:
         """Record the Licensee-checked source jar (regular row) and derive its stub
-        manifest row from the source artifact and the target extraction rule."""
+        manifest row from the source artifact and the target extraction rule.
+        trimmed=True also applies the build's foreign-native trim (skikoRemoved)
+        and records the removed entries in the row's fourth `removed:` field."""
         entries = entries if entries is not None else self.default_skiko_entries(os_arch)
         stem = f"skiko-awt-runtime-{os_arch}-{version}"
         self.manifest(stem, zip_bytes(entries))
         extracted = self.skiko_extraction(os_arch)
-        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in extracted]
+        removed = self.skiko_removed(os_arch) if trimmed else set()
+        dropped = extracted | removed
+        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in dropped]
         specs = ",".join(
             f"{n.rsplit('/', 1)[-1]}={self.canonical_content_hash(n, d)}"
             for n, d in entries
             if self._skiko_base(n) in extracted
         )
-        self.stub_rows[f"{stem}.jar"] = (
-            f"{self.canonical_hash(zip_bytes(remaining))}  {stem}.jar  {specs}"
-        )
+        row = f"{self.canonical_hash(zip_bytes(remaining))}  {stem}.jar  {specs}"
+        if removed:
+            row += "  removed:" + ",".join(
+                f"{n.rsplit('/', 1)[-1]}={self.canonical_content_hash(n, d)}"
+                for n, d in entries
+                if self._skiko_base(n) in removed
+            )
+        self.stub_rows[f"{stem}.jar"] = row
         return entries
 
     def skiko_stub(self, img, os_arch="linux-x64", version="0.9.30", entries=None,
-                  mutate=None, stamp=None, write_extracted=True) -> str:
-        """Write the derived stub jar (and its extracted natives) into the image."""
+                   mutate=None, stamp=None, write_extracted=True, trimmed=False) -> str:
+        """Write the derived stub jar (and its extracted natives) into the image.
+        trimmed=True writes the stub without the foreign natives (the build's
+        trimSkikoStub derivation)."""
         entries = entries if entries is not None else self.default_skiko_entries(os_arch)
         extracted = self.skiko_extraction(os_arch)
-        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in extracted]
+        removed = self.skiko_removed(os_arch) if trimmed else set()
+        dropped = extracted | removed
+        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in dropped]
         data = zip_bytes(remaining)
         if mutate is not None:
             data = mutate(data)
@@ -531,7 +568,7 @@ case "${1:-}" in
         [ "$ro" = 1 ] && [ "$nb" = 1 ] || { echo "attach without -readonly/-nobrowse" >&2; exit 1; }
         [ -n "${FAKE_HDIUTIL_FAIL_ATTACH:-}" ] && exit 1
         [ -n "$mnt" ] && [ -d "$dmg.payload" ] || exit 1
-        cp -R "$dmg.payload/." "$mnt/"
+        cp -Rp "$dmg.payload/." "$mnt/"
         echo "attach $mnt" >>"$log"
         ;;
     detach)
@@ -803,6 +840,91 @@ esac
         r = self.fx.image_check(img)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
+    # ----- the trimmed stub: foreign-architecture natives never ship ----------
+
+    def test_trimmed_macos_stub_passes(self):
+        """The macOS stub without the foreign-architecture native, bound by a
+        record whose fourth removed: field carries the trim's provenance."""
+        img = self.flat_image(manifest_skiko=False)
+        self.fx.skiko_source("macos-arm64", "0.150.1", trimmed=True)
+        self.fx.skiko_stub(img, os_arch="macos-arm64", version="0.150.1", trimmed=True)
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_trimmed_record_rejects_the_untrimmed_stub(self):
+        """A stub that still carries the foreign native differs from the
+        trimmed record's expected content: no name-prefix acceptance."""
+        img = self.flat_image(manifest_skiko=False)
+        self.fx.skiko_source("macos-arm64", "0.150.1", trimmed=True)
+        self.fx.skiko_stub(img, os_arch="macos-arm64", version="0.150.1")
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("skiko stub content differs", r.stderr)
+
+    def test_trimmed_stub_rejects_a_kept_foreign_native(self):
+        """A stub that keeps the foreign native — even mutated, so its own hash
+        matches nothing recorded — differs from the trimmed expectation."""
+        img = self.flat_image(manifest_skiko=False)
+        entries = self.fx.default_skiko_entries("macos-arm64")
+        self.fx.skiko_source("macos-arm64", "0.150.1", entries=entries, trimmed=True)
+        evil = self.flat_image(name="Neutrodyne-kept-foreign", manifest_skiko=False)
+        kept = [
+            (n, b"NATIVE-EVIL" if n == "libskiko-macos-x64.dylib" else d)
+            for n, d in entries
+        ]
+        self.fx.skiko_stub(evil, os_arch="macos-arm64", version="0.150.1", entries=kept)
+        self.fx.write_manifest()
+        r = self.fx.image_check(evil)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("skiko stub content differs", r.stderr)
+        # The same source's properly trimmed stub still passes.
+        self.fx.skiko_stub(img, os_arch="macos-arm64", version="0.150.1", trimmed=True)
+        r2 = self.fx.image_check(img)
+        self.assertEqual(0, r2.returncode, r2.stdout + r2.stderr)
+
+    def test_trimmed_stub_rejects_a_removed_entry(self):
+        """Removing a manifest entry from the trimmed stub — the classic
+        malicious-removal case — breaks the expected content."""
+        img = self.flat_image(manifest_skiko=False)
+        entries = self.fx.default_skiko_entries("macos-arm64")
+        self.fx.skiko_source("macos-arm64", "0.150.1", entries=entries, trimmed=True)
+        stub_entries = [
+            (n, d) for n, d in entries if n != "META-INF/MANIFEST.MF"
+        ]
+        self.fx.skiko_stub(
+            img, os_arch="macos-arm64", version="0.150.1",
+            entries=stub_entries, trimmed=True,
+        )
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("skiko stub content differs", r.stderr)
+
+    def test_stub_record_with_an_unexpected_fourth_field_fails(self):
+        img = self.flat_image()
+        self.fx.skiko_source("linux-x64", "0.9.30")
+        stem = "skiko-awt-runtime-linux-x64-0.9.30.jar"
+        self.fx.stub_rows[stem] = self.fx.stub_rows[stem] + "  extra-field"
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("malformed skiko stub record", r.stderr)
+
+    def test_trimmed_linux_stub_keeps_the_three_field_record(self):
+        """Measured 0.150.1 layout: the linux and windows jars carry no foreign
+        arch, so their trim is a no-op and the record keeps its three fields."""
+        img = self.flat_image(manifest_skiko=False)
+        self.fx.skiko_source("linux-x64", "0.9.30", trimmed=True)
+        row = self.fx.stub_rows["skiko-awt-runtime-linux-x64-0.9.30.jar"]
+        self.assertNotIn("removed:", row)
+        self.fx.skiko_stub(img, os_arch="linux-x64", version="0.9.30", trimmed=True)
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
     # ----- I2: the macOS runtime home is Contents/runtime/Contents/Home -------
 
     def test_macos_app_runtime_sources_image(self):
@@ -839,6 +961,7 @@ esac
         image = self.root / app
         (image / "Contents/MacOS/Neutrodyne").chmod(0o755)
         (image / "Contents/runtime/Contents/Home/legal/LICENSE.link").symlink_to("LICENSE")
+        self.stamp_epoch(image)
         self.fx.write_manifest()
         # These are sealed-bundle properties, checked after the shipped extractor runs.
         self.fake("codesign", '''
@@ -872,6 +995,33 @@ for image; do :; done
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
         self.assertIn("java.base", out)
+
+    def test_make_runtime_sources_md_records_the_locale_restriction(self):
+        """The generated document names --include-locales=en,de (read from the
+        convention plugin's JLINK_INCLUDED_LOCALES) and the one legal file the
+        restriction drops — never a hand-deleted notice (11 jlink modules)."""
+        self.mac_app()
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--image", "imgs/Neutrodyne.app", "--out", "RUNTIME-SOURCES.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
+        self.assertIn("en,de", out)
+        self.assertIn("legal/jdk.localedata/thaidict.md", out)
+
+    def test_make_runtime_sources_md_reads_the_plugin_without_an_image(self):
+        """The no-image path derives the module list and the locale set from the
+        convention plugin source (the same constants the build uses)."""
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--out", "OUT.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "OUT.md").read_text(encoding="utf-8")
+        self.assertIn("java.base", out)
+        self.assertIn("jdk.localedata", out)
+        self.assertIn("en,de", out)
 
     def test_flat_runtime_still_works(self):
         """The flat lib/runtime root keeps resolving as before."""
@@ -1004,7 +1154,15 @@ for image; do :; done
             dst = self.root / f"{name}.payload" / "Neutrodyne.app"
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(src, dst)
+            self.stamp_epoch(dst)
         return name
+
+    def stamp_epoch(self, root: Path):
+        """Set every non-symlink entry below root to the fixed 1980-02-01 UTC
+        epoch, the way a trained image's post-image-restored payload ships."""
+        for p in sorted(root.rglob("*")) + [root]:
+            if not p.is_symlink():
+                os.utime(p, (self.AOT_EPOCH_S, self.AOT_EPOCH_S), follow_symlinks=False)
 
     def test_dmg_payload_gets_the_image_scan(self):
         app = self.mac_app()
@@ -1065,6 +1223,200 @@ for image; do :; done
         )
         self.assertNotEqual(0, r.returncode)
         self.assertIn("attach", r.stderr)
+
+    # ----- 11 AOT cache: the .cfg classpath's fixed epoch ----------------------
+    # The archive binds only its classpath inputs (the JARs app.classpath
+    # names); the front-ends own every other entry's metadata.
+
+    AOT_EPOCH_S = 318211200  # 1980-02-01T00:00:00Z — AOT_IMAGE_TIMESTAMP_MS
+
+    def aot_cfg(self, img):
+        """Make the image AOT-configured: a launcher .cfg whose app.classpath
+        lists every JAR beside it and whose java-options read the trained
+        archive, plus the archive file. Returns the app dir."""
+        for appdir in (f"{img}/app", f"{img}/Contents/app", f"{img}/lib/app"):
+            base = self.root / appdir
+            if base.is_dir():
+                jars = sorted(p.name for p in base.glob("*.jar"))
+                lines = ["[Application]"] + [
+                    f"app.classpath=$APPDIR/{n}" for n in jars
+                ] + ["", "[JavaOptions]",
+                     "java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot"]
+                self.fx.write(f"{appdir}/Neutrodyne.cfg",
+                              ("\n".join(lines) + "\n").encode())
+                self.fx.write(f"{appdir}/neutrodyne.aot", b"AOT")
+                return appdir
+        raise AssertionError(f"no app dir in {img}")
+
+    def tarball(self, image_rel, name="dist/neutrodyne.tar.gz", epoch=AOT_EPOCH_S,
+                jar_epoch=None):
+        """A .tar.gz package holding <image_rel>/…; JAR entries record jar_epoch
+        (default: epoch) and every other entry records epoch — only the
+        classpath JARs' trained times are the archive's bound inputs."""
+        src = self.root / image_rel
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(path, "w:gz") as tar:
+            for p in sorted(src.rglob("*")):
+                rel = str(p.relative_to(src))
+                info = tar.gettarinfo(str(p), arcname=rel)
+                info.mtime = jar_epoch if (
+                    jar_epoch is not None and rel.endswith(".jar")
+                ) else epoch
+                if p.is_file():
+                    with open(p, "rb") as fh:
+                        tar.addfile(info, fh)
+                else:
+                    tar.addfile(info)
+        return name
+
+    def test_targz_payload_epoch_passes(self):
+        """A trained payload whose classpath JARs carry the fixed epoch."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    @unittest.skipUnless(sys.platform == "darwin", "needs the macOS system Bash")
+    def test_macos_system_bash_runs_the_image_and_epoch_gates(self):
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        result = self.fx.run(
+            self.root / "scripts/ci/check-desktop-image.sh", self.tarball(img),
+            executable_shell="/bin/bash",
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("check-desktop-image: OK", result.stdout)
+        self.assertIn("size: package", result.stdout)
+        syntax = subprocess.run(
+            ["/bin/bash", "-n", str(self.root / "scripts/ci/check-desktop-image.sh")],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+
+    @unittest.skipUnless(sys.platform == "darwin", "needs the macOS system Bash")
+    def test_macos_system_bash_rejects_a_drifted_classpath(self):
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        result = self.fx.run(
+            self.root / "scripts/ci/check-desktop-image.sh",
+            self.tarball(img, jar_epoch=self.AOT_EPOCH_S + 1),
+            executable_shell="/bin/bash",
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("off the trained epoch", result.stderr)
+        self.assertNotIn("check-desktop-image: OK", result.stdout)
+
+    @unittest.skipUnless(sys.platform == "darwin", "needs the macOS system Bash")
+    def test_macos_system_bash_rejects_an_epoch_probe_failure(self):
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        self.fake("python3", "if [ -n \"${APPDIR:-}\" ]; then exit 37; fi\nexec \"" + sys.executable + "\" \"$@\"\n")
+        result = self.fx.run(
+            self.root / "scripts/ci/check-desktop-image.sh", self.tarball(img),
+            executable_shell="/bin/bash",
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("cannot inspect the packaged AOT classpath epoch", result.stderr)
+
+    def test_targz_payload_drifted_jar_fails(self):
+        """A one-second drift on a classpath JAR — what jpackage's
+        attribute-losing staging copy produces without the post-image hook —
+        is a violation."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img, jar_epoch=self.AOT_EPOCH_S + 1))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("off the trained epoch", r.stderr)
+
+    def test_targz_non_classpath_restamp_passes(self):
+        """The package front-ends own non-classpath metadata: drifted
+        directories, launchers, legal files and the .cfg/.aot themselves do not
+        false-fail — the archive binds the classpath inputs only."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(
+            img, epoch=self.AOT_EPOCH_S + 3600, jar_epoch=self.AOT_EPOCH_S))
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_targz_undeclared_jar_fails(self):
+        """A JAR beside the .cfg that the classpath does not declare is outside
+        the archive's consistency set: fail closed."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        data = b"EXTRA"
+        self.fx.write(f"{img}/lib/app/{self.fx.manifest('extra', data)}", data)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("not on the .cfg classpath", r.stderr)
+
+    def test_targz_classpath_directory_fails_closed(self):
+        """A classpath entry resolving to a directory carries no bindable file
+        metadata: fail closed."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        appdir = self.aot_cfg(img)
+        cfg = self.root / appdir / "Neutrodyne.cfg"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace(
+            "[JavaOptions]", "app.classpath=$APPDIR/cpdir\n\n[JavaOptions]"),
+            encoding="utf-8")
+        self.fx.write(f"{appdir}/cpdir/notes.txt", b"NOTES")
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("not a regular file", r.stderr)
+
+    def test_targz_missing_archive_fails(self):
+        """The flag without the archive file is a strict-launch failure the
+        package must not ship."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        (self.root / f"{img}/lib/app/neutrodyne.aot").unlink()
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("neutrodyne.aot is missing", r.stderr)
+
+    def test_zip_payload_gets_the_image_scan(self):
+        """The checker's ZIP extraction boundary (extract-zip.py off Darwin, ditto
+        on Darwin) feeds the same image rules and restores the artifact's entry
+        times instead of the extraction time — the .cfg classpath JARs included."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        archive = self.root / "dist/neutrodyne-1.0.0-windows-x64.zip"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        utc_extra = struct.pack("<HHB", 0x5455, 5, 0x01) + struct.pack("<I", self.AOT_EPOCH_S)
+        with zipfile.ZipFile(archive, "w") as out:
+            for path in sorted((self.root / img).rglob("*")):
+                rel = path.relative_to(self.root / img)
+                name = str(rel) + "/" if path.is_dir() else str(rel)
+                # The producer writes the DOS local time plus the UTC 0x5455
+                # field; either decodes to the trained epoch on this host.
+                info = zipfile.ZipInfo(name, date_time=time.localtime(self.AOT_EPOCH_S)[:6])
+                info.create_system = 3
+                info.external_attr = path.stat().st_mode << 16
+                info.extra = utc_extra
+                info.compress_type = zipfile.ZIP_STORED
+                out.writestr(info, path.read_bytes() if path.is_file() else b"")
+        r = self.fx.image_check(archive)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     # ----- rule 9: MSI checks through a faked Windows boundary -----------------
     # Fake cygpath records the MSYS -> native conversion; fake powershell.exe

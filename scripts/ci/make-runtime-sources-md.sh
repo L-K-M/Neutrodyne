@@ -76,6 +76,16 @@ else
 fi
 [ -n "$modules" ] || { echo "could not determine the jlink module list" >&2; exit 2; }
 
+# The locale restriction of jdk.localedata (11 jlink modules, PB27): the image's
+# release file records no locale set, so the list always comes from the convention
+# plugin — the same constant the build's jlink task reads.
+include_locales="$(
+    awk '/internal val JLINK_INCLUDED_LOCALES *=/{in_list=1} in_list{print} in_list&&/\)/{exit}' \
+        "$REPO_ROOT/build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt" \
+        | grep -oE '"[a-zA-Z-]+"' | tr -d '"' | paste -sd, -
+)"
+[ -n "$include_locales" ] || { echo "could not determine the jlink locale list" >&2; exit 2; }
+
 {
     cat <<EOF
 # Runtime sources — Neutrodyne desktop
@@ -115,11 +125,15 @@ EOF
 ## jlink
 
 The bundled runtime is produced by jlink from the archives above; it only selects
-modules and strips debug data, headers and man pages. The plugins applied:
---add-modules, --strip-debug (which on Linux also strips native debug symbols,
-equivalent to objcopy -g, via jlink's strip-native-debug-symbols plugin),
---strip-native-commands, --no-header-files, --no-man-pages. One list serves every
-target:
+modules, restricts locale data to the shipped locales and strips debug data,
+headers and man pages. The plugins applied: --add-modules, --include-locales
+(keeping $include_locales inside jdk.localedata; every other locale falls back to
+the root locale — jlink's own selection drops exactly one legal file,
+legal/jdk.localedata/thaidict.md, the credit of the Thai dictionary whose locale
+data is excluded; no legal file is removed by hand), --strip-debug (which on Linux
+also strips native debug symbols, equivalent to objcopy -g, via jlink's
+strip-native-debug-symbols plugin), --strip-native-commands, --no-header-files,
+--no-man-pages. One list serves every target:
 
     $modules
 

@@ -36,6 +36,10 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnit()
+    // Task properties with no input/output annotation fail validatePlugins;
+    // the scriptExtension gap reached the Windows runner because CI invokes
+    // test directly, so the public check rides along with it.
+    dependsOn("validatePlugins")
 }
 
 gradlePlugin {
