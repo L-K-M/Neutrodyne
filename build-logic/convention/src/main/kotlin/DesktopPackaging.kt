@@ -525,14 +525,17 @@ internal object CanonicalJarHash {
 
     /**
      * The Compose-repacked skiko stub and the native files it extracts, derived from the
-     * Licensee-checked source artifact [file] and the target's extraction rule [extracted]
-     * (an entry is extracted when its name, with any `.sha256` suffix removed, is in the set).
-     * The expected stub hash is the canonical content identity of the remaining entries, so
+     * Licensee-checked source artifact [file], the target's extraction rule [extracted]
+     * (an entry is extracted when its name, with any `.sha256` suffix removed, is in the set)
+     * and the foreign-architecture natives [removed] the derived stub drops by the same
+     * suffix rule ([TrimSkikoStubTask]; empty keeps Compose's repack untouched). The
+     * expected stub hash is the canonical content identity of the remaining entries, so
      * the image checker can bind the stub without ever trusting a hash taken from the image.
      */
     data class StubDerivation(
         val expectedHash: String,
         val extracted: List<Pair<String, String>>,
+        val removed: List<Pair<String, String>> = emptyList(),
     )
 
     fun of(file: File): String {
@@ -549,9 +552,13 @@ internal object CanonicalJarHash {
     fun stubOf(
         file: File,
         extracted: Set<String>,
+        removed: Set<String> = emptySet(),
     ): StubDerivation {
+        require(extracted.none { it in removed }) {
+            "a skiko entry cannot be both extracted and removed: ${extracted intersect removed}"
+        }
         val zip = java.util.zip.ZipFile(file)
-        return zip.use { z -> computeStub(z, extracted) }
+        return zip.use { z -> computeStub(z, extracted, removed) }
     }
 
     private fun compute(zip: java.util.zip.ZipFile): String {
@@ -581,6 +588,7 @@ internal object CanonicalJarHash {
     private fun computeStub(
         zip: java.util.zip.ZipFile,
         extracted: Set<String>,
+        removed: Set<String> = emptySet(),
     ): StubDerivation {
         val entries = zip.entries().toList()
         val seen = HashSet<String>()
@@ -592,6 +600,7 @@ internal object CanonicalJarHash {
         }
         val remaining = mutableListOf<Pair<String, ByteArray>>()
         val extractedFiles = mutableListOf<Pair<String, String>>()
+        val removedFiles = mutableListOf<Pair<String, String>>()
         for (entry in entries) {
             val base =
                 if (entry.name.endsWith(".sha256")) {
@@ -608,6 +617,9 @@ internal object CanonicalJarHash {
             if (base in extracted) {
                 extractedFiles += entry.name.substringAfterLast('/') to
                     sha256Hex(normalizedEntryBytes(entry.name, bytes))
+            } else if (base in removed) {
+                removedFiles += entry.name.substringAfterLast('/') to
+                    sha256Hex(normalizedEntryBytes(entry.name, bytes))
             } else {
                 remaining += entry.name to normalizedEntryBytes(entry.name, bytes)
             }
@@ -619,7 +631,11 @@ internal object CanonicalJarHash {
             outer.update(hexToBytes(MessageDigest.getInstance("SHA-256").digest(bytes)))
             outer.update('\n'.code.toByte())
         }
-        return StubDerivation(hexToString(outer.digest()), extractedFiles.sortedBy { it.first })
+        return StubDerivation(
+            hexToString(outer.digest()),
+            extractedFiles.sortedBy { it.first },
+            removedFiles.sortedBy { it.first },
+        )
     }
 
     private fun hexToString(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
@@ -933,6 +949,26 @@ internal fun skikoExtractedNames(
     }
 
 /**
+ * The foreign-architecture skiko native the derived stub must not ship. Of the four
+ * pinned artifacts (skiko-awt-runtime 0.150.1, measured 2026-11-09) only the macOS jar
+ * carries another architecture's library besides the target's (`libskiko-macos-x64.dylib`,
+ * 22,190,816 bytes, beside `libskiko-macos-arm64.dylib`); the linux-x64, linux-arm64 and
+ * windows-x64 jars ship exactly their extracted set, so their derived stubs stay
+ * untouched. A `.sha256` sibling is removed with its library (the extraction rule's
+ * suffix handling). [TrimSkikoStubTask] fails closed when a name listed here is absent
+ * from the pinned source artifact, so a repin that changes the layout stops the build
+ * until this rule is re-measured against the actual artifacts.
+ */
+internal fun skikoForeignNames(
+    os: String,
+    arch: String,
+): Set<String> =
+    when (os) {
+        "macos" -> setOf("libskiko-macos-${if (arch == "arm64") "x64" else "arm64"}.dylib")
+        else -> emptySet()
+    }
+
+/**
  * Writes the Licensee-checked runtime classpath as `<canonical sha256>  name` lines
  * (09 Build-output checks): `check-desktop-image.sh` asserts every JAR of an image is
  * one of these files. Same-named JARs — `api-desktop.jar` comes from four modules, and
@@ -943,7 +979,10 @@ internal fun skikoExtractedNames(
  * extracts the target's native library and repacks the rest under a fresh content-md5 stamp.
  * Its stub record (`<expected stub hash>  <source name>  <extracted file>=<hash>,…`) is
  * derived here from the source artifact, so the checker binds the stub's canonical content
- * instead of accepting a name prefix.
+ * instead of accepting a name prefix. A fourth `removed:<file>=<hash>,…` field appears when
+ * [skikoForeignNames] drops the foreign-architecture native from the derived stub; the
+ * field is the trim's provenance record (the image carries nothing left to check it
+ * against — the expected hash already binds the trimmed entry set exactly).
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -978,9 +1017,243 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val match = SKIKO_RUNTIME_JAR.matchEntire(file.name) ?: return null
         val os = match.groupValues[1]
         val arch = match.groupValues[2]
-        val stub = CanonicalJarHash.stubOf(file, skikoExtractedNames(os, arch))
+        val stub =
+            CanonicalJarHash.stubOf(
+                file,
+                skikoExtractedNames(os, arch),
+                skikoForeignNames(os, arch),
+            )
         val extracted = stub.extracted.joinToString(",") { "${it.first}=${it.second}" }
-        return "${stub.expectedHash}  ${file.name}  $extracted"
+        val removed =
+            stub.removed
+                .joinToString(",") { "${it.first}=${it.second}" }
+                .takeIf { it.isNotEmpty() }
+                ?.let { "  removed:$it" }
+                ?: ""
+        return "${stub.expectedHash}  ${file.name}  $extracted$removed"
+    }
+}
+
+/** One trim run's outcome: the stub [stubFile], its size across the rewrite and the removed entry names. */
+internal data class SkikoStubTrim(
+    val stubFile: File,
+    val beforeBytes: Long,
+    val afterBytes: Long,
+    val removed: List<String>,
+)
+
+/**
+ * The stub trim itself, shared by [TrimSkikoStubTask] and its tests: locates Compose's
+ * repacked stub of [source] in the image's app dir, refuses anything that is not exactly
+ * the source minus the target's extracted entries, drops the foreign-architecture
+ * natives of [skikoForeignNames] (`.sha256` siblings included) and rewrites the JAR
+ * atomically. Fails closed when a declared foreign entry is absent from the pinned
+ * source, or when any native entry would remain in the derived stub — a repin that
+ * changes the upstream layout stops the build instead of shipping or silently removing.
+ * A stub that already matches the trimmed derivation is left untouched. [resign] runs
+ * on macOS after a rewrite (the new JAR bytes break the bundle's ad-hoc seal); the task
+ * passes [resignMacImageAdHoc], tests a recorder.
+ */
+internal fun trimSkikoStub(
+    image: File,
+    source: File,
+    os: String,
+    arch: String,
+    resign: (File) -> Unit,
+): SkikoStubTrim {
+    val extracted = skikoExtractedNames(os, arch)
+    val foreign = skikoForeignNames(os, arch)
+    val preTrim = CanonicalJarHash.stubOf(source, extracted)
+    val trimmed = CanonicalJarHash.stubOf(source, extracted, foreign)
+
+    // No arbitrary missing entry: every declared foreign native must exist in the
+    // pinned source, and the derived stub must keep no native payload at all —
+    // anything a future artifact layout adds fails here instead of shipping.
+    val dropped = extracted + foreign
+    java.util.zip.ZipFile(source).use { zip ->
+        for (name in foreign) {
+            if (zip.getEntry(name) == null) {
+                throw GradleException(
+                    "the pinned skiko artifact ${source.name} no longer carries the foreign " +
+                        "native $name; re-measure the upstream artifacts and update " +
+                        "skikoForeignNames (11 Image scan rules)",
+                )
+            }
+        }
+        for (entry in zip.entries().asSequence()) {
+            val base = if (entry.name.endsWith(".sha256")) entry.name.removeSuffix(".sha256") else entry.name
+            if (base in dropped) continue
+            if (base.endsWith(".dylib") || base.endsWith(".so") || base.endsWith(".dll") || base == "icudtl.dat") {
+                throw GradleException(
+                    "the derived skiko stub would still carry the native entry ${entry.name}; " +
+                        "only the declared foreign set of skikoForeignNames may be removed " +
+                        "(11 Image scan rules)",
+                )
+            }
+        }
+    }
+
+    val appDir = File(image, aotImageLayout(os).appDir)
+    val stem = source.name.removeSuffix(".jar")
+    val stubs =
+        appDir
+            .listFiles { f -> f.isFile && f.name.startsWith("skiko-awt-runtime-") && f.name.endsWith(".jar") }
+            .orEmpty()
+            .filter { it.name == source.name || it.name.startsWith("$stem-") }
+    if (stubs.isEmpty()) {
+        val present =
+            appDir
+                .listFiles { f -> f.isFile && f.name.startsWith("skiko-awt-runtime-") }
+                .orEmpty()
+                .joinToString { it.name }
+        throw GradleException(
+            "the image carries no repacked skiko stub for ${source.name} (skiko jars present: " +
+                "${present.ifEmpty { "none" }}); createDistributable derives it",
+        )
+    }
+    if (stubs.size > 1) {
+        throw GradleException(
+            "the image carries more than one skiko stub for ${source.name}: " +
+                stubs.joinToString { it.name },
+        )
+    }
+    val stubFile = stubs.single()
+
+    val actual = CanonicalJarHash.of(stubFile)
+    if (actual == trimmed.expectedHash) {
+        return SkikoStubTrim(stubFile, stubFile.length(), stubFile.length(), emptyList())
+    }
+    if (actual != preTrim.expectedHash) {
+        throw GradleException(
+            "the image's skiko stub ${stubFile.name} is not Compose's repack of the " +
+                "Licensee-checked source artifact ${source.name} (canonical content differs)",
+        )
+    }
+
+    val before = stubFile.length()
+    rewriteSkikoStubWithout(stubFile, foreign)
+    if (CanonicalJarHash.of(stubFile) != trimmed.expectedHash) {
+        throw GradleException(
+            "rewriting the skiko stub ${stubFile.name} did not produce the derived trimmed content",
+        )
+    }
+    if (os == "macos") {
+        resign(image)
+    }
+    return SkikoStubTrim(stubFile, before, stubFile.length(), trimmed.removed.map { it.first })
+}
+
+/** Rewrites [stub] keeping every entry except [dropBases] and their `.sha256` siblings. */
+private fun rewriteSkikoStubWithout(
+    stub: File,
+    dropBases: Set<String>,
+) {
+    val rewritten = File(stub.parentFile, stub.name + ".trimming")
+    try {
+        ZipFile(stub).use { source ->
+            ZipOutputStream(rewritten.outputStream().buffered()).use { out ->
+                for (entry in source.entries().asSequence()) {
+                    val base = if (entry.name.endsWith(".sha256")) entry.name.removeSuffix(".sha256") else entry.name
+                    if (base in dropBases) continue
+                    val copy = ZipEntry(entry.name)
+                    copy.time = entry.time
+                    if (entry.comment != null) copy.comment = entry.comment
+                    out.putNextEntry(copy)
+                    if (!entry.isDirectory) {
+                        source.getInputStream(entry).copyTo(out)
+                    }
+                    out.closeEntry()
+                }
+            }
+        }
+    } catch (e: Exception) {
+        rewritten.delete()
+        throw e
+    }
+    if (!stub.delete() || !rewritten.renameTo(stub)) {
+        rewritten.delete()
+        throw GradleException("could not rewrite the skiko stub $stub")
+    }
+}
+
+/**
+ * Rewrites Compose's repacked skiko stub inside the app image without the
+ * foreign-architecture natives of [skikoForeignNames] (11 Image scan rules). Registered
+ * as `trimSkikoStub`, depending on `createDistributable` and carrying the same
+ * Licensee-checked classpath as [WriteDesktopRuntimeClasspath]; `trainAotCache` depends
+ * on it, so every image path — packaging, the mac-zip flow's bare `createDistributable`
+ * and the dev assemble image — carries the trimmed stub before the AOT cache records the
+ * classpath JARs' sizes and timestamps (a trim after the training would invalidate the
+ * recorded identity). Fails closed when the runtime classpath carries no skiko jar while
+ * the image does (or vice versa), when several would compete, or when the jar's target
+ * does not match the packaging target; [trimSkikoStub] owns the content checks.
+ */
+abstract class TrimSkikoStubTask : DefaultTask() {
+    /** The app image root — internal: the declared inputs below identify the trim. */
+    @get:Internal
+    abstract val appImage: DirectoryProperty
+
+    /** The Licensee-checked runtime classpath whose skiko jar is the stub's source. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val runtimeClasspath: ConfigurableFileCollection
+
+    @get:Input
+    abstract val targetOs: Property<String>
+
+    @get:Input
+    abstract val targetArch: Property<String>
+
+    @TaskAction
+    fun trim() {
+        val os = targetOs.get()
+        val arch = targetArch.get()
+        val sources =
+            runtimeClasspath.files.filter { SKIKO_RUNTIME_JAR.matchEntire(it.name) != null }
+        val appDir = File(appImage.get().asFile, aotImageLayout(os).appDir)
+        val skikoJars =
+            appDir
+                .listFiles { f -> f.isFile && f.name.startsWith("skiko-awt-runtime-") && f.name.endsWith(".jar") }
+                .orEmpty()
+                .toList()
+
+        if (sources.isEmpty()) {
+            if (skikoJars.isNotEmpty()) {
+                throw GradleException(
+                    "the image carries a skiko runtime JAR (${skikoJars.first().name}) but the " +
+                        "runtime classpath has no Licensee-checked source artifact for it",
+                )
+            }
+            return
+        }
+        if (sources.size > 1) {
+            throw GradleException(
+                "the runtime classpath carries more than one skiko runtime jar: " +
+                    sources.joinToString { it.name },
+            )
+        }
+        val source = sources.single()
+        val match = requireNotNull(SKIKO_RUNTIME_JAR.matchEntire(source.name))
+        if (match.groupValues[1] != os || match.groupValues[2] != arch) {
+            throw GradleException(
+                "the runtime classpath's skiko jar ${source.name} does not match the packaging target $os-$arch",
+            )
+        }
+
+        val outcome =
+            trimSkikoStub(appImage.get().asFile, source, os, arch) { image ->
+                resignMacImageAdHoc(image)
+            }
+        if (outcome.removed.isEmpty()) {
+            logger.lifecycle(
+                "trimSkikoStub: ${outcome.stubFile.name} carries no foreign-architecture native",
+            )
+        } else {
+            logger.lifecycle(
+                "trimSkikoStub: ${outcome.stubFile.name} ${outcome.beforeBytes} -> " +
+                    "${outcome.afterBytes} bytes (removed ${outcome.removed.joinToString()})",
+            )
+        }
     }
 }
 
@@ -1327,31 +1600,50 @@ internal fun Project.registerDesktopPackagingTasks(
         }
 
     // The runtime-classpath manifest is registered here, ahead of the AOT training task:
-    // the training inputs bind it so a JAR change retrains the archive.
+    // the training inputs bind it so a JAR change retrains the archive. The stub trim
+    // shares the classpath: it derives the trimmed stub from the same source artifacts.
+    // Compose resolves project dependencies to their jar artifacts for the image,
+    // so both must ask for jar artifacts too (otherwise project deps show
+    // up as classes directories) and include this project's own jar.
+    val runtimeClasspathJars =
+        configurations.named("runtimeClasspath").map { conf ->
+            conf.incoming
+                .artifactView {
+                    attributes {
+                        attribute(
+                            ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
+                            ArtifactTypeDefinition.JAR_TYPE,
+                        )
+                    }
+                }.files
+        }
     tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
         description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
-        // Compose resolves project dependencies to their jar artifacts for the image,
-        // so the manifest must ask for jar artifacts too (otherwise project deps show
-        // up as classes directories) and include this project's own jar.
-        runtimeClasspath.from(
-            configurations.named("runtimeClasspath").map { conf ->
-                conf.incoming
-                    .artifactView {
-                        attributes {
-                            attribute(
-                                ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
-                                ArtifactTypeDefinition.JAR_TYPE,
-                            )
-                        }
-                    }.files
-            },
-        )
+        runtimeClasspath.from(runtimeClasspathJars)
         runtimeClasspath.from(tasks.named("jar"))
         manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
         stubManifest.set(
             layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
         )
     }
+
+    // The stub trim runs between createDistributable and the AOT training: trainAotCache
+    // depends on it below, and the mac-zip flow's bare createDistributable reaches it
+    // through the training finalizer's dependency chain (a dev image with no install kind
+    // trains nothing, but the finalizer's dependencies still trim the stub so the image
+    // matches what writeDesktopRuntimeClasspath records for it).
+    val image = appImage
+    val trimSkikoStub =
+        tasks.register<TrimSkikoStubTask>("trimSkikoStub") {
+            description =
+                "Rewrites the image's skiko stub JAR without the foreign-architecture natives (11 Image scan rules)."
+            dependsOn("createDistributable")
+            this.appImage.set(image)
+            runtimeClasspath.from(runtimeClasspathJars)
+            runtimeClasspath.from(tasks.named("jar"))
+            targetOs.set(target.osWire)
+            targetArch.set(target.archWire)
+        }
 
     // --- AOT cache: one training launch writes $APPDIR/neutrodyne.aot into the image (PO-42) ---
     // Every packaging invocation trains: package* tasks depend on the task, and
@@ -1360,7 +1652,6 @@ internal fun Project.registerDesktopPackagingTasks(
     // createDistributable's output, package* need the trained image, and createDistributable
     // never depends on a package task.
     val aotLayout = aotImageLayout(target.osWire)
-    val image = appImage
     val runtimeJavaName = "java" + if (target.osWire == "windows") ".exe" else ""
     val trainAotCache =
         tasks.register<TrainAotCacheTask>("trainAotCache") {
@@ -1371,6 +1662,7 @@ internal fun Project.registerDesktopPackagingTasks(
                 "createDistributable",
                 setupRuntime,
                 "writeDesktopRuntimeClasspath",
+                trimSkikoStub,
                 ":playback:native:buildFfmpeg",
                 ":playback:native:buildNdmedia",
             )

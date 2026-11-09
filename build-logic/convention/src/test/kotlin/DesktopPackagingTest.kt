@@ -22,6 +22,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Packaging helpers of 11 (Packaging pipeline, Links and files from the OS):
@@ -662,6 +663,350 @@ class DesktopPackagingTest {
             // The extracted files are recorded as basename=normalized-hash, comma-separated.
             assertEquals(2, parts[2].split(",").size)
             assertTrue(parts[2].startsWith("$native=${sha256Hex("NATIVE-X64".toByteArray())}"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the macos stub record omits the foreign-architecture native from the expected stub`() {
+        val root = Files.createTempDirectory("skiko-trim").toFile()
+        try {
+            // The pinned macos-arm64 artifact's measured layout (skiko 0.150.1):
+            // the target's native pair plus the other macOS architecture's pair.
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-macos-arm64-0.150.1.jar",
+                    zipBytes(entries),
+                )
+
+            classpathManifestTask(root, source).write()
+
+            val parts = File(root, "manifest-stubs.txt").readLines().single().split("  ")
+            // The expected stub is the source minus the extracted pair AND the
+            // foreign pair: the derived stub ships no other-architecture native.
+            val expected =
+                entries.filter { !it.first.startsWith(native) && !it.first.startsWith(foreign) }
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "expected.jar", zipBytes(expected))),
+                parts[0],
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko foreign-native rule matches the pinned upstream artifacts`() {
+        // Measured 2026-11-09 on the four skiko-awt-runtime 0.150.1 artifacts: only the
+        // macOS jar carries another matrix architecture's native beside the target's;
+        // the linux and windows jars ship exactly their extracted set.
+        assertEquals(setOf("libskiko-macos-x64.dylib"), skikoForeignNames("macos", "arm64"))
+        assertEquals(setOf("libskiko-macos-arm64.dylib"), skikoForeignNames("macos", "x64"))
+        assertEquals(emptySet(), skikoForeignNames("linux", "x64"))
+        assertEquals(emptySet(), skikoForeignNames("linux", "arm64"))
+        assertEquals(emptySet(), skikoForeignNames("windows", "x64"))
+    }
+
+    @Test
+    fun `the skiko stub derivation removes the declared foreign natives`() {
+        val root = Files.createTempDirectory("skiko-removed").toFile()
+        try {
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(
+                    root,
+                    "skiko-awt-runtime-macos-arm64-0.150.1.jar",
+                    zipBytes(entries),
+                )
+
+            val derivation =
+                CanonicalJarHash.stubOf(source, setOf(native), setOf(foreign))
+
+            // The expected stub keeps exactly the non-native entries: the foreign pair
+            // is gone with its .sha256 sibling, like the extracted pair before it.
+            val remaining = entries.take(2)
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "stub.jar", zipBytes(remaining))),
+                derivation.expectedHash,
+            )
+            assertEquals(listOf(native, "$native.sha256"), derivation.extracted.map { it.first })
+            assertEquals(
+                listOf(foreign, "$foreign.sha256"),
+                derivation.removed.map { it.first },
+            )
+            assertEquals(
+                sha256Hex("NATIVE-X64".toByteArray()),
+                derivation.removed.single { it.first == foreign }.second,
+            )
+            // The removal is the extraction's mirror: refusing a name claimed by both.
+            assertFailsWith<IllegalArgumentException> {
+                CanonicalJarHash.stubOf(source, setOf(native, foreign), setOf(foreign))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the classpath manifest records the removed skiko entries`() {
+        val root = Files.createTempDirectory("skiko-removed-manifest").toFile()
+        try {
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val macEntries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val macSource =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(macEntries))
+            val linuxEntries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    "libskiko-linux-x64.so" to "NATIVE-X64".toByteArray(),
+                    "libskiko-linux-x64.so.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val linuxSource =
+                writeJar(root, "skiko-awt-runtime-linux-x64-0.150.1.jar", zipBytes(linuxEntries))
+
+            classpathManifestTask(root, macSource, linuxSource).write()
+
+            val lines = File(root, "manifest-stubs.txt").readLines()
+            assertEquals(2, lines.size)
+            val mac = lines.single { it.contains("macos-arm64") }.split("  ")
+            assertEquals(4, mac.size)
+            assertTrue(mac[3].startsWith("removed:libskiko-macos-x64.dylib="))
+            // The trimmed expectation is the source minus both native pairs.
+            assertEquals(
+                CanonicalJarHash.of(writeJar(root, "mac-stub.jar", zipBytes(macEntries.take(2)))),
+                mac[0],
+            )
+            // A target whose upstream jar carries no foreign native keeps the
+            // three-field record: the trim is a no-op there, not a hidden change.
+            val linux = lines.single { it.contains("linux-x64") }.split("  ")
+            assertEquals(3, linux.size)
+            assertEquals(
+                CanonicalJarHash.of(
+                    writeJar(
+                        root,
+                        "linux-stub.jar",
+                        zipBytes(linuxEntries.filter { !it.first.startsWith("libskiko-linux-x64.so") }),
+                    ),
+                ),
+                linux[0],
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim rewrites only the foreign natives`() {
+        val root = Files.createTempDirectory("skiko-trim-fn").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/" to ByteArray(0),
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(entries))
+            // Compose's repack: the extracted pair out of the jar, into the app dir.
+            val stubBytes = zipBytes(entries.filter { !it.first.startsWith(native) })
+            val stub = writeJar(appDir, "skiko-awt-runtime-macos-arm64-0.150.1-cafe1.jar", stubBytes)
+            File(appDir, native).writeBytes("NATIVE-ARM64".toByteArray())
+            File(appDir, "$native.sha256").writeBytes("0".repeat(64).toByteArray())
+            var resigned = 0
+
+            val outcome =
+                trimSkikoStub(image, source, "macos", "arm64") { resigned++ }
+
+            assertEquals(stub, outcome.stubFile)
+            assertEquals(listOf(foreign, "$foreign.sha256"), outcome.removed)
+            assertTrue(outcome.afterBytes < outcome.beforeBytes)
+            assertEquals(1, resigned)
+            val trimmed = CanonicalJarHash.stubOf(source, setOf(native), setOf(foreign))
+            assertEquals(trimmed.expectedHash, CanonicalJarHash.of(stub))
+            // The extracted native beside the stub keeps its byte identity.
+            assertEquals("NATIVE-ARM64", File(appDir, native).readText())
+            // Re-running is a no-op that does not reseal.
+            val rerun = trimSkikoStub(image, source, "macos", "arm64") { resigned++ }
+            assertEquals(emptyList(), rerun.removed)
+            assertEquals(outcome.afterBytes, rerun.afterBytes)
+            assertEquals(1, resigned)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim refuses a stub that is not the source's repack`() {
+        val root = Files.createTempDirectory("skiko-trim-evil").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(entries))
+            // A stub with an added class entry: the malicious-removal/addition case.
+            val evil =
+                zipBytes(
+                    entries.filter { !it.first.startsWith(native) } +
+                        ("org/unchecked/Surprise.class" to "EVIL".toByteArray()),
+                )
+            writeJar(appDir, "skiko-awt-runtime-macos-arm64-0.150.1-bad1.jar", evil)
+
+            val failure =
+                assertFailsWith<GradleException> {
+                    trimSkikoStub(image, source, "macos", "arm64") {}
+                }
+            assertTrue(
+                failure.message!!.contains("is not Compose's repack"),
+                failure.message,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim refuses a source without the declared foreign native`() {
+        val root = Files.createTempDirectory("skiko-trim-missing").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            // A future macos artifact that ships only its own arch: the declared
+            // foreign entry no longer exists, so no arbitrary removal may happen.
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.160.0.jar", zipBytes(entries))
+
+            val failure =
+                assertFailsWith<GradleException> {
+                    trimSkikoStub(image, source, "macos", "arm64") {}
+                }
+            assertTrue(
+                failure.message!!.contains("no longer carries the foreign native"),
+                failure.message,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim refuses a stub that would keep a native`() {
+        val root = Files.createTempDirectory("skiko-trim-leftover").toFile()
+        try {
+            val image = File(root, "Neutrodyne.app")
+            val appDir = File(image, "Contents/app")
+            appDir.mkdirs()
+            val native = "libskiko-macos-arm64.dylib"
+            val foreign = "libskiko-macos-x64.dylib"
+            // A source that also carries a cross-OS native the rule does not name:
+            // the derived stub would ship it, so the trim fails instead.
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-ARM64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                    foreign to "NATIVE-X64".toByteArray(),
+                    "$foreign.sha256" to "1".repeat(64).toByteArray(),
+                    "libskiko-linux-x64.so" to "NATIVE-LINUX".toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-macos-arm64-0.150.1.jar", zipBytes(entries))
+
+            val failure =
+                assertFailsWith<GradleException> {
+                    trimSkikoStub(image, source, "macos", "arm64") {}
+                }
+            assertTrue(
+                failure.message!!.contains("would still carry the native entry"),
+                failure.message,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the skiko stub trim is a no-op for a target without foreign natives`() {
+        val root = Files.createTempDirectory("skiko-trim-linux").toFile()
+        try {
+            val image = File(root, "Neutrodyne")
+            val appDir = File(image, "lib/app")
+            appDir.mkdirs()
+            val native = "libskiko-linux-x64.so"
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    native to "NATIVE-X64".toByteArray(),
+                    "$native.sha256" to "0".repeat(64).toByteArray(),
+                )
+            val source =
+                writeJar(root, "skiko-awt-runtime-linux-x64-0.150.1.jar", zipBytes(entries))
+            val stubBytes = zipBytes(entries.filter { !it.first.startsWith(native) })
+            val stub = writeJar(appDir, "skiko-awt-runtime-linux-x64-0.150.1-feed2.jar", stubBytes)
+            val before = stub.readBytes()
+
+            val outcome = trimSkikoStub(image, source, "linux", "x64") { fail("no reseal off macOS") }
+
+            assertEquals(emptyList(), outcome.removed)
+            assertTrue(before.contentEquals(stub.readBytes()))
         } finally {
             root.deleteRecursively()
         }
