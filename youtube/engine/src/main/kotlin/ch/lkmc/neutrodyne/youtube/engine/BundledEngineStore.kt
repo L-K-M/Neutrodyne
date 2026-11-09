@@ -24,6 +24,7 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.nio.file.attribute.DosFileAttributeView
+import java.nio.file.attribute.PosixFileAttributeView
 
 /**
  * Main-process engine store (04 Engine updates): `active.json` names `current`/`previous`, the
@@ -769,7 +770,8 @@ private fun restoreEngineEntry(file: File): Boolean = setEngineEntryWritable(fil
 
 /**
  * Toggles an engine-tree entry's write protection with the host's own semantics. A
- * DOS-attribute file store sets or clears `dos:readonly` on files and directories alike;
+ * POSIX store keeps chmod semantics even when it also advertises DOS attributes. A
+ * DOS-only store sets or clears `dos:readonly` on files and directories alike;
  * on a directory that flag is only a marker and never ACL-protects the contents. Other
  * stores keep `File`'s POSIX chmod semantics — protection strips every write bit,
  * restoration grants owner write only. `File`'s own methods cannot serve Windows here:
@@ -781,6 +783,8 @@ private fun setEngineEntryWritable(
     file: File,
     writable: Boolean,
 ): Boolean {
+    val posix = Files.getFileAttributeView(file.toPath(), PosixFileAttributeView::class.java, NOFOLLOW_LINKS)
+    if (posix != null) return if (writable) file.setWritable(true, true) else file.setReadOnly()
     val dos = Files.getFileAttributeView(file.toPath(), DosFileAttributeView::class.java, NOFOLLOW_LINKS)
     if (dos != null) {
         return try {

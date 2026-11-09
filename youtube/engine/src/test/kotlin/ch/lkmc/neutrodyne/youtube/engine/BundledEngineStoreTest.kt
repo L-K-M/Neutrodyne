@@ -390,7 +390,7 @@ class BundledEngineStoreTest {
             compileFixture(candidate)
             val lib = candidate.libDir.toFile()
             // The marker is written last, certifying a source-free tree whose files and
-            // directories are all protected against modification.
+            // directories carry the platform's protection bits or read-only markers.
             assertTrue(File(lib, ".compiled-3.14").isFile)
             assertEquals(candidate.marker, EngineCompileMarkers.stored(candidate.libDir, paths.pythonMinor))
             assertTrue(EngineCompileMarkers.matches(candidate.libDir, candidate.marker))
@@ -420,7 +420,8 @@ class BundledEngineStoreTest {
         }
 
     @Test fun dosStoreProtectionMarksDirectories() {
-        assumeTrue(Files.getFileStore(temporary.root.toPath()).supportsFileAttributeView("dos"))
+        val fileStore = Files.getFileStore(temporary.root.toPath())
+        assumeTrue(!fileStore.supportsFileAttributeView("posix") && fileStore.supportsFileAttributeView("dos"))
         runTest {
             val store = store()
             store.prepareBundled()
@@ -438,7 +439,8 @@ class BundledEngineStoreTest {
     }
 
     @Test fun abortRestoresADosProtectedTree() {
-        assumeTrue(Files.getFileStore(temporary.root.toPath()).supportsFileAttributeView("dos"))
+        val fileStore = Files.getFileStore(temporary.root.toPath())
+        assumeTrue(!fileStore.supportsFileAttributeView("posix") && fileStore.supportsFileAttributeView("dos"))
         runTest {
             val store = store()
             store.prepareBundled()
