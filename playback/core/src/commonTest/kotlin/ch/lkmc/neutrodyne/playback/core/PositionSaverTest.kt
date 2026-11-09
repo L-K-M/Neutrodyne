@@ -191,6 +191,51 @@ class PositionSaverTest {
             assertEquals(replayCalls, store.calls.count { it.operation == FakePositionStore.Operation.REPLAY })
         }
 
+    @Test fun aRejectedReplayClearIsSkippedAndCanRetry() =
+        runTest {
+            var allowed = false
+            val gated =
+                object : PositionStore by store {
+                    override suspend fun markUnplayedForReplay(
+                        episodeId: Long,
+                        now: Long,
+                    ): Boolean = allowed && store.markUnplayedForReplay(episodeId, now)
+                }
+            store.positions.value = mapOf(1L to StoredPosition(1, 0, 1, 1))
+            val saver = PositionSaver(gated, clock, PlayedRule())
+            saver.load(1, 1000, PositionSource.STREAM, replay = true)
+            saver.startPositionApplied()
+            assertEquals(PositionSaveResult.Skipped, saver.onPlaying())
+            assertEquals(1L, store.positions.value[1]?.playedAt)
+            allowed = true
+            assertEquals(PositionSaveResult.Saved, saver.onPlaying())
+            assertNull(store.positions.value[1]?.playedAt)
+        }
+
+    @Test fun aRejectedResetIsSkippedWithoutReplayingTheStaleSeek() =
+        runTest {
+            var resetCalls = 0
+            val gated =
+                object : PositionStore by store {
+                    override suspend fun reset(
+                        episodeId: Long,
+                        now: Long,
+                    ): Boolean {
+                        resetCalls++
+                        return false
+                    }
+                }
+            store.positions.value = mapOf(1L to StoredPosition(1, 20_000, 1, null))
+            val saver = PositionSaver(gated, clock, PlayedRule())
+            saver.load(1, 1000, PositionSource.STREAM)
+            saver.startPositionApplied()
+            assertEquals(PositionSaveResult.Skipped, saver.onSeek(0, null, SeekOrigin.USER))
+            assertEquals(20_000L, store.positions.value[1]?.positionMs)
+            assertEquals(PositionSaveResult.Saved, saver.onPause(25_000, null))
+            assertEquals(1, resetCalls)
+            assertEquals(25_000L, store.positions.value[1]?.positionMs)
+        }
+
     @Test fun allowedPredicateIsEvaluatedAtCommitAfterAQueuedSaveWasCaptured() =
         runTest {
             val release = CompletableDeferred<Unit>()

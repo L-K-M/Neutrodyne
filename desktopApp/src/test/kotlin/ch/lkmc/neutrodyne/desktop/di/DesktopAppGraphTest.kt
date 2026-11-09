@@ -102,6 +102,31 @@ class DesktopAppGraphTest {
     }
 
     @Test
+    fun thePlaybackFreezeGuardsTheGraphPositionWriter() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            val podcastId = db.podcastDao().insertPodcast(podcastEntity(feedUrl = "https://gate.example/feed"))
+            val episodeId =
+                db
+                    .ingestDao()
+                    .insertEpisodes(
+                        listOf(episodeEntity(podcastId = podcastId, identityKey = "g:gate")),
+                    ).single()
+            val positions = graph.positionStore()
+            assertThat(
+                positions
+                    .save(episodeId, 20_000, 100_000, ch.lkmc.neutrodyne.core.model.PositionSource.STREAM, 100, 1, {
+                        true
+                    }),
+            ).isTrue()
+            val before = db.positionDao().byEpisode(episodeId)
+            graph.playbackSyncPort.onRemoteMarkedPlayed(episodeId, "Other device")
+            assertThat(positions.reset(episodeId, 200)).isFalse()
+            assertThat(db.positionDao().byEpisode(episodeId)).isEqualTo(before)
+        }
+
+    @Test
     fun graphCleanupKeepsRoomOpenUntilItsCollectorsFinish() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
@@ -386,6 +411,12 @@ class DesktopAppGraphTest {
             ).isEqualTo(SleepTimerState.Off)
             assertThat(graph.playbackStateSource.currentChapter.value).isNull()
             assertThat(graph.playbackController::class.simpleName).isEqualTo("DesktopPlaybackController")
+            // 06 Sync interplay: the engine's playback port is the controller's own port, so the
+            // scheduler reads the same player's state — never a stub.
+            assertThat(graph.playbackSyncPort).isSameInstanceAs(graph.desktopPlaybackController.syncPort)
+            assertThat(graph.playbackSyncPort).isNotSameInstanceAs(
+                ch.lkmc.neutrodyne.core.domain.NoPlaybackSync,
+            )
             graph.playbackController.pause()
             graph.playbackController.dismiss()
             assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)

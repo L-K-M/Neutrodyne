@@ -1441,9 +1441,9 @@ for image; do :; done
         "WixUI_Ico_Exclam\nWixUI_Ico_Info\nWixUI_Bmp_New\nWixUI_Bmp_Up\n"
     )
 
-    def msi_check(self, dir_rows=MSI_DIR_OK, bin_rows=MSI_BIN_OK,
-                  msi="dist/x.msi", **fails):
-        self.fx.write(msi, b"MSI")
+    def msi_fakes(self, dir_rows=MSI_DIR_OK, bin_rows=MSI_BIN_OK, **fails):
+        """Install the cygpath/powershell.exe boundary fakes serving the given
+        fakedb/ rows; returns (env_extra, ps_log, cy_log) for image_check."""
         self.fx.write("fakedb/Directory", dir_rows.encode())
         self.fx.write("fakedb/Binary", bin_rows.encode())
         self.fake("cygpath", r"""
@@ -1472,6 +1472,12 @@ esac
         ps_log, cy_log = self.root / "ps.log", self.root / "cygpath.log"
         env = {"FAKE_PS_LOG": str(ps_log), "FAKE_CYGPATH_LOG": str(cy_log),
                **fails}
+        return env, ps_log, cy_log
+
+    def msi_check(self, dir_rows=MSI_DIR_OK, bin_rows=MSI_BIN_OK,
+                  msi="dist/x.msi", **fails):
+        self.fx.write(msi, b"MSI")
+        env, ps_log, cy_log = self.msi_fakes(dir_rows, bin_rows, **fails)
         return self.fx.image_check(msi, env_extra=env), ps_log, cy_log
 
     def test_msi_valid_installdir_passes(self):
@@ -1751,6 +1757,122 @@ esac
                 self.fx.write_manifest()
                 r = self.fx.image_check(img)
                 self.assertEqual(expected, r.returncode, r.stdout + r.stderr)
+
+    # ----- PB27: the approved decimal budgets block the gate -----------------
+    # Owner-approved 2026-11-09: installed <= 500 MB, download <= 200 MB per
+    # desktop target — decimal bytes. The installed measure is the image
+    # tree's allocated size (du -sk, KiB * 1024); the package measure is the
+    # file's stat byte size. The stubs below exercise the byte accounting
+    # without writing hundreds of MB of dense fixture data.
+
+    def fake_du(self, kib):
+        """Stub `du`: report <kib> KiB for whatever path it is handed. du -sk's
+        only caller is the installed-size measure, so a fixed KiB value
+        exercises the byte accounting without real allocation."""
+        self.fake(
+            "du",
+            'for p; do :; done\nprintf "%s\\t%s\\n" "' + str(kib) + '" "$p"\n',
+        )
+
+    def sparse_file(self, rel, size):
+        """A sparse file of <size> bytes: stat reports the byte count the
+        package budget reads, without dense fixture data."""
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.truncate(size)
+        return rel
+
+    def test_pb27_installed_size_decimal_boundaries(self):
+        """The installed budget is 500 MB decimal on allocated bytes:
+        488281 KiB = 499999744 B passes; 488282 KiB = 500000768 B fails."""
+        for kib, expected in ((488281, 0), (488282, 1)):
+            with self.subTest(kib=kib):
+                img = self.flat_image(name=f"Size-{kib}")
+                self.fx.skiko_stub(img)
+                self.fx.write_manifest()
+                self.fake_du(kib)
+                r = self.fx.image_check(img)
+                self.assertEqual(expected, r.returncode, r.stdout + r.stderr)
+                self.assertIn("size: installed", r.stdout)
+                if expected:
+                    self.assertIn(
+                        "installed size 500000768 bytes exceeds", r.stderr)
+                    self.assertIn("check-desktop-image: 1 violation(s)", r.stderr)
+
+    def test_pb27_package_size_decimal_boundaries(self):
+        """The download budget is 200 MB decimal on the file's stat bytes:
+        200000000 passes; 200000001 and exactly 200 MiB (209715200 — the
+        binary-unit misread) fail."""
+        env, _, _ = self.msi_fakes()
+        for size, expected in ((200000000, 0), (200000001, 1), (209715200, 1)):
+            with self.subTest(size=size):
+                msi = self.sparse_file(f"dist/probe-{size}.msi", size)
+                r = self.fx.image_check(msi, env_extra=env)
+                self.assertEqual(expected, r.returncode, r.stdout + r.stderr)
+                self.assertIn("size: package", r.stdout)
+                if expected:
+                    self.assertIn(f"package size {size} bytes exceeds", r.stderr)
+
+    def test_pb27_extracted_payload_faces_installed_admission(self):
+        """A package checked alone: its extracted installed image is admitted
+        against the 500 MB budget, not only the file against 200 MB."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        self.fake_du(488282)
+        r = self.fx.image_check(self.tarball(img))
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertIn("installed size 500000768 bytes exceeds", r.stderr)
+        self.assertIn("check-desktop-image: 1 violation(s)", r.stderr)
+
+    def test_pb27_within_budget_package_and_payload_pass(self):
+        """A small package holding a within-budget payload reports its sizes
+        and passes."""
+        app = self.mac_app()
+        self.fx.write_manifest()
+        dmg = self.dmg(payload_app=app)
+        self.fake_hdiutil()
+        self.fake_codesign_ok()
+        self.fake_du(488281)
+        log = self.root / "hdiutil.log"
+        r = self.fx.image_check(dmg, env_extra={"FAKE_HDIUTIL_LOG": str(log)})
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("size: package", r.stdout)
+
+    def test_pb27_package_and_payload_failures_aggregate(self):
+        """One over-budget package file and its over-budget extracted payload
+        report two violations in a single exit-1 run — and the DMG mount
+        still detaches."""
+        app = self.mac_app()
+        self.fx.write_manifest()
+        dmg = self.dmg(payload_app=app)
+        self.sparse_file(dmg, 200000001)
+        self.fake_hdiutil()
+        self.fake_codesign_ok()
+        self.fake_du(488282)
+        log = self.root / "hdiutil.log"
+        r = self.fx.image_check(dmg, env_extra={"FAKE_HDIUTIL_LOG": str(log)})
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertIn("installed size 500000768 bytes exceeds", r.stderr)
+        self.assertIn("package size 200000001 bytes exceeds", r.stderr)
+        self.assertIn("check-desktop-image: 2 violation(s)", r.stderr)
+        self.assertIn("detach ", log.read_text(encoding="utf-8"))
+
+    def test_pb27_dir_and_package_inputs_each_admitted(self):
+        """The release invocation's shape — installed dir and package file in
+        one run — admits each on its own budget."""
+        img = self.flat_image(name="Neutrodyne-App")
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        self.fake_du(488282)
+        env, _, _ = self.msi_fakes()
+        msi = self.sparse_file("dist/x.msi", 200000001)
+        r = self.fx.image_check(img, msi, env_extra=env)
+        self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+        self.assertIn("installed size 500000768 bytes exceeds", r.stderr)
+        self.assertIn("package size 200000001 bytes exceeds", r.stderr)
+        self.assertIn("check-desktop-image: 2 violation(s)", r.stderr)
 
 if __name__ == "__main__":
     unittest.main()
