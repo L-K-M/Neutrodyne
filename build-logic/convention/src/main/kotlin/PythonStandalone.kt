@@ -203,6 +203,34 @@ abstract class FetchPythonStandalone : DefaultTask() {
     }
 }
 
+/**
+ * The argv [TrimPythonStandalone.trim] execs: bare `bash` on Unix; on Windows the located Git
+ * Bash (MSYS2 as fallback) plus the script, archive and output as MSYS paths. A `D:\` argument
+ * would reach tar as `host:file` remote syntax. Resolving at execution time keeps the lookup
+ * out of the configuration cache's inputs.
+ */
+internal fun trimShellCommand(
+    osName: String,
+    env: Map<String, String>,
+    isFile: (String) -> Boolean,
+    script: String,
+    archive: String,
+    out: String,
+): List<String> {
+    if (!isWindowsHost(osName)) return listOf("bash", script, archive, out)
+    val candidates = windowsBashCandidates(env, BashPreference.GIT_BASH, isFile)
+    val bash =
+        candidates.firstOrNull(isFile)
+            ?: throw GradleException(
+                "trimPythonStandalone: no usable bash on this Windows host; checked " +
+                    candidates.joinToString(", ") +
+                    ". Install Git for Windows or MSYS2, or put git on PATH. " +
+                    "C:\\Windows\\System32\\bash.exe is WSL's launcher and cannot run " +
+                    "scripts/engine/trim-python.sh (11 Trim list and checks)",
+            )
+    return listOf(bash, msysPath(script), msysPath(archive), msysPath(out))
+}
+
 /** Runs `scripts/engine/trim-python.sh` over the fetched archive (11 Trim list and checks). */
 abstract class TrimPythonStandalone : DefaultTask() {
     @get:InputFile
@@ -233,10 +261,18 @@ abstract class TrimPythonStandalone : DefaultTask() {
             throw GradleException("missing trim script $script (11 Trim list and checks)")
         }
         val archiveFile = archive.get().asFile
+        val argv =
+            trimShellCommand(
+                System.getProperty("os.name"),
+                System.getenv(),
+                { File(it).isFile },
+                script.absolutePath,
+                archiveFile.absolutePath,
+                out.absolutePath,
+            )
         execOperations
-            .exec {
-                commandLine("bash", script.absolutePath, archiveFile.absolutePath, out.absolutePath)
-            }.assertNormalExitValue()
+            .exec { commandLine(*argv.toTypedArray()) }
+            .assertNormalExitValue()
         val python = File(out, "python")
         if (!python.isDirectory) {
             throw GradleException("trim-python.sh produced no python/ tree under ${out.absolutePath}")
