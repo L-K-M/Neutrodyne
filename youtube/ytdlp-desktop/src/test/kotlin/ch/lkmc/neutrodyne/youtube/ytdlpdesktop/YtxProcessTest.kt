@@ -57,8 +57,10 @@ class YtxProcessTest {
                 fixture.scope.async {
                     transport.callForTest("_hang", EMPTY, fixture.deadline(60_000))
                 }
+            // `running` counts the admitted call and flips before the spawn coroutine
+            // lands; `pid` publishes only once the real child exists, so wait on it.
             withTimeout(15_000) {
-                while (transport.status.value.running == 0) delay(20)
+                while (transport.status.value.pid == null) delay(20)
             }
             val child = fixture.spawner.last
             assertNotNull(child)
