@@ -6,6 +6,9 @@
   <string name="sync_continue">Continue</string>
   <string name="sync_linked">Linked to %1$s</string>
   <string name="sync_now">Sync now</string>
+  <string name="sync_activity_idle">Live updates idle</string>
+  <string name="sync_activity_syncing">Syncing…</string>
+  <string name="sync_activity_live">Live updates connected</string>
   <string name="sync_what_syncs">Synced: subscriptions, groups, played state, positions, favourites, Up next and synced settings. Never synced: downloads, artwork and feed contents.</string>
   <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
   <string name="sync_finish_link">Finish linking to %1$s.</string>

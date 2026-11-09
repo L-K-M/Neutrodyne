@@ -39,6 +39,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.sync.api.LinkPhase
 import ch.lkmc.neutrodyne.sync.api.LinkState
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -201,6 +202,7 @@ class SyncSettingsEntryTest {
                         username = "anna",
                         nodeId = "node",
                         lastSyncAtMs = null,
+                        activity = SyncActivity.IDLE,
                         problem = null,
                     ),
                 )

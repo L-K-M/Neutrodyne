@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.navigation.SyncSettingsKey
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -79,6 +80,7 @@ class SyncSettingsRowTest {
                     username = "anna",
                     nodeId = "node",
                     lastSyncAtMs = System.currentTimeMillis(),
+                    activity = SyncActivity.IDLE,
                     problem = null,
                 )
             waitForIdle()
