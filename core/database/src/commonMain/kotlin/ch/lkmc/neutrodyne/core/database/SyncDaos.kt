@@ -465,6 +465,10 @@ abstract class SyncClockDao(
 /** `sync_parked` (02): received records awaiting their podcast or episode. */
 @Dao
 interface SyncParkedDao {
+    /** Revalidate a retry snapshot after acquiring the writer, including unlink and newer pages. */
+    @Query("SELECT * FROM sync_parked WHERE id = :id")
+    suspend fun byId(id: Long): SyncParkedEntity?
+
     @Insert
     suspend fun park(row: SyncParkedEntity): Long
 

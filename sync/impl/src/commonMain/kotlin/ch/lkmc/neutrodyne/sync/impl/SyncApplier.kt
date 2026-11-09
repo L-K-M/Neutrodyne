@@ -770,7 +770,10 @@ class SyncApplier(
         var held = 0
         var invalid = 0
         val resolved = ArrayList<Long>(rows.size)
-        for (row in rows) {
+        for (snapshot in rows) {
+            // Rows were read before this transaction. Unlink may have removed them, or a
+            // later page may have accumulated new fields; apply only the current journal row.
+            val row = db.syncParkedDao().byId(snapshot.id) ?: continue
             val dto = decodeParked(row)
             val coll = dto?.let { runCatching { SyncCollection.fromWire(it.coll) }.getOrNull() }
             val retryable =

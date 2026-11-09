@@ -48,6 +48,107 @@ class SyncParkedStateTest {
     private val deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
     @Test
+    fun anUnlinkedRetrySnapshotCannotOverwriteNewLocalState() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(true),
+                            "playedAt" to int(5L),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                // The retry reads before acquiring the writer. Unlink and a new local edit
+                // can complete while that writer is queued.
+                val snapshot = db.syncParkedDao().all()
+                assertEquals(1, snapshot.size)
+                val episodeId = ingestEpisode(db, podcastId, "g:one", guid = "one")
+                db.syncStateDao().unlink()
+                db.episodeStateDao().ensure(
+                    ch.lkmc.neutrodyne.core.database.EpisodeStateEntity(
+                        episodeId = episodeId,
+                        updatedAt = now + 1,
+                    ),
+                )
+                assertEquals(null, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                val result = applier.applyParkedRecords(snapshot)
+                assertEquals(
+                    null,
+                    db.episodeStateDao().byEpisode(episodeId)?.playedAt,
+                    "old-account work must not overwrite a newer unlinked local value",
+                )
+                assertEquals(0, result.applied)
+                assertEquals(0, db.syncParkedDao().count())
+                assertEquals(0, db.syncOutboxDao().rows().size)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aRetrySnapshotUsesTheLatestJournalFields() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(true),
+                            "playedAt" to int(5L),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                val snapshot = db.syncParkedDao().all()
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "pos" to pos(777L),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+                assertEquals(
+                    snapshot.single().id,
+                    db
+                        .syncParkedDao()
+                        .all()
+                        .single()
+                        .id,
+                )
+                val episodeId = ingestEpisode(db, podcastId, "g:one", guid = "one")
+                applier.applyParkedRecords(snapshot)
+                assertEquals(
+                    777L,
+                    db.positionDao().byEpisode(episodeId)?.positionMs,
+                    "a stale read must not discard fields added before the retry transaction",
+                )
+                assertEquals(5L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                assertEquals(0, db.syncParkedDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun aParkedEpisodeIsJournaledWithItsHints() =
         runTest {
             val db = TestDb.inMemory()
