@@ -28,6 +28,9 @@ class FakeSyncServerAddress(
     /** Suspends after the durable value changes, before the write returns to its caller. */
     var afterShareWrite: (suspend (Boolean) -> Unit)? = null
 
+    /** Suspends after the durable share value is read, before the read returns to its caller. */
+    var afterShareRead: (suspend (Boolean) -> Unit)? = null
+
     private var storedShareFeedPasswords: Boolean = false
     private var storedSyncPlaybackSettings: Boolean = true
 
@@ -62,7 +65,11 @@ class FakeSyncServerAddress(
 
     override suspend fun deviceName(): String? = deviceName
 
-    override suspend fun shareFeedPasswords(): Boolean = storedShareFeedPasswords
+    override suspend fun shareFeedPasswords(): Boolean {
+        val value = storedShareFeedPasswords
+        afterShareRead?.invoke(value)
+        return value
+    }
 
     override suspend fun syncPlaybackSettings(): Boolean = storedSyncPlaybackSettings
 
