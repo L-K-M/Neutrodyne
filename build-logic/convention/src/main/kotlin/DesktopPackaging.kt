@@ -13,6 +13,7 @@ import org.gradle.api.file.RelativePath
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
@@ -37,6 +38,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -75,13 +77,14 @@ internal enum class DesktopPackagingTarget(
 /**
  * The package-level licence metadata (DEB/RPM `--license-file`, MSI/DMG licence page, RPM
  * `License:`): the package bundles the OpenJDK runtime and third-party libraries besides our
- * Unlicense code, so the file lists them and the SPDX expression covers them. Extend both when
- * the python-build-standalone stack joins the image.
+ * Unlicense code, so the file lists them and the SPDX expression covers them. Extended for the
+ * python-build-standalone CPython stack, the vendored yt-dlp and certifi's CA bundle (MD3).
  */
 internal const val DESKTOP_PACKAGE_LICENSE_FILE = "packaging/LICENSE-PACKAGE.txt"
 internal const val DESKTOP_PACKAGE_LICENSE =
-    "Unlicense AND Apache-2.0 AND MIT AND MIT-0 AND MIT-Modern-Variant AND BSD-3-Clause AND FTL AND libpng-2.0 " +
-        "AND IJG AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND LGPL-2.1-or-later " +
+    "Unlicense AND Apache-2.0 AND MIT AND MIT-0 AND MIT-Modern-Variant AND BSD-2-Clause AND BSD-3-Clause " +
+        "AND FTL AND libpng-2.0 AND IJG AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND bzip2-1.0.6 " +
+        "AND 0BSD AND ISC AND Python-2.0 AND X11 AND LGPL-2.1-or-later " +
         "AND GPL-2.0-only WITH Classpath-exception-2.0"
 
 /** `neutrodyne-<size>.png`, the committed hicolor source names (desktopApp/icons/png). */
@@ -248,6 +251,50 @@ internal fun stagedNativeProblems(
         if (!licence.isFile || licence.length() == 0L) {
             problems += "common/licenses/$name missing or empty (11 licences/ payload)"
         }
+    }
+    return problems
+}
+
+/**
+ * The missing pieces of the staged `desktop-resources` engine payload, empty when complete
+ * (11 Resources layout): the trimmed interpreter at `<os>-<arch>/engine/python/` (its entry
+ * `python/bin/python3` off Windows, `python/python.exe` on Windows) and the shared inputs at
+ * `common/engine/` — the CA bundle, the yt-dlp zip and manifest, the signing keys and the
+ * shim package the stdio child runs. `createDistributable` fails closed on any of them
+ * rather than ship an image whose engine cannot start.
+ */
+internal fun stagedEngineProblems(
+    target: DesktopPackagingTarget,
+    destinationDir: File,
+): List<String> {
+    val problems = mutableListOf<String>()
+    val python = destinationDir.resolve("${target.id}/engine/python")
+    val interpreter =
+        if (target.osWire == "windows") {
+            python.resolve("python.exe")
+        } else {
+            python.resolve("bin/python3")
+        }
+    if (!interpreter.isFile) {
+        problems += "${interpreter.relativeTo(destinationDir)} missing from the image (11 Resources layout)"
+    }
+    val engine = destinationDir.resolve("common/engine")
+    for (
+    name in
+    listOf(
+        "cacert.pem",
+        "ytdlp/yt-dlp",
+        "ytdlp/bundled.json",
+        "keys/engine-manifest-ed25519.pub",
+        "keys/yt-dlp-release-key.asc",
+    )
+    ) {
+        if (!engine.resolve(name).isFile) {
+            problems += "common/engine/$name missing from the image (11 Resources layout)"
+        }
+    }
+    if (!engine.resolve("shim/neutrodyne_ytx").isDirectory) {
+        problems += "common/engine/shim/neutrodyne_ytx missing from the image (11 Resources layout)"
     }
     return problems
 }
@@ -1110,6 +1157,36 @@ private fun rewriteZipWithUtcTimestamps(
     }
 }
 
+/**
+ * Restores the executable bit on the bundled Python tree inside a packaged image.
+ * Compose's `createDistributable` copies `appResourcesRootDir` with `File.copyTo`, which
+ * does not carry POSIX permissions, so the interpreter arrives non-executable and the
+ * engine child cannot start (the image scan's required-layout rule catches it). The staged
+ * tree's modes are the truth; `chmod` does not touch the Mach-O bytes, so the ad-hoc
+ * signatures jpackage sealed over the nested binaries stay valid. A no-op on Windows,
+ * where the execute bit does not exist.
+ */
+abstract class RestoreDesktopPythonPermissions : DefaultTask() {
+    @get:InputDirectory
+    abstract val stagedPython: DirectoryProperty
+
+    @get:InputDirectory
+    abstract val imagePython: DirectoryProperty
+
+    @TaskAction
+    fun restore() {
+        if (System.getProperty("os.name").startsWith("Windows")) return
+        val staged = stagedPython.get().asFile
+        val image = imagePython.get().asFile
+        staged.walkTopDown().forEach { file ->
+            val target = image.toPath().resolve(file.relativeTo(staged).path).toFile()
+            if (file.isFile && target.isFile) {
+                Files.setPosixFilePermissions(target.toPath(), Files.getPosixFilePermissions(file.toPath()))
+            }
+        }
+    }
+}
+
 /** The Info-ZIP 0x5455 extended timestamp field: flags=1 (mtime present) plus UTC seconds. */
 private fun utcTimestampField(utcSeconds: Long): ByteArray =
     ByteBuffer
@@ -1153,6 +1230,14 @@ internal fun Project.registerDesktopPackagingTasks(
     lock: BundledRuntimeLock,
 ) {
     val versionName = providers.gradleProperty("neutrodyne.versionName").get()
+    // The emergency build omits the engine stack and its resources entirely (01 Emergency
+    // build without the engine); the property mirrors desktopApp's youtubeEngine switch.
+    val youtubeEngine =
+        providers
+            .gradleProperty("neutrodyne.youtubeEngine")
+            .map { it.toBoolean() }
+            .orElse(true)
+            .get()
     val setupRuntime = tasks.named("setupBundledRuntime", SetupBundledRuntime::class.java)
     val jpackage =
         setupRuntime.map { task ->
@@ -1249,6 +1334,31 @@ internal fun Project.registerDesktopPackagingTasks(
             }
         }
         from(writeDesktopLicences) { into("common/licenses") }
+        // The bundled engine runtime (11 Resources layout): `:youtube:ytdlp-desktop` fetches and
+        // trims the pinned python-build-standalone archive; the trimmed tree lands at
+        // <os>-<arch>/engine/python/, the yt-dlp zip, keys, shim and certifi's CA bundle at
+        // common/engine/, where Compose's prepareAppResources merges them into the image.
+        // Only when the engine is bundled; the emergency build omits engine/ entirely.
+        if (youtubeEngine) {
+            dependsOn(
+                ":youtube:ytdlp-desktop:fetchPythonStandalone",
+                ":youtube:ytdlp-desktop:trimPythonStandalone",
+                ":youtube:ytdlp-desktop:syncEngineResources",
+            )
+            val pythonStandalone =
+                project(":youtube:ytdlp-desktop")
+                    .layout.buildDirectory
+                    .dir("python-standalone/${target.id}/trimmed")
+            from(pythonStandalone.map { it.dir("python") }) {
+                into("${target.id}/engine/python")
+            }
+            from(pythonStandalone.map { it.file("cacert.pem") }) {
+                into("common/engine")
+            }
+            from(project(":youtube:ytdlp-desktop").layout.buildDirectory.dir("engine-resources")) {
+                into("common/engine")
+            }
+        }
         if (target.osWire == "linux") {
             from("packaging/desktop-integration") { into("linux/desktop-integration") }
             // neutrodyne-48.png -> linux/desktop-integration/hicolor/48x48/apps/neutrodyne.png
@@ -1273,7 +1383,9 @@ internal fun Project.registerDesktopPackagingTasks(
             if (iconsTrayDir.listFiles().isNullOrEmpty()) {
                 throw GradleException("icons/tray carries no icons (11 Resources layout)")
             }
-            val problems = stagedNativeProblems(target, destinationDir)
+            val problems =
+                stagedNativeProblems(target, destinationDir) +
+                    if (youtubeEngine) stagedEngineProblems(target, destinationDir) else emptyList()
             if (problems.isNotEmpty()) {
                 throw GradleException(
                     "the staged image resources are incomplete:\n" +
@@ -1285,6 +1397,30 @@ internal fun Project.registerDesktopPackagingTasks(
 
     tasks.named("createDistributable") {
         dependsOn("syncDesktopIntegrationResources", "writeDesktopRuntimeClasspath")
+    }
+    if (youtubeEngine) {
+        // Compose's createDistributable copies the staged resources without POSIX
+        // permissions, so the bundled Python interpreter arrives non-executable; this
+        // task restores the staged modes after the image is sealed (11 Image scan rules).
+        val restorePythonPermissions =
+            tasks.register<RestoreDesktopPythonPermissions>("restoreDesktopPythonPermissions") {
+                group = "build"
+                description =
+                    "Restores the executable bit on the bundled Python tree inside the app image (11 Image scan rules)."
+                stagedPython.set(layout.buildDirectory.dir("desktop-resources/${target.id}/engine/python"))
+                imagePython.set(
+                    appImage.map { img ->
+                        img.dir(
+                            when (target.osWire) {
+                                "macos" -> "Contents/app/resources/engine/python"
+                                "windows" -> "app/resources/engine/python"
+                                else -> "lib/app/resources/engine/python"
+                            },
+                        )
+                    },
+                )
+            }
+        tasks.named("createDistributable") { finalizedBy(restorePythonPermissions) }
     }
     // Compose merges appResourcesRootDir/{common,<os>,<os>-<arch>} into the image through its own
     // Sync; ours must run first or Gradle flags the shared output dir as an implicit dependency.

@@ -31,12 +31,7 @@ class PythonRuntimeLocatorTest {
 
     @Test fun engineResourcePythonIsUsedWhenNoExplicitPath() {
         val dir = tempRoot("res")
-        val exe =
-            dir
-                .resolve("python")
-                .apply { mkdirs() }
-                .resolve(if (isWindows()) "python.exe" else "python3")
-                .apply { writeBytes(byteArrayOf()) }
+        val exe = interpreterIn(dir).apply { writeBytes(byteArrayOf()) }
         val locator =
             DesktopPythonRuntimeLocator(
                 explicit = { null },
@@ -45,6 +40,68 @@ class PythonRuntimeLocatorTest {
                 probe = { PythonRuntime(it, "3.14") },
             )
         assertEquals(exe, locator.locate()?.executable)
+    }
+
+    @Test fun bundledResourcesWinOverTheDevStandaloneTree() {
+        val bundled = tempRoot("bundled")
+        val bundledExe = interpreterIn(bundled).apply { writeBytes(byteArrayOf()) }
+        val dev = tempRoot("dev")
+        interpreterIn(dev).apply { writeBytes(byteArrayOf()) }
+        val locator =
+            DesktopPythonRuntimeLocator(
+                explicit = { null },
+                engineResources = { bundled },
+                devStandalone = { dev },
+                probe = { PythonRuntime(it, "3.14") },
+            )
+        assertEquals(bundledExe, locator.locate()?.executable)
+    }
+
+    @Test fun devStandaloneTreeIsUsedWhenResourcesCarryNoInterpreter() {
+        val resources = tempRoot("res")
+        val dev = tempRoot("dev")
+        val devExe = interpreterIn(dev).apply { writeBytes(byteArrayOf()) }
+        val locator =
+            DesktopPythonRuntimeLocator(
+                explicit = { null },
+                engineResources = { resources },
+                devStandalone = { dev },
+                probe = { PythonRuntime(it, "3.14") },
+            )
+        assertEquals(devExe, locator.locate()?.executable)
+    }
+
+    @Test fun standardLocatorFindsTheFetcherTreeOnEveryTarget() {
+        val properties = listOf("os.name", "os.arch", "neutrodyne.ytx.python")
+        val original = properties.associateWith(System::getProperty)
+        try {
+            System.clearProperty("neutrodyne.ytx.python")
+            val targets =
+                listOf(
+                    Triple("Windows 11", "amd64", "windows-x64"),
+                    Triple("Mac OS X", "aarch64", "macos-arm64"),
+                    Triple("Linux", "amd64", "linux-x64"),
+                    Triple("Linux", "aarch64", "linux-arm64"),
+                )
+            for ((os, arch, target) in targets) {
+                System.setProperty("os.name", os)
+                System.setProperty("os.arch", arch)
+                val root = tempRoot(target)
+                val engine = root.resolve("youtube/ytdlp-desktop/build/python-standalone/$target/trimmed")
+                val exe = interpreterIn(engine).apply { writeBytes(byteArrayOf()) }
+                val locator =
+                    DesktopPythonRuntimeLocator.standard(
+                        engineResources = { null },
+                        rootDir = { root },
+                        probe = { PythonRuntime(it, "3.14") },
+                    )
+                assertEquals(exe, locator.locate()?.executable, "$os / $arch must use the fetcher's directory")
+            }
+        } finally {
+            for ((key, value) in original) {
+                if (value == null) System.clearProperty(key) else System.setProperty(key, value)
+            }
+        }
     }
 
     @Test fun missingInterpreterYieldsNullNotAnException() {
@@ -91,6 +148,17 @@ class PythonRuntimeLocatorTest {
         assertNull(locator.locate())
         assertNull(locator.locate())
         assertEquals(2, probes)
+    }
+
+    private fun interpreterIn(resources: java.io.File): java.io.File {
+        val exe =
+            if (isWindows()) {
+                resources.resolve("python/python.exe")
+            } else {
+                resources.resolve("python/bin/python3")
+            }
+        exe.parentFile.mkdirs()
+        return exe
     }
 
     private fun isWindows(): Boolean = System.getProperty("os.name").startsWith("Windows")
