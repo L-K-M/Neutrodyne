@@ -1317,36 +1317,6 @@ abstract class TrimSkikoStubTask : DefaultTask() {
 abstract class JPackageImageTask : Exec()
 
 /**
- * Restores the executable bit on the bundled Python tree inside a packaged image.
- * Compose's `createDistributable` copies `appResourcesRootDir` with `File.copyTo`, which
- * does not carry POSIX permissions, so the interpreter arrives non-executable and the
- * engine child cannot start (the image scan's required-layout rule catches it). The staged
- * tree's modes are the truth; `chmod` does not touch the Mach-O bytes, so the ad-hoc
- * signatures jpackage sealed over the nested binaries stay valid. A no-op on Windows,
- * where the execute bit does not exist.
- */
-abstract class RestoreDesktopPythonPermissions : DefaultTask() {
-    @get:InputDirectory
-    abstract val stagedPython: DirectoryProperty
-
-    @get:InputDirectory
-    abstract val imagePython: DirectoryProperty
-
-    @TaskAction
-    fun restore() {
-        if (System.getProperty("os.name").startsWith("Windows")) return
-        val staged = stagedPython.get().asFile
-        val image = imagePython.get().asFile
-        staged.walkTopDown().forEach { file ->
-            val target = image.toPath().resolve(file.relativeTo(staged).path).toFile()
-            if (file.isFile && target.isFile) {
-                Files.setPosixFilePermissions(target.toPath(), Files.getPosixFilePermissions(file.toPath()))
-            }
-        }
-    }
-}
-
-/**
  * Compose's `createRuntimeImage` with `jdk.localedata` restricted to the shipped locales
  * (11 jlink modules; PB27's miss reserved the convention plugin's own jlink step, open
  * question 12). Compose 1.12.1's `AbstractJLinkTask` emits only `--add-modules`,
@@ -1506,6 +1476,36 @@ private fun rewriteZipWithUtcTimestamps(
                     source.getInputStream(entry).copyTo(out)
                 }
                 out.closeEntry()
+            }
+        }
+    }
+}
+
+/**
+ * Restores the executable bit on the bundled Python tree inside a packaged image.
+ * Compose's `createDistributable` copies `appResourcesRootDir` with `File.copyTo`, which
+ * does not carry POSIX permissions, so the interpreter arrives non-executable and the
+ * engine child cannot start (the image scan's required-layout rule catches it). The staged
+ * tree's modes are the truth; `chmod` does not touch the Mach-O bytes, so the ad-hoc
+ * signatures jpackage sealed over the nested binaries stay valid. A no-op on Windows,
+ * where the execute bit does not exist.
+ */
+abstract class RestoreDesktopPythonPermissions : DefaultTask() {
+    @get:InputDirectory
+    abstract val stagedPython: DirectoryProperty
+
+    @get:InputDirectory
+    abstract val imagePython: DirectoryProperty
+
+    @TaskAction
+    fun restore() {
+        if (System.getProperty("os.name").startsWith("Windows")) return
+        val staged = stagedPython.get().asFile
+        val image = imagePython.get().asFile
+        staged.walkTopDown().forEach { file ->
+            val target = image.toPath().resolve(file.relativeTo(staged).path).toFile()
+            if (file.isFile && target.isFile) {
+                Files.setPosixFilePermissions(target.toPath(), Files.getPosixFilePermissions(file.toPath()))
             }
         }
     }

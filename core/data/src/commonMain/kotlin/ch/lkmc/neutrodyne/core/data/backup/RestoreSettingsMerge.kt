@@ -147,16 +147,21 @@ internal class RestoreSettingsMerge(
         // and the lock is released on cancellation or a storage failure, so a crash or a retry
         // cannot interleave a newer local literal with the older stored value.
         return writeLocks.withLock(key) {
-            val applied =
+            val before = sync.currentSnapshot(key) ?: return@withLock Applied.Failed(BackupError.Storage)
+            val origin =
                 db.withWriteTransaction {
-                    db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)
+                    if (!db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)) {
+                        null
+                    } else {
+                        sync.recordCommitted(key, json, before)
+                    }
                 }
-            if (!applied) {
+            if (origin == null) {
                 // A newer pending local intent keeps its DataStore value (05 step 7): the archive's
                 // older value must not roll it back.
                 return@withLock Applied.SKIPPED
             }
-            if (sync.applyRemote(key, json)) {
+            if (sync.applyRecorded(key, json, origin)) {
                 Applied.YES
             } else {
                 // The DataStore write failed; the captured intent keeps the value recoverable,

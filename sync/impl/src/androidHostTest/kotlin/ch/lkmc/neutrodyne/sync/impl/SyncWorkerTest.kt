@@ -110,6 +110,7 @@ class SyncWorkerTest {
                         activity = SyncActivityState(),
                         gate = FakeLocalNetworkGate(),
                         effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) { true },
+                        capture = SettingsCapture(db, settings, TestSettingsWriteCoordinator()) { true },
                     )
                 val schedulerCalls = mutableListOf<String>()
                 val scheduler =
@@ -199,6 +200,7 @@ class SyncWorkerTest {
                     activity = SyncActivityState(),
                     gate = FakeLocalNetworkGate(),
                     effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) { true },
+                    capture = SettingsCapture(db, settings, TestSettingsWriteCoordinator()) { true },
                 )
             val scheduler =
                 SyncScheduler(

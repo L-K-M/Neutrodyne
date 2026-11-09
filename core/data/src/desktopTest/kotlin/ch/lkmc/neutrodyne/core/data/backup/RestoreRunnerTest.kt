@@ -181,13 +181,24 @@ class RestoreRunnerTest {
             orderKeys = TestOrderKeys,
             clock = clock,
         )
-    private val settingsSync = FakeSettingsSyncPort()
+    private val settingsSync =
+        FakeSettingsSyncPort().apply {
+            // A real portable store strictly reads typed defaults for never-written keys.
+            ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys.list.filter { it.synced }.forEach { key ->
+                current[key.name] = encode(key, key.default)!!
+            }
+        }
     private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
     private val runner = newRunner(settingsSync)
 
     /** A runner over [settingsSyncPort], for tests that drive a specific port. */
-    private fun newRunner(settingsSyncPort: SettingsSyncPort): RestoreRunner =
-        RestoreRunner(
+    private fun newRunner(settingsSyncPort: SettingsSyncPort): RestoreRunner {
+        // This data-layer fixture supplies the capture adapter that the app's sync graph owns.
+        settingsSyncPort.registerCommittedRecorder { _, _, _ ->
+            ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin
+                .Captured("restore fixture intent")
+        }
+        return RestoreRunner(
             db = db,
             stager = stager,
             merger = merger,
@@ -205,6 +216,7 @@ class RestoreRunnerTest {
             clock = clock,
             io = Dispatchers.IO,
         )
+    }
 
     @AfterTest
     fun tearDown() {

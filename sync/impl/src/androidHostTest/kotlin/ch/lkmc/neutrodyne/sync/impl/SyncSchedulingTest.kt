@@ -359,6 +359,7 @@ class SyncSchedulingTest {
             activity = SyncActivityState(),
             gate = FakeLocalNetworkGate(),
             effects = SyncApplyEffects(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
+            capture = SettingsCapture(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
         )
     }
 
