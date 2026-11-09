@@ -20,10 +20,11 @@ class SyncStartupDrainInitializer
     constructor(
         // Lazy (01 DI rule 7): the drainer reaches the database, which band 100 opens first.
         private val effects: Provider<SyncApplyEffects>,
+        private val capture: Provider<SettingsCapture>,
     ) : AppInitializer {
         override val order: Int = 160
 
         override suspend fun run() {
-            effects().drainAtStart()
+            effects().drainAtStart(capture())
         }
     }

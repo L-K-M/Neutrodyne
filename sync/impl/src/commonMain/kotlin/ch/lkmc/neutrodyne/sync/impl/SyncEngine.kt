@@ -14,10 +14,12 @@ import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
@@ -81,9 +83,11 @@ class SyncEngine(
     private val activity: SyncActivityState,
     private val gate: LocalNetworkGate,
     private val effects: SyncApplyEffects,
+    private val capture: SettingsCapture,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
+    private val clockStore = SyncClockStore(db)
 
     /**
      * Rounds serialize: an in-process round, a `SyncWorker` round and the controller's "Sync now"
@@ -120,6 +124,7 @@ class SyncEngine(
         // 10 Durable apply effects: a marker an earlier committed page left behind retries before
         // this round's first request — the drain is local (Room and DataStore), so it recovers
         // while offline too, and the push below can never echo over an unapplied server value.
+        capture.reconcile()
         effects.drainSettings()
         var pushed = 0
         var applied = 0
@@ -134,7 +139,7 @@ class SyncEngine(
         var rounds = 0
         while (rounds < MAX_ROUNDS) {
             rounds++
-            val rows = reader.next()
+            val rows = capture.prepareForPush(reader.next(), reason == SyncRoundReason.FIRST_LINK)
             val changes = builder.build(rows)
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
@@ -205,7 +210,72 @@ class SyncEngine(
                 .mapNotNull { runCatching { Hlc.parse(it) }.getOrNull() }
                 .minOrNull()
                 ?.let { db.syncOutboxDao().deleteAcked(coll, rid, "*", it.packed, it.nodeId.value) }
+            if (coll == SyncCollection.SETTING.wire) mergeAckedSetting(rid, change)
         }
+    }
+
+    /**
+     * 10 Outbox and coalescing / Settings capture: the acknowledgement merges the exact sent `v`
+     * into `sync_clock` raw state by the normal field rules — the cursor alone must not strand
+     * the accepted value, and the merged `v` keeps a restart from re-capturing the key — and
+     * advances the materialization baseline to the immutable sent value and its complete clock
+     * in the same transaction, never re-reading a possibly newer DataStore value. The pending
+     * marker and the other raw metadata stay untouched, so a newer page's effect or a newer
+     * local intent is never rolled back by an older ack.
+     */
+    private suspend fun mergeAckedSetting(
+        rid: String,
+        change: ChangeDto,
+    ) {
+        val sent = change.fields["v"] ?: return
+        val value = sent.v ?: return
+        val clock = sent.c?.let { runCatching { Hlc.parse(it) }.getOrNull() } ?: return
+        val stored = clockStore.get(SyncCollection.SETTING.wire, rid)
+        val incoming =
+            RecordState(
+                SyncCollection.SETTING,
+                fields = mapOf("v" to FieldState(value, clock)),
+            )
+        val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
+        // A historical restore may have materialized below a value already known in raw state.
+        // Its rejected ACK must journal that winner even if the response re-delivers equal raw
+        // clocks; otherwise the applier's stale fast path leaves the restore looking unrecorded.
+        val winner = merged.record.fields["v"]
+        val winnerClock = winner?.c
+        val pending = stored?.pendingSetting
+        val pendingClock = pending?.clock?.let { runCatching { Hlc.parse(it) }.getOrNull() }
+        val materializeWinner =
+            if (winner != null && winnerClock != null && winnerClock > clock &&
+                (pendingClock == null || pendingClock < winnerClock)
+            ) {
+                PendingSetting(winner.v.toString(), winnerClock.toString())
+            } else {
+                pending
+            }
+        clockStore.put(
+            SyncCollection.SETTING.wire,
+            rid,
+            RawSyncRecord(
+                state = merged.record,
+                by = stored?.by,
+                authReference = stored?.authReference,
+                redirect = stored?.redirect,
+                alias = stored?.alias,
+                // prepareForPush baselines a selected literal before sending it. A clockless
+                // baseline seen now therefore belongs to a later off-switch write, and this
+                // delayed acknowledgement must not relabel it as the older sent value.
+                settingHash =
+                    stored?.settingHash?.takeIf { it.clock == null }
+                        ?: stored?.settingHash.advancedTo(
+                            value.toString(),
+                            clock.toString(),
+                            capture.canonicalLiteral(rid, value.toString()) ?: return,
+                        ),
+                pendingSetting = materializeWinner,
+                pendingAuth = stored?.pendingAuth,
+                settingIntent = stored?.settingIntent,
+            ),
+        )
     }
 
     private suspend fun raiseHlc(records: List<RecordDto>) {

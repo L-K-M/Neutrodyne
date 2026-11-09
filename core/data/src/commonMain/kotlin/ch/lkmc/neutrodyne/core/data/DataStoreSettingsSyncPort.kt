@@ -4,10 +4,13 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.LocalSyncedSetting
+import ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SyncedSettingSnapshot
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import dev.zacsweers.metro.ContributesBinding
@@ -24,6 +27,7 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlin.concurrent.Volatile
+import kotlin.uuid.Uuid
 
 /**
  * [SettingsSyncPort] over the portable [SettingStore] (10 Settings capture). The recorder is
@@ -39,7 +43,14 @@ internal class DataStoreSettingsSyncPort(
     private val clock: Clock,
 ) : SettingsSyncPort {
     @Volatile
-    private var recorderRef: suspend (SettingKey<*>, String) -> Unit = { _, _ -> }
+    private var recorderRef: suspend (SettingKey<*>, String) -> SettingWriteOrigin =
+        { _, _ -> SettingWriteOrigin.Uncaptured }
+
+    @Volatile
+    private var materializedRef: suspend (SettingKey<*>, String) -> Unit = { _, _ -> }
+
+    @Volatile
+    private var committedRef: (suspend (SettingKey<*>, String, SyncedSettingSnapshot) -> SettingWriteOrigin)? = null
     private val local = MutableSharedFlow<LocalSyncedSetting>(extraBufferCapacity = 16)
     override val localSyncedChanges: Flow<LocalSyncedSetting> = local
 
@@ -55,9 +66,62 @@ internal class DataStoreSettingsSyncPort(
         }
     }
 
-    override fun registerRecorder(recorder: (suspend (key: SettingKey<*>, json: String) -> Unit)?) {
-        recorderRef = recorder ?: { _, _ -> }
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun applyRecorded(
+        key: SettingKey<*>,
+        json: String,
+        origin: SettingWriteOrigin,
+    ): Boolean {
+        if (!key.synced) return false
+        val decoded = decodeSyncedValue(key, json) ?: return false
+        return suspendRunCatching {
+            val receipt = origin.storedReceipt()
+            when (decoded) {
+                SyncedSettingValue.Reset -> {
+                    settingsStore.resetWithReceipt(key, receipt)
+                }
+
+                is SyncedSettingValue.Set -> {
+                    settingsStore.setWithReceipt(
+                        key as SettingKey<Any>,
+                        decoded.value,
+                        receipt,
+                    )
+                }
+            }
+        }.isSuccess
     }
+
+    override suspend fun recordCommitted(
+        key: SettingKey<*>,
+        json: String,
+        before: SyncedSettingSnapshot,
+    ): SettingWriteOrigin =
+        (committedRef ?: throw okio.IOException("committed setting recorder unavailable"))(key, json, before)
+
+    override fun registerCommittedRecorder(
+        recorder: (suspend (key: SettingKey<*>, json: String, before: SyncedSettingSnapshot) -> SettingWriteOrigin)?,
+    ) {
+        committedRef = recorder
+    }
+
+    override fun registerRecorder(recorder: (suspend (key: SettingKey<*>, json: String) -> SettingWriteOrigin)?) {
+        recorderRef = recorder ?: { _, _ -> SettingWriteOrigin.Uncaptured }
+    }
+
+    override fun registerMaterialized(listener: (suspend (SettingKey<*>, String) -> Unit)?) {
+        materializedRef = listener ?: { _, _ -> }
+    }
+
+    override suspend fun currentJson(key: SettingKey<*>): String? = currentSnapshot(key)?.json
+
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun currentSnapshot(key: SettingKey<*>): SyncedSettingSnapshot? =
+        suspendRunCatching {
+            val snapshot = settingsStore.readWithReceipt(key as SettingKey<Any>)
+            val json = encode(key, snapshot.value) ?: return@suspendRunCatching null
+            SyncedSettingSnapshot(json, decodeWriteOrigin(snapshot.receipt), snapshot.receipt)
+        }.getOrNull()
 
     override fun encode(
         key: SettingKey<*>,
@@ -78,22 +142,37 @@ internal class DataStoreSettingsSyncPort(
         return element.toString()
     }
 
+    override fun canonicalJson(
+        key: SettingKey<*>,
+        json: String,
+    ): String? =
+        when (val decoded = decodeSyncedValue(key, json)) {
+            null -> null
+            SyncedSettingValue.Reset -> "null"
+            is SyncedSettingValue.Set -> encode(key, decoded.value)
+        }
+
     override suspend fun recordLocal(
         key: SettingKey<*>,
         value: Any?,
-    ) {
-        if (!key.synced) return
-        val json = encode(key, value) ?: return
-        recorderRef.invoke(key, json)
+    ): SettingWriteOrigin {
+        if (!key.synced) return SettingWriteOrigin.Uncaptured
+        val json = encode(key, value) ?: return SettingWriteOrigin.Uncaptured
+        return recorderRef.invoke(key, json)
     }
 
-    override fun emitLocal(
+    override suspend fun emitLocal(
         key: SettingKey<*>,
         value: Any?,
         atMs: Long,
     ) {
         if (!key.synced) return
         val json = encode(key, value) ?: return
+        // The value has already committed. Room bookkeeping can retry from its durable intent;
+        // it must not turn a successful settings write into an uncaught UI failure.
+        suspendRunCatching { materializedRef(key, json) }.onFailure { failure ->
+            Log.w("Settings", failure) { "materialization bookkeeping failed for '${key.name}'" }
+        }
         local.tryEmit(LocalSyncedSetting(key, json, atMs))
     }
 
@@ -175,3 +254,28 @@ private fun decodeSettingValue(
             name?.let(key::fromStored)
         }
     }
+
+// The low-level store treats these as opaque receipts; sync types stay in this adapter.
+internal fun SettingWriteOrigin.storedReceipt(): String =
+    when (this) {
+        SettingWriteOrigin.Uncaptured -> "$UNCAPTURED_RECEIPT:${Uuid.random()}"
+        is SettingWriteOrigin.Captured -> "$CAPTURED_RECEIPT_PREFIX$token"
+    }
+
+private fun decodeWriteOrigin(receipt: String?): SettingWriteOrigin? =
+    when {
+        receipt == null -> {
+            null
+        }
+
+        receipt.startsWith(CAPTURED_RECEIPT_PREFIX) && receipt.length > CAPTURED_RECEIPT_PREFIX.length -> {
+            SettingWriteOrigin.Captured(receipt.removePrefix(CAPTURED_RECEIPT_PREFIX))
+        }
+
+        else -> {
+            SettingWriteOrigin.Uncaptured
+        }
+    }
+
+private const val UNCAPTURED_RECEIPT = "uncaptured"
+private const val CAPTURED_RECEIPT_PREFIX = "captured:"

@@ -71,24 +71,33 @@ internal class DataStoreSettingsRepository(
             }
 
             // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
-            suspendRunCatching { store(key).set(key, value) }
-                .fold(
-                    onSuccess = {
-                        syncPort.emitLocal(key, value, clock.now())
-                        Outcome.Success(Unit)
-                    },
-                    onFailure = { failure ->
-                        Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
-                        Outcome.Failure(SettingsError.WriteFailed)
-                    },
-                )
+            suspendRunCatching {
+                if (key.synced) {
+                    settingsStore.setWithReceipt(key, value, recorded.getOrThrow().storedReceipt())
+                } else {
+                    store(key).set(key, value)
+                }
+            }.fold(
+                onSuccess = {
+                    syncPort.emitLocal(key, value, clock.now())
+                    Outcome.Success(Unit)
+                },
+                onFailure = { failure ->
+                    Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
+                    Outcome.Failure(SettingsError.WriteFailed)
+                },
+            )
         }
     }
 
     override suspend fun reset(key: SettingKey<*>) {
         writeLocks.withLock(key) {
-            syncPort.recordLocal(key, null)
-            store(key).reset(key)
+            val origin = syncPort.recordLocal(key, null)
+            if (key.synced) {
+                settingsStore.resetWithReceipt(key, origin.storedReceipt())
+            } else {
+                store(key).reset(key)
+            }
             syncPort.emitLocal(key, null, clock.now())
         }
     }

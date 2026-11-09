@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.datastore.DataStoreBindings
 import ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory
+import ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
@@ -16,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -93,7 +95,7 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
                     override suspend fun recordLocal(
                         key: ch.lkmc.neutrodyne.core.model.settings.SettingKey<*>,
                         value: Any?,
-                    ): Unit = throw java.io.IOException("recorder down")
+                    ): SettingWriteOrigin = throw java.io.IOException("recorder down")
                 }
             val dir = root.resolve("repo-recorder")
             if (!::scope.isInitialized) {
@@ -115,6 +117,103 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
 
             assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableSyncedLong, 30_000L))
             assertEquals(10_000L, repository.get(portableSyncedLong))
+        }
+
+    @Test
+    fun postWriteBookkeepingFailureStillReturnsSuccessForTheCommittedValue() =
+        runTest {
+            if (!::scope.isInitialized) {
+                scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            }
+            val dispatcher = UnconfinedTestDispatcher(testScheduler)
+            val factory = SettingsDataStoreFactory(storagePathsFor(root.resolve("post-write")), scope, dispatcher)
+            val store = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory))
+            val clock =
+                ch.lkmc.neutrodyne.core.testing
+                    .TestClock()
+            val port = DataStoreSettingsSyncPort(store, clock)
+            port.registerMaterialized { _, _ -> throw java.io.IOException("bookkeeping unavailable") }
+            val repository =
+                DataStoreSettingsRepository(
+                    store,
+                    DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+                    port,
+                    clock,
+                    DataStoreSettingsWriteCoordinator(),
+                )
+            assertEquals(Outcome.Success(Unit), repository.set(portableSyncedLong, 20000L))
+            assertEquals(20000L, repository.get(portableSyncedLong))
+        }
+
+    @Test
+    fun aCapturedReceiptSurvivesReopenWithoutItsRoomCallback() =
+        runTest {
+            val dir = root.resolve("captured-receipt")
+            val dispatcher = UnconfinedTestDispatcher(testScheduler)
+            scope = CoroutineScope(SupervisorJob() + dispatcher)
+            val factory = SettingsDataStoreFactory(storagePathsFor(dir), scope, dispatcher)
+            val store = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory))
+            val clock =
+                ch.lkmc.neutrodyne.core.testing
+                    .TestClock()
+            val port = DataStoreSettingsSyncPort(store, clock)
+            port.registerRecorder { _, _ -> SettingWriteOrigin.Captured("admitted-before-gate-flip") }
+            port.registerMaterialized { _, _ -> throw java.io.IOException("Room unavailable after commit") }
+            val repository =
+                DataStoreSettingsRepository(
+                    store,
+                    DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+                    port,
+                    clock,
+                    DataStoreSettingsWriteCoordinator(),
+                )
+            assertEquals(Outcome.Success(Unit), repository.set(portableSyncedLong, 20000L))
+            scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            scope.coroutineContext[kotlinx.coroutines.Job]!!.join()
+            scope = CoroutineScope(SupervisorJob() + dispatcher)
+            val reopenedFactory = SettingsDataStoreFactory(storagePathsFor(dir), scope, dispatcher)
+            val reopened = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(reopenedFactory))
+            val reopenedPort = DataStoreSettingsSyncPort(reopened, clock)
+            assertEquals("20000", reopenedPort.currentSnapshot(portableSyncedLong)?.json)
+            assertEquals(
+                SettingWriteOrigin.Captured("admitted-before-gate-flip"),
+                reopenedPort.currentSnapshot(portableSyncedLong)?.origin,
+            )
+        }
+
+    @Test
+    fun anUncapturedWritePersistsItsOriginWithoutRoomBookkeeping() =
+        runTest {
+            val dispatcher = UnconfinedTestDispatcher(testScheduler)
+            scope = CoroutineScope(SupervisorJob() + dispatcher)
+            val factory = SettingsDataStoreFactory(storagePathsFor(root.resolve("off-receipt")), scope, dispatcher)
+            val store = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory))
+            val clock =
+                ch.lkmc.neutrodyne.core.testing
+                    .TestClock()
+            val port = DataStoreSettingsSyncPort(store, clock)
+            port.registerRecorder { _, _ -> SettingWriteOrigin.Uncaptured }
+            port.registerMaterialized { _, _ -> throw java.io.IOException("Room unavailable") }
+            val repository =
+                DataStoreSettingsRepository(
+                    store,
+                    DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+                    port,
+                    clock,
+                    DataStoreSettingsWriteCoordinator(),
+                )
+            assertEquals(Outcome.Success(Unit), repository.set(portableSyncedLong, 15000L))
+            assertEquals("15000", port.currentSnapshot(portableSyncedLong)?.json)
+            assertEquals(SettingWriteOrigin.Uncaptured, port.currentSnapshot(portableSyncedLong)?.origin)
+            repository.reset(portableSyncedLong)
+            assertEquals("10000", port.currentSnapshot(portableSyncedLong)?.json)
+            assertEquals(SettingWriteOrigin.Uncaptured, port.currentSnapshot(portableSyncedLong)?.origin)
+            val portableNames =
+                ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys.list
+                    .filter { it.file == SettingsFile.PORTABLE }
+                    .map { it.name }
+                    .toSet()
+            assertEquals(portableNames, repository.observePortableSnapshot().first().keys)
         }
 
     @Test fun appearanceValuesPersistAndStayOutOfSync() =

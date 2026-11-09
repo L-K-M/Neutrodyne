@@ -60,10 +60,15 @@ class SyncApplyEffects(
      * hash reconciliation. Only while linked — an unlink cleared the sync tables, so a leftover
      * marker of the old account must never re-apply. Local only (Room and DataStore): no network
      * call, nothing that blocks start-up beyond the markers' own writes.
+     *
+     * [capture] reconciles first: its committed-intent recovery must precede the marker drain,
+     * because the drain clears a superseded marker after applying — an older local intent
+     * materialized only afterwards would then overwrite the newer remote value it had lost to.
      */
-    suspend fun drainAtStart() {
+    suspend fun drainAtStart(capture: SettingsCapture) {
         val state = db.syncStateDao().get() ?: return
         if (!state.enabled || state.linkedAt == null) return
+        capture.reconcile()
         drainSettings()
     }
 
@@ -76,11 +81,11 @@ class SyncApplyEffects(
             val raw = decode(row.clocks) ?: return@withLock
             val pending = raw.pendingSetting ?: return@withLock
             if (hasNewerLocalIntent(key, pending)) {
-                ack(key, pending)
+                ack(key, pending, applied = false)
                 return@withLock
             }
             if (!settings.applyRemote(key, pending.value)) return@withLock
-            ack(key, pending)
+            ack(key, pending, applied = true)
         }
     }
 
@@ -104,10 +109,15 @@ class SyncApplyEffects(
      * The re-read and the write share one Room transaction, so a concurrent metadata update or a
      * newer page's marker is neither overwritten nor cleared. Used both after a successful apply
      * and when a strictly newer local intent supersedes the marker.
+     *
+     * Only an [applied] marker advances the materialization baseline to the applied value and
+     * clock — atomically with the clear. A superseded marker never materialized, so the baseline
+     * stays with the local intent that beat it.
      */
     private suspend fun ack(
         key: SettingKey<*>,
-        applied: PendingSetting,
+        pending: PendingSetting,
+        applied: Boolean,
     ) {
         db.withWriteTransaction {
             val fresh =
@@ -115,10 +125,22 @@ class SyncApplyEffects(
                     ?: return@withWriteTransaction
             val freshRaw = decode(fresh.clocks) ?: return@withWriteTransaction
             val marker = freshRaw.pendingSetting ?: return@withWriteTransaction
-            if (marker.value != applied.value || marker.clock != applied.clock) {
+            if (marker.value != pending.value || marker.clock != pending.clock) {
                 return@withWriteTransaction
             }
-            db.syncClockDao().upsert(fresh.copy(clocks = encode(freshRaw.copy(pendingSetting = null))))
+            val next =
+                if (applied) {
+                    freshRaw.settingHash.advancedTo(
+                        marker.value,
+                        marker.clock,
+                        settings.canonicalJson(key, marker.value) ?: return@withWriteTransaction,
+                    )
+                } else {
+                    freshRaw.settingHash
+                }
+            db.syncClockDao().upsert(
+                fresh.copy(clocks = encode(freshRaw.copy(pendingSetting = null, settingHash = next))),
+            )
         }
     }
 

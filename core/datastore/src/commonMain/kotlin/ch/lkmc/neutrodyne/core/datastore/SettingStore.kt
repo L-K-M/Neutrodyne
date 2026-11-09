@@ -6,6 +6,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
@@ -69,7 +70,12 @@ internal class SettingStoreImpl(
     ) {
         requireFile(key)
         SettingPreferences.validate(key, value)
-        dataStore.edit { preferences -> SettingPreferences.write(preferences, key, value) }
+        dataStore.edit { preferences ->
+            SettingPreferences.write(preferences, key, value)
+            // An untracked write clears the receipt in the same commit: a change this store did
+            // not capture must never read as the write a receipt-bearing commit recorded.
+            preferences -= receiptPreferenceKey(key)
+        }
     }
 
     override suspend fun <T : Any> update(
@@ -82,12 +88,16 @@ internal class SettingStoreImpl(
             val next = transform(current)
             SettingPreferences.validate(key, next)
             SettingPreferences.write(preferences, key, next)
+            preferences -= receiptPreferenceKey(key)
         }
     }
 
     override suspend fun reset(key: SettingKey<*>) {
         requireFile(key)
-        dataStore.edit { preferences -> SettingPreferences.remove(preferences, key) }
+        dataStore.edit { preferences ->
+            SettingPreferences.remove(preferences, key)
+            preferences -= receiptPreferenceKey(key)
+        }
     }
 
     /**
@@ -113,3 +123,21 @@ internal class SettingStoreImpl(
         const val TAG = "Settings"
     }
 }
+
+/**
+ * The write-receipt metadata namespace: `receipt/<setting name>` string entries inside the same
+ * preferences file, so a receipt commits in the same `edit` as its value. `/` can never appear
+ * in a setting name (the registry's `area.[a-z0-9_]+` shape), so receipt entries cannot collide
+ * with any [SettingKey] — registered or ad-hoc — and are never read back as settings.
+ */
+internal const val RECEIPT_NAME_PREFIX = "receipt/"
+
+/** The metadata preference entry carrying [key]'s write receipt — an opaque string. */
+internal fun receiptPreferenceKey(key: SettingKey<*>): Preferences.Key<String> =
+    stringPreferencesKey(RECEIPT_NAME_PREFIX + key.name)
+
+/** The stored receipt for [key]; `null` when absent or foreign-typed. */
+internal fun readReceipt(
+    preferences: Preferences,
+    key: SettingKey<*>,
+): String? = runCatching { preferences[receiptPreferenceKey(key)] }.getOrNull()

@@ -384,8 +384,9 @@ class SyncEngineTest {
         val secrets = FakeSecretStore()
         val gate = FakeLocalNetworkGate()
         val settingsPort = FakeSettingsSyncPort()
+        val writeLocks = TestSettingsWriteCoordinator()
         val effects =
-            SyncApplyEffects(db, settingsPort, TestSettingsWriteCoordinator()) { true }
+            SyncApplyEffects(db, settingsPort, writeLocks) { true }
         val engine =
             SyncEngine(
                 db = db,
@@ -438,6 +439,7 @@ class SyncEngineTest {
                 activity = activity,
                 gate = gate,
                 effects = effects,
+                capture = SettingsCapture(db, settingsPort, writeLocks) { true },
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

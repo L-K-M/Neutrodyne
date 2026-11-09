@@ -1187,8 +1187,13 @@ private class Harness(
             sharePasswords = { flags.sharePasswords },
         )
     val activity = SyncActivityState()
+    val writeLocks = TestSettingsWriteCoordinator()
     val effects =
-        SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) {
+        SyncApplyEffects(db, settings, writeLocks) {
+            address.syncPlaybackSettings()
+        }
+    val settingsCapture =
+        SettingsCapture(db, settings, writeLocks) {
             address.syncPlaybackSettings()
         }
     val engine =
@@ -1204,6 +1209,7 @@ private class Harness(
             activity = activity,
             gate = gate,
             effects = effects,
+            capture = settingsCapture,
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -1291,6 +1297,7 @@ private class Harness(
             build = build,
             merger = merger,
             effects = effects,
+            settingsCapture = settingsCapture,
             gate = gate,
             errors = classifier,
             scheduler = scheduler,

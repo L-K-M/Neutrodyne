@@ -2,8 +2,11 @@
 
 package ch.lkmc.neutrodyne.core.data.backup
 
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsRepository
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPort
 import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.execSql
 import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
@@ -17,8 +20,11 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.datastore.DataStoreBindings
 import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.DeleteAfter
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -59,8 +65,10 @@ import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
@@ -116,6 +124,7 @@ class BackupWriterTest {
     private fun newWriter(
         archives: ArchiveWriterFactory = ZipArchiveWriter(),
         fileSystem: FileSystem = this.fileSystem,
+        settings: SettingsRepository = this.settings,
     ) = BackupWriter(
         db,
         settings,
@@ -303,6 +312,50 @@ class BackupWriterTest {
         }
 
     // --- Settings whitelist (05 Settings whitelist) --------------------------------------------
+
+    @Test
+    fun internalWriteReceiptsNeverEnterTheBackupSettings() =
+        runTest {
+            val storeJob = SupervisorJob()
+            val storeScope = CoroutineScope(storeJob + Dispatchers.IO)
+            try {
+                val data =
+                    PreferenceDataStoreFactory.createWithPath(
+                        scope = storeScope,
+                        produceFile = { dir / "portable.preferences_pb" },
+                    )
+                val device =
+                    PreferenceDataStoreFactory.createWithPath(
+                        scope = storeScope,
+                        produceFile = { dir / "device.preferences_pb" },
+                    )
+                val store = DataStoreBindings.settingsStore(data)
+                val port = DataStoreSettingsSyncPort(store, clock)
+                val receipt = "private-write-receipt-marker"
+                port.registerRecorder { _, _ -> SettingWriteOrigin.Captured(receipt) }
+                val repository =
+                    DataStoreSettingsRepository(
+                        store,
+                        DataStoreBindings.deviceSettingsStore(device),
+                        port,
+                        clock,
+                        DataStoreSettingsWriteCoordinator(),
+                    )
+                assertIs<Outcome.Success<*>>(repository.set(PlaybackSettingKeys.SKIP_BACK_MS, 45000L))
+                assertTrue(store.readWithReceipt(PlaybackSettingKeys.SKIP_BACK_MS).receipt!!.contains(receipt))
+                assertIs<Outcome.Success<*>>(
+                    newWriter(settings = repository).write(BackupKind.MANUAL, target(), includeCredentials = false),
+                )
+                reader(target()).use { archive ->
+                    val exported = archive.settings().values
+                    assertEquals(portableKeys().toSet(), exported.map { it.key }.toSet())
+                    assertFalse(archive.bytes(BackupCodec.ENTRY_SETTINGS).decodeToString().contains(receipt))
+                }
+            } finally {
+                storeJob.cancel()
+                storeJob.join()
+            }
+        }
 
     @Test
     fun portablePlaybackSettingsRoundTripWithoutDeviceKeys() =
