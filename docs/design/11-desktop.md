@@ -1808,8 +1808,8 @@ change: the AboutLibraries notices and skiko's Apache-2.0 entries are
 unchanged. Measured on the real b601 macos-arm64 artifact: the stub jar went
 9,359,206 → 261 bytes, the removed entries deflating to 9,338,397 bytes (the
 shipped zip's stub contribution had measured 9,305,757); the linux and windows
-targets gain nothing, as measured. PB27 stays open; no budget number changes
-here.
+targets gain nothing, as measured. This trim did not change the budget. The later four-target measurements and
+owner amendment are recorded under [Sizes](#sizes).
 
 ### Lockfiles
 
@@ -1822,7 +1822,20 @@ here.
 
 ### Sizes
 
-Estimates per target (Unverified until S13 measures them; PB27: installed ≤ 300 MB, download ≤ 130 MB):
+**Owner-approved PB27 limits (2026-11-09): installed ≤ 500 MB and download ≤ 200 MB per desktop target, in decimal units.** These replace the original 300 MB / 130 MB estimates. Other performance budgets are unchanged.
+
+[Four-target packaged run 42622466883](https://github.com/L-K-M/Neutrodyne/actions/runs/42622466883), commit `fa61b5560a1b4f2cdefb358881ca171295da932d`, measured the following sizes. The image checker reports MiB (1,048,576 bytes); the budget uses MB (1,000,000 bytes).
+
+| Target | Installed | Package downloads |
+|---|---|---|
+| Windows x64 | 333 MiB | MSI 145 MiB; ZIP 143 MiB |
+| macOS ARM64 | 379 MiB | ZIP 162 MiB |
+| Linux ARM64 | 386–389 MiB | DEB 132 MiB; RPM and tar.gz 164 MiB |
+| Linux x64 | 417 MiB | DEB 143 MiB; RPM and tar.gz 175 MiB |
+
+Every measured format is within the amended limits: the largest installed image is approximately 437.3 MB and the largest download 183.5 MB. All four artifact archive digests and the extracted smoke evidence were verified. Runtime source archives are separate assets, excluded from the application download sizes. These are the candidate's size results; they do not complete the reference-laptop startup, memory or other release checks. The checker rejects later images or packages above the approved byte limits.
+
+Original component estimates (2026-10-05), retained as historical context:
 
 | Piece | Installed | Compressed |
 |---|---|---|
@@ -1835,7 +1848,7 @@ Estimates per target (Unverified until S13 measures them; PB27: installed ≤ 30
 
 A release carries 9 desktop installers and archives of roughly this download size plus the runtime source (≈ 121 MB) and the FFmpeg source bundle; GitHub sets no limit on a release's total size ([about releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)).
 
-Measured 2026-10-06 on Linux x64 (M0b, before FFmpeg, CPython, `ndmedia` and the AOT cache exist — those pieces still stand at their estimates above): app image 197 MiB installed; DEB 75 MiB and tar.gz 95 MiB downloads. Already inside PB27 (installed ≤ 300 MB, download ≤ 130 MB).
+Measured 2026-10-06 on Linux x64 (M0b, before FFmpeg, CPython, `ndmedia` and the AOT cache exist — those pieces still stand at their estimates above): app image 197 MiB installed; DEB 75 MiB and tar.gz 95 MiB downloads. This was within the original PB27 estimates of 300 MB installed and 130 MB downloaded.
 
 ### S13 desktop packaging and performance
 
@@ -2250,7 +2263,7 @@ S13 ([S13 desktop packaging and performance](#s13-desktop-packaging-and-performa
 | PB24 first frame | ≤ 1.0 s with the AOT cache, ≤ 2.5 s without | JVM start (`RuntimeMXBean.startTime`) to the end of the first `withFrameNanos`, logged by the app; median of 5 warm starts and the first start after a reboot, with the library fixture of 300 podcasts |
 | PB25 idle RSS | ≤ 350 MB | 30 s after the first frame on the Library destination with the fixture; Windows working set, macOS RSS (`ps`), Linux `VmRSS`; the CPython child excluded |
 | PB26 RSS while playing | ≤ 450 MB | after 10 min of streaming at 1.5× with skip silence on |
-| PB27 size | installed ≤ 300 MB, download ≤ 130 MB per target | size of the installed directory; size of the release asset |
+| PB27 size | installed ≤ 500 MB, download ≤ 200 MB per target (decimal; owner-approved 2026-11-09) | size of the installed directory; size of the release asset |
 | PB28 local playback start | ≤ 300 ms | `playEpisode` of a downloaded MP3 to the first advance of `framesPlayed`, median of 10 warm starts |
 | PB29 YouTube engine | cold resolve p50 ≤ 3 s, warm ≤ 1.5 s, child ≤ 120 MB RSS, child gone 3 min after the last call | `YtDlpClient` timings with the child stopped and running; child RSS by PID; exit time logged |
 
@@ -2324,7 +2337,7 @@ Names fixed by PLAN and the change brief (`desktop.*` keys, `-Dneutrodyne.smoke`
 9. **Third-party JNI locations (S13).** Whether `sqlite-bundled` and quickjs-kt can load their natives from the image instead of a temporary or cache directory (N7); JNA can (`jna.boot.library.path`, `jna.nounpack`). If one cannot, N7's "native code loaded only from the app image" needs a recorded exception for that library's extraction into `<cache>/native/`.
 10. **Windows notifications (MD2).** Toast behaviour without a registered activator CLSID, and on ZIP installs (no shortcut); fallback is the AWT tray balloon.
 11. **AOT cache relocation (S13).** Whether the JDK 25 cache trained in the build directory is accepted after jpackage installs the image elsewhere.
-12. **`jdk.localedata` size (S13).** Its installed size; Compose 1.12.1's jlink step cannot restrict it to the shipped locales (no `--include-locales`), so it ships whole unless PB27 is missed, in which case the convention plugin runs its own jlink step. *Resolved 2026-11-09 (PB27 miss):* the measured miss (macos-arm64 artifact of head b6016050: 326 MiB installed, 142 MiB download against 300/130) put the reserved step into force — the convention plugin replaces Compose's `createRuntimeImage` with a jlink task that adds `--include-locales=en,de` to the identical flags and module list ([jlink modules](#jlink-modules)); measured `lib/modules` 87.94 → 61.42 MB with the module set and every native file unchanged. The installed-size question this entry tracked is answered; final PB27 acceptance stays with the four-target hosted measurement.
+12. **`jdk.localedata` size (S13).** Its installed size; Compose 1.12.1's jlink step cannot restrict it to the shipped locales (no `--include-locales`), so it ships whole unless PB27 is missed, in which case the convention plugin runs its own jlink step. *Resolved 2026-11-09 (PB27 miss):* the measured miss (macos-arm64 artifact of head b6016050: 326 MiB installed, 142 MiB download against 300/130) put the reserved step into force — the convention plugin replaces Compose's `createRuntimeImage` with a jlink task that adds `--include-locales=en,de` to the identical flags and module list ([jlink modules](#jlink-modules)); measured `lib/modules` 87.94 → 61.42 MB with the module set and every native file unchanged. The installed-size question this entry tracked is answered; the later four-target measurements and owner-approved limits are recorded under [Sizes](#sizes).
 13. **Re-signed runtime on macOS (PO).** jpackage must replace Adoptium's signatures on the runtime's Mach-O files with the bundle's ad-hoc signature to seal the app; the code is unchanged. Default: treat it as unmodified for [D3](../PLAN.md#3-key-decisions)'s runtime exception and say so in `RUNTIME-SOURCES.md` ([Runtime exception obligations and checks](#runtime-exception-obligations-and-checks)).
 14. **Linux package dependencies (S13).** The `Depends`/`Requires` lists of [Linux DEB, RPM and tar.gz](#linux-deb-rpm-and-targz) are a first draft; S13's installs on Debian 11, Ubuntu 20.04–24.04, Fedora and openSUSE fix them. If a distribution inside the floor cannot satisfy them, the tar.gz is the documented route there.
 

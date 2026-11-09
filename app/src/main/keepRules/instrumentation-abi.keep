@@ -1739,7 +1739,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.playback.Podcasting20ChaptersParser {
 }
 -keep class ch.lkmc.neutrodyne.core.data.playback.PositionWriterContributions$ToAppScope$ProvidesPositionWriterMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.playback.PositionWriterContributions$ToAppScope$ProvidesPositionWriterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.playback.PositionWriterContributions$ToAppScope$ProvidesPositionWriterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.playback.PositionWriterContributions$ToAppScope$ProvidesPositionWriterMetroFactory {
   ch.lkmc.neutrodyne.core.data.playback.PositionWriterContributions$ToAppScope$ProvidesPositionWriterMetroFactory$Companion Companion;
@@ -1759,7 +1759,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.playback.QueueRepositoryImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.playback.SessionWriterContributions$ToAppScope$ProvidesSessionWriterMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.playback.SessionWriterContributions$ToAppScope$ProvidesSessionWriterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.playback.SessionWriterContributions$ToAppScope$ProvidesSessionWriterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.playback.SessionWriterContributions$ToAppScope$ProvidesSessionWriterMetroFactory {
   ch.lkmc.neutrodyne.core.data.playback.SessionWriterContributions$ToAppScope$ProvidesSessionWriterMetroFactory$Companion Companion;
@@ -2516,6 +2516,8 @@
 -keep interface ch.lkmc.neutrodyne.core.domain.PlaySessionStore {
   public java.lang.Object virtualQueue(int, kotlin.coroutines.Continuation);
 }
+-keep interface ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort {
+}
 -keep interface ch.lkmc.neutrodyne.core.domain.PositionStore {
   public kotlinx.coroutines.flow.Flow observe(long);
 }
@@ -2999,6 +3001,7 @@
   public ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance getPlaybackMaintenance();
   public dev.zacsweers.metro.Provider getPlaybackMediaLookup();
   public ch.lkmc.neutrodyne.playback.api.PlaybackStateSource getPlaybackStateSource();
+  public ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort getPlaybackSyncPort();
   public dev.zacsweers.metro.Provider getPositionStore();
   public dev.zacsweers.metro.Provider getQueueRepository();
   public ch.lkmc.neutrodyne.core.domain.RefreshController getRefreshController();
@@ -4200,6 +4203,16 @@
 }
 -keep class ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner {
 }
+-keep interface ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard$MetroContributionToDevzacsweersmetroappScopeocf15 {
+}
+-keep class ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard$MetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard$MetroFactory {
+  ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard {
+}
 -keep class ch.lkmc.neutrodyne.playback.core.StartPositionRule$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.playback.core.StartPositionRule$MetroFactory create();
 }
@@ -4327,6 +4340,12 @@
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$MaintenanceMetroFactory {
   ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$MaintenanceMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$PlaybackSyncPortMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$PlaybackSyncPortMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$PlaybackSyncPortMetroFactory {
+  ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$PlaybackSyncPortMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$StateMetroFactory$Companion {
   public ch.lkmc.neutrodyne.playback.impl.PlaybackBindings$StateMetroFactory create(dev.zacsweers.metro.Provider);
 }
@@ -4378,7 +4397,7 @@
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackPrefsInitializerContributions {
 }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackServiceAccess$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.playback.impl.PlaybackServiceAccess newInstance(dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.playback.impl.EpisodeResolver, ch.lkmc.neutrodyne.playback.impl.EpisodeSourceIndex, ch.lkmc.neutrodyne.playback.impl.PlaybackPrefs, ch.lkmc.neutrodyne.playback.impl.PlaybackStateHub, ch.lkmc.neutrodyne.playback.impl.MeteredStreamingGate, ch.lkmc.neutrodyne.playback.impl.MediaLibraryTree, ch.lkmc.neutrodyne.playback.impl.SavedResumption, ch.lkmc.neutrodyne.core.common.NetworkMonitor, ch.lkmc.neutrodyne.core.common.Clock, ch.lkmc.neutrodyne.download.api.LocalMediaIndex, ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource, ch.lkmc.neutrodyne.playback.core.PlaybackHistory, kotlinx.coroutines.CoroutineScope, kotlinx.coroutines.CoroutineDispatcher, ch.lkmc.neutrodyne.core.database.DatabaseOpener, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.download.api.LocalMediaChanges, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.download.api.LocalMediaReadiness, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.youtube.api.YouTubeEngine, ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver, android.app.Application);
+  public ch.lkmc.neutrodyne.playback.impl.PlaybackServiceAccess newInstance(dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.playback.impl.EpisodeResolver, ch.lkmc.neutrodyne.playback.impl.EpisodeSourceIndex, ch.lkmc.neutrodyne.playback.impl.PlaybackPrefs, ch.lkmc.neutrodyne.playback.impl.PlaybackStateHub, ch.lkmc.neutrodyne.playback.impl.MeteredStreamingGate, ch.lkmc.neutrodyne.playback.impl.MediaLibraryTree, ch.lkmc.neutrodyne.playback.impl.SavedResumption, ch.lkmc.neutrodyne.core.common.NetworkMonitor, ch.lkmc.neutrodyne.core.common.Clock, ch.lkmc.neutrodyne.download.api.LocalMediaIndex, ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource, ch.lkmc.neutrodyne.playback.core.PlaybackHistory, ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard, ch.lkmc.neutrodyne.playback.impl.PlaybackSyncBridge, kotlinx.coroutines.CoroutineScope, kotlinx.coroutines.CoroutineDispatcher, ch.lkmc.neutrodyne.core.database.DatabaseOpener, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.download.api.LocalMediaChanges, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.download.api.LocalMediaReadiness, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.youtube.api.YouTubeEngine, ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver, android.app.Application);
 }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackServiceAccess$MetroFactory {
   ch.lkmc.neutrodyne.playback.impl.PlaybackServiceAccess$MetroFactory$Companion Companion;
@@ -4395,6 +4414,14 @@
   ch.lkmc.neutrodyne.playback.impl.PlaybackStateHub$MetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackStateHub {
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.PlaybackSyncBridge$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.playback.impl.PlaybackSyncBridge$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.PlaybackSyncBridge$MetroFactory {
+  ch.lkmc.neutrodyne.playback.impl.PlaybackSyncBridge$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.PlaybackSyncBridge {
 }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackTestHooks {
   public void setPlayerCreated(kotlin.jvm.functions.Function1);
@@ -4482,9 +4509,6 @@
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$LinkFlowMetroFactory {
   public static ch.lkmc.neutrodyne.sync.impl.SyncBindings$LinkFlowMetroFactory create();
 }
--keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$PlaybackSyncPortMetroFactory {
-  public static ch.lkmc.neutrodyne.sync.impl.SyncBindings$PlaybackSyncPortMetroFactory create();
-}
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SettingsCaptureMetroFactory$Companion {
   public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SettingsCaptureMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -4495,7 +4519,7 @@
   public static ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncActivityStateMetroFactory create();
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncApplierMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncApplierMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncApplierMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncApplierMetroFactory {
   ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncApplierMetroFactory$Companion Companion;
