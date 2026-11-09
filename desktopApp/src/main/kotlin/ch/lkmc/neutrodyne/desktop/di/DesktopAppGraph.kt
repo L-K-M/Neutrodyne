@@ -121,6 +121,13 @@ interface DesktopAppGraph {
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
 
+    /**
+     * MD3 AC2's packaged engine proof (11 Smoke mode step 6): bound in engine builds,
+     * null in the emergency no-engine build. It stays inert until the packaged smoke
+     * arms the replay fixture.
+     */
+    val engineSmokeProof: ch.lkmc.neutrodyne.desktop.smoke.EngineSmokeProof?
+
     /** Database-backed; resolve only after the database open gate (M9a health binding). */
     val youTubeHealth: YouTubeHealth
 

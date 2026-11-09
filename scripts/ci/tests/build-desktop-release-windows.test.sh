@@ -31,6 +31,7 @@ mkdir -p "$repo/scripts/ci" "$repo/scripts/desktop" "$repo/bin"
 cp "$LEG" "$repo/scripts/ci/"
 cat > "$repo/scripts/desktop/smoke-start.sh" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$@" >> smoke-args.txt
 echo "SMOKE $1"
 EOF
 cat > "$repo/gradlew" <<'EOF'
@@ -71,7 +72,7 @@ EOF
 chmod +x "$repo/gradlew" "$repo/scripts/desktop/smoke-start.sh" "$repo/scripts/ci/"*.sh "$repo/bin/"*
 
 run_leg() { # [ENV=x ...] — one leg run; clears records, captures leg.log
-    rm -f "$repo/smoke.txt" "$repo/stub.argv" "$repo/stub.env" "$repo/checked-kinds"
+    rm -f "$repo/smoke.txt" "$repo/smoke-args.txt" "$repo/stub.argv" "$repo/stub.env" "$repo/checked-kinds"
     env PATH="$repo/bin:$PATH" LOCALAPPDATA="$repo" STUB_LOG="$repo/stub" "$@" \
         bash "$repo/scripts/ci/build-desktop-release-windows.sh" 9.9.9 \
         "$repo/dist" "$repo/img" >"$repo/leg.log" 2>&1
@@ -91,6 +92,10 @@ chk "both smokes ran after msiexec 0" test "$(smokes)" -eq 2
 chk "installed MSI and ZIP use their own manifest variants" \
     test "$(tr '\n' ' ' < "$repo/checked-kinds")" = "msi zip "
 chk "the installed app's smoke ran" grep -q 'Neutrodyne-App' "$repo/smoke.txt"
+# MD3 AC2: the leg must arm the packaged recorded-resolve proof on both smokes.
+# The leg canonicalises REPO_ROOT (pwd -P), so compare against the resolved repo.
+chk "both smokes armed the recorded-resolve replay" \
+    test "$(grep -cF -- "--engine-replay=$(cd -- "$repo" && pwd -P)/youtube/engine/src/test/resources/recorded/resolve" "$repo/smoke-args.txt")" -eq 2
 chk "powershell got -NoProfile -Command" \
     test "$(head -2 "$repo/stub.argv" | tr '\n' ' ')" = "-NoProfile -Command "
 ps="$(tail -n +3 "$repo/stub.argv")"

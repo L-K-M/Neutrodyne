@@ -1410,6 +1410,8 @@ for image; do :; done
                 # The producer writes the DOS local time plus the UTC 0x5455
                 # field; either decodes to the trained epoch on this host.
                 info = zipfile.ZipInfo(name, date_time=time.localtime(self.AOT_EPOCH_S)[:6])
+                info.create_system = 3
+                info.external_attr = path.stat().st_mode << 16
                 info.extra = utc_extra
                 # Gradle's Zip records each entry's Unix mode in the external
                 # attributes; the interpreter's exec bit must survive the archive
