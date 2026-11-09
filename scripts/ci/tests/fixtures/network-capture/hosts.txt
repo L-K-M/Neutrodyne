@@ -13,7 +13,7 @@ www.youtube.com
 i.ytimg.com
 yt3.googleusercontent.com
 rr3---sn-vgqsenlk.googlevideo.com
-l-k-m.github.io
+api.github.com
 github.com
 release-assets.githubusercontent.com
 sync.example.org

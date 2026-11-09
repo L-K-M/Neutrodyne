@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.youtube.api.ChannelHit
 import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.EngineStatus
+import ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.SearchCursor
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
@@ -205,5 +206,9 @@ class YouTubeSearchViewModelTest : MainDispatcherTest() {
         }
 
         override fun retryStart() = Unit
+
+        override suspend fun checkForUpdate(): EngineUpdateOutcome = EngineUpdateOutcome.UpToDate
+
+        override suspend fun resetToBundled() = Unit
     }
 }

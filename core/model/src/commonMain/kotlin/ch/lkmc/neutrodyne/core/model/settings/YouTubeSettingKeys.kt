@@ -28,6 +28,17 @@ object YouTubeSettingKeys {
     val ENGINE_FAILURE_IDENTITY = SettingKey.Text("youtube.engine_failure_identity", "", SettingsFile.DEVICE)
     val ENGINE_START_FAILURES = SettingKey.Int32("youtube.engine_start_failures", 0, SettingsFile.DEVICE)
 
+    // The engine-update policy is portable (backed up); the check state it feeds never leaves device.
+    val ENGINE_UPDATES =
+        SettingKey.Choice(
+            "youtube.engine_updates",
+            YouTubeEngineUpdatePolicy.APPROVED,
+            YouTubeEngineUpdatePolicy.entries.toImmutableList(),
+        )
+    val ENGINE_LAST_CHECK_AT = SettingKey.Int64("youtube.engine_last_check_at", 0, SettingsFile.DEVICE)
+    val ENGINE_LAST_OUTCOME = SettingKey.Text("youtube.engine_last_outcome", "", SettingsFile.DEVICE)
+    val ENGINE_HEARTBEAT_AT = SettingKey.Int64("youtube.engine_heartbeat_at", 0, SettingsFile.DEVICE)
+
     fun acceptsRange(
         key: SettingKey<*>,
         value: Any,
@@ -51,6 +62,8 @@ object YouTubeSettingKeys {
             BREAKER_OPEN_UNTIL,
             BREAKER_LAST_OPENED_AT,
             RATE_LIMITED_UNTIL,
+            ENGINE_LAST_CHECK_AT,
+            ENGINE_HEARTBEAT_AT,
             -> {
                 value is Long && value >= 0
             }
@@ -80,6 +93,10 @@ object YouTubeSettingKeys {
             RATE_LIMIT_LEVEL,
             ENGINE_START_FAILURES,
             ENGINE_FAILURE_IDENTITY,
+            ENGINE_UPDATES,
+            ENGINE_LAST_CHECK_AT,
+            ENGINE_LAST_OUTCOME,
+            ENGINE_HEARTBEAT_AT,
             SUGGEST_RSS,
             MARK_PLAYED_ON_OPEN,
             FEED_OUTAGE_UNTIL,
@@ -90,6 +107,13 @@ object YouTubeSettingKeys {
 }
 
 enum class YouTubeRowArt { VIDEO_THUMBNAIL, CHANNEL_AVATAR }
+
+/**
+ * Which yt-dlp versions the app may activate for the embedded engine (04 Engine updates, D76):
+ * only canary-approved, every upstream stable, or none. Declared here so `youtube:api` and the
+ * settings stores stay model-independent.
+ */
+enum class YouTubeEngineUpdatePolicy { APPROVED, UPSTREAM_STABLE, OFF }
 
 /** Shared settings/playback quality, declared here to keep model independent of youtube:api. */
 enum class YouTubeAudioQuality(

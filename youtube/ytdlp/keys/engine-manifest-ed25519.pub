@@ -1,0 +1,4 @@
+# Neutrodyne engine-approval manifest signing key (Ed25519, raw 32-byte key, base64).
+# The private half is held outside the repository by the release owner; this file ships
+# as the app asset ytdlp/keys/engine-manifest-ed25519.pub.
+byH3Y89VQmEcysO3OthzO6pOLvgVDvDgEmckGvBb0HM=

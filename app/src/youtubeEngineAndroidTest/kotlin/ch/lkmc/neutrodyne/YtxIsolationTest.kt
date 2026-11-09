@@ -120,7 +120,7 @@ class YtxIsolationTest {
                         }
                     val transitionsBefore = transitions.get()
                     val paths = AndroidEngineStorePaths(app)
-                    val store = BundledEngineStore(paths, app.graph.buildInfo.versionCode)
+                    val store = BundledEngineStore(paths, app.graph.buildInfo.versionCode, clock)
                     store.loadStatus()
                     store.prepareBundled()
                     val directory = root.resolve(UUID.randomUUID().toString()).apply { mkdirs() }

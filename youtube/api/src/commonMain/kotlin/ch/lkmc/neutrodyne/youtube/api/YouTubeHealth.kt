@@ -2,11 +2,19 @@
 
 package ch.lkmc.neutrodyne.youtube.api
 
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** App-scoped serialized state; timestamps are epoch ms. retryNow retains outage level and schedules channels. */
 interface YouTubeHealth {
     val state: StateFlow<YouTubeHealthState>
+
+    /**
+     * Every reported [ExtractionOutcome], reservation-driven or not, in report order. The M9b
+     * rollback monitor taps this instead of polling counters; emissions are at most one per
+     * engine call, so a small hot buffer cannot fall behind a fast reporter.
+     */
+    val outcomes: SharedFlow<ExtractionOutcome>
 
     suspend fun awaitLoaded()
 

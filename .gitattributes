@@ -9,3 +9,8 @@
 *.webp binary
 signing/*.keystore binary
 feeds/src/test/resources/opml/leading_newline.opml -text
+# Vendored upstream release files verify by detached signature and SHA-256; they must check
+# out byte-exact on every OS rather than relying on content-based binary detection.
+youtube/ytdlp/engine/SHA2-256SUMS binary
+youtube/ytdlp/engine/SHA2-256SUMS.sig binary
+youtube/ytdlp/engine/yt-dlp binary
