@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.desktop.smoke.SmokeMode
 import ch.lkmc.neutrodyne.desktop.system.AudioRouteMonitor
 import ch.lkmc.neutrodyne.desktop.system.NoOpAudioRouteMonitor
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.playback.desktop.DesktopEpisodeSourceResolver
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackRuntime
 import ch.lkmc.neutrodyne.playback.engine.AudioEngine
+import ch.lkmc.neutrodyne.playback.engine.EngineBackend
 import ch.lkmc.neutrodyne.playback.engine.FfAudioEngine
 import ch.lkmc.neutrodyne.playback.engine.SpanCache
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
@@ -125,7 +127,12 @@ object DesktopPlaybackBindings {
         cache: SpanCache,
     ): AudioEngine {
         val paths = DesktopEnginePaths.current()
-        return FfAudioEngine(paths.ffmpeg, paths.ndmedia, resolver, clients, cache)
+        // The double-armed packaged smoke (smoke=true plus the engine-replay scenario)
+        // proves real FFmpeg playback on the headless null output; every other run keeps
+        // the system device. The armed property is only ever set inside that image.
+        val backend =
+            if (SmokeMode.engineReplayDir() != null) EngineBackend.NULL else EngineBackend.SYSTEM
+        return FfAudioEngine(paths.ffmpeg, paths.ndmedia, resolver, clients, cache, backend)
     }
 
     /**

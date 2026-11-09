@@ -92,10 +92,10 @@ chk "both smokes ran after msiexec 0" test "$(smokes)" -eq 2
 chk "installed MSI and ZIP use their own manifest variants" \
     test "$(tr '\n' ' ' < "$repo/checked-kinds")" = "msi zip "
 chk "the installed app's smoke ran" grep -q 'Neutrodyne-App' "$repo/smoke.txt"
-# MD3 AC2: the leg must arm the packaged recorded-resolve proof on both smokes.
+# MD3 AC2: the leg must arm the packaged recorded-media proof on both smokes.
 # The leg canonicalises REPO_ROOT (pwd -P), so compare against the resolved repo.
-chk "both smokes armed the recorded-resolve replay" \
-    test "$(grep -cF -- "--engine-replay=$(cd -- "$repo" && pwd -P)/youtube/engine/src/test/resources/recorded/resolve" "$repo/smoke-args.txt")" -eq 2
+chk "both smokes armed the recorded-media replay" \
+    test "$(grep -cF -- "--engine-replay=$(cd -- "$repo" && pwd -P)/youtube/engine/src/test/resources/recorded/media" "$repo/smoke-args.txt")" -eq 2
 chk "powershell got -NoProfile -Command" \
     test "$(head -2 "$repo/stub.argv" | tr '\n' ' ')" = "-NoProfile -Command "
 ps="$(tail -n +3 "$repo/stub.argv")"
