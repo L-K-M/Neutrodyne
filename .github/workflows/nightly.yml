@@ -28,8 +28,11 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | desktop-windows (desktop-packages' windows-x64 leg alone) | windows-identity (the windows-x64 ndmedia native boundary: process AUMID, the SMTC worker's release-ID re-assert and the .lnk stamp) | benchmark-dryrun (M10 journeys; timings are diagnostic) | benchmark (cold-start and cover-grid Macrobenchmarks; report-only, emulator timings are diagnostic) | baseline-profile (generate the baseline and startup profiles into an artifact) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36) | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build) | api37-subscribe (API 37 ATF diagnostic on the api37-16k job: SubscribeJourneyTest only)"
+        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | desktop-windows (desktop-packages' windows-x64 leg alone) | windows-identity (the windows-x64 ndmedia native boundary: process AUMID, the SMTC worker's release-ID re-assert and the .lnk stamp) | benchmark-dryrun (M10 journeys; timings are diagnostic) | benchmark (cold-start and cover-grid Macrobenchmarks; report-only, emulator timings are diagnostic) | baseline-profile (generate the baseline and startup profiles into an artifact) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36) | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build) | api37-subscribe (API 37 ATF diagnostic on the api37-16k job: SubscribeJourneyTest only) | playback-class (diagnostic: only the classes input's instrumented selection on the api36 debug GMD)"
         default: full
+      classes:
+        description: "instrumentation class filter for scope=playback-class; Class#method narrows to one test"
+        default: "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest"
 
 permissions:
   contents: read
@@ -51,7 +54,7 @@ jobs:
     permissions:
       contents: read
       issues: write # report-nightly.sh
-    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'downloads'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'downloads' || inputs.scope == 'playback-class'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,6 +84,8 @@ jobs:
       # Step timeout: a hung test still leaves time to report and upload (see ci.yml).
       - name: GMD nightly group (debug)
         timeout-minutes: 90
+        env:
+          PLAYBACK_CLASSES: ${{ inputs.classes }}
         run: |
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
@@ -115,6 +120,16 @@ jobs:
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.DownloadJourneyTest \
               -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+          elif [ "${{ inputs.scope }}" = "playback-class" ]; then
+            # Diagnostic reproduction leg: a nonzero, explicit selection on api36 only.
+            test -n "$PLAYBACK_CLASSES" || { echo "::error::scope=playback-class needs the classes input"; exit 1; }
+            # FQCN[#method](,...) only — anything else is a typo or an injection, not a filter.
+            readonly CLASS_GRAMMAR='^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)+(#[A-Za-z_$][A-Za-z0-9_$]*)?(,[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)+(#[A-Za-z_$][A-Za-z0-9_$]*)?)*$'
+            [[ "$PLAYBACK_CLASSES" =~ $CLASS_GRAMMAR ]] || { echo "::error::classes must be FQCN[#method](,...), got: $PLAYBACK_CLASSES"; exit 1; }
+            ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
+              -Pneutrodyne.testScope=nightly \
+              -Pandroid.testInstrumentationRunnerArguments.class="$PLAYBACK_CLASSES" \
+              -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe
           else
             # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
             ./gradlew --info "${GMD_LIMITS[@]}" nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
@@ -122,18 +137,32 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe
           fi
+      # The classes input selects the evidence: a selection that executed zero
+      # cases must read as failure, never as a quiet green. Runs only after a
+      # green Gradle leg, so an original Gradle failure stays the failure.
+      - name: Require selected playback cases on api36
+        if: inputs.scope == 'playback-class'
+        env:
+          PLAYBACK_CLASSES: ${{ inputs.classes }}
+        run: |
+          mapfile -t selected < <(printf '%s' "$PLAYBACK_CLASSES" | tr ',' '\n')
+          args=()
+          for entry in "${selected[@]}"; do
+            args+=(--require-class "${entry%%#*}")
+          done
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results --device api36 "${args[@]}"
       - name: Require M5 playback and M6a download evidence
-        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads'
+        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads' && inputs.scope != 'playback-class'
         run: python3 scripts/ci/assert-playback-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       # M7 evidence gate: the share/deep-link journeys and the shared replay cases
       # run on every nightly GMD (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on the nightly devices
-        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads'
+        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads' && inputs.scope != 'playback-class'
         run: |
           python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
           python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api26 --device api33 --device api34 --device api36
       - name: Out-of-process smoke on api36 (benchmarkRelease fallback)
-        if: inputs.scope != 'youtube-smoke'
+        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'playback-class'
         timeout-minutes: 40
         run: scripts/ci/system-tests.sh smoke api36
       - name: Require explicitly selected M6a journeys

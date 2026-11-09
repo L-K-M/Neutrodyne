@@ -144,6 +144,9 @@ interface DesktopAppGraph {
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
 
+    /** The portable settings store; journey tests toggle engine availability through it. */
+    val settingsStore: ch.lkmc.neutrodyne.core.datastore.SettingsStore
+
     /** The user-facing refresh port (11 Menus' File › Refresh, Ctrl/Cmd+R / F5). */
     val refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController
 

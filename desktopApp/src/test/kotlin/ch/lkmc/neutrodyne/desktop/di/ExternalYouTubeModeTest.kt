@@ -47,6 +47,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
@@ -86,8 +87,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
 import org.junit.Test
 import java.util.Locale
@@ -130,6 +133,18 @@ class ExternalYouTubeModeTest {
                 createDynamicGraphFactory<DesktopAppGraph.Factory>(
                     RecordedJourneyBindings(db, clock, scope, replay, settings),
                 ).create(dirs, build, reporter, FakeLevelMutableLogSink())
+            // The external-mode journey needs a disabled engine: under the bundled variant
+            // the real engine is present and would report in-app capability instead.
+            if (build.youTubeEngineBundled) {
+                runBlocking {
+                    graph.settingsStore.set(YouTubeSettingKeys.ENGINE_ENABLED, false)
+                    withTimeout(10_000) {
+                        graph.youtubeCapabilities.capabilities.first {
+                            it.externalReason == ExternalReason.DISABLED_BY_USER
+                        }
+                    }
+                }
+            }
             val group = runBlocking { db.groupDao().insert(groupEntity(name = "Journey group", orderKey = "a0")) }
             var showing by mutableStateOf(true)
             try {
@@ -203,7 +218,11 @@ class ExternalYouTubeModeTest {
                     assertEquals(emptyList(), db.downloadDao().allRows())
                 }
                 assertEquals(
-                    ExternalReason.NOT_YET_AVAILABLE,
+                    if (build.youTubeEngineBundled) {
+                        ExternalReason.DISABLED_BY_USER
+                    } else {
+                        ExternalReason.NOT_YET_AVAILABLE
+                    },
                     graph.youtubeCapabilities.capabilities.value.externalReason,
                 )
                 // Fail both subscription variants/fallbacks and the real monitor's controls.
@@ -280,6 +299,18 @@ class ExternalYouTubeModeTest {
             val graph =
                 createDynamicGraphFactory<DesktopAppGraph.Factory>(bindings)
                     .create(dirs, build, reporter, FakeLevelMutableLogSink())
+            // The external-mode journey needs a disabled engine: under the bundled variant
+            // the real engine is present and would report in-app capability instead.
+            if (build.youTubeEngineBundled) {
+                runBlocking {
+                    graph.settingsStore.set(YouTubeSettingKeys.ENGINE_ENABLED, false)
+                    withTimeout(10_000) {
+                        graph.youtubeCapabilities.capabilities.first {
+                            it.externalReason == ExternalReason.DISABLED_BY_USER
+                        }
+                    }
+                }
+            }
             val actions = CapturedBrowserActions()
             val id =
                 runBlocking {
@@ -363,8 +394,13 @@ class ExternalYouTubeModeTest {
                 onAllNodesWithContentDescription("Settings").onFirst().performClick()
                 onNodeWithText("YouTube").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                 onRoot().performKeyInput { pressKey(Key.Enter) }
-                onNodeWithText("Not yet available on this computer").assertExists()
-                onNodeWithText("Play YouTube in the app").assertDoesNotExist()
+                if (build.youTubeEngineBundled) {
+                    onNodeWithText("In-app YouTube is off").assertExists()
+                    onNodeWithText("Play YouTube in the app").assertExists()
+                } else {
+                    onNodeWithText("Not yet available on this computer").assertExists()
+                    onNodeWithText("Play YouTube in the app").assertDoesNotExist()
+                }
             } finally {
                 runOnIdle { showing = false }
                 waitForIdle()
