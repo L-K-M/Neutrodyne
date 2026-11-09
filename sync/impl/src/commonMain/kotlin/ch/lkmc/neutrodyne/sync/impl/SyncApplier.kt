@@ -60,6 +60,8 @@ data class SyncApplyResult(
     val invalid: Int,
     /** Podcasts this page flagged `needsCredentials` — one `FeedPasswordNeeded` per pull. */
     val feedsNeedingCredentials: List<Long> = emptyList(),
+    /** A `session` record merged new content this page — the adopter re-evaluates after commit. */
+    val sessionApplied: Boolean = false,
 )
 
 /** The parked `identityKey` of a membership row: `@member:<groupUuid>` (10 Parked state). */
@@ -113,6 +115,7 @@ class SyncApplier(
             var parked = 0
             var held = 0
             var invalid = 0
+            var sessionApplied = false
             try {
                 db.withWriteTransaction {
                     db.syncStateDao().withApplying {
@@ -128,7 +131,10 @@ class SyncApplier(
                                     feedsNeedingCredentials,
                                 )
                             when (result) {
-                                is RecordOutcome.Applied -> applied++
+                                is RecordOutcome.Applied -> {
+                                    applied++
+                                    if (dto.coll == SyncCollection.SESSION.wire) sessionApplied = true
+                                }
                                 is RecordOutcome.Stale -> stale++
                                 is RecordOutcome.Parked -> parked++
                                 is RecordOutcome.Held -> held++
@@ -151,7 +157,7 @@ class SyncApplier(
                     )
                 }
             }
-            SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials)
+            SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials, sessionApplied)
         }
 
     private suspend fun wireRid(dto: RecordDto): String? {
@@ -1154,7 +1160,7 @@ private fun maxOfNullable(
     }
 
 /** The stub row of 02 Restore matching: `inFeed = 0`, `isNew = 0`, `contentHash = 0`. */
-private fun episodeEntity(
+internal fun episodeEntity(
     podcastId: Long,
     key: String,
     hints: ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints?,

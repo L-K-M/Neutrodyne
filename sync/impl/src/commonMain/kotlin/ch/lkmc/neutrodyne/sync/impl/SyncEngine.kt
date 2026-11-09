@@ -79,6 +79,7 @@ class SyncEngine(
     private val effects: SyncApplyEffects,
     private val capture: SettingsCapture,
     private val notices: SyncNoticeBus,
+    private val onSessionApplied: suspend () -> Unit = {},
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -127,6 +128,7 @@ class SyncEngine(
         var rejected = 0
         var pulled = 0
         var held = 0
+        var sessionApplied = false
         val feedsNeedingCredentials = LinkedHashSet<Long>()
         val roundId = clock.now()
 
@@ -155,6 +157,7 @@ class SyncEngine(
             effects.drainPasswords()
             stale += page.stale
             held += page.held
+            sessionApplied = sessionApplied || page.sessionApplied
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
             raiseHlc(response.records)
@@ -168,6 +171,7 @@ class SyncEngine(
                 applied += next.records.size
                 pulled += next.records.size
                 val later = applier.applyPage(next.records, roundId)
+                sessionApplied = sessionApplied || later.sessionApplied
                 feedsNeedingCredentials += later.feedsNeedingCredentials
                 // Each later page's effects drain with its own commit, not only at the round's end.
                 effects.drainSettings()
@@ -187,6 +191,9 @@ class SyncEngine(
             // Below the thresholds the guard deleted its provisional row; the removals were staged
             // in `sync_held` only when held, so nothing else to apply here.
         }
+        // 10 Now playing: a committed session record re-evaluates once per round — the raw
+        // record already holds every page's winner, so one check covers multi-page pulls.
+        if (sessionApplied) onSessionApplied()
         // 10 Passwords: one notice per pull for the feeds that still need a credential.
         if (feedsNeedingCredentials.isNotEmpty()) {
             notices.post(

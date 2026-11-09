@@ -410,6 +410,54 @@ class SyncApplierTest {
             }
         }
 
+    @Test
+    fun aSessionPageIsRetainedInRawWithItsWriterAndFlaggedForTheAdopter() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            RecordDto(
+                                coll = "session",
+                                id = JsonPrimitive("current"),
+                                seq = 1,
+                                by = deviceId,
+                                fields =
+                                    mapOf(
+                                        "episode" to
+                                            FieldValue(
+                                                buildJsonObject {
+                                                    put("p", podcastSyncId)
+                                                    put("k", "g:one")
+                                                },
+                                                clock(10).toString(),
+                                            ),
+                                        "context" to
+                                            FieldValue(
+                                                buildJsonObject { put("type", "EXTERNAL") },
+                                                clock(10).toString(),
+                                            ),
+                                    ),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                assertEquals(1, result.applied)
+                assertTrue(result.sessionApplied, "the page flags a committed session for the adopter")
+
+                val raw = SyncClockStore(db).get("session", "current")
+                assertNotNull(raw, "the merged session stays raw even while the player runs")
+                assertEquals(deviceId, raw.by, "the writer survives the page commit")
+                val episode = raw.state.fields["episode"]?.v as? JsonObject
+                assertEquals(JsonPrimitive("g:one"), episode?.get("k"))
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(db: NeutrodyneDatabase): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
