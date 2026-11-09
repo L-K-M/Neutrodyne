@@ -41,6 +41,7 @@ import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -82,7 +83,7 @@ class SyncSchedulingTest {
     @Test
     fun `sync-now rides KEEP with connected constraints and the expedited flag`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             initWorkManager()
             scheduler = scheduler()
 
@@ -100,7 +101,7 @@ class SyncSchedulingTest {
     @Test
     fun `sync-push rides KEEP with the ten-second coalescing delay`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             initWorkManager()
             scheduler = scheduler()
 
@@ -118,7 +119,7 @@ class SyncSchedulingTest {
     @Test
     fun `sync-periodic arms the hourly pull only while linked`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             initWorkManager()
             scheduler = scheduler()
 
@@ -140,7 +141,7 @@ class SyncSchedulingTest {
     @Test
     fun `onUnlinked cancels every sync work name`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             initWorkManager()
             scheduler = scheduler()
 
@@ -162,7 +163,7 @@ class SyncSchedulingTest {
     @Test
     fun `the foreground observer enqueues sync-now only while linked`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             initWorkManager()
             scheduler = scheduler()
             val observer = observer()
@@ -187,7 +188,7 @@ class SyncSchedulingTest {
     @Test
     fun `a driven sync-now runs the engine round`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             link()
             val client = ScriptedSyncClient()
             val engine = engine(client)
@@ -208,7 +209,7 @@ class SyncSchedulingTest {
     @Test
     fun `a transport failure reschedules the work`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             link()
             val client = ScriptedSyncClient(failWith = SyncTransportException(500, null, "boom"))
             val engine = engine(client)
@@ -225,7 +226,7 @@ class SyncSchedulingTest {
     @Test
     fun `a rejected token revokes the link and cancels every sync work`() =
         runTest {
-            db = TestDb.inMemory(app)
+            db = TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler))
             link()
             val client = ScriptedSyncClient(failWith = SyncTransportException(401, null, "nope"))
             val engine = engine(client)

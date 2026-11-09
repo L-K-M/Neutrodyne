@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -64,7 +65,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun wireAuthNeverReachesRawState() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -94,7 +95,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aStoreFailureBeforeStagingDropsNoRawState() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -115,7 +116,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun drainInstallsTheCredentialAndClearsTheMarker() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -153,7 +154,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aCrashBetweenTheStoresRepeatsIdempotently() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -180,7 +181,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aLockedStoreKeepsTheMarkerPending() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -204,7 +205,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aMissingPodcastKeepsTheMarkerUntilItArrives() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -240,7 +241,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aMissingSnapshotFlagsNeedsCredentialsAndKeepsTheMarker() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -260,7 +261,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun equalClockRedeliveryKeepsOneSnapshotAndMarker() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -283,7 +284,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aLosingRemoteAuthDropsItsStagedSnapshot() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -307,7 +308,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aNewerLocalAuthIsNotClobberedByRemote() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 db.podcastDao().insertPodcast(podcastEntity(syncId = rid))
@@ -336,7 +337,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aNewerRemoteAuthReplacesTheInstalledCredential() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -379,7 +380,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anAcknowledgementBindsTheCompleteOriginalClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -442,7 +443,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anInstalledAuthReplaysItsAcceptedBytesNotTheLiveCredential() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -479,7 +480,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anAcknowledgedSendBindsTheSentBytesUnderANewerLocalEdit() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -557,7 +558,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aPendingOutboxIntentKeepsItsStagedSnapshotFromTheSweep() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -598,7 +599,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun theShareGateControlsTheHydratedPush() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -635,7 +636,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aFeedWithOnlyAnOriginFlagsNeedsCredentials() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -654,7 +655,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun orphanSweepKeepsReferencedKeysAndLiveStagingFiles() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             val dir = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "nd-auth-${rid.take(8)}"
             try {
                 link(db)
@@ -691,7 +692,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun prefixEnumerationAndUnlinkSweepOnlyTouchStagingOrigins() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -716,7 +717,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aDrainWaitsForTheCredentialCoordinator() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -752,7 +753,12 @@ abstract class SyncProtectedAuthTestBase {
 
     // --- fixture -----------------------------------------------------------------------------------
 
-    protected abstract fun newTestDb(): NeutrodyneDatabase
+    /**
+     * The host's real in-memory Room database; the Android host supplies a Robolectric context.
+     * Its query context is an [kotlinx.coroutines.test.UnconfinedTestDispatcher] sharing
+     * [scheduler], so Room work stays on the test's virtual clock.
+     */
+    protected abstract fun newTestDb(scheduler: TestCoroutineScheduler): NeutrodyneDatabase
 
     private suspend fun link(db: NeutrodyneDatabase) {
         db.withWriteTransaction {
@@ -826,7 +832,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun rootProbeANewerOriginMustNotReceiveAnOlderAuthSnapshot() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -872,7 +878,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anUnpairedNewerAuthDoesNotInstallAtTheMergedOrigin() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -931,7 +937,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aPairedAuthAndOriginWriteInstallsAtItsOwnOrigin() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -971,7 +977,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aPendingEffectForTheOldOriginCannotInstallAfterTheMove() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -999,7 +1005,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anAuthPushCarriesItsOwnOriginAtTheSameClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -1047,7 +1053,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aReplayCarriesTheAcceptedOriginAtTheAcceptedClock() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -1085,7 +1091,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aReplayAtAnUnboundClockOmitsAuth() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -1118,7 +1124,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aCoalescedNewerOriginSurvivesThePairsAck() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -1174,7 +1180,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anAckWithoutAProvenPairBindsNothing() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -1240,7 +1246,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun anAuthAndASettingAcknowledgeInOnePushWithoutMetadataLoss() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)
@@ -1358,7 +1364,7 @@ abstract class SyncProtectedAuthTestBase {
     @Test
     fun aFailedAuthStageCannotPartiallyDeleteTheSettingsAck() =
         runTest {
-            val db = newTestDb()
+            val db = newTestDb(testScheduler)
             try {
                 link(db)
                 val h = harness(db)

@@ -3,7 +3,8 @@
 All scenarios here are **synthetic**, generated 2026-10-19 by
 `youtube/engine/python/tests/make_scenarios.py` with official yt-dlp
 2026.08.19. Origin: invented player/channel/search JSON and HTML, never a
-live capture. Prose and media URLs are invented. No artwork/audio is included.
+live capture. Prose and media URLs are invented. No artwork is included; the
+only audio is `media/media-head.m4a`, the playback fixture described below.
 The fixed test wall clock is 1792368000; monotonic deadlines remain real.
 
 Each scenario stores wire input/output plus strict HTTP exchanges. `bodies`
@@ -12,6 +13,14 @@ Replay matches method, scrubbed URL and the entire canonical JSON request
 body, once per recorded exchange. No other network handler is installed.
 An unrecorded request poisons the call even if yt-dlp catches the exception.
 Contract mode is explicit, informational only, and answers misses with 404.
+
+`media/` is the packaged smoke's media scenario: `resolve`'s own exchanges
+replicated x10 because replay consumes each one once while the proof resolves
+repeatedly. Its `media.json` declares the loopback fixture's byte total
+(22020219), its `media-head.m4a` is a byte copy of
+`playback/engine/src/test/resources/media/m4a_lc_2s.m4a` (a real 2 s AAC-LC
+M4A engine fixture) and the packaged proof pads it with one MP4 `free` box —
+no media blob lives here.
 
 The AC1 error corpus is generated into ignored build output by the same
 synthetic source and then strictly replayed, with independently asserted
