@@ -110,7 +110,9 @@ class DesktopEngineCompiler(
         process: Process,
     ) {
         private val tail = ByteArrayOutputStream(TAIL_BYTES)
-        private val full = java.util.concurrent.atomic.AtomicBoolean()
+        private val full =
+            java.util.concurrent.atomic
+                .AtomicBoolean()
         private val threads =
             listOf(process.inputStream, process.errorStream).map { stream ->
                 Thread(
@@ -149,7 +151,11 @@ class DesktopEngineCompiler(
 
         fun tail(): String =
             synchronized(tail) {
-                tail.toString(Charsets.UTF_8).takeLast(TAIL_CHARS).replace(Regex("\\s+"), " ").trim()
+                tail
+                    .toString(Charsets.UTF_8)
+                    .takeLast(TAIL_CHARS)
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
             }
 
         fun close() = threads.forEach { it.join(JOIN_MS) }

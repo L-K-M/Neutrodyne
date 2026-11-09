@@ -212,8 +212,7 @@ object DesktopYouTubeBindingsModule {
     /** The lane's poker arrives lazily: `JobLanePoker` resolves the `Set<JobLane>` the lane joins. */
     @Provides
     @SingleIn(AppScope::class)
-    fun updateScheduler(poker: () -> JobLanePoker): DesktopEngineUpdateScheduler =
-        DesktopEngineUpdateScheduler(poker)
+    fun updateScheduler(poker: () -> JobLanePoker): DesktopEngineUpdateScheduler = DesktopEngineUpdateScheduler(poker)
 
     @Provides fun updateSchedulerPort(scheduler: DesktopEngineUpdateScheduler): EngineUpdateScheduler = scheduler
 
@@ -314,7 +313,10 @@ object DesktopYouTubeBindingsModule {
             network,
             clock,
             { YtxControlRequest(context()) },
-            paths.root.toString().hashCode().toLong(),
+            paths.root
+                .toString()
+                .hashCode()
+                .toLong(),
         )
 
     @Provides

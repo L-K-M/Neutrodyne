@@ -375,7 +375,7 @@ Caps: ≤ 20 inputs per hand-off, each ≤ 4 KiB; files must be regular files �
 
 `-Dneutrodyne.smoke=true` is the only test entry point in a published image ([PLAN 7.2](../PLAN.md#72-definition-of-done-every-milestone)). It is used by CI on every packaged image ([09 release.yml](09-quality-and-release.md#releaseyml)) and by S13.
 
-1. `AppDirs` under a new temporary directory (never the user's directories); no URL-scheme, file-association or login-item registration; no tray; no network access.
+1. `AppDirs` under a new temporary directory (never the user's directories); no URL-scheme, file-association or login-item registration; no tray; no network access. Before running initializers, disable app update checks and set the engine update policy to `OFF` in that temporary settings store. A failed write fails the journey before any runner starts. Engine preparation remains enabled for the recorded proof. The same rule applies to AOT training.
 2. Open the database (migrations from an empty file), build the graph, show the window, record the first frame.
 3. Open the five destinations through `AppNavigator`, one frame each.
 4. Load FFmpeg, check the library majors against the build's layout file and that `avcodec_license()` reports "LGPL version 2.1 or later"; demux and decode a 1-s WAV that the smoke code generates in memory, through the AVIO bridge.

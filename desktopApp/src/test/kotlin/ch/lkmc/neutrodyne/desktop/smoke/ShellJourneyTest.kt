@@ -3,6 +3,9 @@ package ch.lkmc.neutrodyne.desktop.smoke
 
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogSink
+import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeEngineUpdatePolicy
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -15,6 +18,7 @@ import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
@@ -31,6 +35,26 @@ import java.nio.file.Files
  * still runs the whole set.
  */
 class ShellJourneyTest {
+    @Test
+    fun `the real prologue disables automatic update lanes in its temporary store`() =
+        runBlocking {
+            val journey = ShellJourney("test-journey-updates-")
+            try {
+                journey.runPrologue()
+
+                val settings = journey.graph!!.settingsRepository
+                assertThat(settings.get(UpdateSettingKeys.CHECK_ENABLED)).isFalse()
+                assertThat(settings.get(YouTubeSettingKeys.ENGINE_UPDATES)).isEqualTo(YouTubeEngineUpdatePolicy.OFF)
+                assertThat(settings.get(YouTubeSettingKeys.ENGINE_ENABLED)).isTrue()
+            } finally {
+                try {
+                    journey.cleanUp()
+                } finally {
+                    journey.disarmWatchdog()
+                }
+            }
+        }
+
     @Test
     fun `cleanup does not change permissions through symbolic links`() {
         val outside = Files.createTempDirectory("test-journey-outside-")

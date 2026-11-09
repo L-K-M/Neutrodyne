@@ -21,14 +21,14 @@ import ch.lkmc.neutrodyne.youtube.engine.PreparedEngine
 import ch.lkmc.neutrodyne.youtube.engine.YtxContext
 import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
-import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 /**
  * The desktop lane's own cadence: the persisted once-a-day + jitter gate, the immediate-check
@@ -62,8 +62,7 @@ class DesktopEngineUpdateLaneTest {
             jitterSeed,
         )
 
-    private fun now(deltaMs: Long = 0): Instant =
-        Instant.fromEpochMilliseconds(clock.now() + deltaMs)
+    private fun now(deltaMs: Long = 0): Instant = Instant.fromEpochMilliseconds(clock.now() + deltaMs)
 
     private fun markCheckedAt(msAgo: Long) {
         settings.state.value = settings.state.value.copy(lastCheckAtMs = clock.now() - msAgo)

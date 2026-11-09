@@ -25,18 +25,10 @@ import ch.lkmc.neutrodyne.youtube.engine.YtDlpClient
 import ch.lkmc.neutrodyne.youtube.engine.YtxContext
 import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNotEquals
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
-import kotlin.test.fail
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -48,8 +40,8 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import okio.Buffer
-import okio.buffer
 import okio.Path.Companion.toPath
+import okio.buffer
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -62,6 +54,14 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * MD3 AC4 — the M9 AC10 cases against the real desktop store and host: signed fixture
@@ -110,7 +110,8 @@ class DesktopEngineUpdaterTest {
         candidateArchive = repinnedBundled(NEW)
         store = BundledEngineStore(fixture.paths, 1, RealClock)
         fixture.settings.state.value =
-            fixture.settings.state.value.copy(enabled = true, updatePolicy = EngineUpdatePolicy.APPROVED)
+            fixture.settings.state.value
+                .copy(enabled = true, updatePolicy = EngineUpdatePolicy.APPROVED)
         health = FakeYouTubeHealth()
         scheduler = FakeEngineUpdateScheduler()
         transport =
@@ -300,7 +301,11 @@ class DesktopEngineUpdaterTest {
                     val path = request.url.encodedPath
                     requested += path
                     val bytes = served[path] ?: return MockResponse.Builder().code(404).build()
-                    return MockResponse.Builder().code(200).body(Buffer().write(bytes)).build()
+                    return MockResponse
+                        .Builder()
+                        .code(200)
+                        .body(Buffer().write(bytes))
+                        .build()
                 }
             }
     }
@@ -477,7 +482,13 @@ class DesktopEngineUpdaterTest {
             assertEquals(NEW, trialStatus.engineVersion)
             val version =
                 transport.call(YtxMethod.VERSION, fixture.ping.toJson(), fixture.deadline(30_000))
-            assertEquals(NEW, kotlinx.serialization.json.Json.parseToJsonElement(version).jsonObject["ytDlp"]!!.jsonPrimitive.content)
+            assertEquals(
+                NEW,
+                kotlinx.serialization.json.Json
+                    .parseToJsonElement(version)
+                    .jsonObject["ytDlp"]!!
+                    .jsonPrimitive.content,
+            )
         }
 
     @Test fun activationWaitsForTheHostToGoIdle() =
@@ -488,14 +499,20 @@ class DesktopEngineUpdaterTest {
                 async {
                     transport.callForTest("_hang", JsonObject(emptyMap()), fixture.deadline(300_000))
                 }
-            awaitReal { transport.status.value.inFlight.isNotEmpty() }
+            awaitReal {
+                transport.status.value.inFlight
+                    .isNotEmpty()
+            }
             val run = async { updater().runUpdate(EngineUpdateTrigger.SCHEDULED) }
             // Staged and compiled, but the busy host holds activation back.
             awaitReal { store.active.value.staged == NEW }
             delay(500)
             assertEquals(BUNDLED_VERSION, store.active.value.current)
             assertTrue(run.isActive)
-            transport.cancel(transport.status.value.inFlight.first())
+            transport.cancel(
+                transport.status.value.inFlight
+                    .first(),
+            )
             hang.await()
             assertEquals(EngineUpdateOutcome.Activated(NEW), run.await())
             assertEquals(NEW, store.active.value.current)

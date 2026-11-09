@@ -5,10 +5,6 @@ import ch.lkmc.neutrodyne.core.testing.EngineUpdateFixtures
 import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
 import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
 import ch.lkmc.neutrodyne.youtube.engine.EngineCompileMarkers
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -21,6 +17,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * The real compile boundary: the packaged interpreter in isolated mode, `compile_bundle`'s
@@ -55,10 +55,12 @@ class DesktopEngineCompilerTest {
         environment: Map<String, String>,
         workDir: File,
     ): Process =
-        ProcessBuilder(command).directory(workDir).apply {
-            this.environment().clear()
-            this.environment().putAll(environment)
-        }.start()
+        ProcessBuilder(command)
+            .directory(workDir)
+            .apply {
+                this.environment().clear()
+                this.environment().putAll(environment)
+            }.start()
 
     @Test fun stagedTreeCompilesToMarkedReadOnlyPycLayout() =
         runBlocking {
@@ -69,7 +71,13 @@ class DesktopEngineCompilerTest {
             val expected = CompileMarker(1, NEW, paths.pythonMinor)
             // The same record the store's `downloadedUsable` gate reads before serving.
             assertEquals(expected, EngineCompileMarkers.stored(lib.path.toPath(), paths.pythonMinor))
-            for (file in listOf("yt_dlp/__init__.pyc", "yt_dlp/version.pyc", "yt_dlp_ejs/__init__.pyc", "yt_dlp_ejs/_version.pyc", "__main__.pyc")) {
+            for (file in listOf(
+                "yt_dlp/__init__.pyc",
+                "yt_dlp/version.pyc",
+                "yt_dlp_ejs/__init__.pyc",
+                "yt_dlp_ejs/_version.pyc",
+                "__main__.pyc",
+            )) {
                 assertTrue(lib.resolve(file).isFile, "missing $file")
             }
             assertTrue(lib.walkTopDown().none { it.extension == "py" })
@@ -189,7 +197,10 @@ class DesktopEngineCompilerTest {
             assertTrue(environment.keys.none { it.startsWith("PYTHON") })
             assertTrue(
                 environment.keys
-                    .all { it in setOf("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "USERPROFILE", "SYSTEMROOT", "SSL_CERT_FILE") },
+                    .all {
+                        it in
+                            setOf("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "USERPROFILE", "SYSTEMROOT", "SSL_CERT_FILE")
+                    },
                 "unexpected env keys ${environment.keys}",
             )
         }

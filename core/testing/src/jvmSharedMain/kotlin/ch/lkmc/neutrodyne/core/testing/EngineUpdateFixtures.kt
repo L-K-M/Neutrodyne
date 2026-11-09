@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.youtube.engine.EngineKeys
 import ch.lkmc.neutrodyne.youtube.engine.OpenPgpDetachedVerifier
 import ch.lkmc.neutrodyne.youtube.engine.UpstreamReleaseVerifier
-
 import java.io.ByteArrayOutputStream
 import java.math.BigInteger
 import java.security.KeyPair
