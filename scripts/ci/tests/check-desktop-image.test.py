@@ -95,6 +95,15 @@ class Fixture:
         ):
             (root / lock).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / lock, root / lock)
+        # make-runtime-sources-md.sh reads the jlink module and locale lists from
+        # the convention plugin source when no image is given (and the locale list
+        # always), so the fixture repo carries that file too.
+        plugin_src = (
+            REPO
+            / "build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt"
+        )
+        (root / "build-logic/convention/src/main/kotlin").mkdir(parents=True)
+        shutil.copy2(plugin_src, root / "build-logic/convention/src/main/kotlin/DesktopApplicationConventionPlugin.kt")
         (root / "desktopApp/build/desktop-packaging").mkdir(parents=True)
         (root / "fakebin").mkdir()
         self.env = {
@@ -232,6 +241,17 @@ class Fixture:
         return {f"skiko-windows-{arch}.dll", "icudtl.dat"}
 
     @staticmethod
+    def skiko_removed(os_arch: str) -> set:
+        """The foreign-architecture natives the build's trim removes from the
+        derived stub (DesktopPackaging.kt skikoForeignNames): of the pinned
+        0.150.1 artifacts only the macOS jar carries another arch's native."""
+        os_name, arch = os_arch.split("-")
+        if os_name != "macos":
+            return set()
+        other = "x64" if arch == "arm64" else "arm64"
+        return {f"libskiko-macos-{other}.dylib"}
+
+    @staticmethod
     def default_skiko_entries(os_arch: str) -> list:
         """A source runtime jar: META-INF, the target native pair, and another arch's
         native that stays in the repacked stub (the real macos-arm64 jar carries both)."""
@@ -255,30 +275,44 @@ class Fixture:
             entries.append(("icudtl.dat", b"ICU"))
         return entries
 
-    def skiko_source(self, os_arch="linux-x64", version="0.9.30", entries=None) -> list:
+    def skiko_source(self, os_arch="linux-x64", version="0.9.30", entries=None,
+                     trimmed=False) -> list:
         """Record the Licensee-checked source jar (regular row) and derive its stub
-        manifest row from the source artifact and the target extraction rule."""
+        manifest row from the source artifact and the target extraction rule.
+        trimmed=True also applies the build's foreign-native trim (skikoRemoved)
+        and records the removed entries in the row's fourth `removed:` field."""
         entries = entries if entries is not None else self.default_skiko_entries(os_arch)
         stem = f"skiko-awt-runtime-{os_arch}-{version}"
         self.manifest(stem, zip_bytes(entries))
         extracted = self.skiko_extraction(os_arch)
-        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in extracted]
+        removed = self.skiko_removed(os_arch) if trimmed else set()
+        dropped = extracted | removed
+        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in dropped]
         specs = ",".join(
             f"{n.rsplit('/', 1)[-1]}={self.canonical_content_hash(n, d)}"
             for n, d in entries
             if self._skiko_base(n) in extracted
         )
-        self.stub_rows[f"{stem}.jar"] = (
-            f"{self.canonical_hash(zip_bytes(remaining))}  {stem}.jar  {specs}"
-        )
+        row = f"{self.canonical_hash(zip_bytes(remaining))}  {stem}.jar  {specs}"
+        if removed:
+            row += "  removed:" + ",".join(
+                f"{n.rsplit('/', 1)[-1]}={self.canonical_content_hash(n, d)}"
+                for n, d in entries
+                if self._skiko_base(n) in removed
+            )
+        self.stub_rows[f"{stem}.jar"] = row
         return entries
 
     def skiko_stub(self, img, os_arch="linux-x64", version="0.9.30", entries=None,
-                  mutate=None, stamp=None, write_extracted=True) -> str:
-        """Write the derived stub jar (and its extracted natives) into the image."""
+                   mutate=None, stamp=None, write_extracted=True, trimmed=False) -> str:
+        """Write the derived stub jar (and its extracted natives) into the image.
+        trimmed=True writes the stub without the foreign natives (the build's
+        trimSkikoStub derivation)."""
         entries = entries if entries is not None else self.default_skiko_entries(os_arch)
         extracted = self.skiko_extraction(os_arch)
-        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in extracted]
+        removed = self.skiko_removed(os_arch) if trimmed else set()
+        dropped = extracted | removed
+        remaining = [(n, d) for n, d in entries if self._skiko_base(n) not in dropped]
         data = zip_bytes(remaining)
         if mutate is not None:
             data = mutate(data)
@@ -806,6 +840,91 @@ esac
         r = self.fx.image_check(img)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
+    # ----- the trimmed stub: foreign-architecture natives never ship ----------
+
+    def test_trimmed_macos_stub_passes(self):
+        """The macOS stub without the foreign-architecture native, bound by a
+        record whose fourth removed: field carries the trim's provenance."""
+        img = self.flat_image(manifest_skiko=False)
+        self.fx.skiko_source("macos-arm64", "0.150.1", trimmed=True)
+        self.fx.skiko_stub(img, os_arch="macos-arm64", version="0.150.1", trimmed=True)
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_trimmed_record_rejects_the_untrimmed_stub(self):
+        """A stub that still carries the foreign native differs from the
+        trimmed record's expected content: no name-prefix acceptance."""
+        img = self.flat_image(manifest_skiko=False)
+        self.fx.skiko_source("macos-arm64", "0.150.1", trimmed=True)
+        self.fx.skiko_stub(img, os_arch="macos-arm64", version="0.150.1")
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("skiko stub content differs", r.stderr)
+
+    def test_trimmed_stub_rejects_a_kept_foreign_native(self):
+        """A stub that keeps the foreign native — even mutated, so its own hash
+        matches nothing recorded — differs from the trimmed expectation."""
+        img = self.flat_image(manifest_skiko=False)
+        entries = self.fx.default_skiko_entries("macos-arm64")
+        self.fx.skiko_source("macos-arm64", "0.150.1", entries=entries, trimmed=True)
+        evil = self.flat_image(name="Neutrodyne-kept-foreign", manifest_skiko=False)
+        kept = [
+            (n, b"NATIVE-EVIL" if n == "libskiko-macos-x64.dylib" else d)
+            for n, d in entries
+        ]
+        self.fx.skiko_stub(evil, os_arch="macos-arm64", version="0.150.1", entries=kept)
+        self.fx.write_manifest()
+        r = self.fx.image_check(evil)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("skiko stub content differs", r.stderr)
+        # The same source's properly trimmed stub still passes.
+        self.fx.skiko_stub(img, os_arch="macos-arm64", version="0.150.1", trimmed=True)
+        r2 = self.fx.image_check(img)
+        self.assertEqual(0, r2.returncode, r2.stdout + r2.stderr)
+
+    def test_trimmed_stub_rejects_a_removed_entry(self):
+        """Removing a manifest entry from the trimmed stub — the classic
+        malicious-removal case — breaks the expected content."""
+        img = self.flat_image(manifest_skiko=False)
+        entries = self.fx.default_skiko_entries("macos-arm64")
+        self.fx.skiko_source("macos-arm64", "0.150.1", entries=entries, trimmed=True)
+        stub_entries = [
+            (n, d) for n, d in entries if n != "META-INF/MANIFEST.MF"
+        ]
+        self.fx.skiko_stub(
+            img, os_arch="macos-arm64", version="0.150.1",
+            entries=stub_entries, trimmed=True,
+        )
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("skiko stub content differs", r.stderr)
+
+    def test_stub_record_with_an_unexpected_fourth_field_fails(self):
+        img = self.flat_image()
+        self.fx.skiko_source("linux-x64", "0.9.30")
+        stem = "skiko-awt-runtime-linux-x64-0.9.30.jar"
+        self.fx.stub_rows[stem] = self.fx.stub_rows[stem] + "  extra-field"
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("malformed skiko stub record", r.stderr)
+
+    def test_trimmed_linux_stub_keeps_the_three_field_record(self):
+        """Measured 0.150.1 layout: the linux and windows jars carry no foreign
+        arch, so their trim is a no-op and the record keeps its three fields."""
+        img = self.flat_image(manifest_skiko=False)
+        self.fx.skiko_source("linux-x64", "0.9.30", trimmed=True)
+        row = self.fx.stub_rows["skiko-awt-runtime-linux-x64-0.9.30.jar"]
+        self.assertNotIn("removed:", row)
+        self.fx.skiko_stub(img, os_arch="linux-x64", version="0.9.30", trimmed=True)
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
     # ----- I2: the macOS runtime home is Contents/runtime/Contents/Home -------
 
     def test_macos_app_runtime_sources_image(self):
@@ -876,6 +995,33 @@ for image; do :; done
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
         self.assertIn("java.base", out)
+
+    def test_make_runtime_sources_md_records_the_locale_restriction(self):
+        """The generated document names --include-locales=en,de (read from the
+        convention plugin's JLINK_INCLUDED_LOCALES) and the one legal file the
+        restriction drops — never a hand-deleted notice (11 jlink modules)."""
+        self.mac_app()
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--image", "imgs/Neutrodyne.app", "--out", "RUNTIME-SOURCES.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "RUNTIME-SOURCES.md").read_text(encoding="utf-8")
+        self.assertIn("en,de", out)
+        self.assertIn("legal/jdk.localedata/thaidict.md", out)
+
+    def test_make_runtime_sources_md_reads_the_plugin_without_an_image(self):
+        """The no-image path derives the module list and the locale set from the
+        convention plugin source (the same constants the build uses)."""
+        r = self.fx.run(
+            self.root / "scripts/ci/make-runtime-sources-md.sh",
+            "--out", "OUT.md",
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        out = (self.root / "OUT.md").read_text(encoding="utf-8")
+        self.assertIn("java.base", out)
+        self.assertIn("jdk.localedata", out)
+        self.assertIn("en,de", out)
 
     def test_flat_runtime_still_works(self):
         """The flat lib/runtime root keeps resolving as before."""

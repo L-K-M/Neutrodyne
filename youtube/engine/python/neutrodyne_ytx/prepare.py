@@ -2,7 +2,9 @@
 """Compile the prepared bundle on its host worker, before importing yt-dlp."""
 
 import compileall
+import os
 from pathlib import Path
+import stat
 import sys
 
 
@@ -14,6 +16,9 @@ def compile_bundle(directory):
         if not source.with_suffix('.pyc').is_file():
             raise RuntimeError('Engine bytecode missing')
     for source in lib.rglob('*.py'):
+        # Windows refuses to unlink the read-only files extracted from the bundle.
+        if os.name == 'nt':
+            source.chmod(source.stat().st_mode | stat.S_IWRITE)
         source.unlink()
 
 
