@@ -18,15 +18,23 @@
 # valid because nothing here writes them.
 #
 # --engine-replay=<dir> arms MD3 AC2's packaged engine proof: <dir> is a recorded
-# scenario directory (the shared corpus' `recorded/resolve/`, http.json included)
-# injected as `-Dneutrodyne.smoke.engineReplay`; the image's engine child replays
-# the recorded exchanges, never the network. The SMOKE line must then carry an
-# `engine` object proving the resolve through the image's own packaged runtime —
-# the interpreter and engine resources inside the image, the pinned interpreter
-# and yt-dlp versions, the resolved audio's recorded identity and a dead child —
-# and the step's budget grows to 300 s for the cold bundled compile. A .cfg or
-# `_JAVA_OPTIONS` declaration of the replay property fails before launch, and a
-# missing or contradicting `engine` object fails the verdict.
+# scenario directory (the shared corpus' `recorded/resolve/` or `recorded/media/`,
+# http.json included) injected as `-Dneutrodyne.smoke.engineReplay`; the image's
+# engine child replays the recorded exchanges, never the network. The SMOKE line
+# must then carry an `engine` object proving the resolve through the image's own
+# packaged runtime — the interpreter and engine resources inside the image, the
+# pinned interpreter and yt-dlp versions, the resolved audio's recorded identity
+# and a dead child — and the step's budget grows to 300 s for the cold bundled
+# compile. A .cfg or `_JAVA_OPTIONS` declaration of the replay property fails
+# before launch, and a missing or contradicting `engine` object fails the verdict.
+#
+# When <dir> also carries `media.json`, the armed run must prove the whole media
+# chain instead of the resolve alone: the recorded response bodies are rewritten
+# to a `127.0.0.1` loopback fixture (the resolve's urlHost), the `playback`
+# object reports a real YOUTUBE READY/playing decode past 500 ms, and the
+# `download` object reports COMPLETED with the fixture's byte count, its exact
+# post-boundary chunk ranges and the digest of the deterministic head+free-box
+# composition this script recomputes from media.json itself.
 #
 # An image whose .cfg reads a trained AOT cache (-XX:AOTCache=) gets a stricter
 # contract: the run appends -XX:AOTMode=on to the child's JAVA_TOOL_OPTIONS and
@@ -608,13 +616,22 @@ if [ -n "$REPLAY" ]; then
     if command -v cygpath >/dev/null 2>&1; then
         IMG_CHECK="$(cygpath -m "$IMG_CHECK")"
     fi
-    if ! python3 - "$IMG_CHECK" "$VERDICT" "$PY_LOCK" "$BUNDLED" <<'PY'
+    # A scenario carrying media.json arms the whole media chain: the gate then
+    # requires the separate playback and download evidence and recomputes the
+    # expected composition digest itself — the SMOKE line is checked against
+    # the scenario, never merely echoed.
+    MEDIA_JSON=""
+    if [ -f "$REPLAY/media.json" ]; then
+        MEDIA_JSON="$REPLAY/media.json"
+    fi
+    if ! python3 - "$IMG_CHECK" "$VERDICT" "$PY_LOCK" "$BUNDLED" "$MEDIA_JSON" <<'PY'
+import hashlib
 import json
 import os
 import re
 import sys
 
-img_arg, verdict_path, lock_path, bundled_path = sys.argv[1:5]
+img_arg, verdict_path, lock_path, bundled_path, media_path = sys.argv[1:6]
 
 
 def fail(message):
@@ -630,11 +647,91 @@ if not isinstance(engine, dict):
     fail("the SMOKE line carries no engine evidence for the armed replay run")
 if engine.get("resolve") != "ok":
     fail(f"resolve is {engine.get('resolve')!r}, not ok")
+
+# A media scenario arms the loopback chain: the rewritten resolve answers the
+# fixture's own host, and the separate playback/download objects carry the proof.
+media = None
+expected_host = "media.example.invalid"
+if media_path:
+    try:
+        with open(media_path, "r", encoding="utf-8") as handle:
+            media = json.load(handle)
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"media.json does not parse: {error}")
+    if not isinstance(media.get("total"), int) or media["total"] <= 0:
+        fail("media.json carries no positive byte total")
+    head = media.get("head")
+    if not isinstance(head, str) or not head or os.path.basename(head) != head:
+        fail("media.json carries no bare head file name")
+    digest = media.get("headSha256")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+        fail("media.json carries no 64-hex headSha256")
+    expected_host = "127.0.0.1"
+
 for key, wanted in (("videoId", "aaaaaaaaaaA"), ("formatId", "140"),
-                    ("urlHost", "media.example.invalid"), ("host", "stdio"),
+                    ("urlHost", expected_host), ("host", "stdio"),
                     ("child", "exited"), ("cacert", True)):
     if engine.get(key) != wanted:
         fail(f"{key} is {engine.get(key)!r}, not {wanted!r}")
+
+# The media scenario's separate evidence objects: a real READY/playing YOUTUBE
+# decode past the 500 ms bound, then a COMPLETED download whose byte count,
+# exact post-boundary chunk list and sha256 this gate recomputes from
+# media.json's own head — nothing the SMOKE line asserts is trusted blindly.
+if media is not None:
+    playback = engine.get("playback")
+    if not isinstance(playback, dict):
+        fail("the media run carries no playback evidence")
+    for key, wanted in (("stream", "YOUTUBE"), ("phase", "READY"),
+                        ("playing", True)):
+        if playback.get(key) != wanted:
+            fail(f"playback {key} is {playback.get(key)!r}, not {wanted!r}")
+    position = playback.get("positionMs")
+    if not isinstance(position, int) or position < 500:
+        fail(f"playback positionMs is {position!r}, below the 500 ms proof bound")
+
+    download = engine.get("download")
+    if not isinstance(download, dict):
+        fail("the media run carries no download evidence")
+    if download.get("state") != "COMPLETED":
+        fail(f"download state is {download.get('state')!r}, not COMPLETED")
+    total = media["total"]
+    if download.get("bytes") != total:
+        fail(f"download bytes is {download.get('bytes')!r}, not the fixture's {total}")
+    chunk = 10 * 1024 * 1024
+    ranges = []
+    offset = 0
+    while offset < total:
+        ranges.append(f"bytes={offset}-{min(offset + chunk, total) - 1}")
+        offset += chunk
+    if download.get("chunks") != ranges:
+        fail(f"download chunks are {download.get('chunks')!r}, not exactly {ranges!r}")
+    head_path = os.path.join(os.path.dirname(media_path), head)
+    try:
+        with open(head_path, "rb") as handle:
+            head_bytes = handle.read()
+    except OSError as error:
+        fail(f"cannot read the scenario's media head: {error}")
+    if hashlib.sha256(head_bytes).hexdigest() != digest.lower():
+        fail("the scenario's media head does not match media.json's headSha256")
+    padding = total - len(head_bytes)
+    if padding < 8:
+        fail("media.json's total leaves no room for its one free box")
+    if padding <= 0xFFFFFFFF:
+        box = padding.to_bytes(4, "big") + b"free"
+    else:
+        box = (1).to_bytes(4, "big") + b"free" + padding.to_bytes(8, "big")
+    composition = hashlib.sha256()
+    composition.update(head_bytes)
+    composition.update(box)
+    remaining = padding - len(box)
+    zeros = b"\0" * (1 << 20)
+    while remaining > 0:
+        take = min(remaining, len(zeros))
+        composition.update(zeros[:take])
+        remaining -= take
+    if download.get("sha256") != composition.hexdigest():
+        fail("download sha256 does not match the head+free-box composition")
 
 # The reported interpreter and resource paths must canonicalise inside the very
 # image the gate launched, and the interpreter inside the packaged engine's
