@@ -94,6 +94,31 @@ class AndroidAppGraphTest {
     }
 
     @Test
+    fun thePlaybackFreezeGuardsTheGraphPositionWriter() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            val podcastId = db.podcastDao().insertPodcast(podcastEntity(feedUrl = "https://gate.example/feed"))
+            val episodeId =
+                db
+                    .ingestDao()
+                    .insertEpisodes(
+                        listOf(episodeEntity(podcastId = podcastId, identityKey = "g:gate")),
+                    ).single()
+            val positions = graph.positionStore()
+            assertThat(
+                positions
+                    .save(episodeId, 20_000, 100_000, ch.lkmc.neutrodyne.core.model.PositionSource.STREAM, 100, 1, {
+                        true
+                    }),
+            ).isTrue()
+            val before = db.positionDao().byEpisode(episodeId)
+            graph.playbackSyncPort.onRemoteMarkedPlayed(episodeId, "Other device")
+            assertThat(positions.reset(episodeId, 200)).isFalse()
+            assertThat(db.positionDao().byEpisode(episodeId)).isEqualTo(before)
+        }
+
+    @Test
     fun downloadComponentsInjectBeforeDatabaseOpen() {
         graph.inject(
             ch.lkmc.neutrodyne.download.impl
@@ -226,6 +251,13 @@ class AndroidAppGraphTest {
             assertThat(graph.playbackController::class.simpleName).isEqualTo("PlaybackControllerImpl")
             assertThat(graph.playbackStateSource::class.simpleName).isEqualTo("PlaybackStateHub")
             assertThat(graph.playbackMaintenance::class.simpleName).isEqualTo("StreamingCache")
+            // 06 Sync interplay: the sync engine's playback port is the real service bridge, and
+            // resolving it must not start the service or open the database.
+            assertThat(graph.playbackSyncPort::class.simpleName).isEqualTo("PlaybackSyncBridge")
+            assertThat(graph.playbackSyncPort).isSameInstanceAs(graph.playbackSyncPort)
+            assertThat(graph.playbackSyncPort).isNotSameInstanceAs(
+                ch.lkmc.neutrodyne.core.domain.NoPlaybackSync,
+            )
             assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
             assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
             assertThat(
@@ -549,6 +581,7 @@ class AndroidAppGraphTest {
                 // 10 Durable apply effects: the start drain sits at 160, after the database
                 // open and before every scheduling arm.
                 "SyncStartupDrainInitializer" to 101..199,
+                "SessionAdoptionInitializer" to 170..179,
                 // 05's work table: periodic arm, watcher and durable-work reconciliation.
                 "AutoBackupInitializer" to 200..299,
                 // M11b's maintenance arm belongs to the periodic scheduling band.

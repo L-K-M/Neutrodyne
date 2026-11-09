@@ -806,6 +806,8 @@ abstract class SyncProtectedAuthTestBase {
                         },
                     sharePasswords = { false },
                     coordinator = credentials,
+                    notices = SyncNoticeBus(),
+                    deviceNames = ClientDeviceNames { emptyList() },
                 ),
             effects =
                 SyncApplyEffects(

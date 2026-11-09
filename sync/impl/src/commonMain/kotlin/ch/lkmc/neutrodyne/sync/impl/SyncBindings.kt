@@ -29,9 +29,6 @@ import okio.Path.Companion.toPath
 @ContributesTo(AppScope::class)
 @BindingContainer
 object SyncBindings {
-    @Provides
-    fun playbackSyncPort(): PlaybackSyncPort = ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
-
     /** 10 Now playing and handoff: the card's writer-name lookup rides the account client. */
     @Provides
     @SingleIn(AppScope::class)
@@ -100,6 +97,8 @@ object SyncBindings {
         syncIngestHook: SyncIngestHook,
         channelSync: GroupChannelSync,
         flags: SyncFlags,
+        notices: SyncNoticeBus,
+        deviceNames: DeviceNames,
         coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): SyncApplier =
         SyncApplier(
@@ -111,6 +110,8 @@ object SyncBindings {
             syncIngestHook = syncIngestHook,
             channelSync = channelSync,
             sharePasswords = { flags.sharePasswords },
+            notices = notices,
+            deviceNames = deviceNames,
             coordinator = coordinator,
         )
 

@@ -1233,6 +1233,8 @@ private class Harness(
 
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
+            notices = SyncNoticeBus(),
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { flags.sharePasswords },
             coordinator = credentials,
         )

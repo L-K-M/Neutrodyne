@@ -240,6 +240,8 @@ class SyncParkedStateTest {
             playback = NoPlaybackSync,
             syncIngestHook = SyncIngestHook.None,
             channelSync = NoGroupChannelSync,
+            notices = SyncNoticeBus(),
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { false },
             coordinator =
                 ch.lkmc.neutrodyne.core.testing
