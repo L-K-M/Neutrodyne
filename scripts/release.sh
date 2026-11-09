@@ -96,8 +96,9 @@ blockers="$(gh issue list --repo "$REPO" --label release-blocker --state open --
 # nightly whose checkout IS this commit and whose youtube-smoke jobs
 # (instrumented-full + release-build-smoke, nightly.yml's scope filter) ran
 # green on it. A green run for another sha or a narrower scope proves nothing.
-# Judged per job: repro and the feed-only canary are report-only, so neither can
-# block a tag or supply successful gating evidence. Other jobs must succeed or skip.
+# Judged per job: repro, the feed-only canary and the M11b emulator benchmark are
+# report-only, so none of them can block a tag or supply successful gating
+# evidence. Other jobs must succeed or skip.
 nightly=""
 nightly_id="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 5 \
     --json databaseId,conclusion,event \
@@ -105,10 +106,10 @@ nightly_id="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANC
 if [ -n "$nightly_id" ]; then
     jobs_url="repos/$REPO/actions/runs/$nightly_id/jobs?per_page=100"
     failed_jobs="$(gh api "$jobs_url" \
-        --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")' \
+        --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .name != "benchmark" and .conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")' \
         2>/dev/null || echo 'unknown')"
     # A run whose gating jobs were all skipped (or that listed no jobs) proves nothing.
-    ok_jobs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .conclusion == "success")] | length' \
+    ok_jobs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .name != "benchmark" and .conclusion == "success")] | length' \
         2>/dev/null || echo 0)"
     server_proofs="$(gh api "$jobs_url" --jq '[.jobs[] | select((.name == "server-image-smoke" or .name == "server-convergence-report") and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
     if [ "$server_proofs" -ne 2 ]; then failed_jobs="missing MS1 image/convergence proof"; fi

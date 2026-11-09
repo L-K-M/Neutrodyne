@@ -820,6 +820,16 @@ enable only assets of products actually shipped.
   `assert-selected-tests.py` requires executed, unskipped evidence after each
   class and across the complete snapshot. `full` already covers the classes
   inside `instrumented-full`.
+- `benchmark` selects only M11b's report-only Macrobenchmark run:
+  `ColdStartBenchmark` and `CoverGridBenchmark` on `bench34`. Emulator timings
+  are diagnostic; PB1/PB3 stay manual on the reference device.
+- `baseline-profile` selects only M11b's profile generation:
+  `:app:generateBaselineProfile` on `bench34`, uploaded as the
+  `baseline-profile` artifact. The generated files are committed through a
+  normal PR; every run also uploads its device test reports and benchmark
+  outputs as `baseline-profile-reports` (2026-11-08: the upload was
+  failure-only before, so successful run 42495419362 kept the merged
+  profiles but lost its four-journey XML/PB evidence).
 - `youtube-recorded` selects M9a's recorded YouTube acceptance lane ahead of
   app engine activation, on the two supported-CPython GMDs (`api34` and
   `api36` matrix legs, `fail-fast: false` so each leg's evidence is required):
@@ -855,6 +865,8 @@ without changing main's issues.
 | `sync-convergence` | MS0 | `SyncConvergenceTest` and `ServerConvergenceTest` with `-PsyncSeeds=100000` ([10 Convergence property test](10-sync.md#convergence-property-test)); from MS2 E12 `CrossDeviceSyncTest` (`-PcrossDevice`, an `api36` emulator through android-emulator-runner, the built fat JAR on the runner, the headless desktop graph; [End-to-end journeys](#end-to-end-journeys)) | yes |
 | `server-image-smoke` | MS1 | build the image from the fat JAR (`docker buildx build --load`), run the reference `sync/server/deploy/compose.yaml` with a test domain and Caddy's internal CA, `/readyz` through Caddy, an SSE stream held for 5 min through Caddy and through the nginx example (S17, [10 nginx](10-sync.md#nginx)), the nightly `VACUUM INTO` backup triggered and restored with `restore`; `check-server-image.sh`; a `tcpdump` of the compose network showing no outbound request except the update check (`NEUTRODYNE_SERVER_UPDATE_CHECK` pointed at a local stub; [10 Update notice](10-sync.md#update-notice)) | yes |
 | `benchmark-dryrun` | M10 | Macrobenchmark journeys against `:app`'s `benchmarkRelease` with `-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true` on `bench34` (catches broken journeys; timings are meaningless on emulators) | no |
+| `benchmark` | M11b | `GatedBenchmarks` (the suite running `ColdStartBenchmark` and `CoverGridBenchmark`) against `:app`'s `benchmarkRelease` on `bench34` (`-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.benchmark.GatedBenchmarks`; the class list is a suite because AGP 9.4.1's engine bridge destroys commas in instrumentation argument values, see [Macrobenchmark and profiles](#macrobenchmark-and-profiles)); `assert-benchmark-run.py` then requires both classes, the complete cumulative JSON samples and all per-iteration traces, or the job fails. Uploads `benchmark/build/outputs/` and `benchmark/build/reports/androidTests/` as `benchmark-results`. Report-only: this hosted command suppresses only AndroidX’s `EMULATOR` error so it can collect diagnostic timings; PB1/PB3 stay manual on the reference device, other benchmark errors still fail, and `release.sh` exempts it like `repro` | no |
+| `baseline-profile` | M11b | dispatch-only: `./gradlew :app:generateBaselineProfile` on `bench34`; uploads `app/src/release/generated/baselineProfiles/` as `baseline-profile`, and its device reports and benchmark outputs on success and failure as `baseline-profile-reports`. The generated files are committed through a normal PR (as `app/profiles/*.txt.gz` + `capture-receipt.properties`, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)) | no |
 | `repro` | M0a | [two signed builds and a diff](#nightly-reproducibility-job) of the APKs, from M0b the desktop application JARs and the server JAR; report-only permanently ([D79](../PLAN.md#3-key-decisions)) | no |
 | `bmgr` | M3 | android-emulator-runner API 31 and API 36 (`data_extraction_rules.xml`), image `default`: `scripts/ci/bmgr-check.sh <api> <evidence-dir>` on the untouched published release `x86_64` APK — the black-box harness: the self-instrumenting `:tools:bmgrdriver` APK seeds through the production `ExternalImportActivity` over UiAutomator, the host triggers the shell-only `SnapshotNowReceiver`, verifies the raw LocalTransport TAR, reinstalls the identical APK and validates the pulled post-restore tree with `check-first-launch-restore-results.py --bmgr-pull`/`--bmgr` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr), plus 07's "no `Podcasts/`" assertion). No test code or hooks in the release process; needs root uninstall/reinstall, which an in-process instrumented test cannot do. Host pulls keep each remote `find` as nonhidden `<dir>-listing.txt` sibling evidence read on fd3, and `bmgr init` keeps every attempt under `init-<label>-attempt<N>.txt` plus an `init-<label>-attempts.txt` rc ledger (bounded retry only for the observed rc0/`result: -1000` observer-race shape; explicit `result: 0` remains the only acceptance — 2026-10-25 run8 corrections, pending a new real run). The legacy `backup_rules.xml` path (API 28–30) is covered by `BackupRulesTest` and the negative API 28/29 diagnostic below, not by a positive app leg ([PO-50](../PLAN.md#48-further-product-owner-decisions)) | yes |
 | `first-launch-restore` | M3 | opt-in scope only: `./gradlew --max-workers=2 :app:api26DebugAndroidTest :app:api36DebugAndroidTest -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest -Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore` — the seeded cold-start restore gate ([05 Testing](05-groups-opml-backup.md#testing)); its XML goes to the `first-launch-restore-results` artifact on success and failure | no (not part of `full`) |
@@ -984,7 +996,7 @@ Key custody for `NEUTRODYNE_ENGINE_MANIFEST_KEY`, the project's only private sig
 | `record-screenshots.yml` | `workflow_dispatch` (input: branch, tier) | records both golden sets on `ubuntu-24.04` (`./gradlew recordRoborazziAndroidHostTest recordRoborazziDesktop -Proborazzi.test.record=true -PscreenshotTier=…`; named record tasks avoid aggregate `--tests` ambiguity); uploads `screenshots-<sha>.zip` |
 | `keepalive.yml` (M0a) | `schedule: cron "41 4 1 * *"` (monthly) and `workflow_dispatch` | `gh workflow enable` for `nightly.yml`, `engine-canary.yml` (from M9b) and itself (`permissions: actions: write`). In a public repository GitHub disables scheduled workflows "when no repository activity has occurred in 60 days" ([disable and enable workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows)), and a disabled canary would stop approving engine fixes without any failure issue. Unverified: which events count as activity and whether re-enabling resets the clock; the engine heartbeat ([engine-canary.yml](#engine-canaryyml)) detects a stopped canary either way |
 
-Baseline and startup profiles are generated by a maintainer on a managed device (`./gradlew :app:generateBaselineProfile`, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)) and committed through a normal PR; no workflow generates them, and `release.yml` has no emulator. The `baseline-profile.yml` workflow of an earlier draft stays removed.
+Baseline and startup profiles are generated by a maintainer on a managed device (`./gradlew :app:generateBaselineProfile`, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)) and committed through a normal PR; the dispatch-only `baseline-profile` scope of `nightly.yml` regenerates them into artifacts (`baseline-profile` for the merged plaintext pair, `baseline-profile-reports` on every run for the device reports and benchmark outputs), and `release.yml` has no emulator and never generates them. The committed form is the deterministic-gzip capture pair under `app/profiles/` plus its receipt (01); regenerating means replacing both `.gz` blobs and the receipt fields with the new run's values in one commit. Current capture: successful run 42504550653 on `dc1ed51` (2026-11-08), with retained XML showing all four generator journeys executed unskipped and the PB naming their distinct generated outputs; the merged files are the committed captures. The `baseline-profile.yml` workflow of an earlier draft stays removed.
 
 Pushing commits from workflows is deliberately avoided: pushes made with `GITHUB_TOKEN` do not trigger new workflow runs, so a bot commit would leave the PR without required checks.
 
@@ -1744,7 +1756,7 @@ Serves N12 (independent verifiability) and [D79](../PLAN.md#3-key-decisions). De
 | VCS info | `buildTypes.release { vcsInfo { include = false } }` in `:app` (a rebuild from a source archive has no `.git`; nothing depends on it); AGP adds `META-INF/version-control-info.textproto` to release builds by default (Unverified for AGP 9.4, which is why `check-apk.sh` checks that it is absent) | 09 (delegated by 01) |
 | AboutLibraries metadata | offline mode on both shells: no remote licence or funding fetches during the build (Unverified 15.x property names, e.g. `offlineMode = true`, `fetchRemoteLicense = false`) | 01 |
 | R8 | the published build is minified; R8 output is expected to be deterministic for the same inputs. Known kotlinx.coroutines service-loader nondeterminism is countered only if the job shows it, with `-keep class kotlinx.coroutines.CoroutineExceptionHandler` and `-keep class kotlinx.coroutines.internal.MainDispatcherFactory` in `app/src/main/keepRules/app.keep` ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)) | 01, 09 |
-| Compiled ART profile (`assets/dexopt/baseline.prof`/`.profm`) | from M11b AGP compiles the committed profile from `app/src/release/generated/baselineProfiles/` into the APK; the same committed profile must give the same bytes (Unverified; the job reports it) | 01, 09 |
+| Compiled ART profile (`assets/dexopt/baseline.prof`/`.profm`) | from M11b AGP compiles the committed `app/profiles/` captures (inflated and receipt-verified by `inflateBaselineProfileCaptures`) into the APK; the same committed profile must give the same bytes (Unverified; the job reports it) | 01, 09 |
 | Python bytecode | Chaquopy compiles the shim to `.pyc` at build time with the container's Python (the standard library arrives precompiled from Maven Central; yt-dlp is compiled on the device, 04); CPython writes timestamp-based `.pyc` headers unless `SOURCE_DATE_EPOCH` is set, in which case it writes checked-hash `.pyc` ([py_compile](https://docs.python.org/3/library/py_compile.html)). The container sets `SOURCE_DATE_EPOCH` to the tagged commit's time (Unverified: that Chaquopy's compile step honours it; the job reports it). The desktop compiles nothing at build time: the bundled interpreter compiles on the user's machine (11) | 09 |
 | Vendored engine and Python runtimes | the yt-dlp asset is copied byte for byte from `youtube/ytdlp/engine/`; Chaquopy's runtime comes from Maven Central with verification metadata (01); python-build-standalone, Temurin and the FFmpeg source come from pinned, checksum-verified downloads (lockfiles) | 01, 04, 11 |
 | JARs (desktop modules, the KMP modules' desktop JARs, `:desktopApp`, the server's fat JAR) | every `Jar`/`Zip` task with `isPreserveFileTimestamps = false` and `isReproducibleFileOrder = true` (set by the convention plugins); the fat JAR merges `META-INF/services` in sorted order (Unverified for the Compose plugin's own JAR tasks; the job reports it) | 01, 09 |
@@ -2181,6 +2193,56 @@ Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB
 - `:benchmark` (`com.android.test` with the `androidx.baselineprofile` 1.5.0 producer plugin; created in M6b for the system tests, Macrobenchmarks from M10, the profile generator from M11b) has `targetProjectPath = ":app"`, self-instrumentation (`experimentalProperties["android.experimental.self-instrumenting"] = true`) and `benchmark-macro-junit4` 1.5.0. Its variants mirror `:app`'s build types ([Out-of-process system tests](#out-of-process-system-tests)): `benchmarkRelease` measures `:app`'s `benchmarkRelease` (PB1–PB5, PB9, PB15), `nonMinifiedRelease` generates profiles against `:app`'s `nonMinifiedRelease`, `release` runs the system tests and release smoke journeys. Unverified: the plugin's variant matching under AGP 9.4 with KMP library modules in the graph (S19 decides, M10 confirms; 01's module table points here). Managed device `bench34` (`aosp`, API 34) for `benchmark-dryrun` and profile generation; the reference device, connected, for measurements.
 - **Seeding:** `BenchmarkSeedReceiver` lives in `app/src/benchmarkRelease/`, the `benchmarkRelease` build type's own source set, never in `release` ([01 Build variants and ABIs](01-foundation.md#build-variants-and-abis)). It is a receiver without intent filters, `exported="true"` and protected by `android:permission="android.permission.DUMP"` (held by the shell, not by apps), which fills the database with `SeedDatabase` (`:core:testing` on the `benchmarkRelease` classpath). The benchmark's `setupBlock` sends `am broadcast -n ch.lkmc.neutrodyne/.benchmark.BenchmarkSeedReceiver` once and waits for its marker file. The release APK never contains it (`check-apk.sh --published`).
 - **Baseline and startup profiles** (M11b, [D96](../PLAN.md#3-key-decisions)): `BaselineProfileGenerator` in `:benchmark` runs `BaselineProfileRule` journeys owned here against `nonMinifiedRelease` on `bench34` — `ColdStartToFeeds` with `includeInStartupProfile = true` (so R8 lays out the startup DEX), then `CoverGridFling`, `PodcastOpen` and `PlayerExpandCollapse` — and writes `app/src/release/generated/baselineProfiles/` through the consumer's `saveInSrc` ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles), [Baseline Profiles overview](https://developer.android.com/topic/performance/baselineprofiles/overview)). A maintainer regenerates them with `./gradlew :app:generateBaselineProfile` when start-up code changes and before each MINOR release, and commits them through a normal PR; `release.yml` never generates them. The M11b release issue records PB1 with `BaselineProfileMode.Require` against `Disable`, so the profiles' effect on a sideloaded install is known.
+
+  **Implementation note (2026-11-04, M11b).** The gated macrobenchmarks are
+  `ColdStartBenchmark` (PB1) and `CoverGridBenchmark` (PB3) in `:benchmark`; `Journeys`
+  carries the remaining frame journeys (PB4, PB5, PB9) and `BaselineProfileGenerator`
+  collects the same journeys through `JourneyActions`, so a journey is defined once. The
+  nightly `benchmark` scope runs the two gated benchmarks on `bench34` and uploads
+  `benchmark/build/outputs/` and `benchmark/build/reports/androidTests/` as an artifact;
+  emulator timings are diagnostic only and PB1/PB3 stay manual on the reference device,
+  and `release.sh` exempts the report-only job. The dispatch-only `baseline-profile` scope
+  runs `:app:generateBaselineProfile` on `bench34` and uploads
+  `app/src/release/generated/baselineProfiles/`; the generated files are committed through a
+  normal PR, and a failed run keeps its device test reports as `baseline-profile-reports`.
+  `nonMinifiedRelease` is explicitly unminified (the plugin's `initWith(release)` copies
+  release's optimization block) and carries the benchmark-only seed receiver so the
+  generator can seed the journeys; neither enters the published `release` APK
+  ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)).
+
+  **Trace retention (2026-11-08, revised 2026-11-09).** The benchmark library writes each iteration's
+  Perfetto trace and the benchmark JSON to the emulator's public additional-test-output
+  directory (`/sdcard/Android/media/ch.lkmc.neutrodyne.benchmark/additional_test_output/`),
+  and AGP 9.4.1's managed-device runner collects them only after instrumentation ends -
+  yet the hosted `benchmark` runs reached the CI host with zero of those files (the
+  complete `benchmark-results` artifacts of runs 42515546426 and 42522440261 contain
+  none), losing the ephemeral emulator's traces with the runner. The job therefore runs
+  the Gradle command through `scripts/ci/benchmark-live-capture.py`, which polls that
+  exact directory through adb while the emulator is alive and pulls every stable new
+  trace into `benchmark/build/outputs/host-collected/` (inside the uploaded
+  `build/outputs/` tree) before teardown. Benchmark 1.5.0 writes one cumulative
+  `ch.lkmc.neutrodyne.benchmark-benchmarkData.json` that it overwrites after every test
+  (there are no per-test JSONs); the wrapper re-examines that file on every sweep, on
+  every "Moving" announcement it sees in a per-device logcat tail (the final rewrite
+  lands less than one poll interval before GMD shutdown, run 42530327038), and
+  republishes the latest complete rewrite by content - a truncated or in-flight rewrite
+  keeps the prior complete snapshot and is retried, and an uncapturable final rewrite is
+  a logged diagnostic gap. It changes no Gradle or instrumentation arguments, returns the
+  child's exit status exactly, and logs a diagnostic-gap warning instead of claiming
+  success when nothing could be captured; its lifecycle is covered by
+  `scripts/ci/tests/benchmark-live-capture.test.py` (fake adb and child, no device).
+  Run 42530327038 also exposed that the workflow's comma-separated class argument never
+  reached the runner: AGP 9.4.1 forwards instrumentation arguments to its managed-device
+  engine as one unescaped comma-joined string (`android-test.instrumentation-args`) that
+  the engine splits back on commas, so `class=A,B` executed only `A` on every hosted run
+  while staying green. The scope therefore runs the single comma-free suite
+  `GatedBenchmarks` (`ColdStartBenchmark` + `CoverGridBenchmark`), and
+  `scripts/ci/assert-benchmark-run.py` fails the job unless both classes executed, the
+  JSON carries 15 `timeToInitialDisplayMs` and 15 `timeToFullDisplayMs` runs (the
+  library silently drops any iteration with incomplete metrics - "Skipping results from
+  iter 5"), all five cover-grid `sampledMetrics.frameOverrunMs.runs` lists contain
+  frame samples, and all 15 + 5 per-iteration traces are retained. Failed or skipped
+  XML cases do not count as execution; emulator timings stay diagnostic.
 - **Full display:** 08's Feeds route calls `ReportDrawnWhen { first page loaded }` ([08 Performance journeys](08-ui-ux.md#performance-journeys)), so `StartupTimingMetric` also reports time to full display; not budgeted in v1.
 - Results (`*-benchmarkData.json`) from the reference device are attached to the release checklist issue; a regression > 10 % against the previous minor release on PB1–PB4 blocks the release until explained.
 - **R8** (`release` and `benchmarkRelease`): full mode via `optimization { enable = true }` and `-dontobfuscate` (01); keep rules reviewed with R8's `-printconfiguration` and `-printusage` (S19). Size tips when PB12 or PB13 is at risk: legacy native packaging (compressed `.so` files, ≈ 6 MB less per 64-bit APK, decided by S7, [01 Build variants and ABIs](01-foundation.md#build-variants-and-abis)); Chaquopy's foreign-ABI assets left in each split (S7 measures them; > 5 MB per APK triggers [D2](../PLAN.md#3-key-decisions)'s ABI-flavor fallback) and its ABI-independent Python assets in the `armeabi-v7a` APK (01 open question 13); `packaging` excludes such as `/DebugProbesKt.bin`.

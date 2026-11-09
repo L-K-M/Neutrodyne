@@ -28,6 +28,9 @@ __pycache__/
 !gradle/wrapper/gradle-wrapper.jar
 .kotlin/
 captures/
+
+# saveInSrc's transient regeneration output: the committed profile form is app/profiles/*.gz
+app/src/release/generated/
 .externalNativeBuild/
 
 # Private keys never belong here; the committed public keystore is signing/neutrodyne-public.keystore
