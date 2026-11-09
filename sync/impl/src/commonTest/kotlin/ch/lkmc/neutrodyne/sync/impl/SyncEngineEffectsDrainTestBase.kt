@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -17,6 +18,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
@@ -40,10 +42,12 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -64,6 +68,8 @@ abstract class SyncEngineEffectsDrainTestBase {
         val db: NeutrodyneDatabase,
         val port: FakeSettingsSyncPort,
         val address: FakeSyncServerAddress,
+        val flags: SyncFlags,
+        val secrets: FakeSecretStore,
         val engine: SyncEngine,
         val effects: SyncApplyEffects,
         val capture: SettingsCapture,
@@ -77,6 +83,7 @@ abstract class SyncEngineEffectsDrainTestBase {
     ): DrainHarness {
         val address = FakeSyncServerAddress(serverUrl = "https://sync.example")
         address.updateSyncPlaybackSettings(switch)
+        val flags = SyncFlags()
         val clock = TestClock(now)
         val writeLocks = TestSettingsWriteCoordinator()
         val secrets = FakeSecretStore()
@@ -102,7 +109,7 @@ abstract class SyncEngineEffectsDrainTestBase {
                 applier = applier(db, port, clock, secrets, credentials),
                 clock = clock,
                 secrets = secrets,
-                sharePasswords = { false },
+                sharePasswords = { flags.sharePasswords },
                 address = address,
                 tokens =
                     SyncTokenStore(FakeSecretStore()).apply {
@@ -113,8 +120,9 @@ abstract class SyncEngineEffectsDrainTestBase {
                 effects = effects,
                 capture = capture,
                 notices = SyncNoticeBus(),
+                refreshPreferences = { flags.refreshFromStore(address) },
             )
-        return DrainHarness(db, port, address, engine, effects, capture)
+        return DrainHarness(db, port, address, flags, secrets, engine, effects, capture)
     }
 
     @Test
@@ -363,6 +371,8 @@ abstract class SyncEngineEffectsDrainTestBase {
                 val h = harness(db, scriptedClient(syncRecords = emptyList()), port)
                 val initializer =
                     SyncStartupDrainInitializer(
+                        h.flags,
+                        dev.zacsweers.metro.Provider { h.address },
                         dev.zacsweers.metro.Provider { h.effects },
                         dev.zacsweers.metro.Provider { h.capture },
                     )
@@ -384,6 +394,157 @@ abstract class SyncEngineEffectsDrainTestBase {
                         .second,
                 )
                 assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The band-160 start initializer re-primes the volatile share gate before the drain: the
+     * persisted `shareFeedPasswords` — not the restart default — is what the drain's live
+     * switch read and the band-191 parked recovery observe (10 Settings capture). Local only;
+     * the scripted client never runs.
+     */
+    @Test
+    fun theStartInitializerHydratesTheShareGateBeforeTheDrain() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val h = harness(db, scriptedClient(syncRecords = emptyList()))
+                h.address.updateShareFeedPasswords(true)
+                // The drain's live switch read, observed at the moment the gate is consulted.
+                val gateReads = mutableListOf<Boolean>()
+                val probe =
+                    SyncApplyEffects(
+                        db,
+                        h.port,
+                        TestSettingsWriteCoordinator(),
+                        {
+                            gateReads += h.flags.sharePasswords
+                            h.address.syncPlaybackSettings()
+                        },
+                        h.secrets,
+                        FakeCredentialCommitCoordinator(),
+                        "__absent_cache__".toPath(),
+                    )
+                val initializer =
+                    SyncStartupDrainInitializer(
+                        h.flags,
+                        dev.zacsweers.metro.Provider { h.address },
+                        dev.zacsweers.metro.Provider { probe },
+                        dev.zacsweers.metro.Provider { h.capture },
+                    )
+
+                assertFalse(h.flags.sharePasswords, "a restart left the cache at its default")
+                initializer.run()
+
+                assertTrue(h.flags.sharePasswords, "the persisted switch primed the cache")
+                assertEquals(listOf(true), gateReads, "the drain must see the persisted gate")
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The unconfigured path keeps R7.1 laziness: the portable address is consulted first, and
+     * without a server no switch is read, no flag is primed and nothing heavier resolves.
+     */
+    @Test
+    fun theStartInitializerReadsNoSwitchesWhileUnconfigured() =
+        runTest {
+            val db = newTestDb()
+            try {
+                val h = harness(db, scriptedClient(syncRecords = emptyList()))
+                h.address.updateServerUrl(null)
+                var shareReads = 0
+                val unconfigured =
+                    object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress by h.address {
+                        override suspend fun shareFeedPasswords(): Boolean {
+                            shareReads++
+                            return true
+                        }
+                    }
+                val initializer =
+                    SyncStartupDrainInitializer(
+                        h.flags,
+                        dev.zacsweers.metro.Provider { unconfigured },
+                        dev.zacsweers.metro.Provider { h.effects },
+                        dev.zacsweers.metro.Provider { h.capture },
+                    )
+
+                initializer.run()
+
+                assertFalse(h.flags.sharePasswords, "an unconfigured start primes nothing")
+                assertEquals(0, shareReads, "the portable-address guard precedes every switch read")
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The first round after a restart re-primes the share gate before the push builds its
+     * changes: the persisted consent — not the restart default — lets the local credential
+     * ride with the feed (10 Passwords). No real network; the scripted client captures the
+     * DTOs.
+     */
+    @Test
+    fun theFirstRoundPushesAuthUnderTheStoredShareGate() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val sent = mutableListOf<ChangeDto>()
+                val client =
+                    scriptedClient(syncRecords = emptyList(), onSync = { sent += it })
+                val h = harness(db, client)
+                seedCredentialIntent(db, h.secrets)
+                h.address.updateShareFeedPasswords(true)
+
+                assertFalse(h.flags.sharePasswords, "a restart left the cache at its default")
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+
+                val pushed = sent.single { it.coll == SyncCollection.PODCAST.wire }
+                assertEquals(
+                    JsonObject(
+                        mapOf(
+                            "u" to JsonPrimitive(AUTH_USER),
+                            "p" to JsonPrimitive(AUTH_PASS),
+                        ),
+                    ),
+                    pushed.fields
+                        .getValue("auth")
+                        .v,
+                    "the stored consent must reach the first round's push",
+                )
+                assertTrue(h.flags.sharePasswords, "the round hydrated the cache")
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The consent's companion direction: a persisted `false` still withholds `auth`. */
+    @Test
+    fun aStoredOffShareGateStillExportsNoAuth() =
+        runTest {
+            val db = newTestDb()
+            try {
+                seedLinked(db)
+                val sent = mutableListOf<ChangeDto>()
+                val client =
+                    scriptedClient(syncRecords = emptyList(), onSync = { sent += it })
+                val h = harness(db, client)
+                seedCredentialIntent(db, h.secrets)
+                h.address.updateShareFeedPasswords(false)
+
+                h.engine.round(SyncRoundReason.SYNC_NOW)
+
+                val pushed = sent.single { it.coll == SyncCollection.PODCAST.wire }
+                assertTrue(pushed.fields.containsKey("subscribed"), "the ordinary fields still push")
+                assertFalse(
+                    pushed.fields.containsKey("auth"),
+                    "a persisted off gate must withhold the credential",
+                )
             } finally {
                 db.close()
             }
@@ -556,6 +717,65 @@ abstract class SyncEngineEffectsDrainTestBase {
         }
 
     // --- Fixtures -----------------------------------------------------------------------------------
+
+    private val authRid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    private val localNode = NodeId("0000000000000001")
+
+    /**
+     * One credential feed with a pending local `auth` intent, as an un-pushed credential set
+     * left the outbox before this restart (10 Passwords, producer side).
+     */
+    private suspend fun seedCredentialIntent(
+        db: NeutrodyneDatabase,
+        secrets: FakeSecretStore,
+    ) {
+        val podcastId =
+            db.podcastDao().insertPodcast(
+                podcastEntity(
+                    syncId = authRid,
+                    feedUrl = "$AUTH_ORIGIN/feed",
+                    feedKey = "$AUTH_ORIGIN/feed",
+                ),
+            )
+        val credentialId = secrets.put(AUTH_ORIGIN, AUTH_USER, AUTH_PASS.toCharArray())!!
+        db
+            .credentialDao()
+            .insert(
+                CredentialEntity(
+                    id = credentialId,
+                    origin = AUTH_ORIGIN,
+                    username = AUTH_USER,
+                    secretCipher = null,
+                    iv = null,
+                    createdAt = now,
+                ),
+            )
+        val clock = Hlc.of(now, 2, localNode)
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                db.podcastDao().setCredentialId(podcastId, credentialId)
+                db.syncOutboxDao().upsert(
+                    SyncOutboxEntity(
+                        coll = SyncCollection.PODCAST.wire,
+                        rid = authRid,
+                        field = "subscribed",
+                        hlc = clock.packed,
+                        nodeId = localNode.value,
+                        value = "true",
+                    ),
+                )
+                db.syncOutboxDao().upsert(
+                    SyncOutboxEntity(
+                        coll = SyncCollection.PODCAST.wire,
+                        rid = authRid,
+                        field = "auth",
+                        hlc = clock.packed,
+                        nodeId = localNode.value,
+                    ),
+                )
+            }
+        }
+    }
 
     private fun applier(
         db: NeutrodyneDatabase,
@@ -742,4 +962,10 @@ abstract class SyncEngineEffectsDrainTestBase {
 
     /** The host's real in-memory Room database; the Android host supplies a Robolectric context. */
     protected abstract fun newTestDb(): NeutrodyneDatabase
+
+    private companion object {
+        const val AUTH_ORIGIN = "https://a.example"
+        const val AUTH_USER = "sync-user"
+        const val AUTH_PASS = "s3ntinel-pass-9f8e"
+    }
 }

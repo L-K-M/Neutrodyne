@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.testing
 
+import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 
 /**
@@ -19,6 +21,15 @@ class FakeSyncServerAddress(
         private set
     var deviceName: String? = deviceName
         private set
+
+    /** One-shot storage failure, consumed by the next switch write. */
+    var nextPreferenceError: SettingsError? = null
+
+    /** Suspends after the durable value changes, before the write returns to its caller. */
+    var afterShareWrite: (suspend (Boolean) -> Unit)? = null
+
+    /** Suspends after the durable share value is read, before the read returns to its caller. */
+    var afterShareRead: (suspend (Boolean) -> Unit)? = null
 
     private var storedShareFeedPasswords: Boolean = false
     private var storedSyncPlaybackSettings: Boolean = true
@@ -54,7 +65,11 @@ class FakeSyncServerAddress(
 
     override suspend fun deviceName(): String? = deviceName
 
-    override suspend fun shareFeedPasswords(): Boolean = storedShareFeedPasswords
+    override suspend fun shareFeedPasswords(): Boolean {
+        val value = storedShareFeedPasswords
+        afterShareRead?.invoke(value)
+        return value
+    }
 
     override suspend fun syncPlaybackSettings(): Boolean = storedSyncPlaybackSettings
 
@@ -68,13 +83,24 @@ class FakeSyncServerAddress(
         this.username = username
     }
 
-    override suspend fun setShareFeedPasswords(enabled: Boolean) {
+    override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SettingsError> {
+        nextPreferenceError?.let {
+            nextPreferenceError = null
+            return Outcome.Failure(it)
+        }
         writtenShareFeedPasswords += enabled
         storedShareFeedPasswords = enabled
+        afterShareWrite?.invoke(enabled)
+        return Outcome.Success(Unit)
     }
 
-    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SettingsError> {
+        nextPreferenceError?.let {
+            nextPreferenceError = null
+            return Outcome.Failure(it)
+        }
         writtenSyncPlaybackSettings += enabled
         storedSyncPlaybackSettings = enabled
+        return Outcome.Success(Unit)
     }
 }

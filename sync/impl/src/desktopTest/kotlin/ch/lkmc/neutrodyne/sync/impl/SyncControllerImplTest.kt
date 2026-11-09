@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkLocation
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -29,6 +30,7 @@ import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
+import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -52,9 +54,11 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
@@ -1154,11 +1158,160 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun overlappingPasswordSwitchWritesCannotPublishAnOlderRuntimeGate() =
+        runTest {
+            val h = harness(this)
+            val committed = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.updateShareFeedPasswords(true)
+                h.flags.sharePasswords = true
+                h.address.afterShareWrite = { enabled ->
+                    if (!enabled) {
+                        committed.complete(Unit)
+                        release.await()
+                    }
+                }
+                val first = async { h.controller.setShareFeedPasswords(false) }
+                committed.await()
+                val second =
+                    async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                        h.controller.setShareFeedPasswords(true)
+                    }
+                release.complete(Unit)
+                first.await()
+                second.await()
+
+                assertEquals(h.address.shareFeedPasswords(), h.flags.sharePasswords)
+                assertTrue(h.flags.sharePasswords)
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
+    /**
+     * The reload and the setters take the one commit guard [SyncFlags] owns: a reload parked
+     * mid-read while a newer toggle commits publishes afterwards — never an older snapshot
+     * over the saved gate (10 Settings capture).
+     */
+    @Test
+    fun aStalePreferenceSnapshotCannotOverwriteANewerCommit() =
+        runTest {
+            val h = harness(this)
+            val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.updateShareFeedPasswords(true)
+                h.address.afterShareRead = {
+                    if (entered.complete(Unit)) release.await()
+                }
+                val reload = async { h.flags.refreshFromStore(h.address) }
+                entered.await()
+                // The reload owns the commit guard with its read parked; the setter queues.
+                val commit = async { h.controller.setShareFeedPasswords(false) }
+                runCurrent()
+                release.complete(Unit)
+                reload.await()
+                commit.await()
+
+                assertFalse(
+                    h.flags.sharePasswords,
+                    "an older snapshot must not overwrite the saved toggle",
+                )
+                assertFalse(h.address.shareFeedPasswords())
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
+    @Test
+    fun cancellingAfterASwitchCommitsStillPublishesItsRuntimeGate() =
+        runTest {
+            val h = harness(this)
+            val committed = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.afterShareWrite = {
+                    committed.complete(Unit)
+                    release.await()
+                }
+                val write = async { h.controller.setShareFeedPasswords(true) }
+                committed.await()
+                write.cancel()
+                release.complete(Unit)
+                write.join()
+
+                assertTrue(h.address.shareFeedPasswords())
+                assertTrue(h.flags.sharePasswords, "a committed preference must survive caller cancellation")
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
+    @Test
+    fun failedPasswordSharingWritesKeepStoredAndRuntimeValues() =
+        runTest {
+            for (before in listOf(false, true)) {
+                val h = harness(this)
+                try {
+                    h.tick()
+                    h.address.updateShareFeedPasswords(before)
+                    h.flags.sharePasswords = before
+                    h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                    val result: Any? = h.controller.setShareFeedPasswords(!before)
+
+                    assertEquals(
+                        before,
+                        h.flags.sharePasswords,
+                        "a failed write must not change the runtime gate",
+                    )
+                    assertEquals(before, h.address.shareFeedPasswords())
+                    assertEquals<Any?>(Outcome.Failure(SyncPreferenceError.WriteFailed), result)
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
+    fun failedPlaybackSettingWritesKeepStoredAndRuntimeValues() =
+        runTest {
+            for (before in listOf(false, true)) {
+                val h = harness(this)
+                try {
+                    h.tick()
+                    h.address.updateSyncPlaybackSettings(before)
+                    h.flags.syncPlaybackSettings = before
+                    h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                    val result: Any? = h.controller.setSyncPlaybackSettings(!before)
+
+                    assertEquals(
+                        before,
+                        h.flags.syncPlaybackSettings,
+                        "a failed write must not change the runtime gate",
+                    )
+                    assertEquals(before, h.address.syncPlaybackSettings())
+                    assertEquals<Any?>(Outcome.Failure(SyncPreferenceError.WriteFailed), result)
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
     fun shareFeedPasswordsWritesTheSettingAndTheCache() =
         runTest {
             val h = harness(this)
             try {
-                h.controller.setShareFeedPasswords(true)
+                assertEquals(Outcome.Success(Unit), h.controller.setShareFeedPasswords(true))
                 assertEquals(listOf(true), h.address.writtenShareFeedPasswords)
                 assertTrue(h.flags.sharePasswords)
             } finally {
@@ -1171,7 +1324,7 @@ class SyncControllerImplTest {
         runTest {
             val h = harness(this)
             try {
-                h.controller.setSyncPlaybackSettings(false)
+                assertEquals(Outcome.Success(Unit), h.controller.setSyncPlaybackSettings(false))
                 assertEquals(listOf(false), h.address.writtenSyncPlaybackSettings)
                 assertFalse(h.flags.syncPlaybackSettings)
             } finally {
@@ -1183,6 +1336,31 @@ class SyncControllerImplTest {
      * 10 Settings capture: enabling "Sync playback settings" drains the values that stayed
      * pending while it was off (the server's values win); disabling never drains.
      */
+    @Test
+    fun aFailedPlaybackSwitchWriteLeavesRemoteSettingsPending() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val key = ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SKIP_BACK_MS
+                h.address.updateSyncPlaybackSettings(false)
+                h.flags.syncPlaybackSettings = false
+                h.journalPendingSetting(key, "15000")
+                h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                assertEquals(
+                    Outcome.Failure(SyncPreferenceError.WriteFailed),
+                    h.controller.setSyncPlaybackSettings(true),
+                )
+
+                assertFalse(h.flags.syncPlaybackSettings)
+                assertTrue(h.settings.applied.isEmpty())
+                assertEquals("15000", h.pendingSettingOf(key.name))
+            } finally {
+                h.close()
+            }
+        }
+
     @Test
     fun enablingSyncPlaybackSettingsDrainsThePendingMarker() =
         runTest {
@@ -1376,6 +1554,7 @@ private class Harness(
             effects = effects,
             capture = settingsCapture,
             notices = noticeBus,
+            refreshPreferences = { flags.refreshFromStore(address) },
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -1393,6 +1572,7 @@ private class Harness(
             activity = activity,
             secrets = secrets,
             coordinator = credentials,
+            beforeMerge = { flags.refreshFromStore(address) },
         )
 
     /** A temp-dir StoragePaths for the staging file and directory. */

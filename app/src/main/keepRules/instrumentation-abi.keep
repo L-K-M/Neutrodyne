@@ -4501,7 +4501,7 @@
 -keep class ch.lkmc.neutrodyne.sync.impl.LinkedRestoreCoordinatorImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$FirstLinkMergerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$FirstLinkMergerMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$FirstLinkMergerMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$FirstLinkMergerMetroFactory {
   ch.lkmc.neutrodyne.sync.impl.SyncBindings$FirstLinkMergerMetroFactory$Companion Companion;
@@ -4641,7 +4641,7 @@
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncSchedulingInitializerContributions {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncStartupDrainInitializerContributions$ToAppScope$ProvideIntoSetSyncStartupDrainInitializerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSyncStartupDrainInitializer(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSyncStartupDrainInitializer(ch.lkmc.neutrodyne.sync.impl.SyncFlags, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncStartupDrainInitializerContributions$ToAppScope$ProvideIntoSetSyncStartupDrainInitializerMetroFactory {
   ch.lkmc.neutrodyne.sync.impl.SyncStartupDrainInitializerContributions$ToAppScope$ProvideIntoSetSyncStartupDrainInitializerMetroFactory$Companion Companion;
