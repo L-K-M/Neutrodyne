@@ -824,14 +824,6 @@ abstract class SyncApplyEffectsTestBase {
         settingsSyncEnabled: suspend () -> Boolean = { true },
     ): SettingsCapture = SettingsCapture(db, port, coordinator, settingsSyncEnabled)
 
-    /** The capture fixture: the same live-gate shape the graph wires. */
-    private fun capture(
-        db: NeutrodyneDatabase,
-        port: SettingsSyncPort,
-        coordinator: SettingsWriteCoordinator = TestSettingsWriteCoordinator(),
-        settingsSyncEnabled: suspend () -> Boolean = { true },
-    ): SettingsCapture = SettingsCapture(db, port, coordinator, settingsSyncEnabled)
-
     private suspend fun link(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
         db.withWriteTransaction {
             db
