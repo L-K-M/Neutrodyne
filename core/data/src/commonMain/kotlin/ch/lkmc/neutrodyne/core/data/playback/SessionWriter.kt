@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PositionWriteGate
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartMembership
@@ -41,6 +42,7 @@ internal class SessionWriter(
     private val db: NeutrodyneDatabase,
     private val orderKeys: OrderKeys,
     private val capabilities: YouTubeCapabilitiesSource,
+    private val writeGate: PositionWriteGate = PositionWriteGate.Unrestricted,
 ) : PlaySessionStore {
     override suspend fun virtualQueue(k: Int): VirtualQueue {
         require(k >= 0)
@@ -206,6 +208,7 @@ internal class SessionWriter(
             if (session == null || !session.matches(expected) || expected.currentEpisodeId != episodeId) {
                 return@withWriteTransaction false
             }
+            if (!writeGate.allowsSaves(episodeId)) return@withWriteTransaction false
             db.markEpisodesPlayed(listOf(episodeId), now)
             true
         }
@@ -281,6 +284,7 @@ internal class SessionWriter(
         now: Long,
     ) {
         departure ?: return
+        if (!writeGate.allowsSaves(departure.episodeId)) return
         require(departure.positionMs >= 0 && departure.pinStartedAt >= 0)
         val durationMs = departure.durationMs
         require(durationMs == null || durationMs >= 0)
@@ -292,6 +296,7 @@ internal class SessionWriter(
                 departure.source,
                 now,
                 departure.pinStartedAt,
+                allowed = { writeGate.allowsSaves(departure.episodeId) },
             )
         }
         if (departure.markPlayed) db.markEpisodesPlayed(listOf(departure.episodeId), now)

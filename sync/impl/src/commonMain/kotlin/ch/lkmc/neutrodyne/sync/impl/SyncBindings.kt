@@ -29,9 +29,6 @@ import okio.Path.Companion.toPath
 @BindingContainer
 object SyncBindings {
     @Provides
-    fun playbackSyncPort(): PlaybackSyncPort = ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
-
-    @Provides
     @SingleIn(AppScope::class)
     fun syncTokenStore(secrets: SecretStore): SyncTokenStore = SyncTokenStore(secrets)
 
@@ -72,6 +69,8 @@ object SyncBindings {
         syncIngestHook: SyncIngestHook,
         channelSync: GroupChannelSync,
         flags: SyncFlags,
+        notices: SyncNoticeBus,
+        client: SyncClient,
         coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): SyncApplier =
         SyncApplier(
@@ -83,6 +82,8 @@ object SyncBindings {
             syncIngestHook = syncIngestHook,
             channelSync = channelSync,
             sharePasswords = { flags.sharePasswords },
+            notices = notices,
+            deviceNames = DeviceNames { client.devices() },
             coordinator = coordinator,
         )
 

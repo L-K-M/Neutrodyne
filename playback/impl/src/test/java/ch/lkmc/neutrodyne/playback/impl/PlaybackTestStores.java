@@ -18,11 +18,11 @@ import java.lang.reflect.Field;
 /** Access real internal store implementations without widening their production Kotlin APIs. */
 final class PlaybackTestStores {
   static PlaySessionStore sessions(NeutrodyneDatabase db, OrderKeys keys, YouTubeCapabilitiesSource caps) {
-    return new SessionWriter(db, keys, caps);
+    return new SessionWriter(db, keys, caps, id -> true);
   }
 
   static PositionStore positions(NeutrodyneDatabase db) {
-    return new PositionWriter(db, new ch.lkmc.neutrodyne.core.testing.TestClock());
+    return new PositionWriter(db, new ch.lkmc.neutrodyne.core.testing.TestClock(), id -> true);
   }
 
   static PlaybackMediaLookup media(NeutrodyneDatabase db) {
