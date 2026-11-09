@@ -109,6 +109,7 @@ class SyncWorkerTest {
                         tokens = SyncTokenStore(secrets),
                         activity = SyncActivityState(),
                         gate = FakeLocalNetworkGate(),
+                        effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) { true },
                     )
                 val schedulerCalls = mutableListOf<String>()
                 val scheduler =
@@ -197,6 +198,7 @@ class SyncWorkerTest {
                     tokens = SyncTokenStore(secrets),
                     activity = SyncActivityState(),
                     gate = FakeLocalNetworkGate(),
+                    effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) { true },
                 )
             val scheduler =
                 SyncScheduler(

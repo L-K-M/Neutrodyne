@@ -30,14 +30,24 @@ import kotlinx.serialization.encodeToString
  * marker is cleared by the same conditional ack: the upload ack deletes the outbox intent before
  * the server's echo page can replace the marker, so leaving it would let a later drain re-apply
  * the superseded remote value. No Room transaction spans the DataStore write.
+ *
+ * A drain runs only while the persisted "Sync playback settings" switch is on
+ * ([settingsSyncEnabled], the live `SyncServerAddress.syncPlaybackSettings()` read — never
+ * `SyncFlags`' late cache): while it is off the markers stay pending (10 Pull and apply step 3),
+ * and turning it on drains them. A drain failure propagates; the markers it did not clear stay
+ * for the next drain.
  */
 class SyncApplyEffects(
     private val db: NeutrodyneDatabase,
     private val settings: SettingsSyncPort,
     private val writeLocks: SettingsWriteCoordinator,
+    private val settingsSyncEnabled: suspend () -> Boolean,
 ) {
     /** Applies every pending setting whose marker survived; leaves the rest for a later drain. */
     suspend fun drainSettings() {
+        // The switch gate is the persisted value read live: markers stay pending while it is
+        // off, so enabling it later applies them (the server's values win, as at the first link).
+        if (!settingsSyncEnabled()) return
         for (row in db.syncClockDao().all()) {
             if (row.coll != SyncCollection.SETTING.wire) continue
             val key = AllSettingKeys.list.firstOrNull { it.name == row.rid } ?: continue
@@ -45,8 +55,23 @@ class SyncApplyEffects(
         }
     }
 
+    /**
+     * 10 Durable apply effects / Settings capture: the at-each-start drain, before any push or
+     * hash reconciliation. Only while linked — an unlink cleared the sync tables, so a leftover
+     * marker of the old account must never re-apply. Local only (Room and DataStore): no network
+     * call, nothing that blocks start-up beyond the markers' own writes.
+     */
+    suspend fun drainAtStart() {
+        val state = db.syncStateDao().get() ?: return
+        if (!state.enabled || state.linkedAt == null) return
+        drainSettings()
+    }
+
     private suspend fun drainSetting(key: SettingKey<*>) {
         writeLocks.withLock(key) {
+            // A previous key or local writer may have held this drain while sync was disabled.
+            // Admit each key under its write lock; later keys stay pending once the switch is off.
+            if (!settingsSyncEnabled()) return@withLock
             val row = db.syncClockDao().get(SyncCollection.SETTING.wire, key.name) ?: return@withLock
             val raw = decode(row.clocks) ?: return@withLock
             val pending = raw.pendingSetting ?: return@withLock
