@@ -138,6 +138,20 @@ object MassChangeGuard {
         }
     }
 
+    /**
+     * The batch of a HELD `sync_held` row, or `null` for STAGED/DEFERRED rows and malformed
+     * payloads: only HELD rows are user prompts, so the prompt observer and `resolveHeld` gate
+     * on the row's state before anything reads or applies its removals.
+     */
+    fun heldBatch(json: String): HeldBatch? =
+        runCatching {
+            val obj = SyncJson.parseToJsonElement(json).jsonObject
+            if ((obj["state"] as? JsonPrimitive)?.contentOrNull != HeldState.HELD.name) {
+                return null
+            }
+            HeldBatch(decodeRemovals(obj["podcasts"]), decodeRemovals(obj["groups"]))
+        }.getOrNull()
+
     /** Re-captures the local state of a held batch ("Keep mine") with fresh clocks. */
     suspend fun keepMine(
         db: NeutrodyneDatabase,

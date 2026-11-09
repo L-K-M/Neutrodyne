@@ -46,7 +46,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -62,7 +64,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -174,6 +175,19 @@ class SyncControllerImpl(
      */
     private val statusMutex = Mutex()
 
+    // Authorization and an admitted disconnect must not replace each other's account or token.
+    private val identityMutex = Mutex()
+
+    private data class DisconnectIdentity(
+        val serverUrl: String?,
+        val accountId: String?,
+        val deviceId: String?,
+        val nodeId: String?,
+        val token: String?,
+    ) {
+        override fun toString(): String = "DisconnectIdentity(redacted)"
+    }
+
     init {
         scope.launch { refreshStatus() }
         // 10 Live updates: the status card's activity line follows the round counter and the
@@ -182,6 +196,14 @@ class SyncControllerImpl(
             combine(activity.count, events.connected) { _, _ -> currentActivity() }
                 .distinctUntilChanged()
                 .collect { refreshStatus() }
+        }
+        // 10 Mass-change guard: the prompts follow `sync_held`, so a batch the guard holds, a
+        // resolution, or any other writer republishes without a manual refresh. STAGED and
+        // DEFERRED rows are the engine's bookkeeping and never surface as user prompts.
+        scope.launch {
+            db.syncHeldDao().observeAll().collect { rows ->
+                _heldChanges.value = rows.mapNotNull(::heldPrompt)
+            }
         }
     }
 
@@ -446,6 +468,7 @@ class SyncControllerImpl(
     }
 
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
+        val expected = identityMutex.withLock { disconnectIdentity() }
         // One push round with a 5-s budget first, so the last edits reach the other devices; an
         // unreachable server must not block the local unlink.
         try {
@@ -457,39 +480,82 @@ class SyncControllerImpl(
         } catch (failure: Throwable) {
             lastRoundProblem.value = classify(failure)
         }
-        address.serverUrl()?.let { url -> runCatching { client.logout() } }
-        db.syncStateDao().unlink()
-        settingsCapture.clear()
-        address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
-        // 10 Passwords: the account's staged auth snapshots leave with the link — under the
-        // coordinator, like every credential delete.
-        credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
-        // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
-        scheduler.onUnlinked()
-        lastRoundProblem.value = null
-        refreshStatus()
-        return Outcome.Success(Unit)
-    }
-
-    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
-        if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
-        val (url, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
-        refreshGateVerdict()
-        return try {
-            client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+        return admittedDisconnect(expected) {
+            expected.serverUrl?.let { runCatching { client.logout() } }
             db.syncStateDao().unlink()
             settingsCapture.clear()
-            tokenStore.clear(hostOf(url))
+            expected.serverUrl?.let { tokenStore.clear(hostOf(it)) }
+            // 10 Passwords: the account's staged auth snapshots leave with the link — under the
+            // coordinator, like every credential delete.
             credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
+            // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
             scheduler.onUnlinked()
             lastRoundProblem.value = null
             refreshStatus()
             Outcome.Success(Unit)
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Throwable) {
-            Outcome.Failure(tracked(failure))
         }
+    }
+
+    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
+        if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
+        val expected =
+            identityMutex.withLock {
+                if (linkedContext() == null) null else disconnectIdentity()
+            } ?: return Outcome.Failure(SyncProblem.Revoked)
+        val url = expected.serverUrl ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
+        return admittedDisconnect(expected) {
+            try {
+                client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+                db.syncStateDao().unlink()
+                settingsCapture.clear()
+                tokenStore.clear(hostOf(url))
+                credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
+                scheduler.onUnlinked()
+                lastRoundProblem.value = null
+                refreshStatus()
+                Outcome.Success(Unit)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                Outcome.Failure(tracked(failure))
+            }
+        }
+    }
+
+    /** Read only while holding [identityMutex], which also owns authorization's writes. */
+    private suspend fun disconnectIdentity(): DisconnectIdentity {
+        val url = address.serverUrl()
+        val state = db.syncStateDao().get()
+        return DisconnectIdentity(
+            url,
+            state?.accountId,
+            state?.deviceId,
+            state?.nodeId,
+            url?.let { tokenStore.load(hostOf(it)) },
+        )
+    }
+
+    /**
+     * After admission the application owns the request and cleanup. Leaving the screen cancels
+     * only its await; the RPC remains cancellable by its normal timeout or application shutdown.
+     * Recheck after the optional push so an old confirmation never disconnects a newer link.
+     */
+    private suspend fun admittedDisconnect(
+        expected: DisconnectIdentity,
+        operation: suspend () -> Outcome<Unit, SyncProblem>,
+    ): Outcome<Unit, SyncProblem> {
+        coroutineContext.ensureActive()
+        return scope
+            .async(start = CoroutineStart.UNDISPATCHED) {
+                identityMutex.withLock {
+                    if (disconnectIdentity() != expected) {
+                        Outcome.Failure(SyncProblem.Revoked)
+                    } else {
+                        operation()
+                    }
+                }
+            }.await()
     }
 
     override suspend fun renameDevice(
@@ -525,32 +591,25 @@ class SyncControllerImpl(
         id: Long,
         resolution: HeldResolution,
     ) {
+        // Decide later changes nothing: the HELD row and its banner stay.
+        if (resolution == HeldResolution.DECIDE_LATER) return
         scope.launch {
-            val row = db.syncHeldDao().byId(id) ?: return@launch
-            val batch = runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull() ?: return@launch
-            when (resolution) {
-                HeldResolution.APPLY -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.apply(db, batch, clock.now())
-                        }
+            // The row is read and gated inside the write transaction: an answer can only apply a
+            // batch that is still HELD — a row another path resolved, deleted or returned to
+            // STAGED/DEFERRED meanwhile is a no-op — and the apply commits or rolls back together
+            // with the row's delete (10 Mass-change guard step 3).
+            db.withWriteTransaction<Unit> {
+                val row = db.syncHeldDao().byId(id) ?: return@withWriteTransaction
+                val batch = MassChangeGuard.heldBatch(row.batch) ?: return@withWriteTransaction
+                db.syncStateDao().withApplying<Unit> {
+                    when (resolution) {
+                        HeldResolution.APPLY -> MassChangeGuard.apply(db, batch, clock.now())
+                        HeldResolution.KEEP_MINE -> MassChangeGuard.keepMine(db, batch, clock)
+                        HeldResolution.DECIDE_LATER -> Unit
                     }
                 }
-
-                HeldResolution.KEEP_MINE -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.keepMine(db, batch, clock)
-                        }
-                    }
-                }
-
-                HeldResolution.DECIDE_LATER -> {
-                    return@launch
-                }
+                db.syncHeldDao().delete(id)
             }
-            db.syncHeldDao().delete(id)
-            refreshHeld()
         }
     }
 
@@ -710,59 +769,60 @@ class SyncControllerImpl(
         token: TokenResponse,
         nodeId: NodeId,
         deviceId: String,
-    ) {
-        // The identity is the session the submit belongs to: a superseded or cancelled job must
-        // never write it into a newer session's state.
-        coroutineContext.ensureActive()
-        tokenStore.save(hostOf(server.serverUrl), token.token)
-        address.setServerUrl(server.serverUrl)
-        token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
-        db.withWriteTransaction {
-            val existing = db.syncStateDao().get()
-            db.syncStateDao().upsert(
-                (existing ?: SyncStateEntity()).copy(
-                    enabled = false,
-                    applying = false,
-                    serverUrl = server.serverUrl,
-                    accountId = token.accountId,
-                    deviceId = deviceId,
-                    nodeId = nodeId.value,
-                    protocol = PROTOCOL_VERSION,
-                    cursor = null,
-                    hlc = existing?.hlc ?: 0,
-                    linkedAt = null,
-                    lastSyncAt = null,
-                    lastError = null,
-                ),
-            )
-        }
-        lastRoundProblem.value = null
-        accountName = token.username
-        refreshStatus()
+    ): Unit =
+        identityMutex.withLock {
+            // The identity is the session the submit belongs to: a superseded or cancelled job must
+            // never write it into a newer session's state.
+            coroutineContext.ensureActive()
+            tokenStore.save(hostOf(server.serverUrl), token.token)
+            address.setServerUrl(server.serverUrl)
+            token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
+            db.withWriteTransaction {
+                val existing = db.syncStateDao().get()
+                db.syncStateDao().upsert(
+                    (existing ?: SyncStateEntity()).copy(
+                        enabled = false,
+                        applying = false,
+                        serverUrl = server.serverUrl,
+                        accountId = token.accountId,
+                        deviceId = deviceId,
+                        nodeId = nodeId.value,
+                        protocol = PROTOCOL_VERSION,
+                        cursor = null,
+                        hlc = existing?.hlc ?: 0,
+                        linkedAt = null,
+                        lastSyncAt = null,
+                        lastError = null,
+                    ),
+                )
+            }
+            lastRoundProblem.value = null
+            accountName = token.username
+            refreshStatus()
 
-        coroutineContext.ensureActive()
-        val summary = client.account()
-        accountName = summary.username
-        val localPodcasts = db.podcastDao().allForExport().size
-        val localGroups = db.groupDao().groupsInOrder().size
-        when {
-            summary.counts.podcasts == 0 && summary.counts.groups == 0 -> {
-                if (localPodcasts == 0 && localGroups == 0) {
-                    completeEmptyLink()
-                } else {
-                    linkFlow.confirmUpload(summary.username, hostOf(server.serverUrl))
+            coroutineContext.ensureActive()
+            val summary = client.account()
+            accountName = summary.username
+            val localPodcasts = db.podcastDao().allForExport().size
+            val localGroups = db.groupDao().groupsInOrder().size
+            when {
+                summary.counts.podcasts == 0 && summary.counts.groups == 0 -> {
+                    if (localPodcasts == 0 && localGroups == 0) {
+                        completeEmptyLink()
+                    } else {
+                        linkFlow.confirmUpload(summary.username, hostOf(server.serverUrl))
+                    }
+                }
+
+                localPodcasts == 0 && localGroups == 0 -> {
+                    beginMerge(FirstLinkChoice.USE_SERVER)
+                }
+
+                else -> {
+                    linkFlow.chooseFirstLink(localPodcasts, localGroups, summary.counts.podcasts, summary.counts.groups)
                 }
             }
-
-            localPodcasts == 0 && localGroups == 0 -> {
-                beginMerge(FirstLinkChoice.USE_SERVER)
-            }
-
-            else -> {
-                linkFlow.chooseFirstLink(localPodcasts, localGroups, summary.counts.podcasts, summary.counts.groups)
-            }
         }
-    }
 
     /** Nothing to combine: the link completes without a merge (both libraries are empty). */
     private suspend fun completeEmptyLink() {
@@ -994,23 +1054,33 @@ class SyncControllerImpl(
         return classify(failure)
     }
 
-    private suspend fun refreshHeld() {
-        _heldChanges.value =
-            db.syncHeldDao().all().mapNotNull { row ->
-                val batch =
-                    runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull()
-                        ?: return@mapNotNull null
-                val summary =
-                    runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
-                MassChangePrompt(
-                    id = row.id,
-                    deviceName = null,
-                    podcastTitles =
-                        summary?.get("podcasts")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    groupNames = summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                )
-            }
-    }
+    /**
+     * One `sync_held` row as a [MassChangePrompt], or `null` when the row is not a user prompt:
+     * STAGED/DEFERRED rows are the guard's bookkeeping, and a malformed row must never kill the
+     * observer or starve the valid rows behind it. The summary carries only title and name lists
+     * (complete — the UI truncates later); the guard records no device name yet.
+     */
+    private fun heldPrompt(row: SyncHeldEntity): MassChangePrompt? =
+        runCatching {
+            MassChangeGuard.heldBatch(row.batch) ?: return null
+            val summary =
+                runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
+            MassChangePrompt(
+                id = row.id,
+                deviceName = null,
+                podcastTitles = summaryList(summary, "podcasts"),
+                groupNames = summaryList(summary, "groups"),
+            )
+        }.getOrNull()
+
+    /** One summary string list; a malformed member reads as absent rather than failing the row. */
+    private fun summaryList(
+        summary: kotlinx.serialization.json.JsonObject?,
+        key: String,
+    ): List<String> =
+        runCatching { summary?.get(key)?.jsonArray?.map { it.jsonPrimitive.content } }
+            .getOrNull()
+            ?: emptyList()
 }
 
 /** `spaces and hyphens ignored, case-insensitive`, as the server normalises codes (10 Link methods). */
