@@ -6,7 +6,9 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
@@ -17,6 +19,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLibraryMerger
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
+import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -84,6 +87,7 @@ class FirstLinkMergerTest {
     private val june = 1_780_000_000_000L
     private val october = 1_790_000_000_000L
     private val remote = NodeId("0000000000000002")
+    private val localNode = NodeId("0000000000000001")
     private val podcastSyncId = "00000000-0000-4000-8000-00000000000a"
     private val localOnlySyncId = "00000000-0000-4000-8000-00000000000b"
     private val device = "device-1"
@@ -148,6 +152,135 @@ class FirstLinkMergerTest {
                 val link = db.syncStateDao().get()
                 assertTrue(link?.enabled == true)
                 assertNotNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The first link re-primes the volatile share gate before the merge's apply steps run —
+     * `engine.round` is only reached at the upload step, long after the pull staged the
+     * received credentials, so the persisted consent must be read at the merge's entry (10
+     * Settings capture / Passwords). The probe observes the flag from inside `mergeStaged`,
+     * and the pushed `auth` intent proves the hydrated gate carries bytes. No real network —
+     * the scripted client captures the DTOs.
+     */
+    @Test
+    fun theFirstLinkHydratesTheShareGateBeforeApplyingReceivedCredentials() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val flags = SyncFlags()
+                val address = FakeSyncServerAddress(serverUrl = "https://sync.example")
+                address.updateShareFeedPasswords(true)
+                val secrets = FakeSecretStore()
+                // A credential feed whose un-pushed local `auth` intent predates this restart.
+                val podcastId =
+                    db.podcastDao().insertPodcast(
+                        podcastEntity(
+                            syncId = podcastSyncId,
+                            feedUrl = "$AUTH_ORIGIN/feed",
+                            feedKey = "$AUTH_ORIGIN/feed",
+                        ),
+                    )
+                val credentialId = secrets.put(AUTH_ORIGIN, AUTH_USER, AUTH_PASS.toCharArray())!!
+                db
+                    .credentialDao()
+                    .insert(
+                        CredentialEntity(
+                            id = credentialId,
+                            origin = AUTH_ORIGIN,
+                            username = AUTH_USER,
+                            secretCipher = null,
+                            iv = null,
+                            createdAt = now,
+                        ),
+                    )
+                val intent = Hlc.of(now, 2, localNode)
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        db.podcastDao().setCredentialId(podcastId, credentialId)
+                        db.syncOutboxDao().upsert(
+                            SyncOutboxEntity(
+                                coll = "podcast",
+                                rid = podcastSyncId,
+                                field = "auth",
+                                hlc = intent.packed,
+                                nodeId = localNode.value,
+                            ),
+                        )
+                    }
+                }
+                val gateReads = mutableListOf<Boolean>()
+                val library =
+                    object : ch.lkmc.neutrodyne.core.domain.LibraryMerger {
+                        override suspend fun mergeStaged(
+                            stagingDir: String,
+                            policy: MergePolicy,
+                            onUnmatched: suspend (String, String) -> Unit,
+                            progress: (Int, Int) -> Unit,
+                            onApplied: (suspend (ch.lkmc.neutrodyne.core.model.MergedRecord) -> Unit)?,
+                        ): Outcome<
+                            ch.lkmc.neutrodyne.core.model.MergeSummary,
+                            ch.lkmc.neutrodyne.core.domain.BackupError,
+                        > {
+                            gateReads += flags.sharePasswords
+                            return Outcome.Success(
+                                ch.lkmc.neutrodyne.core.model
+                                    .MergeSummary(0, 0, 0, 0, 0, 0, 0, 0),
+                            )
+                        }
+                    }
+                val sent = mutableListOf<ChangeDto>()
+                val client =
+                    ScriptedClient(
+                        listOf(podcastRecord()),
+                        syncHandler = { since, changes ->
+                            sent += changes
+                            ackingSync(since, changes)
+                        },
+                    )
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity, flags, address, secrets),
+                        libraryMerger = library,
+                        storagePaths = paths,
+                        effects = newEffects(db),
+                        clock = TestClock(now),
+                        activity = activity,
+                        secrets = secrets,
+                        coordinator = FakeCredentialCommitCoordinator(),
+                        beforeMerge = { flags.refreshFromStore(address) },
+                    )
+
+                assertFalse(flags.sharePasswords, "a restart left the cache at its default")
+                val result = merger.merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Completed)
+                assertEquals(
+                    listOf(true),
+                    gateReads,
+                    "the merge's apply steps must see the persisted gate",
+                )
+                val pushed =
+                    sent.first {
+                        it.coll == "podcast" && it.fields.containsKey("auth")
+                    }
+                assertEquals(
+                    buildJsonObject {
+                        put("u", AUTH_USER)
+                        put("p", AUTH_PASS)
+                    },
+                    pushed.fields
+                        .getValue("auth")
+                        .v,
+                    "the consented credential rides the first link's upload",
+                )
             } finally {
                 db.close()
             }
@@ -1615,10 +1748,11 @@ class FirstLinkMergerTest {
     private fun mergerOf(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
-        library: FakeLibraryMerger,
+        library: ch.lkmc.neutrodyne.core.domain.LibraryMerger,
         activity: SyncActivityState = SyncActivityState(),
         effects: SyncApplyEffects = newEffects(db),
         secrets: FakeSecretStore = FakeSecretStore(),
+        beforeMerge: suspend () -> Unit = {},
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -1632,6 +1766,7 @@ class FirstLinkMergerTest {
             activity = activity,
             secrets = secrets,
             coordinator = FakeCredentialCommitCoordinator(),
+            beforeMerge = beforeMerge,
         )
 
     /**
@@ -1738,13 +1873,40 @@ class FirstLinkMergerTest {
         return raw?.pendingSetting?.value
     }
 
-    /** The engine the merge's push rounds run through, over the same scripted client. */
+    /** The bare engine's default address — the store the fixtures' refresh reads. */
+    private val defaultEngineAddress =
+        object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
+            override suspend fun serverUrl(): String = "https://sync.example"
+
+            override suspend fun username(): String? = null
+
+            override suspend fun deviceName(): String? = null
+
+            override suspend fun shareFeedPasswords(): Boolean = false
+
+            override suspend fun syncPlaybackSettings(): Boolean = true
+
+            override suspend fun setServerUrl(url: String?) = Unit
+
+            override suspend fun setUsername(username: String?) = Unit
+
+            override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
+
+            override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Outcome.Success(Unit)
+        }
+
+    /**
+     * The engine the merge's push rounds run through, over the same scripted client. [flags],
+     * [address] and the cache's refresh lambda mirror `SyncBindings`' production wiring.
+     */
     private fun engine(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
         activity: SyncActivityState,
+        flags: SyncFlags = SyncFlags(),
+        address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress = defaultEngineAddress,
+        secrets: FakeSecretStore = FakeSecretStore(),
     ): SyncEngine {
-        val secrets = FakeSecretStore()
         val writeLocks = TestSettingsWriteCoordinator()
         val settings =
             FakeSettingsSyncPort().apply {
@@ -1760,27 +1922,8 @@ class FirstLinkMergerTest {
             applier = applier(db),
             clock = TestClock(now),
             secrets = secrets,
-            sharePasswords = { false },
-            address =
-                object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
-                    override suspend fun serverUrl(): String = "https://sync.example"
-
-                    override suspend fun username(): String? = null
-
-                    override suspend fun deviceName(): String? = null
-
-                    override suspend fun shareFeedPasswords(): Boolean = false
-
-                    override suspend fun syncPlaybackSettings(): Boolean = true
-
-                    override suspend fun setServerUrl(url: String?) = Unit
-
-                    override suspend fun setUsername(username: String?) = Unit
-
-                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
-
-                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Outcome.Success(Unit)
-                },
+            sharePasswords = { flags.sharePasswords },
+            address = address,
             tokens =
                 SyncTokenStore(secrets).apply {
                     kotlinx.coroutines.runBlocking { save("sync.example", "token") }
@@ -1792,6 +1935,7 @@ class FirstLinkMergerTest {
             effects = newEffects(db, settings, writeLocks, secrets),
             capture = SettingsCapture(db, settings, writeLocks) { true },
             notices = SyncNoticeBus(),
+            refreshPreferences = { flags.refreshFromStore(address) },
         )
     }
 
@@ -2120,6 +2264,12 @@ class FirstLinkMergerTest {
 
     private suspend fun queuedIdentityKeys(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): List<String> =
         db.queueDao().entries().mapNotNull { db.episodeDao().byId(it.episodeId)?.identityKey }
+
+    private companion object {
+        const val AUTH_ORIGIN = "https://a.example"
+        const val AUTH_USER = "sync-user"
+        const val AUTH_PASS = "s3ntinel-pass-9f8e"
+    }
 }
 
 /** A [SyncClient] that serves a fixed page and counts `changes` calls. */

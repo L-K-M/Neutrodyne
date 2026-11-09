@@ -80,6 +80,12 @@ class SyncEngine(
     private val capture: SettingsCapture,
     private val notices: SyncNoticeBus,
     private val onSessionApplied: suspend () -> Unit = {},
+    /**
+     * Re-primes the volatile preference cache from the store before the round's first local
+     * effect or push — the persisted share gate, not the restart default, decides whether the
+     * outgoing changes carry auth. Bound by `SyncBindings`; bare test engines may omit it.
+     */
+    private val refreshPreferences: suspend () -> Unit = {},
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -116,6 +122,10 @@ class SyncEngine(
         if (db.syncStateDao().get()?.lastError == SYNC_ERROR_REVOKED) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
+        // The volatile share gate is only as fresh as its last hydration — a restart's cache
+        // would withhold auth until a retoggle, so every round re-reads the persisted switches
+        // before the first effect or push consults them (10 Settings capture).
+        refreshPreferences()
         // 10 Durable apply effects: a marker an earlier committed page left behind retries before
         // this round's first request — the drain is local (Room and DataStore), so it recovers
         // while offline too, and the push below can never echo over an unapplied server value.
