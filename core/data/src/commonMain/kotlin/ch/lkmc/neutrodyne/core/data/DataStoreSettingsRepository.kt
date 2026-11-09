@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
+import ch.lkmc.neutrodyne.core.datastore.SettingReset
 import ch.lkmc.neutrodyne.core.datastore.SettingStore
 import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.SettingsError
@@ -101,6 +102,59 @@ internal class DataStoreSettingsRepository(
             syncPort.emitLocal(key, null, clock.now())
         }
     }
+
+    override suspend fun resetAll(keys: List<SettingKey<*>>): Outcome<Unit, SettingsError> {
+        if (keys.isEmpty()) return Outcome.Success(Unit)
+        val file = keys.first().file
+        // Atomicity only exists inside one DataStore file; a cross-file batch can never
+        // commit as one write.
+        require(keys.all { it.file == file }) { "a batched reset is atomic within one settings file only" }
+        // Sorted by name so every multi-key writer takes the per-key locks in the same order.
+        val locked = keys.distinctBy { it.name }.sortedBy { it.name }
+        return withKeyLocks(locked) {
+            // 01 Sync write ordering: each key's durable intent is recorded before the shared
+            // DataStore edit, so a recorder failure leaves every stored value unchanged and a
+            // synced key's receipt still commits with its removal.
+            val entries = mutableListOf<SettingReset>()
+            for (key in locked) {
+                val recorded =
+                    suspendRunCatching { syncPort.recordLocal(key, null) }
+                        .onFailure { failure ->
+                            Log.w(LOG_TAG, failure) { "sync recorder failed for '${key.name}'" }
+                        }
+                if (recorded.isFailure) {
+                    return@withKeyLocks Outcome.Failure(SettingsError.WriteFailed)
+                }
+                entries += SettingReset(key, recorded.getOrThrow().takeIf { key.synced }?.storedReceipt())
+            }
+            suspendRunCatching {
+                when (file) {
+                    SettingsFile.PORTABLE -> settingsStore.resetAll(entries)
+                    SettingsFile.DEVICE -> deviceSettingsStore.resetAll(locked)
+                }
+            }.fold(
+                onSuccess = {
+                    locked.forEach { syncPort.emitLocal(it, null, clock.now()) }
+                    Outcome.Success(Unit)
+                },
+                onFailure = { failure ->
+                    Log.w(LOG_TAG, failure) { "batched reset failed" }
+                    Outcome.Failure(SettingsError.WriteFailed)
+                },
+            )
+        }
+    }
+
+    /** Takes each key's write lock in list order; the caller sorts for a global order. */
+    private suspend fun <T> withKeyLocks(
+        keys: List<SettingKey<*>>,
+        block: suspend () -> T,
+    ): T =
+        if (keys.isEmpty()) {
+            block()
+        } else {
+            writeLocks.withLock(keys.first()) { withKeyLocks(keys.drop(1), block) }
+        }
 
     override fun observePortableSnapshot(): Flow<Map<String, Any>> {
         val portableKeys = AllSettingKeys.list.filter { it.file == SettingsFile.PORTABLE }
