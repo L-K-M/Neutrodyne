@@ -49,6 +49,8 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_read_failed
 import ch.lkmc.neutrodyne.feature.player.resources.player_skipped
 import ch.lkmc.neutrodyne.feature.player.resources.player_write_failed
 import ch.lkmc.neutrodyne.feature.player.resources.player_youtube_unavailable
+import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhere
+import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhereSource
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
@@ -97,6 +99,8 @@ internal data class PlayerUiState(
     val chapters: List<EpisodeChapter> = emptyList(),
     val currentChapter: CurrentChapter? = null,
     val colors: ArtworkColors? = null,
+    /** Retained remote "marked played" for the loaded item; null unless its episode matches. */
+    val markedPlayedElsewhere: MarkedPlayedElsewhere? = null,
 )
 
 /** Window-scoped presentation; starts and consent use the same policy as episode screens. */
@@ -112,6 +116,7 @@ internal class PlayerViewModel(
     queue: QueueRepository,
     private val chapters: ChapterRepository,
     private val artwork: Provider<ArtworkRepository>,
+    private val markedPlayedElsewhere: MarkedPlayedElsewhereSource,
     externalOpenService: YouTubeExternalOpen,
     val youtubeHealth: YouTubeHealth? = null,
 ) : ViewModel() {
@@ -210,7 +215,17 @@ internal class PlayerViewModel(
             }.combine(source.currentChapter) { state, current ->
                 state.copy(currentChapter = current?.takeIf { it.episodeId == state.now?.episodeId })
             }.combine(messages.flow) { state, pending -> state.copy(messages = pending) }
-            .combine(artworkColors) { state, result ->
+            // Re-check the loaded item so a latch cleared just after a switch cannot linger.
+            .combine(markedPlayedElsewhere.markedPlayedElsewhere) { state, mark ->
+                state.copy(
+                    markedPlayedElsewhere =
+                        mark?.takeIf { mark ->
+                            // The load-identity guard too: a mark stamped on a previous occurrence
+                            // must not flash on a reloaded item even before the tracker clears it.
+                            mark.episodeId == state.now?.episodeId && mark.loadId == state.now?.loadId
+                        },
+                )
+            }.combine(artworkColors) { state, result ->
                 state.copy(
                     colors =
                         result.second.takeIf {

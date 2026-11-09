@@ -110,6 +110,7 @@ internal class AndroidServiceBridge(
             boundaryCompleted = { access.hub.event(PlaybackEvent.MarkedPlayed(it)) },
             afterTransition = access.sync::transitioned,
             afterSessionEnd = access.sync::stopped,
+            onLoadBoundary = access.currentLoadId::incrementAndGet,
             localChanges = access.localChanges,
         )
     private val recovery =
@@ -670,6 +671,7 @@ internal class AndroidServiceBridge(
                     access.resolver.streamKind(row.episodeId),
                     serviceIssue ?: recovery.issue.value,
                     context,
+                    access.currentLoadId.get(),
                 )
             }
         if (player.mediaItemCount == 0 && player.playbackState == Player.STATE_ENDED) stopService()

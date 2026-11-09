@@ -8,6 +8,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * The engine-side channel for one-shot [SyncNotice]s (08 Sync notices): the engine and the
@@ -20,5 +21,17 @@ class SyncNoticeBus {
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
     val notices: Flow<SyncNotice> = _notices
 
-    suspend fun post(notice: SyncNotice) = _notices.emit(notice)
+    /**
+     * One app-scoped synchronous observer invoked inside [post] before the replay-0 emit —
+     * [MarkedPlayedElsewhereTracker] uses it to stamp the notice with the load that is current
+     * at post time, which the deferred collector could no longer reconstruct. A StateFlow so
+     * the write is safely published to whatever dispatcher calls [post]; the observer must not
+     * suspend, block, lock or touch IO.
+     */
+    internal val preEmit = MutableStateFlow<((SyncNotice) -> Unit)?>(null)
+
+    suspend fun post(notice: SyncNotice) {
+        preEmit.value?.invoke(notice)
+        _notices.emit(notice)
+    }
 }

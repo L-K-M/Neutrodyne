@@ -45,6 +45,14 @@ data class NowPlaying(
     val stream: StreamKind?,
     val issue: PlaybackIssue?,
     val context: PlayContextInfo?,
+    /**
+     * Per-load occurrence token minted by the producer before the StateFlow conflates: stable
+     * across pause/play, metadata and position updates of the same loaded item, fresh on every
+     * load or reload — including the same episode — so consumers can tell "still loaded" from
+     * "left and came back" even when intermediate emissions were conflated away. `0` in
+     * fixtures and producers that do not track occurrences.
+     */
+    val loadId: Long = 0,
 )
 
 /**
@@ -68,6 +76,12 @@ data class PositionSnapshot(
 }
 
 enum class PlayerPhase { NOT_LOADED, BUFFERING, READY, ENDED, ERROR }
+
+/**
+ * Mints a [NowPlaying.loadId]. Random, so producers need no shared counter; a duplicate only
+ * overestimates one occurrence's lifetime, never merges two distinct items' identities.
+ */
+fun nextNowPlayingLoadId(): Long = kotlin.random.Random.nextLong()
 
 enum class StreamKind { LOCAL, STREAM, YOUTUBE }
 

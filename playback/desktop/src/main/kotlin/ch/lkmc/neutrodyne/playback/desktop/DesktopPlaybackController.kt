@@ -38,6 +38,7 @@ import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.StreamKind
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import ch.lkmc.neutrodyne.playback.api.nextNowPlayingLoadId
 import ch.lkmc.neutrodyne.playback.core.ChapterIndex
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
 import ch.lkmc.neutrodyne.playback.core.PlaybackExit
@@ -161,6 +162,14 @@ class DesktopPlaybackController(
     private var completedBoundary: Long? = null
 
     /**
+     * [NowPlaying.loadId] of the current load occurrence (08 Sync notices): minted at every
+     * committed load or transition — including a reload of the same episode — and stable across
+     * pause/play and position updates, so conflated consumers can still tell "still loaded"
+     * from "left and came back".
+     */
+    private var currentLoadId = nextNowPlayingLoadId()
+
+    /**
      * An issue the engine's own state no longer carries: a missing local file is
      * re-resolved at once, so the error state is replaced by Buffering before the
      * UI can show it. Held until playback resumes (06 Error recovery).
@@ -233,6 +242,7 @@ class DesktopPlaybackController(
     }
 
     private fun transitionBoundary(episodeId: Long) {
+        currentLoadId = nextNowPlayingLoadId()
         boundaries.tryEmit(PlaybackSyncEvent.Transition(episodeId))
     }
 
@@ -404,6 +414,7 @@ class DesktopPlaybackController(
                 null,
                 null,
                 context,
+                currentLoadId,
             )
         ticks.emit(snapshot)
     }
@@ -564,6 +575,7 @@ class DesktopPlaybackController(
         value.saver.clear()
         prepared = row != null
         engineCurrentId = row?.episodeId
+        currentLoadId = nextNowPlayingLoadId()
         durationMs = row?.let { it.measuredDurationMs ?: it.durationMs }
         since = clock.now()
         if (row == null) {
@@ -1298,6 +1310,7 @@ class DesktopPlaybackController(
                     },
                 issue,
                 context,
+                currentLoadId,
             )
         ticks.emit(snapshot)
         syncActive.value = PlaybackSyncActive(playing, row.episodeId)

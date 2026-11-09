@@ -65,6 +65,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -337,6 +338,65 @@ class DesktopPlaybackControllerTest {
                 assertEquals(17_000L, fixture.awaitPosition(1, 17_000L))
                 assertTrue(fixture.engine.closed)
                 assertTrue(fixture.engine.commands.indexOf("speed") < fixture.engine.commands.indexOf("window"))
+            }
+        }
+
+    /**
+     * [NowPlaying.loadId] (08 Sync notices): minted at every committed load and transition —
+     * including returning to an earlier episode — and stable across pause/play.
+     */
+    @Test
+    fun loadIdentityMintsPerLoadAndTransitionAndSurvivesPause() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                fixture.graph.queueRepository().addLast(listOf(2))
+                fixture.controller.playEpisode(1)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                val first =
+                    fixture.controller.nowPlaying.value!!
+                        .loadId
+                assertNotEquals(0L, first)
+                fixture.controller.pause()
+                fixture.awaitPaused()
+                assertEquals(
+                    first,
+                    fixture.controller.nowPlaying.value!!
+                        .loadId,
+                )
+                fixture.controller.play()
+                fixture.awaitPlaying()
+                assertEquals(
+                    first,
+                    fixture.controller.nowPlaying.value!!
+                        .loadId,
+                )
+
+                fixture.controller.skipToNext()
+                fixture.awaitEpisode(2)
+                val second =
+                    fixture.controller.nowPlaying.value!!
+                        .loadId
+                assertNotEquals(first, second)
+
+                // A→B→A: coming back to episode 1 is a new occurrence, not the old token.
+                fixture.controller.skipToPrevious()
+                fixture.awaitEpisode(1)
+                val third =
+                    fixture.controller.nowPlaying.value!!
+                        .loadId
+                assertNotEquals(first, third)
+                assertNotEquals(second, third)
+
+                // Restarting the same episode mints again.
+                fixture.controller.playEpisode(1)
+                fixture.awaitEpisode(1)
+                assertNotEquals(
+                    third,
+                    fixture.controller.nowPlaying.value!!
+                        .loadId,
+                )
             }
         }
 

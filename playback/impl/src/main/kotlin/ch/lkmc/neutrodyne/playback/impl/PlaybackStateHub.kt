@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import java.util.concurrent.atomic.AtomicLong
 
@@ -74,55 +76,85 @@ internal class PlaybackStateHub(
         chapterState.value = chapter
     }
 
+    /** The (episodeId, [NowPlaying.loadId]) of the latest live-published item — one slot, only
+     * ever written from the bridge branch, so a durable fallback for that same item keeps its
+     * identity across service attach/detach while a real load boundary clears it. */
+    private val lastLiveLoad = MutableStateFlow<Pair<Long, Long>?>(null)
+
     private val durable =
         flow {
             opener.awaitOpen()
+            var mintedId: Long? = null
+            var mintedToken = 0L
             emitAll(
-                queues().observeSession().flatMapLatest { session ->
-                    val id = session?.currentEpisodeId
-                    if (id ==
-                        null
-                    ) {
-                        flowOf(null)
-                    } else {
-                        combine(media().observe(setOf(id)), positions().observe(id)) { rows, stored ->
-                            rows[id]?.let { row ->
-                                NowPlaying(
-                                    row.episodeId,
-                                    row.podcastId,
-                                    row.title,
-                                    row.podcastTitle,
-                                    row.artwork,
-                                    row.sourceType,
-                                    row.isVideo,
-                                    PlayerPhase.NOT_LOADED,
-                                    false,
-                                    false,
-                                    PositionSnapshot(
-                                        id,
-                                        stored?.positionMs ?: 0,
-                                        0,
-                                        row.measuredDurationMs ?: row.durationMs,
-                                        1f,
+                queues()
+                    .observeSession()
+                    .map { session ->
+                        val id = session?.currentEpisodeId
+                        if (id == null) {
+                            mintedId = null
+                        } else if (id != mintedId) {
+                            mintedId = id
+                            mintedToken =
+                                ch.lkmc.neutrodyne.playback.api
+                                    .nextNowPlayingLoadId()
+                            // A genuine load boundary in the durable view: the remembered live
+                            // identity must not outlive it.
+                            lastLiveLoad.value = null
+                        }
+                        session to mintedToken
+                    }.flatMapLatest { (session, minted) ->
+                        val id = session?.currentEpisodeId
+                        if (id ==
+                            null
+                        ) {
+                            flowOf(null)
+                        } else {
+                            combine(media().observe(setOf(id)), positions().observe(id)) { rows, stored ->
+                                rows[id]?.let { row ->
+                                    NowPlaying(
+                                        row.episodeId,
+                                        row.podcastId,
+                                        row.title,
+                                        row.podcastTitle,
+                                        row.artwork,
+                                        row.sourceType,
+                                        row.isVideo,
+                                        PlayerPhase.NOT_LOADED,
                                         false,
-                                        clock.elapsedRealtime(),
-                                    ),
-                                    false,
-                                    null,
-                                    null,
-                                    session.context,
-                                )
+                                        false,
+                                        PositionSnapshot(
+                                            id,
+                                            stored?.positionMs ?: 0,
+                                            0,
+                                            row.measuredDurationMs ?: row.durationMs,
+                                            1f,
+                                            false,
+                                            clock.elapsedRealtime(),
+                                        ),
+                                        false,
+                                        null,
+                                        null,
+                                        session.context,
+                                        lastLiveLoad.value
+                                            ?.takeIf { it.first == session.currentEpisodeId }
+                                            ?.second
+                                            ?: mintedToken,
+                                    )
+                                }
                             }
                         }
-                    }
-                },
+                    },
             )
         }.flowOn(io)
 
     override val nowPlaying: StateFlow<NowPlaying?> =
         active
-            .flatMapLatest { bridge ->
-                bridge?.nowPlaying ?: durable
+            .flatMapLatest { bridge -> bridge?.nowPlaying ?: durable }
+            .onEach { now ->
+                if (now != null && active.value != null) {
+                    lastLiveLoad.value = now.episodeId to now.loadId
+                }
             }.stateIn(scope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     override val effectivePlayback: StateFlow<EffectivePlayback?> =

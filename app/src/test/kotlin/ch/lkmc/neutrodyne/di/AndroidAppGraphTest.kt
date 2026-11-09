@@ -422,6 +422,8 @@ class AndroidAppGraphTest {
                 .order
         assertThat(orders.getValue("NewEpisodeChannelsInitializer")).isLessThan(dbOrder)
         assertThat(orders.getValue("ImportBackupChannelsInitializer")).isLessThan(dbOrder)
+        // 08's marked-played latch subscribes before the open; every notice producer sits behind it.
+        assertThat(orders.getValue("MarkedPlayedElsewhereInitializer")).isLessThan(dbOrder)
         assertThat(dbOrder).isLessThan(orders.getValue("GroupChannelsInitializer"))
         assertThat(
             orders.getValue("GroupChannelsInitializer"),
@@ -565,6 +567,9 @@ class AndroidAppGraphTest {
                 "UpdateCheckInitializer" to 200..200,
                 "GroupChannelsInitializer" to 140..140,
                 "DatabaseOpenInitializer" to 100..119,
+                // 08 Sync notices: the marked-played latch arms before the database open so the
+                // replay-0 notice stream never precedes its collector.
+                "MarkedPlayedElsewhereInitializer" to 50..99,
                 // 05 First-launch restore: order 110, inside the database band.
                 "FirstLaunchRestoreInitializer" to 100..119,
                 // M1b's `credential-load` sits at 120: after the database, before refresh work.

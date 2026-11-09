@@ -40,6 +40,7 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":sync:api"))
             implementation(project(":sync:protocol"))
+            implementation(project(":playback:api"))
             implementation(project(":core:domain"))
             implementation(project(":core:model"))
             implementation(project(":core:common"))

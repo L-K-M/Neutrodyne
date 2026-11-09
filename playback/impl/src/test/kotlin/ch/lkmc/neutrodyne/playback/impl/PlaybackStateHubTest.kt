@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.app.Application
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
+import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
@@ -15,6 +16,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -43,6 +45,42 @@ class PlaybackStateHubTest {
                     ?.positionMs == 25_000L
             }
             assertNull(h.connection.controller)
+            job.cancel()
+        }
+    }
+
+    /**
+     * [NowPlaying.loadId] (08 Sync notices): a metadata refresh of the durable item keeps the
+     * occurrence, while unload→reload of the same episode mints a fresh identity.
+     */
+    @Test fun durableLoadIdentityMintsFreshAcrossUnloadAndReload() {
+        LifecycleHarness(RuntimeEnvironment.getApplication(), delayed = true).use { h ->
+            h.seedCurrent()
+            val job = h.scope.launch { h.hub.nowPlaying.collect() }
+            h.allowOpen.countDown()
+            pumpUntil { h.hub.nowPlaying.value != null }
+            val first = assertNotNull(h.hub.nowPlaying.value).loadId
+            assertNotEquals(0L, first)
+            h.positions.positions.value += 1L to StoredPosition(1, 9_000, h.clock.now(), null)
+            pumpUntil {
+                h.hub.nowPlaying.value
+                    ?.position
+                    ?.positionMs == 9_000L
+            }
+            assertEquals(
+                first,
+                h.hub.nowPlaying.value!!
+                    .loadId,
+            )
+            h.publish(VirtualQueue(2, null, emptyList(), emptyList()))
+            pumpUntil { h.hub.nowPlaying.value == null }
+            h.seedCurrent()
+            pumpUntil { h.hub.nowPlaying.value != null }
+            assertNotEquals(
+                first,
+                h.hub.nowPlaying.value!!
+                    .loadId,
+            )
             job.cancel()
         }
     }
