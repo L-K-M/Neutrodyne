@@ -49,11 +49,40 @@ if args == ["devices"]:
         print("List of devices attached")
         print("emulator-5554\tdevice")
         print("emulator-5556\tdevice")
+    elif scenario.get("device_dies_after_marker"):
+        marker = scenario.get("device_dies_after_marker")
+        if online and not Path(marker).exists():
+            print("List of devices attached")
+            print(f"{scenario['serial']}\tdevice")
+        else:
+            print("List of devices attached")
     elif online:
         print("List of devices attached")
         print(f"{scenario['serial']}\tdevice")
     else:
         print("List of devices attached")
+elif args[:3] == ["-s", scenario["serial"], "logcat"]:
+    import time as _time
+
+    # The tail streams for the whole run, so it never rewrites the shared
+    # state json (concurrent stat/pull calls own it); its pid goes to a
+    # dedicated file instead.
+    with open(os.environ["CAPTURE_STATE"] + ".logcat", "a") as pid_log:
+        pid_log.write(f"{os.getpid()}\n")
+    marker = scenario.get("logcat_marker")
+    emitted = False
+    deadline = _time.monotonic() + 60
+    while _time.monotonic() < deadline:
+        if marker and not emitted and Path(marker).exists():
+            for name in scenario.get("logcat_moving_names", []):
+                print(
+                    f"11-08 23:19:18.415 D/Benchmark( 2467): Moving /storage/emulated/0/Android/media/"
+                    f"ch.lkmc.neutrodyne.benchmark/{name} to {REMOTE_DIR}/{name}",
+                    flush=True,
+                )
+            emitted = True
+        _time.sleep(0.02)
+    raise SystemExit(0)
 elif args[:3] == ["-s", scenario["serial"], "shell"] and args[3:6] == ["ls", "-1", REMOTE_DIR]:
     if online and calls >= scenario.get("list_after", 0):
         names = list(scenario["names"])
@@ -124,6 +153,9 @@ time.sleep(float(os.environ.get("CAPTURE_CHILD_SLEEP", "0")))
 marker = os.environ.get("CAPTURE_CHILD_MARKER")
 if marker:
     Path(marker).write_text("marked")
+    # The teardown lag of a real run: the move event is live for a moment
+    # while the Gradle child keeps running.
+    time.sleep(float(os.environ.get("CAPTURE_CHILD_MARKER_LINGER", "0.8")))
 sys.exit(int(os.environ.get("CAPTURE_CHILD_EXIT", "0")))
 '''
 
@@ -243,7 +275,9 @@ class BenchmarkLiveCaptureTest(unittest.TestCase):
             contents={late_trace: "late but stable"},
         )
         self.state_path.write_text(json.dumps({"calls": [], "stats": {}}))
-        result, _ = self._run_wrapper(child_env={"CAPTURE_CHILD_MARKER": str(marker)})
+        result, _ = self._run_wrapper(
+            child_env={"CAPTURE_CHILD_MARKER": str(marker), "CAPTURE_CHILD_MARKER_LINGER": "0"}
+        )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual({late_trace: b"late but stable"}, self._collected())
 
@@ -380,6 +414,59 @@ class BenchmarkLiveCaptureTest(unittest.TestCase):
         self.assertIn("diagnostic gap", result.stderr)
         self.assertIn("pulls failed", result.stderr)
 
+    def test_final_json_is_captured_from_the_move_event_before_teardown(self):
+        # The hosted shape of run 42530327038: the cumulative JSON is moved
+        # into the public directory ~0.6s before GMD shutdown - inside one
+        # 5s poll interval - and the device disappears at teardown. Only the
+        # library's own "Moving ... to <dir>" logcat line announces it in
+        # time; polling alone cannot retain the final JSON.
+        marker = self.folder / "teardown.marker"
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[TRACE],
+            contents={TRACE: TRACE_TEXT, REPORT: REPORT_FULL},
+            late_names_marker=str(marker),
+            late_names=[REPORT],
+            logcat_marker=str(marker),
+            logcat_moving_names=[REPORT],
+            device_dies_after_marker=str(marker),
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        result, _ = self._run_wrapper(
+            "--poll-interval", "5", child_env={"CAPTURE_CHILD_MARKER": str(marker), "CAPTURE_CHILD_SLEEP": "1.2"}
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {TRACE: TRACE_BODY, REPORT: REPORT_FULL.encode()},
+            self._collected(),
+            "the final JSON was lost to the poll-interval teardown race",
+        )
+        self.assertNotIn("was never captured", result.stderr)
+
+    def test_logcat_tail_is_never_orphaned(self):
+        marker = self.folder / "teardown.marker"
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[],
+            logcat_marker=str(marker),
+            logcat_moving_names=[],
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        pid_log = Path(f"{self.state_path}.logcat")
+        result, _ = self._run_wrapper(
+            child_env={"CAPTURE_CHILD_MARKER": str(marker), "CAPTURE_CHILD_SLEEP": "0.8"}
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(pid_log.exists(), "the wrapper never started a logcat tail")
+        for line in pid_log.read_text().splitlines():
+            try:
+                os.kill(int(line), 0)
+                self.fail(f"the wrapper orphaned a logcat tail: pid {line}")
+            except ProcessLookupError:
+                pass
+
     def test_ambiguous_serials_are_never_pulled(self):
         self._scenario(ambiguous=True, online_after=0, list_after=0)
         self.state_path.write_text(json.dumps({"calls": [], "stats": {}}))
@@ -507,14 +594,22 @@ class BenchmarkWorkflowWiringTest(unittest.TestCase):
             "./gradlew :benchmark:bench34BenchmarkReleaseAndroidTest",
             "--max-workers=1",
             "-Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1",
+            # A single comma-free suite class: AGP 9.4.1's engine bridge joins
+            # instrumentation args into one string and splits it back on
+            # commas, so a comma-separated class list cannot reach the runner.
             "-Pandroid.testInstrumentationRunnerArguments.class="
-            "ch.lkmc.neutrodyne.benchmark.ColdStartBenchmark,ch.lkmc.neutrodyne.benchmark.CoverGridBenchmark",
+            "ch.lkmc.neutrodyne.benchmark.GatedBenchmarks",
             "-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR",
         ):
             self.assertIn(argument, step)
 
+    def test_benchmark_step_gates_on_complete_evidence(self):
+        gate = self.job[self.job.index("Require complete benchmark evidence") :]
+        self.assertIn("python3 scripts/ci/assert-benchmark-run.py", gate)
+
     def test_fixture_suite_runs_the_new_tests(self):
         self.assertIn("benchmark-live-capture.test.py", self.ci)
+        self.assertIn("assert-benchmark-run.test.py", self.ci)
 
 
 if __name__ == "__main__":

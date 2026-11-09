@@ -865,7 +865,7 @@ without changing main's issues.
 | `sync-convergence` | MS0 | `SyncConvergenceTest` and `ServerConvergenceTest` with `-PsyncSeeds=100000` ([10 Convergence property test](10-sync.md#convergence-property-test)); from MS2 E12 `CrossDeviceSyncTest` (`-PcrossDevice`, an `api36` emulator through android-emulator-runner, the built fat JAR on the runner, the headless desktop graph; [End-to-end journeys](#end-to-end-journeys)) | yes |
 | `server-image-smoke` | MS1 | build the image from the fat JAR (`docker buildx build --load`), run the reference `sync/server/deploy/compose.yaml` with a test domain and Caddy's internal CA, `/readyz` through Caddy, an SSE stream held for 5 min through Caddy and through the nginx example (S17, [10 nginx](10-sync.md#nginx)), the nightly `VACUUM INTO` backup triggered and restored with `restore`; `check-server-image.sh`; a `tcpdump` of the compose network showing no outbound request except the update check (`NEUTRODYNE_SERVER_UPDATE_CHECK` pointed at a local stub; [10 Update notice](10-sync.md#update-notice)) | yes |
 | `benchmark-dryrun` | M10 | Macrobenchmark journeys against `:app`'s `benchmarkRelease` with `-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true` on `bench34` (catches broken journeys; timings are meaningless on emulators) | no |
-| `benchmark` | M11b | `ColdStartBenchmark` and `CoverGridBenchmark` against `:app`'s `benchmarkRelease` on `bench34` (`-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.benchmark.ColdStartBenchmark,ch.lkmc.neutrodyne.benchmark.CoverGridBenchmark`); uploads `benchmark/build/outputs/` and `benchmark/build/reports/androidTests/` as `benchmark-results`. Report-only: this hosted command suppresses only AndroidX’s `EMULATOR` error so it can collect diagnostic timings; PB1/PB3 stay manual on the reference device, other benchmark errors still fail, and `release.sh` exempts it like `repro` | no |
+| `benchmark` | M11b | `GatedBenchmarks` (the suite running `ColdStartBenchmark` and `CoverGridBenchmark`) against `:app`'s `benchmarkRelease` on `bench34` (`-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.benchmark.GatedBenchmarks`; the class list is a suite because AGP 9.4.1's engine bridge destroys commas in instrumentation argument values, see [Macrobenchmark and profiles](#macrobenchmark-and-profiles)); `assert-benchmark-run.py` then requires both classes, the complete cumulative JSON samples and all per-iteration traces, or the job fails. Uploads `benchmark/build/outputs/` and `benchmark/build/reports/androidTests/` as `benchmark-results`. Report-only: this hosted command suppresses only AndroidX’s `EMULATOR` error so it can collect diagnostic timings; PB1/PB3 stay manual on the reference device, other benchmark errors still fail, and `release.sh` exempts it like `repro` | no |
 | `baseline-profile` | M11b | dispatch-only: `./gradlew :app:generateBaselineProfile` on `bench34`; uploads `app/src/release/generated/baselineProfiles/` as `baseline-profile`, and its device reports and benchmark outputs on success and failure as `baseline-profile-reports`. The generated files are committed through a normal PR (as `app/profiles/*.txt.gz` + `capture-receipt.properties`, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)) | no |
 | `repro` | M0a | [two signed builds and a diff](#nightly-reproducibility-job) of the APKs, from M0b the desktop application JARs and the server JAR; report-only permanently ([D79](../PLAN.md#3-key-decisions)) | no |
 | `bmgr` | M3 | android-emulator-runner API 31 and API 36 (`data_extraction_rules.xml`), image `default`: `scripts/ci/bmgr-check.sh <api> <evidence-dir>` on the untouched published release `x86_64` APK — the black-box harness: the self-instrumenting `:tools:bmgrdriver` APK seeds through the production `ExternalImportActivity` over UiAutomator, the host triggers the shell-only `SnapshotNowReceiver`, verifies the raw LocalTransport TAR, reinstalls the identical APK and validates the pulled post-restore tree with `check-first-launch-restore-results.py --bmgr-pull`/`--bmgr` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr), plus 07's "no `Podcasts/`" assertion). No test code or hooks in the release process; needs root uninstall/reinstall, which an in-process instrumented test cannot do. Host pulls keep each remote `find` as nonhidden `<dir>-listing.txt` sibling evidence read on fd3, and `bmgr init` keeps every attempt under `init-<label>-attempt<N>.txt` plus an `init-<label>-attempts.txt` rc ledger (bounded retry only for the observed rc0/`result: -1000` observer-race shape; explicit `result: 0` remains the only acceptance — 2026-10-25 run8 corrections, pending a new real run). The legacy `backup_rules.xml` path (API 28–30) is covered by `BackupRulesTest` and the negative API 28/29 diagnostic below, not by a positive app leg ([PO-50](../PLAN.md#48-further-product-owner-decisions)) | yes |
@@ -2210,7 +2210,7 @@ Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB
   generator can seed the journeys; neither enters the published `release` APK
   ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)).
 
-  **Trace retention (2026-11-08).** The benchmark library writes each iteration's
+  **Trace retention (2026-11-08, revised 2026-11-09).** The benchmark library writes each iteration's
   Perfetto trace and the benchmark JSON to the emulator's public additional-test-output
   directory (`/sdcard/Android/media/ch.lkmc.neutrodyne.benchmark/additional_test_output/`),
   and AGP 9.4.1's managed-device runner collects them only after instrumentation ends -
@@ -2222,13 +2222,26 @@ Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB
   trace into `benchmark/build/outputs/host-collected/` (inside the uploaded
   `build/outputs/` tree) before teardown. Benchmark 1.5.0 writes one cumulative
   `ch.lkmc.neutrodyne.benchmark-benchmarkData.json` that it overwrites after every test
-  (there are no per-test JSONs); the wrapper re-examines that file on every sweep and
+  (there are no per-test JSONs); the wrapper re-examines that file on every sweep, on
+  every "Moving" announcement it sees in a per-device logcat tail (the final rewrite
+  lands less than one poll interval before GMD shutdown, run 42530327038), and
   republishes the latest complete rewrite by content - a truncated or in-flight rewrite
   keeps the prior complete snapshot and is retried, and an uncapturable final rewrite is
   a logged diagnostic gap. It changes no Gradle or instrumentation arguments, returns the
   child's exit status exactly, and logs a diagnostic-gap warning instead of claiming
   success when nothing could be captured; its lifecycle is covered by
   `scripts/ci/tests/benchmark-live-capture.test.py` (fake adb and child, no device).
+  Run 42530327038 also exposed that the workflow's comma-separated class argument never
+  reached the runner: AGP 9.4.1 forwards instrumentation arguments to its managed-device
+  engine as one unescaped comma-joined string (`android-test.instrumentation-args`) that
+  the engine splits back on commas, so `class=A,B` executed only `A` on every hosted run
+  while staying green. The scope therefore runs the single comma-free suite
+  `GatedBenchmarks` (`ColdStartBenchmark` + `CoverGridBenchmark`), and
+  `scripts/ci/assert-benchmark-run.py` fails the job unless both classes executed, the
+  JSON carries 15 `timeToInitialDisplayMs` and 15 `timeToFullDisplayMs` runs (the
+  library silently drops any iteration with incomplete metrics - "Skipping results from
+  iter 5"), the cover-grid frame samples exist, and all 15 + 5 per-iteration traces are
+  retained; emulator timings stay diagnostic.
 - **Full display:** 08's Feeds route calls `ReportDrawnWhen { first page loaded }` ([08 Performance journeys](08-ui-ux.md#performance-journeys)), so `StartupTimingMetric` also reports time to full display; not budgeted in v1.
 - Results (`*-benchmarkData.json`) from the reference device are attached to the release checklist issue; a regression > 10 % against the previous minor release on PB1–PB4 blocks the release until explained.
 - **R8** (`release` and `benchmarkRelease`): full mode via `optimization { enable = true }` and `-dontobfuscate` (01); keep rules reviewed with R8's `-printconfiguration` and `-printusage` (S19). Size tips when PB12 or PB13 is at risk: legacy native packaging (compressed `.so` files, ≈ 6 MB less per 64-bit APK, decided by S7, [01 Build variants and ABIs](01-foundation.md#build-variants-and-abis)); Chaquopy's foreign-ABI assets left in each split (S7 measures them; > 5 MB per APK triggers [D2](../PLAN.md#3-key-decisions)'s ABI-flavor fallback) and its ABI-independent Python assets in the `armeabi-v7a` APK (01 open question 13); `packaging` excludes such as `/DebugProbesKt.bin`.

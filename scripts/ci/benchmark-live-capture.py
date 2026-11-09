@@ -23,15 +23,17 @@ hold them):
 - Traces are unique per iteration and immutable once moved: they are pulled
   once per name into <output>/<serial>/ via .partial + rename and never
   re-pulled.
-- The pinned library's ONE cumulative benchmarkData JSON (rewritten whole
-  after every test method, ResultWriter.appendTestResult) is re-examined on
-  every sweep and republished - by content, so a same-size rewrite counts -
-  only when the rewrite is complete and parseable; a truncated or in-flight
-  rewrite keeps the prior complete snapshot and is retried. Replacements
-  adjust the stored byte total instead of consuming it twice and never count
-  as a new file.
+- The one cumulative benchmarkData JSON (rewritten whole after every test
+  method, ResultWriter.appendTestResult) is re-examined on every sweep and on
+  every "Moving" file announcement seen in a per-device logcat tail - the
+  final rewrite lands inside one poll interval before GMD shutdown - and
+  republished by content, so a same-size rewrite counts. A truncated or
+  in-flight rewrite keeps the prior complete snapshot and is retried.
+  Replacements adjust the stored byte total instead of consuming it twice and
+  never count as a new file.
 - The destination is cleared at startup so no stale or half-written files
-  survive a rerun.
+  survive a rerun. The logcat tail is one bounded owned subprocess, restarted
+  with a backoff and killed on exit and interruption.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -66,6 +69,14 @@ DEVICE_QUERY_TIMEOUT_SECONDS = 10
 PULL_TIMEOUT_SECONDS = 60
 SLEEP_SLICE_SECONDS = 0.2
 FINAL_SWEEP_PAUSE_SECONDS = 1.0
+LOGCAT_RESTART_BACKOFF_SECONDS = 5.0
+TAIL_STOP_TIMEOUT_SECONDS = 5.0
+
+# The benchmark library announces every file move into the public output
+# directory ("Benchmark: Moving <src> to <dir>/<name>", benchmark-common
+# Outputs.kt). The final cumulative JSON lands there less than one poll
+# interval before GMD shutdown, so the tail is the only channel fast enough.
+MOVE_EVENT = re.compile(rf"Moving \S+ to {re.escape(DEFAULT_REMOTE_DIR)}/([A-Za-z0-9._-]+)")
 
 
 def _default_adb() -> str:
@@ -124,6 +135,7 @@ class CaptureState:
         self.listing_successes = 0
         self.pull_failures = 0
         self.invalid_rewrites = 0
+        self.tail_failures = 0
         self.unstable_left: set[str] = set()
         self.capped_out = False
 
@@ -145,6 +157,8 @@ class CaptureState:
             reasons.append(f"{len(self.unstable_left)} files never stabilized")
         if self.invalid_rewrites:
             reasons.append(f"{self.invalid_rewrites} cumulative-JSON rewrites failed validation")
+        if self.tail_failures:
+            reasons.append(f"the logcat event tail failed {self.tail_failures} times")
         if self.capped_out:
             reasons.append("capture cap reached")
         if not reasons:
@@ -166,6 +180,102 @@ class LiveCollector:
         self.collector_failure = ""
         self.report_bytes: bytes | None = None
         self.report_device_size: int | None = None
+        self._tail: subprocess.Popen[bytes] | None = None
+        self._tail_serial: str | None = None
+        self._tail_buffer = b""
+        self._tail_last_start = 0.0
+
+    def ensure_tail(self, serial: str) -> None:
+        """Start (or restart after failure backoff) the per-device logcat tail
+        that turns the library's file-move announcements into immediate
+        captures. One owned process at most; failures only count."""
+        if self._tail is not None and self._tail.poll() is None and self._tail_serial == serial:
+            return
+
+        if self._tail is not None:
+            self._tail_wait()
+
+        if time.monotonic() - self._tail_last_start < LOGCAT_RESTART_BACKOFF_SECONDS:
+            return
+
+        self._tail_last_start = time.monotonic()
+        try:
+            self._tail = subprocess.Popen(
+                [self.adb, "-s", serial, "logcat"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            self._tail_serial = serial
+            self._tail_buffer = b""
+        except OSError:
+            self._tail = None
+            self._tail_serial = None
+            self.state.tail_failures += 1
+
+    def _tail_wait(self) -> None:
+        if self._tail is None:
+            return
+
+        if self._tail.poll() is None:
+            self._tail.terminate()
+            try:
+                self._tail.wait(timeout=TAIL_STOP_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                self._tail.kill()
+                self._tail.wait()
+        elif self._tail.returncode not in (0,):
+            self.state.tail_failures += 1
+
+        if self._tail.stdout is not None:
+            self._tail.stdout.close()
+        self._tail = None
+        self._tail_serial = None
+
+    def shutdown_tail(self) -> None:
+        if self._tail is not None:
+            self._tail_wait()
+
+    def drain_events(self) -> None:
+        """Collect ready logcat lines and capture the announced files at once.
+        Select keeps this non-blocking inside the poll-sleep slices."""
+        tail = self._tail
+        if tail is None or tail.stdout is None or tail.poll() is not None:
+            return
+
+        try:
+            ready, _, _ = select.select([tail.stdout], [], [], 0)
+        except (OSError, ValueError):
+            return
+
+        if not ready:
+            return
+
+        try:
+            chunk = os.read(tail.stdout.fileno(), 65536)
+        except OSError:
+            return
+
+        if not chunk:
+            return
+
+        self._tail_buffer += chunk
+        while b"\n" in self._tail_buffer:
+            line_bytes, self._tail_buffer = self._tail_buffer.split(b"\n", 1)
+            self._handle_move_line(line_bytes.decode("utf-8", errors="replace"))
+
+    def _handle_move_line(self, line: str) -> None:
+        if "Moving " not in line or self._tail_serial is None:
+            return
+
+        match = MOVE_EVENT.search(line)
+        if match is None or not EXPECTED_FILE.fullmatch(match.group(1)):
+            return
+
+        name = match.group(1)
+        if name == CUMULATIVE_JSON_NAME:
+            self.refresh_cumulative(self._tail_serial)
+        elif name not in self.collected:
+            self.capture_file(self._tail_serial, name)
 
     def resolve_serial(self) -> str | None:
         result = _run_adb(self.adb, ["devices"])
@@ -376,6 +486,7 @@ class LiveCollector:
             if serial is None or not SAFE_SERIAL.fullmatch(serial):
                 return False
 
+            self.ensure_tail(serial)
             self.sweep(serial)
             return True
         except Exception as error:  # noqa: BLE001 - never mask the child's status
@@ -420,9 +531,12 @@ class LiveCollector:
             )
 
 
-def _sleep_responsive(seconds: float, stop: Callable[[], bool]) -> None:
+def _sleep_responsive(seconds: float, stop: Callable[[], bool], tick: Callable[[], None] | None = None) -> None:
     deadline = time.monotonic() + seconds
     while not stop() and time.monotonic() < deadline:
+        if tick is not None:
+            tick()
+
         time.sleep(min(SLEEP_SLICE_SECONDS, max(0.0, deadline - time.monotonic())))
 
 
@@ -495,26 +609,29 @@ def main() -> int:
     def _stopped() -> bool:
         return stop[0] or child.poll() is not None
 
-    while child.poll() is None and not stop[0]:
-        collector.sweep_resolved()
-        _sleep_responsive(args.poll_interval, _stopped)
+    try:
+        while child.poll() is None and not stop[0]:
+            collector.sweep_resolved()
+            _sleep_responsive(args.poll_interval, _stopped, collector.drain_events)
 
-    if stop[0]:
-        # The child got the signal too (same process group on CI, plus the
-        # explicit forward); wait for it, escalating once past the grace.
-        try:
-            child.wait(timeout=args.child_grace)
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.wait()
+        if stop[0]:
+            # The child got the signal too (same process group on CI, plus the
+            # explicit forward); wait for it, escalating once past the grace.
+            try:
+                child.wait(timeout=args.child_grace)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
 
-    # Teardown normally happens inside the child, so these sweeps only pay off
-    # when the device outlives it (early failure, failed teardown); a device
-    # that is already gone fails fast and ends the loop.
-    for _ in range(max(0, args.final_sweeps)):
-        if not collector.sweep_resolved() or collector.state.capped_out:
-            break
-        time.sleep(FINAL_SWEEP_PAUSE_SECONDS)
+        # Teardown normally happens inside the child, so these sweeps only pay off
+        # when the device outlives it (early failure, failed teardown); a device
+        # that is already gone fails fast and ends the loop.
+        for _ in range(max(0, args.final_sweeps)):
+            if not collector.sweep_resolved() or collector.state.capped_out:
+                break
+            _sleep_responsive(FINAL_SWEEP_PAUSE_SECONDS, lambda: False, collector.drain_events)
+    finally:
+        collector.shutdown_tail()
 
     collector.finish_line()
     if received[0]:
