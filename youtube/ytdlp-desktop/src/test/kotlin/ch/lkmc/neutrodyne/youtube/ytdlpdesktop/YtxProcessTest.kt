@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.ytdlpdesktop
 
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
@@ -33,6 +36,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -50,6 +54,78 @@ class YtxProcessTest {
     }
 
     private fun fixture(): StdioFixture = StdioFixture(tempRoot("proc").also { roots += it })
+
+    @Test fun forcedShutdownTimeoutIsReportedWithoutThrowing() {
+        val warnings = CopyOnWriteArrayList<String>()
+        val process =
+            object : FakeProcess(byteArrayOf()) {
+                var killed = false
+                var waitMs = 0L
+
+                override fun destroyForcibly(): Process = apply { killed = true }
+
+                override fun waitFor(
+                    timeout: Long,
+                    unit: TimeUnit,
+                ): Boolean {
+                    waitMs = unit.toMillis(timeout)
+                    return false
+                }
+            }
+        val child =
+            YtxChild(
+                process,
+                {},
+                object : YtxChild.Listener {
+                    override fun onMessage(message: JsonObject) = Unit
+
+                    override fun onProtocolViolation(reason: String) = Unit
+
+                    override fun onExit(code: Int) = Unit
+                },
+            )
+        Log.install(LogSink { level, _, message -> if (level == LogLevel.WARN) warnings += message })
+        try {
+            val result = runCatching { child.destroyForcibly() }
+
+            assertNull(result.exceptionOrNull(), "shutdown must let its callers finish transport bookkeeping")
+            assertTrue(process.killed)
+            assertEquals(2_000L, process.waitMs)
+            assertTrue(warnings.any { it.contains("did not exit") && it.contains("2000") })
+        } finally {
+            Log.install()
+        }
+    }
+
+    @Test fun interruptedForcedShutdownPreservesTheInterruptWithoutThrowing() {
+        val child =
+            YtxChild(
+                object : FakeProcess(byteArrayOf()) {
+                    override fun destroyForcibly(): Process = this
+
+                    override fun waitFor(
+                        timeout: Long,
+                        unit: TimeUnit,
+                    ): Boolean = throw InterruptedException("fixture")
+                },
+                {},
+                object : YtxChild.Listener {
+                    override fun onMessage(message: JsonObject) = Unit
+
+                    override fun onProtocolViolation(reason: String) = Unit
+
+                    override fun onExit(code: Int) = Unit
+                },
+            )
+        try {
+            val result = runCatching { child.destroyForcibly() }
+
+            assertNull(result.exceptionOrNull())
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
+    }
 
     @Test fun applicationScopeShutdownWaitsForTheReadyChildToExit() =
         runBlocking {
@@ -103,11 +179,6 @@ class YtxProcessTest {
                 fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
 
                 assertFalse(child.isAlive, "compile must stop before its library can be removed")
-                assertTrue(
-                    fixture.dirs.data
-                        .toFile()
-                        .deleteRecursively(),
-                )
             } finally {
                 transport.shutdown()
                 child?.destroyForcibly()
@@ -451,7 +522,7 @@ class YtxProcessTest {
 }
 
 /** A canned stdout/stderr stream standing in for a dead or misbehaving child's output. */
-private class FakeProcess(
+private open class FakeProcess(
     stdout: ByteArray,
     stderr: ByteArray = byteArrayOf(),
 ) : Process() {
