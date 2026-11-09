@@ -184,6 +184,9 @@ class YtxChild internal constructor(
 
     fun destroyForcibly() {
         process.destroyForcibly()
+        check(process.waitFor(EXIT_WAIT_MS, TimeUnit.MILLISECONDS)) {
+            "the engine child did not exit after forced shutdown"
+        }
     }
 
     fun awaitExit(timeoutMs: Long): Int? =
