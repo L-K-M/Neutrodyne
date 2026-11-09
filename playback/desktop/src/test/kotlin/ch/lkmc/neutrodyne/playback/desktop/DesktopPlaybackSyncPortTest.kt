@@ -414,6 +414,7 @@ private class SyncPortFixture(
             { runtime },
             network,
             guard,
+            { runtime.starter },
             StandardTestDispatcher(test.testScheduler),
             StandardTestDispatcher(test.testScheduler),
         )

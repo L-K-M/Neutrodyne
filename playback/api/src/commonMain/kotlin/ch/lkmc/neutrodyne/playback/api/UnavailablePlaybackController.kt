@@ -48,11 +48,11 @@ open class UnavailablePlaybackController :
         startEpisodeId: Long?,
     ): PlayResult = PlayResult.ServiceUnavailable
 
-    override suspend fun play(): PlayResult = PlayResult.ServiceUnavailable
+    override suspend fun play(origin: PlayOrigin): PlayResult = PlayResult.ServiceUnavailable
 
     override fun pause() = Unit
 
-    override fun togglePlayPause() {
+    override fun togglePlayPause(origin: PlayOrigin) {
         refused.tryEmit(PlaybackEvent.StartRefused(PlayResult.ServiceUnavailable))
     }
 
