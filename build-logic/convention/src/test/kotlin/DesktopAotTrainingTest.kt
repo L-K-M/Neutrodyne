@@ -8,8 +8,31 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** Training-task mechanics; launcher and installer wiring is covered in the activation slice. */
+/**
+ * The PO-42 AOT-cache training wiring of 11 (AOT cache): the launcher's `-XX:AOTCache`
+ * option ships only on packaging invocations, the training run swaps it for the
+ * `-XX:AOTCacheOutput` + journey pair inside the image's .cfg and restores the file's
+ * exact bytes, the Linux argv wraps headless runners under xvfb-run, and the macOS
+ * bundle is re-signed inside out before the package tasks archive it.
+ */
 class DesktopAotTrainingTest {
+    @Test
+    fun `the aot flag joins the launcher options only for packaged builds`() {
+        for (target in DesktopPackagingTarget.entries) {
+            assertTrue(
+                AOT_CACHE_OPTION in desktopJvmOptions(target, packaged = true),
+                "$target packaged",
+            )
+            assertTrue(
+                desktopJvmOptions(target, packaged = false).none { "AOTCache" in it },
+                "$target unpackaged",
+            )
+        }
+        // Off the packaging matrix there is no flag even on a packaging invocation.
+        assertTrue(desktopJvmOptions(null, packaged = true).none { "AOTCache" in it })
+        assertTrue(desktopJvmOptions(null, packaged = false).none { "AOTCache" in it })
+    }
+
     @Test
     fun `the image layout resolves launcher cfg and runtime release per target`() {
         assertEquals(
