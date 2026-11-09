@@ -123,17 +123,12 @@ internal fun ffmpegVersionOf(lockFile: java.io.File): String {
  * runner's `PATH` reaches `C:\Windows\System32\bash.exe` (WSL's launcher) before
  * Git Bash, so the build died with "Windows Subsystem for Linux has no installed
  * distributions" and no output of its own. FFmpeg's documented MSVC shell is
- * MSYS2 (doc/platform.texi), so MSYS2's bash is named explicitly, with Git Bash
- * as the fallback for a developer who has one but not the other.
+ * MSYS2 (doc/platform.texi), so the shared Windows bash lookup runs in MSYS2
+ * mode, with Git Bash as the fallback for a developer who has one but not the
+ * other.
  */
 internal fun bashExecutable(): String {
-    if (!System.getProperty("os.name").startsWith("Windows")) return "bash"
-    val candidates =
-        listOfNotNull(
-            System.getenv("MSYS2_ROOT")?.let { "$it/usr/bin/bash.exe" },
-            "C:/msys64/usr/bin/bash.exe",
-            "C:/Program Files/MSYS2/usr/bin/bash.exe",
-            "C:/Program Files/Git/bin/bash.exe",
-        )
-    return candidates.firstOrNull { java.io.File(it).isFile } ?: "bash"
+    if (!isWindowsHost(System.getProperty("os.name"))) return "bash"
+    return selectWindowsBash(System.getenv(), BashPreference.MSYS2) { java.io.File(it).isFile }
+        ?: "bash"
 }
