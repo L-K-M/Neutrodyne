@@ -1,0 +1,8 @@
+{
+  "_comment": "tink-android 1.23.0 ships no NOTICE and the Tink repository has none; attribution line per Apache-2.0 4(d) practice, licence text at the upstream LICENSE",
+  "hash": "Apache-2.0-tink-android-NOTICE",
+  "spdxId": "Apache-2.0",
+  "name": "Tink NOTICE",
+  "url": "https://github.com/tink-crypto/tink-java/blob/main/LICENSE",
+  "content": "Tink\nCopyright 2017 Google LLC\n\nThis product contains software developed at\nGoogle LLC (https://www.google.com/).\n"
+}

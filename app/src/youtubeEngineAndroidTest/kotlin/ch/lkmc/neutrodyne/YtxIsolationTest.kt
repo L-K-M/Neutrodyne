@@ -19,7 +19,6 @@ import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
-import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
 import ch.lkmc.neutrodyne.youtube.engine.YtDlpErrorMapper
 import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
 import ch.lkmc.neutrodyne.youtube.engine.YtxContext
@@ -131,11 +130,6 @@ class YtxIsolationTest {
                         BinderYtxTransport(
                             app,
                             store,
-                            CompileMarker(
-                                app.graph.buildInfo.versionCode,
-                                "2026.08.19",
-                                "3.14",
-                            ),
                             clock,
                             scope,
                             YtxControlRequest(ctx),

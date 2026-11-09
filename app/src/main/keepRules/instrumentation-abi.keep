@@ -4655,8 +4655,14 @@
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineControlMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineControlMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineKeysMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineKeysMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineKeysMetroFactory {
+  ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineKeysMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory$Companion Companion;
@@ -4691,6 +4697,9 @@
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$LookupMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$LookupMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$ManifestVerifierMetroFactory {
+  public static ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$ManifestVerifierMetroFactory create();
+}
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$PathsMetroFactory$Companion {
   public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$PathsMetroFactory create(dev.zacsweers.metro.Provider);
 }
@@ -4702,6 +4711,12 @@
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$PreflightMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$PreflightMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$RollbackMonitorMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$RollbackMonitorMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$RollbackMonitorMetroFactory {
+  ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$RollbackMonitorMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$SearchMetroFactory$Companion {
   public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$SearchMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
@@ -4722,10 +4737,28 @@
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StreamsMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$TransportMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$TransportMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$TransportMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$TransportMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$TransportMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHooksMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHooksMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHooksMetroFactory {
+  ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHooksMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHttpMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHttpMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHttpMetroFactory {
+  ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateHttpMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateSchedulerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateSchedulerMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateSchedulerMetroFactory {
+  ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$UpdateSchedulerMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule {
   public ch.lkmc.neutrodyne.core.common.AppInitializer breakerNotifier$app(android.app.Application, ch.lkmc.neutrodyne.youtube.api.YouTubeHealth, kotlinx.coroutines.CoroutineScope);
@@ -4733,6 +4766,8 @@
   public ch.lkmc.neutrodyne.core.common.AppInitializer prepareInitializer$app(ch.lkmc.neutrodyne.youtube.engine.EngineStore, android.app.Application, ch.lkmc.neutrodyne.youtube.engine.EngineSettings, kotlinx.coroutines.CoroutineScope);
   public kotlin.jvm.functions.Function2 prepareWorker(ch.lkmc.neutrodyne.youtube.engine.EngineStore, ch.lkmc.neutrodyne.youtube.engine.YtxTransport, ch.lkmc.neutrodyne.youtube.engine.EngineSettings, ch.lkmc.neutrodyne.youtube.engine.EnginePlatformPreflight, kotlin.jvm.functions.Function0);
   public ch.lkmc.neutrodyne.core.common.AppInitializer statusInitializer(ch.lkmc.neutrodyne.youtube.engine.EngineStore);
+  public ch.lkmc.neutrodyne.core.common.AppInitializer updateInitializer$app(ch.lkmc.neutrodyne.youtube.engine.EngineSettings, ch.lkmc.neutrodyne.youtube.api.YouTubeEngine, ch.lkmc.neutrodyne.youtube.engine.EngineUpdateScheduler, kotlinx.coroutines.CoroutineScope);
+  public kotlin.jvm.functions.Function2 updateWorker(ch.lkmc.neutrodyne.youtube.engine.EngineUpdateHooks);
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule INSTANCE;
 }
 -keep class ch.lkmc.neutrodyne.youtube.api.AudioPref {
@@ -4838,9 +4873,15 @@
 }
 -keep interface ch.lkmc.neutrodyne.youtube.engine.EngineStore {
 }
+-keep interface ch.lkmc.neutrodyne.youtube.engine.EngineUpdateHooks {
+}
+-keep interface ch.lkmc.neutrodyne.youtube.engine.EngineUpdateScheduler {
+}
 -keep interface ch.lkmc.neutrodyne.youtube.engine.YtxTransport {
 }
 -keep class ch.lkmc.neutrodyne.youtube.ytdlp.EnginePrepareWorker {
+}
+-keep class ch.lkmc.neutrodyne.youtube.ytdlp.EngineUpdateWorker {
 }
 -keep enum ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks$Fault {
 }
