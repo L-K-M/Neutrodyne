@@ -8,11 +8,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.attribute.PosixFilePermission.GROUP_WRITE
+import java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE
 import java.nio.file.attribute.PosixFilePermission.OWNER_WRITE
 import java.security.MessageDigest
 import java.util.zip.ZipEntry
@@ -377,6 +381,79 @@ class BundledEngineStoreTest {
                 File(paths.root.toFile(), "versions").list()!!.toSet(),
             )
         }
+
+    @Test fun compileProtectionMarksEveryEntryAndRemovalRestoresThem() =
+        runTest {
+            val store = store()
+            store.prepareBundled()
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            compileFixture(candidate)
+            val lib = candidate.libDir.toFile()
+            // The marker is written last, certifying a source-free tree whose files and
+            // directories are all protected against modification.
+            assertTrue(File(lib, ".compiled-3.14").isFile)
+            assertEquals(candidate.marker, EngineCompileMarkers.stored(candidate.libDir, paths.pythonMinor))
+            assertTrue(EngineCompileMarkers.matches(candidate.libDir, candidate.marker))
+            val fileStore = Files.getFileStore(lib.toPath())
+            lib.walkTopDown().forEach {
+                if (fileStore.supportsFileAttributeView("posix")) {
+                    val writes = setOf(OWNER_WRITE, GROUP_WRITE, OTHERS_WRITE)
+                    assertTrue(
+                        Files.getPosixFilePermissions(it.toPath()).none { perm -> perm in writes },
+                        "$it kept a write bit",
+                    )
+                } else if (fileStore.supportsFileAttributeView("dos")) {
+                    assertEquals(
+                        true,
+                        Files.getAttribute(it.toPath(), "dos:readonly", NOFOLLOW_LINKS),
+                        "$it carries no read-only marker",
+                    )
+                } else if (it.isFile) {
+                    assertFalse(it.canWrite(), "$it stayed writable")
+                }
+            }
+            // Removal restores write access before deleting, so an abort leaves no tree.
+            store.beginTrial("2026.09.01")
+            store.abortTrial("2026.09.01", EngineRejectReason.SELFTEST_FAILED, 4, clock.now())
+            assertFalse(File(paths.root.toFile(), "versions/2026.09.01").exists())
+            assertEquals(listOf("2026.08.19"), File(paths.root.toFile(), "versions").list()!!.toList())
+        }
+
+    @Test fun dosStoreProtectionMarksDirectories() {
+        assumeTrue(Files.getFileStore(temporary.root.toPath()).supportsFileAttributeView("dos"))
+        runTest {
+            val store = store()
+            store.prepareBundled()
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            compileFixture(candidate)
+            val lib = candidate.libDir.toFile()
+            // JDK File.setReadOnly/setWritable skip Windows directories entirely, so on a
+            // DOS store every directory must carry the platform's read-only marker.
+            val directories = lib.walkTopDown().filter { it.isDirectory }.toList()
+            assertTrue(directories.size >= 3)
+            directories.forEach {
+                assertEquals(true, Files.getAttribute(it.toPath(), "dos:readonly", NOFOLLOW_LINKS), "$it")
+            }
+        }
+    }
+
+    @Test fun abortRestoresADosProtectedTree() {
+        assumeTrue(Files.getFileStore(temporary.root.toPath()).supportsFileAttributeView("dos"))
+        runTest {
+            val store = store()
+            store.prepareBundled()
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            // A tree protected by a run that died before writing its marker — files and
+            // directories alike — must still lose write protection and be removed.
+            candidate.libDir.toFile().walkTopDown().forEach {
+                Files.setAttribute(it.toPath(), "dos:readonly", true, NOFOLLOW_LINKS)
+            }
+            store.beginTrial("2026.09.01")
+            store.abortTrial("2026.09.01", EngineRejectReason.SELFTEST_FAILED, 4, clock.now())
+            assertFalse(File(paths.root.toFile(), "versions/2026.09.01").exists())
+            assertEquals(listOf("2026.08.19"), File(paths.root.toFile(), "versions").list()!!.toList())
+        }
+    }
 
     @Test fun genuinePinnedZipExtractsWithShebangAndExpectedInventory() {
         val archive = File("../ytdlp/engine/yt-dlp")
