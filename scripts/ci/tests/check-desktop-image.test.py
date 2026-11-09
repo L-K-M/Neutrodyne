@@ -405,8 +405,11 @@ class DesktopImageGatesTest(unittest.TestCase):
 
     # ----- fixture builders -------------------------------------------------
 
-    def flat_image(self, name="Neutrodyne", extra_jars=(), manifest_skiko=True):
-        """A Linux-style image: flat lib/runtime, bin/ launcher, lib/app JARs."""
+    def flat_image(self, name="Neutrodyne", extra_jars=(), manifest_skiko=True,
+                   engine=True):
+        """A Linux-style image: flat lib/runtime, bin/ launcher, lib/app JARs.
+        Carries the engine tree at lib/app/resources/engine unless engine=False —
+        python-components.lock lists components, so an image without one fails."""
         fx = self.fx
         img = f"imgs/{name}"
         fx.write(f"{img}/bin/Neutrodyne", b"#!/bin/sh\n")
@@ -418,10 +421,16 @@ class DesktopImageGatesTest(unittest.TestCase):
         if manifest_skiko:
             # The Licensee-checked source runtime jar and its derived stub record.
             self.fx.skiko_source("linux-x64", "0.9.30")
+        if engine:
+            self.engine_tree(f"{img}/lib/app/resources/engine")
         return f"{img}"
 
-    def mac_app(self, root_dir="imgs/Neutrodyne.app", jars=(("app", b"APP"),)):
-        """A jpackage .app: runtime home at Contents/runtime/Contents/Home."""
+    def mac_app(self, root_dir="imgs/Neutrodyne.app", jars=(("app", b"APP"),),
+                engine=True):
+        """A jpackage .app: runtime home at Contents/runtime/Contents/Home.
+        Carries the engine tree at Contents/app/resources/engine unless
+        engine=False — python-components.lock lists components, so an image
+        without one fails."""
         fx = self.fx
         app = root_dir
         fx.write(f"{app}/Contents/MacOS/Neutrodyne", b"MACHO-LAUNCHER")
@@ -433,6 +442,8 @@ class DesktopImageGatesTest(unittest.TestCase):
         )
         for stem, data in jars:
             fx.write(f"{app}/Contents/app/{fx.manifest(stem, data)}", data)
+        if engine:
+            self.engine_tree(f"{app}/Contents/app/resources/engine")
         return app
 
     def mac_jdk(self, rel="jdks/macos-arm64/jdk"):
@@ -448,44 +459,70 @@ class DesktopImageGatesTest(unittest.TestCase):
             fx.write(f"{rel}/Contents/Home/{rel_path}", data)
         return rel
 
+    def engine_tree(self, engine, minor="3.14", interpreter=True, cacert=True,
+                    stdlib=True, ytdlp=True, windows=False, extra=()):
+        """Write the representative real trimmed engine tree under an image's
+        resources/engine: the interpreter (python/bin/python3, or python.exe with
+        the versioned python<major><minor>.dll and Lib/ on Windows), cacert.pem,
+        the versioned stdlib directory (threading.py,
+        concurrent/futures/thread.py, asyncio/threads.py and _pyrepl/readline.py
+        on POSIX), the yt-dlp archive and manifest, the shim and the keys — the
+        set the staged-image gate requires."""
+        fx = self.fx
+        if interpreter:
+            if windows:
+                exe = f"{engine}/python/python.exe"
+                fx.write(f"{engine}/python/python{minor.replace('.', '')}.dll", b"DLL")
+            else:
+                exe = f"{engine}/python/bin/python3"
+            fx.write(exe, b"#!/bin/sh\n")
+            os.chmod(fx.root / exe, 0o755)
+        if cacert:
+            fx.write(f"{engine}/cacert.pem", b"FIXTURE-CA-BUNDLE")
+        if stdlib:
+            if windows:
+                fx.write(f"{engine}/python/Lib/os.py", b"# stdlib fixture\n")
+            else:
+                for rel in ("threading.py", "concurrent/futures/thread.py",
+                            "asyncio/threads.py", "_pyrepl/readline.py", "os.py"):
+                    fx.write(f"{engine}/python/lib/python{minor}/{rel}",
+                             b"# stdlib fixture\n")
+        if ytdlp:
+            fx.write(
+                f"{engine}/ytdlp/yt-dlp",
+                zip_bytes([("__main__.py", b""), ("yt_dlp/__init__.py", b"")]),
+            )
+            fx.write(f"{engine}/ytdlp/bundled.json", b"{}\n")
+        fx.write(f"{engine}/shim/neutrodyne_ytx/__init__.py", b"")
+        fx.write(f"{engine}/keys/engine-manifest-ed25519.pub", b"")
+        fx.write(f"{engine}/keys/yt-dlp-release-key.asc", b"")
+        for rel, content in extra:
+            fx.write(f"{engine}/{rel}", content)
+
     def engine_app(self, root_dir="imgs/EngineApp", minor="3.14", interpreter=True,
                    cacert=True, stdlib=True, ytdlp=True, extra=()):
-        """A macOS .app carrying the representative real trimmed engine tree:
-        the interpreter, cacert.pem, lib/python<minor> with threading.py,
-        concurrent/futures/thread.py, asyncio/threads.py and _pyrepl/readline.py,
-        the yt-dlp archive, the shim and the keys."""
+        """A macOS .app carrying the representative real trimmed engine tree at
+        Contents/app/resources/engine (see engine_tree)."""
         fx = self.fx
         app = root_dir
-        engine = f"{app}/Contents/app/resources/engine"
         fx.write(f"{app}/Contents/MacOS/Neutrodyne", b"MACHO-LAUNCHER")
         fx.write(f"{app}/Contents/runtime/Contents/Home/release", release_file())
         fx.write(f"{app}/Contents/runtime/Contents/Home/legal/LICENSE", b"GPL-2.0\n")
         fx.write(f"{app}/Contents/runtime/Contents/Home/lib/jrt-fs.jar", b"JRT")
         data = b"APP"
         fx.write(f"{app}/Contents/app/{fx.manifest('app', data)}", data)
-        if interpreter:
-            fx.write(f"{engine}/python/bin/python3", b"#!/bin/sh\n")
-            os.chmod(fx.root / f"{engine}/python/bin/python3", 0o755)
-        if cacert:
-            fx.write(f"{engine}/cacert.pem", b"FIXTURE-CA-BUNDLE")
-        if stdlib:
-            for rel in ("threading.py", "concurrent/futures/thread.py",
-                        "asyncio/threads.py", "_pyrepl/readline.py", "os.py"):
-                fx.write(f"{engine}/python/lib/python{minor}/{rel}", b"# stdlib fixture\n")
-        if ytdlp:
-            fx.write(
-                f"{engine}/ytdlp/yt-dlp",
-                zip_bytes([("__main__.py", b""), ("yt_dlp/__init__.py", b"")]),
-            )
-        fx.write(f"{engine}/shim/neutrodyne_ytx/__init__.py", b"")
-        fx.write(f"{engine}/keys/engine-manifest-ed25519.pub", b"")
-        for rel, content in extra:
-            fx.write(f"{engine}/{rel}", content)
+        self.engine_tree(f"{app}/Contents/app/resources/engine", minor=minor,
+                         interpreter=interpreter, cacert=cacert, stdlib=stdlib,
+                         ytdlp=ytdlp, extra=extra)
         return app
 
-    def windows_image(self, name="Neutrodyne", extra_root=(), launcher=True):
+    def windows_image(self, name="Neutrodyne", extra_root=(), launcher=True,
+                      engine=True):
         """A Windows-layout image: Neutrodyne.exe at the root, app/, runtime/
-        (recognised by runtime/bin/java.exe) and non-entry DLL/data files."""
+        (recognised by runtime/bin/java.exe) and non-entry DLL/data files.
+        Carries the Windows engine tree at app/resources/engine unless
+        engine=False — python-components.lock lists components, so an image
+        without one fails."""
         fx = self.fx
         img = f"imgs/{name}"
         if launcher:
@@ -498,6 +535,8 @@ class DesktopImageGatesTest(unittest.TestCase):
         fx.write(f"{img}/app/{fx.manifest('app', data)}", data)
         for rel, content in extra_root:
             fx.write(f"{img}/{rel}", content)
+        if engine:
+            self.engine_tree(f"{img}/app/resources/engine", windows=True)
         return img
 
     def fake(self, name: str, body: str):
@@ -1372,6 +1411,13 @@ for image; do :; done
                 # field; either decodes to the trained epoch on this host.
                 info = zipfile.ZipInfo(name, date_time=time.localtime(self.AOT_EPOCH_S)[:6])
                 info.extra = utc_extra
+                # Gradle's Zip records each entry's Unix mode in the external
+                # attributes; the interpreter's exec bit must survive the archive
+                # the same way for the image scan's -x rule to see it. The full
+                # st_mode goes in the high word — extractors honour it only with
+                # the file-type bits set (a bare S_IMODE is ignored).
+                info.create_system = 3
+                info.external_attr = os.stat(path).st_mode << 16
                 info.compress_type = zipfile.ZIP_STORED
                 out.writestr(info, path.read_bytes() if path.is_file() else b"")
         r = self.fx.image_check(archive)
@@ -1626,7 +1672,7 @@ esac
     def test_lock_components_without_tree_fail(self):
         """A lock with components and no engine tree is a violation."""
         self.fx.write_engine_lock()
-        img = self.flat_image(name="NoEngine")
+        img = self.flat_image(name="NoEngine", engine=False)
         self.fx.write_manifest()
         r = self.fx.image_check(img)
         self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
@@ -1691,7 +1737,7 @@ esac
             ("wrong-minor", ("python313.dll",), 1),
         ):
             with self.subTest(case=name):
-                img = self.windows_image(name=f"Engine-{name}")
+                img = self.windows_image(name=f"Engine-{name}", engine=False)
                 engine = f"{img}/app/resources/engine"
                 self.fx.write(f"{engine}/python/python.exe", b"EXE")
                 os.chmod(self.root / f"{engine}/python/python.exe", 0o755)
