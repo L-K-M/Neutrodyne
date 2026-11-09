@@ -59,6 +59,11 @@ val bundledAssets =
             include("yt-dlp", "bundled.json")
             into("ytdlp")
         }
+        // 04: the pinned manifest Ed25519 key and upstream release key ship as assets.
+        from(layout.projectDirectory.dir("keys")) {
+            include("engine-manifest-ed25519.pub", "yt-dlp-release-key.asc")
+            into("ytdlp/keys")
+        }
         into(bundledAssetsDirectory)
     }
 // Chaquopy exposes legacy Kotlin DSL accessors; select AGP's actual source-set type explicitly.
@@ -79,6 +84,8 @@ dependencies {
 
     implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.core)
+    // Ed25519 below API 33, where Signature("Ed25519") is missing (04 verifier port).
+    implementation(libs.tink.android)
     implementation(libs.okio)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.okhttp.mockwebserver3)

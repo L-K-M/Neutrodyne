@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
 import ch.lkmc.neutrodyne.core.testing.FakeYtxTransport
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
 import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
@@ -180,7 +181,7 @@ class EnginePreparationTest {
 
                     override fun getCacheDir(): File = output.resolve("cache").apply { mkdirs() }
                 }
-            val realStore = BundledEngineStore(AndroidEngineStorePaths(wrapped), 1)
+            val realStore = BundledEngineStore(AndroidEngineStorePaths(wrapped), 1, TestClock())
             transport.answer = { "{\"ready\":true}" }
             // A working ping alone cannot claim W4 has compiled the engine.
             assertEquals(ListenableWorker.Result.retry(), worker(realStore).doWork())

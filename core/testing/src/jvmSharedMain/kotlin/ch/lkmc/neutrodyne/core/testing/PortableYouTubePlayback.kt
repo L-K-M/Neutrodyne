@@ -42,6 +42,7 @@ class PortableYouTubePlayback(
             preflight,
             CompileMarker(42, "2026.08.19", "3.14"),
             health,
+            clock,
             scope,
         )
     val capabilities: YouTubeCapabilitiesSource get() = engine

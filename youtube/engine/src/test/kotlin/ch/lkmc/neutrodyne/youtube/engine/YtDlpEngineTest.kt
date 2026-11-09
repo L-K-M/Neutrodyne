@@ -9,8 +9,10 @@ import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeHealth
 import ch.lkmc.neutrodyne.core.testing.FakeYtxTransport
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.youtube.api.BreakerState
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
+import ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome
 import ch.lkmc.neutrodyne.youtube.api.EngineVersionSource
 import ch.lkmc.neutrodyne.youtube.api.ExtractionGate
 import ch.lkmc.neutrodyne.youtube.api.PlatformLimitation
@@ -155,6 +157,7 @@ class YtDlpEngineTest {
                         f.preflight,
                         identity,
                         f.health,
+                        f.clock,
                         backgroundScope,
                     )
                 runCurrent()
@@ -425,6 +428,58 @@ class YtDlpEngineTest {
             assertEquals(0, f.settings.state.value.startFailures)
         }
 
+    @Test fun updateHooksRouteManualCheckBreakerEdgeAndReset() =
+        runTest {
+            val settings = FakeEngineSettings()
+            val health = FakeYouTubeHealth()
+            val hooks = RecordingHooks()
+            val f = Fixture(this, settings, settings, healthDelegate = health, hooks = hooks)
+            runCurrent()
+            assertEquals(0, hooks.immediates)
+            health.state.value = health.state.value.copy(breaker = BreakerState.OPEN)
+            runCurrent()
+            assertEquals(1, hooks.immediates)
+            // Only a closed → open edge re-arms the immediate check.
+            health.state.value = health.state.value.copy(breaker = BreakerState.OPEN)
+            runCurrent()
+            assertEquals(1, hooks.immediates)
+            health.state.value = health.state.value.copy(breaker = BreakerState.CLOSED)
+            runCurrent()
+            health.state.value = health.state.value.copy(breaker = BreakerState.OPEN)
+            runCurrent()
+            assertEquals(2, hooks.immediates)
+            assertEquals(EngineUpdateOutcome.UpToDate, f.engine.checkForUpdate())
+            assertEquals(listOf(EngineUpdateTrigger.MANUAL), hooks.triggers)
+            f.engine.resetToBundled()
+            assertEquals(1, hooks.resets)
+        }
+
+    @Test fun engineWithoutHooksReportsUpdateUnavailable() =
+        runTest {
+            val f = fixture()
+            assertEquals(
+                EngineUpdateOutcome.Failed(TransientKind.ENGINE_UNAVAILABLE),
+                f.engine.checkForUpdate(),
+            )
+            f.engine.resetToBundled()
+        }
+
+    @Test fun statusReportsTheBundleBeforeLoadStatusFillsActive() =
+        runTest {
+            val engine =
+                YtDlpEngine(
+                    FakeYtxTransport(),
+                    FakeEngineStore(),
+                    FakeEngineSettings(),
+                    FakeEnginePlatformPreflight(),
+                    CompileMarker(42, "2026.08.19", "3.14"),
+                    FakeYouTubeHealth(),
+                    TestClock(),
+                    backgroundScope,
+                )
+            assertEquals("2026.08.19", engine.status.value.version)
+        }
+
     @Test fun fastHealthLoadDoesNotSkipPersistedFailureRestore() =
         runTest {
             val identity = CompileMarker(42, "2026.08.19", "3.14")
@@ -481,11 +536,17 @@ class YtDlpEngineTest {
         adapter: EngineSettings,
         limitation: PlatformLimitation? = null,
         healthDelegate: YouTubeExtractionHealth = FakeYouTubeHealth(),
+        hooks: EngineUpdateHooks? = null,
     ) {
         val transport = FakeYtxTransport()
-        val store = FakeEngineStore().also { it.preparation.value = EnginePreparation.COMPILED }
+        val store =
+            FakeEngineStore().also {
+                it.preparation.value = EnginePreparation.COMPILED
+                it.active.value = EngineActive("2026.08.19", "2026.08.19", null, 0)
+            }
         val preflight = FakeEnginePlatformPreflight().also { it.result = limitation }
         val health = healthDelegate
+        val clock = TestClock()
         val engine =
             YtDlpEngine(
                 transport,
@@ -494,7 +555,9 @@ class YtDlpEngineTest {
                 preflight,
                 CompileMarker(42, "2026.08.19", "3.14"),
                 health,
+                clock,
                 scope.backgroundScope,
+                hooks,
             )
 
         fun host(
@@ -523,6 +586,26 @@ class YtDlpEngineTest {
                     caps.backCatalogue,
                 ),
             )
+        }
+    }
+
+    private class RecordingHooks : EngineUpdateHooks {
+        val triggers = mutableListOf<EngineUpdateTrigger>()
+        var immediates = 0
+        var resets = 0
+        var outcome: EngineUpdateOutcome = EngineUpdateOutcome.UpToDate
+
+        override suspend fun runUpdate(trigger: EngineUpdateTrigger): EngineUpdateOutcome {
+            triggers += trigger
+            return outcome
+        }
+
+        override suspend fun resetToBundled() {
+            resets++
+        }
+
+        override fun requestImmediateCheck() {
+            immediates++
         }
     }
 

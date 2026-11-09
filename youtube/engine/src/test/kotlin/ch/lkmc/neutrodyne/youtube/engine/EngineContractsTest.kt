@@ -87,7 +87,7 @@ class EngineContractsTest {
             assertEquals(1, paths.openBundledZip().buffer().use { it.readByte().toInt() })
             assertEquals("3.14", paths.pythonMinor)
             val store = FakeEngineStore()
-            assertNull(store.hostLibDir())
+            assertNull(store.hostPrepared())
             assertFailsWith<IllegalStateException> { store.prepareBundled() }
             val marker = CompileMarker(1, "bundled", "3.14")
             val prepared = PreparedEngine("/test/lib".toPath(), marker)

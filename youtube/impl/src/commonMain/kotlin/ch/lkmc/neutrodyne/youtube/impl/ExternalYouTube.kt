@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.EngineStatus
+import ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome
 import ch.lkmc.neutrodyne.youtube.api.EnrichResult
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
@@ -15,6 +16,7 @@ import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolvePurpose
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.SearchCursor
+import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.api.UploadsCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsPageResult
 import ch.lkmc.neutrodyne.youtube.api.VideoFactsResult
@@ -35,6 +37,11 @@ class DeferredYouTubeEngine : YouTubeEngine {
     override fun prewarm(reason: PrewarmReason) = Unit
 
     override fun retryStart() = Unit
+
+    override suspend fun checkForUpdate(): EngineUpdateOutcome =
+        EngineUpdateOutcome.Failed(TransientKind.ENGINE_UNAVAILABLE)
+
+    override suspend fun resetToBundled() = Unit
 }
 
 /** Dependency-free external bindings: constructing or calling these never starts a host or IO. */
@@ -97,4 +104,9 @@ class AbsentYouTubeEngine : YouTubeEngine {
     override fun prewarm(reason: PrewarmReason) = Unit
 
     override fun retryStart() = Unit
+
+    override suspend fun checkForUpdate(): EngineUpdateOutcome =
+        EngineUpdateOutcome.Failed(TransientKind.ENGINE_UNAVAILABLE)
+
+    override suspend fun resetToBundled() = Unit
 }

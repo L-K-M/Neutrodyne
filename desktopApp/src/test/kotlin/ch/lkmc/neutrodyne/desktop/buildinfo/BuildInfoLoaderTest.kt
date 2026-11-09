@@ -49,12 +49,16 @@ class BuildInfoLoaderTest {
 
     @Test
     fun `a packaged resource overrides the image identity`() {
+        val repoUrl = "https://github.com/L-K-M/Neutrodyne"
+        val engineIndex =
+            repoUrl.replace("://", "://api.").replace("github.com/", "github.com/repos/") +
+                "/releases/tags/engine-approvals"
         val resource =
             """
             versionName=1.2.3
             versionCode=200
-            repoUrl=https://github.com/L-K-M/Neutrodyne
-            engineManifestUrl=https://l-k-m.github.io/Neutrodyne/engine/ytdlp-approved.json
+            repoUrl=$repoUrl
+            engineManifestUrl=$engineIndex
             youtubeEngine=true
             installKind=msi
             os=windows

@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.domain.YouTubeFactsWriter
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.EngineStatus
+import ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.VideoFacts
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
@@ -23,6 +24,15 @@ class FakeYouTubeEngine : YouTubeEngine {
 
     override fun retryStart() {
         retries++
+    }
+
+    var updateOutcome: EngineUpdateOutcome = EngineUpdateOutcome.UpToDate
+    var resets = 0
+
+    override suspend fun checkForUpdate(): EngineUpdateOutcome = updateOutcome
+
+    override suspend fun resetToBundled() {
+        resets++
     }
 }
 

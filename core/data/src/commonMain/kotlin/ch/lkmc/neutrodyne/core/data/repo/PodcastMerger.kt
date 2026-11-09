@@ -38,11 +38,16 @@ internal class PodcastMerger(
         }
     }
 
-    /** Revalidate both primary and alias ownership after taking the coordinator and writer. */
+    /**
+     * Revalidate both primary and alias ownership after taking the coordinator and writer. The
+     * outcome carries how many loser episodes were re-parented into the owner unmatched: those
+     * rows change the owner's matching surface without an insert, which the sync hook needs
+     * (10 Parked state and stubs).
+     */
     suspend fun mergeIntoKeyOwner(
         loserId: Long,
         key: String,
-    ): Long? =
+    ): PodcastMerge? =
         coordinator.withCredentialCommit {
             val initialOwner = db.podcastDao().byFeedKey(key)?.id ?: db.podcastDao().aliasOwner(key)
             if (initialOwner == null || initialOwner == loserId) return@withCredentialCommit null
@@ -55,8 +60,8 @@ internal class PodcastMerger(
                     if (owner == null || owner == loserId) return@withWriteTransaction null
 
                     check(owner == initialOwner) { "Feed owner changed during download cleanup; retry merge" }
-                    mergeInTransaction(loserId, owner, prepared)
-                    owner
+                    val reparented = mergeInTransaction(loserId, owner, prepared)
+                    PodcastMerge(owner, reparented)
                 }
             }
         }
@@ -108,7 +113,7 @@ internal class PodcastMerger(
         loserId: Long,
         winnerId: Long,
         prepared: Map<Pair<Long, Long>, DownloadEntity?>,
-    ) {
+    ): Int {
         val pairs = episodePairs(loserId, winnerId)
         check(prepared.keys.containsAll(pairs)) {
             "Episodes changed during download cleanup; retry merge"
@@ -136,10 +141,12 @@ internal class PodcastMerger(
         dao.copySettings(loserId, winnerId)
         dao.copyMissingTitle(loserId, winnerId)
 
+        var reparented = 0
         for (episode in losingEpisodes) {
             val winner = matches[episode.id]
             if (winner == null) {
                 dao.reparentEpisode(episode.id, winnerId)
+                reparented++
                 continue
             }
 
@@ -166,5 +173,13 @@ internal class PodcastMerger(
             // A moved current must load paused, after index ownership is published on commit.
             db.playSessionDao().write(session.copy(generation = session.generation + 1, updatedAt = now))
         }
+        return reparented
     }
 }
+
+/** One committed merge's outcome for callers that react to what actually moved (10 Parked state). */
+internal data class PodcastMerge(
+    val owner: Long,
+    /** Loser episodes re-parented into the owner unmatched — the owner's matching surface grew. */
+    val reparentedEpisodes: Int,
+)
