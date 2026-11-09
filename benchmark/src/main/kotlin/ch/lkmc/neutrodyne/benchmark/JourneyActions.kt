@@ -44,13 +44,14 @@ object JourneyActions {
      * returns. The pager's accessibility node exists while skeleton rows still show,
      * so the wait ends on settled content instead: the seeded fixture guarantees a
      * non-empty All feed and the journey never moves the Feeds selection off the
-     * default All page. Then wait for device idle so the final frames finish, as
-     * the sibling frame journeys do.
+     * default All page. Cached rows can also survive a loading refresh, so wait
+     * for the explicit settled marker aligned with ReportDrawnWhen. Accessibility
+     * idle is awaited afterward; it cannot establish paging or rendering readiness.
      */
     fun MacrobenchmarkScope.coldStart() {
         startActivityAndWait()
         val page = checkNotNull(device.wait(Until.findObject(By.res("feed-page:all")), WAIT_MS))
-        check(page.wait(Until.hasObject(By.res("feed_list")), WAIT_MS)) { "Feeds did not load" }
+        check(page.wait(Until.hasObject(By.res("feed_settled")), WAIT_MS)) { "Feeds did not settle" }
         device.waitForIdle()
     }
 
