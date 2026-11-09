@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: Unlicense
 """Canary control flow uses a fake bridge and fake bytes, without network access."""
 import ast
+import contextlib
+import hashlib
+import tempfile
+import types
+from unittest import mock
 import importlib.util
 import json
 from pathlib import Path
@@ -52,6 +57,33 @@ def probe_error(bridge, fetch_chunk=lambda url: canary.CHUNK):
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_main_failure_artifact_records_stage_without_sensitive_text(self):
+        sensitive = 'https://media.example.invalid/audio?sig=PRIVATE&password=hidden'
+        bridge = FailingBridge(1, RuntimeError(sensitive))
+        package = types.ModuleType('neutrodyne_ytx')
+        bridge_module = types.ModuleType('neutrodyne_ytx.bridge')
+        bridge_module.Bridge = lambda **kwargs: bridge
+        errors_module = types.ModuleType('neutrodyne_ytx.errors')
+        errors_module.ShimError = FakeShimError
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / 'yt-dlp'
+            bundle.write_bytes(b'offline fixture')
+            (root / 'bundled.json').write_text(json.dumps({'sha256': hashlib.sha256(bundle.read_bytes()).hexdigest()}))
+            with contextlib.chdir(root), mock.patch.object(canary, 'BUNDLE', bundle), \
+                    mock.patch.dict('sys.modules', {'neutrodyne_ytx': package,
+                                                   'neutrodyne_ytx.bridge': bridge_module,
+                                                   'neutrodyne_ytx.errors': errors_module}), \
+                    mock.patch('sys.path', list(__import__('sys').path)):
+                self.assertEqual(1, canary.main())
+                text = (root / 'youtube-engine-canary.json').read_text()
+                result = json.loads(text)
+            self.assertEqual('lookup-mkbhd', result.get('stage'))
+            self.assertEqual('UNEXPECTED', result.get('code'))
+            self.assertFalse(result['ok'])
+            for secret in (sensitive, 'PRIVATE', 'password=', 'hidden', 'RuntimeError'):
+                self.assertNotIn(secret, text)
+
     def test_every_stage_reports_a_finite_identifier_and_the_shim_code(self):
         for call_id, stage in ((1, 'lookup-mkbhd'), (2, 'lookup-nasa'), (3, 'resolve')):
             with self.subTest(stage=stage):
