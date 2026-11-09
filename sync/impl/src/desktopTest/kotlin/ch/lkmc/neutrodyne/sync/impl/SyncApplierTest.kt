@@ -461,9 +461,7 @@ class SyncApplierTest {
                                 // A lookup can need credentials: it must run after the page's
                                 // writer committed and its credential hold was released.
                                 withTimeout(1_000) {
-                                    coordinator.withCredentialCommit {
-                                        assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
-                                    }
+                                    coordinator.withCredentialCommit { Unit }
                                 }
                                 listOf(
                                     DeviceDto(
@@ -496,6 +494,7 @@ class SyncApplierTest {
 
                 assertEquals(listOf(episodeId to deviceId), playback.remotePlayed)
                 assertEquals(listOf(RemotePlayedMark(episodeId, deviceId)), result.remotePlayed)
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
                 assertEquals(2, coordinator.commits, "page and post-commit name lookup acquire separately")
                 assertTrue(playback.remoteReverted.isEmpty(), "a committed mark is never reverted")
                 val notice =
