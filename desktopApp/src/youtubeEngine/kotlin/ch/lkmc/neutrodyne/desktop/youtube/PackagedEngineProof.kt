@@ -42,8 +42,10 @@ import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineStorePaths
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.PythonRuntime
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.PythonRuntimeLocator
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.StdioReplayArming
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -214,7 +216,13 @@ internal class PackagedEngineProof(
                 seeded = seedRecordedItem()
                 playbackStarted = true // playEpisode may have committed before a later await throws
                 playbackEvidence = provePlayback(seeded[1])
-                val boundary = loop.requests().size
+                // Pause retains decoder reads. Release them and account for their completed
+                // responses before measuring the download's three bounded range requests.
+                withTimeout(PAUSE_WAIT_MS) {
+                    playbackController().dismiss()
+                    playbackStateSource().nowPlaying.first { it == null }
+                }
+                val boundary = runInterruptible(Dispatchers.IO) { loop.awaitRequestBoundary() }
                 downloadEvidence = proveDownload(loop, seeded[1], boundary)
 
                 ready = transport.status.value

@@ -6,6 +6,7 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
 import java.util.HexFormat
@@ -322,6 +323,46 @@ class LoopbackMediaFixtureTest {
             request(fixture.port, range = "bytes=1-2")
             assertThat(before).hasSize(served.size)
             assertThat(fixture.requests()).hasSize(served.size + 1)
+        }
+    }
+
+    @Test
+    fun requestBoundaryWaitsForPlaybackBodyToFinish() {
+        fixture().use { fixture ->
+            val playback =
+                Socket().apply {
+                    receiveBufferSize = 1024
+                    soTimeout = SOCKET_TIMEOUT_MS
+                    connect(InetSocketAddress(InetAddress.getByName("127.0.0.1"), fixture.port))
+                }
+            try {
+                playback.outputStream.write(
+                    "GET /audio HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=0-\r\n\r\n"
+                        .toByteArray(Charsets.US_ASCII),
+                )
+                playback.outputStream.flush()
+                var end = 0
+                while (end != 0x0D0A0D0A) {
+                    val next = playback.inputStream.read()
+                    check(next >= 0) { "the playback response ended before its headers" }
+                    end = (end shl 8) or next
+                }
+                // The receive window cannot hold the 22 MB body. Keep the reader paused
+                // while the fixture is still serving it, just like the packaged playback.
+                try {
+                    fixture.awaitRequestBoundary(100)
+                    error("the request boundary returned while playback was still reading")
+                } catch (expected: IOException) {
+                    assertThat(expected.message).contains("did not settle")
+                }
+            } finally {
+                playback.close()
+            }
+            val boundary = fixture.awaitRequestBoundary(5_000)
+            assertThat(boundary).isEqualTo(1)
+            request(fixture.port, range = "bytes=0-0")
+            fixture.awaitRequestBoundary(5_000)
+            assertThat(fixture.requests().drop(boundary).map { it.range }).containsExactly("bytes=0-0")
         }
     }
 
