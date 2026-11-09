@@ -38,20 +38,20 @@ class DesktopEngineUpdateGraphTest {
     /**
      * `jobRunner` resolves the lane set through `provideDatabase`, which blocks until the
      * band-100 open finishes — the same gate `DesktopAppGraphTest`'s lane assertions take.
+     * The pool stays open until [tearDown] joins the collectors the resolution launched
+     * (`SyncControllerImpl.init`'s `refreshStatus`, `DefaultYouTubeHealth`, the rollback
+     * monitor): closing it earlier races those appScope reads — a "Connection pool is
+     * closed" fault reaches the debug fatal handler and kills the test worker.
      */
     @Test
     fun theEngineUpdateLaneJoinsTheRunnerSet() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
-            try {
-                assertThat(graph.jobRunner.status.value.keys).contains("engine-update")
-                assertThat(
-                    graph.initializers
-                        .count { it::class.simpleName == "DesktopEngineUpdateInitializer" },
-                ).isEqualTo(1)
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
-            }
+            assertThat(graph.jobRunner.status.value.keys).contains("engine-update")
+            assertThat(
+                graph.initializers
+                    .count { it::class.simpleName == "DesktopEngineUpdateInitializer" },
+            ).isEqualTo(1)
         }
 
     @Test
