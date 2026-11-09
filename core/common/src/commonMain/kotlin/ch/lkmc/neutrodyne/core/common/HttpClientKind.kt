@@ -7,4 +7,4 @@ package ch.lkmc.neutrodyne.core.common
  * interceptors per purpose. Modules inject `NeutrodyneHttpClients`/`NetworkClients` — never
  * construct clients directly.
  */
-enum class HttpClientKind { FEED, API, IMAGE, MEDIA, DOWNLOAD, YOUTUBE, SYNC }
+enum class HttpClientKind { FEED, API, IMAGE, MEDIA, DOWNLOAD, YOUTUBE, SYNC, SYNC_STREAM }

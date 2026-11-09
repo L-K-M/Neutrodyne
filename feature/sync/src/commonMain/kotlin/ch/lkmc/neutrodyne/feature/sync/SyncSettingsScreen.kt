@@ -27,6 +27,9 @@ import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_idle
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_live
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_syncing
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_intro
@@ -41,6 +44,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_server_address
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_address_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_what_syncs
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import org.jetbrains.compose.resources.stringResource
@@ -85,6 +89,16 @@ fun SyncSettingsScreen(
                     Text(
                         stringResource(Res.string.sync_linked, current.serverUrl),
                         style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(
+                            when (current.activity) {
+                                SyncActivity.SYNCING -> Res.string.sync_activity_syncing
+                                SyncActivity.LIVE -> Res.string.sync_activity_live
+                                SyncActivity.IDLE -> Res.string.sync_activity_idle
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                     Button(onClick = controller::syncNow, enabled = !syncing) {
                         Text(stringResource(Res.string.sync_now))

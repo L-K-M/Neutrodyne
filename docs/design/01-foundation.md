@@ -1864,7 +1864,7 @@ OkHttp 5.5.0 is the only transport on both JVM targets ([D10](../PLAN.md#3-key-d
 
 ```kotlin
 // :core:common (commonMain) — visible to the island, to :core:network and to callers
-enum class HttpClientKind { FEED, API, IMAGE, MEDIA, DOWNLOAD, YOUTUBE, SYNC }
+enum class HttpClientKind { FEED, API, IMAGE, MEDIA, DOWNLOAD, YOUTUBE, SYNC, SYNC_STREAM }
 
 // :core:network:okhttp (JVM island)
 /** Credential-free clients; contributed to AppScope and to YtxScope (the :ytx graph builds nothing else). */
@@ -1891,6 +1891,8 @@ class CoreClients @Inject constructor(
     // Guard mode SYNC: passes local addresses only while LocalNetworkAccess.syncAllowed (10's LocalNetworkPermissionGate);
     // no AuthInterceptor: SyncClient adds the device token per request (10)
     val sync: OkHttpClient = coreBuilder(LocalNetworkGuard.Mode.SYNC).callTimeout(60, TimeUnit.SECONDS).build()
+    // 10's events stream: SYNC derived with no read/call timeout (MS3 note 2026-11-22: implemented).
+    val syncStream: OkHttpClient = sync.newBuilder().readTimeout(0, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build()
 }
 
 @SingleIn(AppScope::class)
@@ -1904,7 +1906,7 @@ class NetworkClients @Inject constructor(private val coreClients: CoreClients, a
     val download = base.newBuilder().readTimeout(60, TimeUnit.SECONDS).addInterceptor(IdentityEncodingInterceptor).build()
     operator fun get(kind: HttpClientKind): OkHttpClient = when (kind) {
         FEED -> feed; API -> api; IMAGE -> image; MEDIA -> media; DOWNLOAD -> download
-        YOUTUBE -> coreClients.youtube; SYNC -> coreClients.sync }
+        YOUTUBE -> coreClients.youtube; SYNC -> coreClients.sync; SYNC_STREAM -> coreClients.syncStream }
 }
 /** :ytx per-call IP-family pinning (D74): same pool and dispatcher; every host resolves to [family]'s records only
  *  (all records when it has none). Cached per family. */

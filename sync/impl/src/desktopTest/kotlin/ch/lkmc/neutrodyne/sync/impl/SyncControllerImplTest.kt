@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -50,6 +51,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -503,6 +505,50 @@ class SyncControllerImplTest {
                 assertTrue(h.controller.approveLink("WDJB-MJHT") is Outcome.Success)
                 assertTrue(h.controller.confirmLink("WDJB-MJHT", approve = false) is Outcome.Success)
                 assertTrue(h.client.calls.contains("confirm:" + normaliseUserCode("WDJB-MJHT") + ":false"))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun theStatusActivityFollowsTheStreamAndTheRound() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.controller.refreshStatus()
+                assertEquals(
+                    SyncActivity.IDLE,
+                    (h.controller.status.value as SyncStatus.Linked).activity,
+                )
+
+                // 10 Live updates: the real supervisor path — gate open, link live — drives
+                // the scripted transport; `connected` moves the card to LIVE.
+                h.events.start(MutableStateFlow(true), 60)
+                h.events.reevaluate()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.LIVE
+                }
+
+                h.activity.begin()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.SYNCING
+                }
+                h.activity.end()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.LIVE
+                }
+
+                h.eventsTransport.sessions
+                    .single()
+                    .close()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.IDLE
+                }
             } finally {
                 h.close()
             }
@@ -1260,7 +1306,7 @@ private class Harness(
 
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()
-    val scheduler =
+    val scheduler: SyncScheduler =
         SyncScheduler(
             db = db,
             round = { reason -> engine.round(reason) },
@@ -1284,6 +1330,42 @@ private class Harness(
                         schedulerCalls += "unlinked"
                     }
                 },
+            linkStateChanged = { events.reevaluate() },
+        )
+
+    /**
+     * The events supervisor over the scripted transport: tests drive the stream through
+     * `eventsTransport`'s sessions and watch `connected` move the status activity.
+     */
+    val eventsTransport = FakeSyncEventTransport()
+    val events: SyncEventsClient =
+        SyncEventsClient(
+            db = db,
+            transport = eventsTransport.transport(),
+            discover = { _ ->
+                ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument(
+                    name = "test",
+                    serverVersion = "1.0",
+                    protocol =
+                        ch.lkmc.neutrodyne.sync.protocol.dto
+                            .ProtocolRange(1, 1),
+                    features = listOf("sse"),
+                    maxBatch = 200,
+                    maxSkewMs = 60_000,
+                    serverTime = "2026-01-01T00:00:00Z",
+                )
+            },
+            address = address,
+            tokens = tokens,
+            network =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeNetworkMonitor(
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeNetworkMonitor.ONLINE,
+                    ),
+            scope = controllerScope,
+            onRemoteChanged = { scheduler.onRemoteChanged() },
+            onRevoked = { scheduler.onUnlinked() },
         )
     val build =
         BuildInfo(
@@ -1317,6 +1399,8 @@ private class Harness(
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
+            events = events,
+            activity = activity,
             noticeBus = noticeBus,
             secrets = secrets,
             credentials = credentials,
