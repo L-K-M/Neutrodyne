@@ -4,12 +4,16 @@ package ch.lkmc.neutrodyne.youtube.ytdlpdesktop
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
+import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
 import ch.lkmc.neutrodyne.youtube.engine.HostExit
 import ch.lkmc.neutrodyne.youtube.engine.HostState
 import ch.lkmc.neutrodyne.youtube.engine.YtDlpErrorMapper
 import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
+import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -47,6 +51,116 @@ class YtxProcessTest {
 
     private fun fixture(): StdioFixture = StdioFixture(tempRoot("proc").also { roots += it })
 
+    @Test fun applicationScopeShutdownWaitsForTheReadyChildToExit() =
+        runBlocking {
+            val fixture = fixture()
+            fixture.serve(SharedEngine.lib)
+            val transport = fixture.transport(idleStopMs = 60_000)
+            var child: YtxChild? = null
+            try {
+                assertEquals(ECHO_RESULT, transport.callForTest("_echo", ECHOED, fixture.deadline(30_000)))
+                child = assertNotNull(fixture.spawner.last)
+                assertTrue(child.isAlive)
+
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+
+                // ShellJourney removes the engine files as soon as the application scope joins.
+                assertFalse(child.isAlive, "the child must stop before its data tree can be removed")
+                assertEquals(HostExit.SHUTDOWN, transport.status.value.lastExit)
+            } finally {
+                transport.shutdown()
+                child?.destroyForcibly()
+                child?.awaitExit(10_000)
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+            }
+        }
+
+    @Test fun applicationScopeShutdownWaitsForTheCompilingChildToExit() =
+        runBlocking {
+            val fixture = fixture()
+            val store = BundledEngineStore(fixture.paths, 1, fixture.clock)
+            store.prepareBundled()
+            val transport =
+                StdioYtxTransport(
+                    fixture.spawner,
+                    store,
+                    fixture.settings,
+                    arming = null,
+                    debugHooks = true,
+                    clock = fixture.clock,
+                    scope = fixture.scope,
+                    ping = fixture.ping,
+                )
+            var child: YtxChild? = null
+            try {
+                fixture.scope.async {
+                    runCatching { transport.call(YtxMethod.PING, fixture.ping.toJson(), fixture.deadline(120_000)) }
+                }
+                withTimeout(30_000) { transport.status.first { it.pid != null } }
+                child = assertNotNull(fixture.spawner.last)
+                assertTrue(child.isAlive)
+
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+
+                assertFalse(child.isAlive, "compile must stop before its library can be removed")
+                assertTrue(
+                    fixture.dirs.data
+                        .toFile()
+                        .deleteRecursively(),
+                )
+            } finally {
+                transport.shutdown()
+                child?.destroyForcibly()
+                child?.awaitExit(10_000)
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+            }
+        }
+
+    @Test fun applicationScopeShutdownReapsTheChildInsideItsIdleGracePeriod() =
+        runBlocking {
+            val fixture = fixture()
+            fixture.serve(SharedEngine.lib)
+            val spawner =
+                SpySpawner(
+                    YtxProcess(
+                        { fixture.python },
+                        fixture.paths,
+                        spawn = { _, _, _ ->
+                            ProcessBuilder(fixture.python.executable.absolutePath, "-I", "-c", SLOW_EOF_CHILD).start()
+                        },
+                    ),
+                )
+            val transport =
+                StdioYtxTransport(
+                    spawner,
+                    fixture.store,
+                    fixture.settings,
+                    arming = null,
+                    debugHooks = true,
+                    clock = fixture.clock,
+                    scope = fixture.scope,
+                    ping = fixture.ping,
+                    idleStopMs = 100,
+                )
+            var child: YtxChild? = null
+            try {
+                transport.prewarm(PrewarmReason.SCREEN)
+                withTimeout(30_000) { transport.status.first { it.state == HostState.READY } }
+                child = assertNotNull(spawner.last)
+                withTimeout(10_000) { transport.status.first { it.lastExit == HostExit.IDLE_STOP } }
+                assertTrue(child.isAlive, "the fixture deliberately ignores stdin EOF")
+
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+
+                assertFalse(child.isAlive, "cancellation must retain the idle child's kill fallback")
+            } finally {
+                transport.shutdown()
+                child?.destroyForcibly()
+                child?.awaitExit(10_000)
+                fixture.scope.coroutineContext[Job]!!.cancelAndJoin()
+            }
+        }
+
     @Test fun killedChildMidCallYieldsTransientAndNextCallRestarts() =
         runBlocking {
             val fixture = fixture()
@@ -58,7 +172,7 @@ class YtxProcessTest {
                     transport.callForTest("_hang", EMPTY, fixture.deadline(60_000))
                 }
             withTimeout(15_000) {
-                while (transport.status.value.running == 0) delay(20)
+                while (transport.status.value.pid == null) delay(20)
             }
             val child = fixture.spawner.last
             assertNotNull(child)
@@ -319,6 +433,16 @@ class YtxProcessTest {
     }
 
     private companion object {
+        val SLOW_EOF_CHILD =
+            """
+            import json, sys, time
+            print(json.dumps({'t':'hello','state':'ready'}), flush=True)
+            for line in sys.stdin:
+                frame = json.loads(line)
+                print(json.dumps({'t':'ok','id':frame['id'],'r':{'ready':True}}), flush=True)
+            time.sleep(60)
+            """.trimIndent()
+
         const val VIDEO = "aaaaaaaaaaA"
         val EMPTY = JsonObject(emptyMap())
         val ECHOED = buildJsonObject { put("probe", "ok") }
