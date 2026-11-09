@@ -73,6 +73,9 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     /** 10's parked-state release hook `FeedRefresher` calls after each ingest (MS2). */
     val syncIngestHook: ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 
+    /** 10's pull before play; UI playback starts bound to it wait before they plan. */
+    val prePlaySync: ch.lkmc.neutrodyne.core.domain.PrePlaySync
+
     /** The link state machine; `null` while no link runs. */
     val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
     val application: Application

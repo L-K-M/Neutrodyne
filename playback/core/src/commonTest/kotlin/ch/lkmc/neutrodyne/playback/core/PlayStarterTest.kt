@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PrePlaySync
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
@@ -34,6 +35,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -99,6 +101,7 @@ class PlayStarterTest {
         resolver: PlayContextResolver = contexts,
         gates: Set<StartGate> = setOf(gate),
         store: PlaySessionStore = writer,
+        prePlay: Provider<PrePlaySync> = Provider { PrePlaySync.None },
     ): PlayStarter {
         queues.queue.value = sessions.queue
         return PlayStarter(
@@ -114,6 +117,7 @@ class PlayStarterTest {
             StartPositionRule(),
             PlayedRule(),
             gates,
+            prePlay,
         )
     }
 
@@ -395,6 +399,39 @@ class PlayStarterTest {
             assertTrue(sessions.calls.isEmpty())
         }
 
+    @Test fun beforeUiStartRunsThePullSoPlanningReadsTheSyncedPosition() =
+        runTest {
+            // MS3 pull before play (10): the UI hook must land before the start reads the stored
+            // position — the pulled 45 s wins over the stale local 70 s.
+            positions.positions.value = mapOf(8L to StoredPosition(8, 70_000, clock.now(), null))
+            var pulls = 0
+            val s =
+                starter(
+                    prePlay =
+                        Provider {
+                            PrePlaySync {
+                                pulls++
+                                positions.positions.value = mapOf(8L to StoredPosition(8, 45_000, clock.now(), null))
+                            }
+                        },
+                )
+
+            s.beforeUiStart()
+            assertEquals(1, pulls)
+            assertEquals(45_000L, assertIs<StartOutcome.Committed>(s.start(StartRequest.Episode(8))).startPositionMs)
+        }
+
+    @Test fun aGenericStartNeverRunsTheUiPull() =
+        runTest {
+            // Service, automatic, resumption and OS-button paths share start() and must not wait.
+            var pulls = 0
+            val s = starter(prePlay = Provider { PrePlaySync { pulls++ } })
+
+            assertIs<StartOutcome.Committed>(s.start(StartRequest.Episode(8)))
+
+            assertEquals(0, pulls)
+        }
+
     @Test fun startPositionUsesSavedProgressAndExplicitPositionOverridesRules() =
         runTest {
             positions.positions.value = mapOf(8L to StoredPosition(8, 70_000, clock.now(), null))
@@ -529,7 +566,7 @@ class PlayStarterTest {
             sessions.queue = queue()
             val saver = PositionSaver(positions, clock, PlayedRule())
             saver.load(1, clock.now(), PositionSource.STREAM)
-            saver.startPositionApplied()
+            saver.startPositionApplied(0)
             saver.onPlaying()
             var position = 100_000L
             val waiting =
