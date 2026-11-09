@@ -246,6 +246,12 @@ dependencies {
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)
     testImplementation(libs.androidx.test.runner)
+    // MainActivity's root-composition tests under Robolectric (same pinned coordinates as the
+    // androidTest classpath and feature androidHostTests).
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(libs.androidx.test.espresso.core)
+    testImplementation(project(":core:testing"))
     // Startup recovery verifies the real periodic work against WorkManager's host backend.
     testImplementation(libs.androidx.work.testing)
     testImplementation(libs.androidx.media3.session)

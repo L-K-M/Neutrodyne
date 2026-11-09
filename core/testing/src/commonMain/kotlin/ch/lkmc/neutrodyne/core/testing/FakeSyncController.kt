@@ -37,6 +37,10 @@ class FakeSyncController(
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
     override val notices: Flow<SyncNotice> = _notices
 
+    /** Live [notices] collectors — replay is 0, so a [post] before subscription is dropped. */
+    @kotlin.OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val noticeSubscriptions: StateFlow<Int> = _notices.subscriptionCount
+
     val startLinks = mutableListOf<Pair<String, LinkMethod>>()
     val discoveries = mutableListOf<String>()
     val localNetworkGrants = mutableListOf<Boolean>()
