@@ -122,6 +122,13 @@ class FirstLinkMerger(
     private val activity: SyncActivityState,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
     private val coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+    /**
+     * Re-primes the volatile preference cache before any entry point applies or pushes
+     * credentials — the persisted share gate, not the restart default, decides what the
+     * merge's clock reconstruction and the push's changes do with `auth`. Bound by
+     * `SyncBindings`; bare test mergers may omit it.
+     */
+    private val beforeMerge: suspend () -> Unit = {},
 ) {
     private val fileSystem: FileSystem = FileSystem.SYSTEM
     private val cacheDir: Path = storagePaths.cacheDir.toPath()
@@ -135,6 +142,9 @@ class FirstLinkMerger(
         // The whole merge holds the shared activity flag; nested push rounds share the counter.
         activity.begin()
         try {
+            // The merge's apply steps and the upload push read the volatile share gate — the
+            // persisted consent, not a restart default, must prime it before any of them.
+            beforeMerge()
             return when (choice) {
                 FirstLinkChoice.MERGE -> mergeBoth(roundId, onProgress)
                 FirstLinkChoice.USE_SERVER -> useServer(roundId, onProgress)
@@ -160,6 +170,7 @@ class FirstLinkMerger(
         // Seeding, the pull and the re-assert all hold the shared activity flag.
         activity.begin()
         try {
+            beforeMerge()
             val applied = pullAndApply(roundId, { _, _, _ -> })
             // 10 Durable apply effects: the pull's committed settings effects drain before the
             // re-assertion, so DataStore holds the server value first and the re-assert replays
@@ -186,6 +197,7 @@ class FirstLinkMerger(
         val roundId = clock.now()
         activity.begin()
         return try {
+            beforeMerge()
             // A fresh pull: the prune must bound to a snapshot that covers everything the
             // server holds now, and this run's uploads re-assert every surviving record.
             val pull = pullStaged(roundId, resume = false) { _, _, _ -> }

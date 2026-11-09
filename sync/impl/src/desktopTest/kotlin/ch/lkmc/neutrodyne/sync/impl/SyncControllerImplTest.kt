@@ -58,6 +58,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
@@ -888,7 +889,7 @@ class SyncControllerImplTest {
             try {
                 h.seedLinked()
                 h.client.syncHandler = { _, _ -> throw java.io.IOException("offline") }
-                h.client.logout = { throw java.io.IOException("offline") }
+                h.client.logoutHandler = { throw java.io.IOException("offline") }
                 val result = h.controller.unlink()
                 assertTrue(result is Outcome.Success)
                 assertFalse(h.tokenStoreContains(host))
@@ -1190,6 +1191,43 @@ class SyncControllerImplTest {
             }
         }
 
+    /**
+     * The reload and the setters take the one commit guard [SyncFlags] owns: a reload parked
+     * mid-read while a newer toggle commits publishes afterwards — never an older snapshot
+     * over the saved gate (10 Settings capture).
+     */
+    @Test
+    fun aStalePreferenceSnapshotCannotOverwriteANewerCommit() =
+        runTest {
+            val h = harness(this)
+            val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.updateShareFeedPasswords(true)
+                h.address.afterShareRead = {
+                    if (entered.complete(Unit)) release.await()
+                }
+                val reload = async { h.flags.refreshFromStore(h.address) }
+                entered.await()
+                // The reload owns the commit guard with its read parked; the setter queues.
+                val commit = async { h.controller.setShareFeedPasswords(false) }
+                runCurrent()
+                release.complete(Unit)
+                reload.await()
+                commit.await()
+
+                assertFalse(
+                    h.flags.sharePasswords,
+                    "an older snapshot must not overwrite the saved toggle",
+                )
+                assertFalse(h.address.shareFeedPasswords())
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
     @Test
     fun cancellingAfterASwitchCommitsStillPublishesItsRuntimeGate() =
         runTest {
@@ -1436,10 +1474,11 @@ class SyncControllerImplTest {
 }
 
 /** The controller, its collaborators and the scripted client for one test. */
-private class Harness(
+internal class Harness(
     private val scope: TestScope,
     private val now: Long,
     val secrets: SecretStore = FakeSecretStore(),
+    controllerDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
 ) {
     /**
      * The controller's own scope, cancelled before the database closes. A supervisor like the
@@ -1447,7 +1486,7 @@ private class Harness(
      */
     private val controllerJob = kotlinx.coroutines.SupervisorJob()
     private val controllerScope =
-        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob)
+        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob + controllerDispatcher)
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
@@ -1516,6 +1555,7 @@ private class Harness(
             effects = effects,
             capture = settingsCapture,
             notices = noticeBus,
+            refreshPreferences = { flags.refreshFromStore(address) },
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -1533,6 +1573,7 @@ private class Harness(
             activity = activity,
             secrets = secrets,
             coordinator = credentials,
+            beforeMerge = { flags.refreshFromStore(address) },
         )
 
     /** A temp-dir StoragePaths for the staging file and directory. */
@@ -1784,7 +1825,7 @@ private class Harness(
 }
 
 /** A [SyncClient] whose every call is scripted and recorded. */
-private class ScriptedSyncClient : SyncClient {
+internal class ScriptedSyncClient : SyncClient {
     val calls = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
     val revokes = mutableListOf<String>()
@@ -1810,7 +1851,7 @@ private class ScriptedSyncClient : SyncClient {
         DeviceDto(id, name, "android", "1.0.0", null, false, false)
     }
     var revoke: suspend (String) -> Unit = {}
-    var logout: suspend () -> Unit = {}
+    var logoutHandler: suspend () -> Unit = {}
     var summary: AccountSummary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
     var changesHandler: suspend (String?) -> ChangesPage = { emptyPage() }
     var syncHandler: suspend (String?, List<ChangeDto>) -> SyncResponse = { _, changes -> defaultSyncResponse(changes) }
@@ -1879,7 +1920,7 @@ private class ScriptedSyncClient : SyncClient {
 
     override suspend fun logout() {
         calls += "logout"
-        logout()
+        logoutHandler()
     }
 
     override suspend fun devices(): List<DeviceDto> {
@@ -1939,7 +1980,7 @@ private class ScriptedSyncClient : SyncClient {
     }
 }
 
-private class FakeNetErrorClassifier(
+internal class FakeNetErrorClassifier(
     var result: NetError = NetError.Offline,
 ) : NetErrorClassifier {
     override fun classify(e: Throwable): NetError = result
