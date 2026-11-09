@@ -285,6 +285,7 @@ jobs:
             **/build/reports/tests/
             **/build/outputs/roborazzi/
             **/build/test-results/
+            **/hs_err_pid*.log
 
   assemble:
     runs-on: ubuntu-24.04
