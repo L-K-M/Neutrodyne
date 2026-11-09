@@ -34,13 +34,16 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -664,6 +667,106 @@ abstract class SessionAdopterTestBase {
                 adopter.evaluate()
                 adopter.drainOffers()
                 assertNull(adopter.offer.value, "a played-since device never offers the older remote session")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aLocalStartBeforeTheAdoptionWriteKeepsItsSession() =
+        runTest {
+            val db = newTestDb(testScheduler)
+            val reachedWrite = java.util.concurrent.CountDownLatch(1)
+            val continueWrite = java.util.concurrent.CountDownLatch(1)
+            val reads =
+                java.util.concurrent.atomic
+                    .AtomicInteger()
+            val clock =
+                object : Clock {
+                    override fun now(): Long {
+                        if (reads.incrementAndGet() == 2) {
+                            reachedWrite.countDown()
+                            check(continueWrite.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                        }
+                        return NOW
+                    }
+
+                    override fun elapsedRealtime(): Long = NOW
+                }
+            try {
+                seedLink(db)
+                val podcast = seedPodcastAndEpisode(db)
+                val localId = episodeId(db, podcast, OTHER_KEY)
+                storeRaw(db, remoteSession(PODCAST_SYNC, EPISODE_KEY), OTHER_DEVICE)
+                val adopter = testSessionAdopter(db, clock)
+                val evaluation = async(Dispatchers.Default) { adopter.evaluate() }
+                try {
+                    assertTrue(
+                        withContext(Dispatchers.IO) { reachedWrite.await(10, java.util.concurrent.TimeUnit.SECONDS) },
+                    )
+                    db.withWriteTransaction {
+                        db.playSessionDao().ensureNow(NOW)
+                        val row = requireNotNull(db.playSessionDao().get())
+                        db.playSessionDao().write(row.copy(currentEpisodeId = localId, generation = row.generation + 1))
+                        db.syncOutboxDao().upsert(
+                            SyncOutboxEntity(
+                                coll = SESSION_WIRE,
+                                rid = SESSION_RID,
+                                field = "episode",
+                                hlc = (NOW + 1) shl 16,
+                                nodeId = THIS_NODE,
+                                value = null,
+                            ),
+                        )
+                    }
+                } finally {
+                    continueWrite.countDown()
+                }
+                evaluation.await()
+                assertEquals(
+                    localId,
+                    db.playSessionDao().get()?.currentEpisodeId,
+                    "a remote adoption must not overwrite a newer local start",
+                )
+                assertEquals(
+                    episodeRef(PODCAST_SYNC, OTHER_KEY),
+                    SourceReader(db, FakeSecretStore(), {
+                        false
+                    }).sessionField("episode"),
+                )
+                adopter.drainOffers()
+                assertNull(adopter.offer.value)
+            } finally {
+                continueWrite.countDown()
+                db.close()
+            }
+        }
+
+    @Test
+    fun startingPlaybackAfterEligibilityPreventsTheAdoptionWrite() =
+        runTest {
+            val db = newTestDb(testScheduler)
+            try {
+                seedLink(db)
+                seedPodcastAndEpisode(db)
+                val playback = FakePlaybackSyncPort()
+                var reads = 0
+                val clock =
+                    object : Clock {
+                        override fun now(): Long {
+                            if (++reads == 2) playback.setPlaying(true)
+                            return NOW
+                        }
+
+                        override fun elapsedRealtime(): Long = NOW
+                    }
+                storeRaw(db, remoteSession(PODCAST_SYNC, EPISODE_KEY), OTHER_DEVICE)
+                val adopter = testSessionAdopter(db, clock, playback = playback)
+                adopter.evaluate()
+                assertTrue(playback.active.value.isPlaying)
+                assertNull(db.playSessionDao().get()?.currentEpisodeId, "eligibility must be rechecked at the write")
+                adopter.drainOffers()
+                assertNull(adopter.offer.value)
             } finally {
                 db.close()
             }

@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PlaySessionEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -166,9 +167,9 @@ class SessionAdopter
                 }
                 return
             }
-            adopt(pending)
+            val adopted = adopt(pending, dismissed) ?: return
             mutex.withLock {
-                pendingOffer.value = pending.copy(epoch = ++epoch)
+                pendingOffer.value = adopted.copy(epoch = ++epoch)
             }
         }
 
@@ -196,7 +197,7 @@ class SessionAdopter
                 matcher.match(podcast.id, id.key.value, record.match)
                     ?: stubOrNull(podcast.id, id.key.value, record)
                     ?: return null
-            return PendingOffer(matched, record, by, maxClock)
+            return PendingOffer(matched, record, by, maxClock, state.linkIdentity())
         }
 
         /** The same stub semantics as an episode record: enclosure or YouTube hints only. */
@@ -212,32 +213,48 @@ class SessionAdopter
             return db.episodeDao().byIdentityKey(podcastId, key)?.id
         }
 
-        /** Writes `play_session` under `applying = 1`; an identical session is not re-stamped. */
-        private suspend fun adopt(pending: PendingOffer) {
-            val columns = contextColumns(pending.record.fields["context"]?.v as? JsonObject)
+        /**
+         * Re-proves the candidate under the same writer as the adoption. A local start between
+         * the initial reads and this writer owns its session and live-valued outbox rows; an
+         * adoption must never replace that literal underneath the local capture's newer clock.
+         * No offer mutex is held while taking Room's writer.
+         */
+        private suspend fun adopt(
+            pending: PendingOffer,
+            dismissed: Hlc?,
+        ): PendingOffer? {
             val now = clock.now()
-            db.withWriteTransaction {
+            return db.withWriteTransaction {
+                val state = db.syncStateDao().get() ?: return@withWriteTransaction null
+                if (playing() || state.linkIdentity() != pending.link) return@withWriteTransaction null
+                val raw = clockStore.get(SESSION_WIRE, SESSION_RID) ?: return@withWriteTransaction null
+                val merged = SyncRecordMerger.merge(raw.state, pendingSession(), RecordState(SyncCollection.SESSION))
+                val fresh = eligible(merged.record, raw.by, dismissed) ?: return@withWriteTransaction null
+                if (fresh.record != pending.record || fresh.by != pending.by || fresh.episodeId != pending.episodeId) {
+                    return@withWriteTransaction null
+                }
+                val columns = contextColumns(fresh.record.fields["context"]?.v as? JsonObject)
+                if (playing()) return@withWriteTransaction null
                 db.syncStateDao().withApplying {
                     db.playSessionDao().ensureNow(now)
                     val current = db.playSessionDao().get()
-                    if (current == null || !current.matches(pending.episodeId, columns)) {
-                        db
-                            .playSessionDao()
-                            .restoreSession(
-                                currentEpisodeId = pending.episodeId,
-                                contextType = columns.type,
-                                contextId = columns.id,
-                                contextOrder = columns.order,
-                                contextFilterFlags = columns.flags,
-                                contextMediaFilter = columns.media,
-                                contextMinSortDate = columns.minSortDate,
-                                contextAnchorEpisodeId = columns.anchorEpisodeId,
-                                contextAnchorSortDate = columns.anchorSortDate,
-                                onlyWhenIdle = false,
-                                now = now,
-                            )
+                    if (current == null || !current.matches(fresh.episodeId, columns)) {
+                        db.playSessionDao().restoreSession(
+                            currentEpisodeId = fresh.episodeId,
+                            contextType = columns.type,
+                            contextId = columns.id,
+                            contextOrder = columns.order,
+                            contextFilterFlags = columns.flags,
+                            contextMediaFilter = columns.media,
+                            contextMinSortDate = columns.minSortDate,
+                            contextAnchorEpisodeId = columns.anchorEpisodeId,
+                            contextAnchorSortDate = columns.anchorSortDate,
+                            onlyWhenIdle = false,
+                            now = now,
+                        )
                     }
                 }
+                fresh
             }
         }
 
@@ -258,7 +275,11 @@ class SessionAdopter
                 val merged =
                     SyncRecordMerger.merge(raw.state, pendingSession(), RecordState(SyncCollection.SESSION))
                 val fresh = eligible(merged.record, raw.by, dismissedClock) ?: return
-                if (fresh.episodeId != pending.episodeId || fresh.maxClock != pending.maxClock) return
+                if (fresh.link != pending.link || fresh.episodeId != pending.episodeId ||
+                    fresh.maxClock != pending.maxClock
+                ) {
+                    return
+                }
                 offeredClock = pending.maxClock
                 _offer.value =
                     RemoteSessionOffer(
@@ -413,7 +434,20 @@ class SessionAdopter
             val record: RecordState,
             val by: String,
             val maxClock: Hlc,
+            val link: LinkIdentity,
             val epoch: Int = 0,
+        )
+
+        private fun SyncStateEntity.linkIdentity(): LinkIdentity =
+            LinkIdentity(serverUrl, accountId, deviceId, nodeId, linkedAt)
+
+        /** Activity timestamps and cursors do not change the linked identity. */
+        private data class LinkIdentity(
+            val serverUrl: String?,
+            val accountId: String?,
+            val deviceId: String?,
+            val nodeId: String?,
+            val linkedAt: Long?,
         )
 
         private data class ContextColumns(
