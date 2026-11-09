@@ -68,9 +68,11 @@ internal class FeedMoveCommitter(
     suspend fun mergeCollision(
         podcastId: Long,
         collision: FeedMoveCollision,
-    ): DueFeed? {
-        val owner = merger.mergeIntoKeyOwner(podcastId, collision.key) ?: return null
-        return db.podcastDao().dueFeedById(owner)
+    ): FeedMergeSurvivor? {
+        val merge = merger.mergeIntoKeyOwner(podcastId, collision.key) ?: return null
+        // Like the merge itself, a survivor with no due feed row reads as "nothing to retry into".
+        val feed = db.podcastDao().dueFeedById(merge.owner) ?: return null
+        return FeedMergeSurvivor(feed = feed, reparentedEpisodes = merge.reparentedEpisodes)
     }
 
     /** 304 and Unchanged are successes too, but provide no evidence for redirect adoption. */
@@ -89,7 +91,11 @@ internal class FeedMoveCommitter(
                 return feed ?: FeedMoveResult(null)
             } catch (collision: FeedMoveCollision) {
                 val survivor = mergeCollision(podcastId, collision) ?: continue
-                return FeedMoveResult(survivor, mergedInto = survivor.id)
+                return FeedMoveResult(
+                    survivor.feed,
+                    mergedInto = survivor.feed.id,
+                    reparentedEpisodes = survivor.reparentedEpisodes,
+                )
             }
         }
     }
@@ -104,4 +110,12 @@ internal data class FeedMoveResult(
     val feed: DueFeed?,
     val mergedInto: Long? = null,
     val moved: Boolean = false,
+    /** Episodes the merge re-parented into the survivor unmatched (10 Parked state). */
+    val reparentedEpisodes: Int = 0,
+)
+
+/** One collision merge's outcome: the surviving feed and what the merge actually moved. */
+internal data class FeedMergeSurvivor(
+    val feed: DueFeed,
+    val reparentedEpisodes: Int,
 )
