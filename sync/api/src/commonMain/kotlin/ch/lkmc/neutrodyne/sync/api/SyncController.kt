@@ -94,8 +94,8 @@ interface SyncController {
 
     fun dismissRemoteSession()
 
-    /** 10 Settings: persist the device-local switches (Settings › Sync). */
-    suspend fun setSyncPlaybackSettings(enabled: Boolean)
+    /** Persist device-local switches. A failed write leaves both the stored and runtime gate unchanged. */
+    suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError>
 
-    suspend fun setShareFeedPasswords(enabled: Boolean)
+    suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SyncPreferenceError>
 }
