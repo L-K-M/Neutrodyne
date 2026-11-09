@@ -880,8 +880,8 @@ Paths that must not be captured run their transaction with `applying = 1` (`Sync
 
 DataStore is not SQLite, so settings use `SettingsCapture` (`:sync:impl`) instead of triggers:
 
-- `SettingsSyncPort` (`:core:domain`, implemented beside `SettingsRepository` in `:core:data`) offers `applyRemote(key, json): Boolean`, `localSyncedChanges` and registration of a suspending recorder. Local `set()`/`reset()` and remote apply share a per-key mutex. While linked, `SettingsCapture` installs the recorder for synced keys: persist the literal value and a fresh clock in Room **before** DataStore, then emit the scheduling event. A failed Room record leaves DataStore unchanged; a failed DataStore write keeps the committed intent for recovery. The callback is absent while unlinked or inert while the switch is off; `:core:datastore` has no Room or sync dependency ([01 Sync write ordering](01-foundation.md#datastore-files-and-typed-setting-keys)).
-- At each start while linked, before normal rounds or hash reconciliation, drain durable remote effects and finish any local setting write whose literal outbox intent survived a crash before DataStore. Under the same per-key mutex, compare the pending remote clock with local intents; the newest wins. Only then compare current hashes with the last synced hashes and capture otherwise unrecorded differences. A stale DataStore value waiting for a committed remote effect is never promoted to a fresh local edit.
+- `SettingsSyncPort` (`:core:domain`, implemented beside `SettingsRepository` in `:core:data`) offers remote apply, strict value/origin snapshots, scheduling events and a suspending local-write recorder. Local `set()`/`reset()` and remote apply share a per-key mutex. The recorder stays installed while linked, including while the switch is off, and fixes each write's admission before DataStore. ON persists its literal and complete clock in Room first; recorder failure leaves DataStore unchanged and a later DataStore failure retains the intent. OFF returns explicit uncaptured provenance without requiring Room or taking an HLC tick. The repository commits the value and opaque receipt in one DataStore edit; a failed edit changes neither. Notification after commit is scheduling/bookkeeping, not the provenance boundary. The receipt retains the admitting account, link node and complete clock, so gate flips, a lost callback or an equal older intent cannot relabel the write. Each physical uncaptured write receives a unique opaque identity. The same Room transaction as each local intent retains its preceding receipt and value hash at that intent's complete clock. Recovery distinguishes that older snapshot from a later uncaptured write, including equal-value writes and an ON write whose DataStore commit failed. Snapshot admissions for account-absent keys and first-link bootstrap retain the same predecessor boundary without re-ticking. Acknowledgements, pulls and first-link raw-state updates preserve it. Direct untracked writes clear the receipt. Generic receipt storage in `:core:datastore` has no Room, account or sync dependency; internal metadata is outside the typed backup whitelist ([01 Sync write ordering](01-foundation.md#datastore-files-and-typed-setting-keys)).
+- At each start while linked, before normal rounds or hash reconciliation, drain durable remote effects and finish any local setting write whose literal outbox intent survived a crash before DataStore. Under the same per-key mutex, compare the pending remote clock with local intents; the newest wins. Durable write origin takes precedence over literal equality and older baselines: known account values win over uncaptured edits; captured writes keep their original clock even before their callback; receipts of another link cannot become fresh account edits. Normalize valid wire literals in each key's stored type before comparisons and baseline hashes; a Float32 `1` and stored `1.0` represent the same intent, while Int64 values retain their exact precision. Only then compare current hashes with the last synced hashes and capture otherwise unrecorded differences from untracked writers. A stale DataStore value waiting for a committed remote effect is never promoted to a fresh local edit.
 - While the switch is off, nothing is captured and received `setting` records are stored as pending values in `sync_clock` instead of applied. Turning it on applies the pending values (the server's values win, as at the first link) and then captures the synced keys the account has no value for.
 
 ### Durable apply effects
@@ -899,7 +899,7 @@ Room, DataStore and `SecretStore` cannot commit atomically. `SyncApplyEffects` t
 - Value at push time: `ChangeBuilder` reads the outbox rows and the current source rows in one read transaction, so a value always corresponds to the newest clock of its row. A row whose source row no longer exists and whose `value` is NULL is skipped (the deletion wrote its own literal row).
 - A `*` row and per-field rows of one record may coexist (an insert after a pending removal, such as a group re-created by undo); `ChangeBuilder` takes, per wire field, the row with the newest clock, so a newer `*` supersedes an older literal removal and vice versa. A `*` row is not deleted when a remote value beats it for one field; `ChangeBuilder` instead omits every field whose `sync_clock` entry is newer than the row's clock (that field now holds the remote value).
 - **Undo window.** `OutboxReader` skips a group's `deleted = true` row, and the `member` `in = false` rows with that group's `uuid` prefix, until 10 s after the deletion was captured (05's undo, R2.1). `SyncScheduler` notes the capture time of each new group-deletion row in memory when the outbox changes; after a process restart the rows are eligible at once, matching 05's rule that process death inside the window makes the delete final. The scheduler pokes a round when the oldest skipped row comes of age. Every other row is eligible at once.
-- After acknowledgement, delete only rows whose complete `(hlc, nodeId)` clock is at most the sent clock, and merge the exact sent fields into `sync_clock.raw` without lowering a known field clock. A change made during the round stays for the next one; replays never borrow this device's node ID.
+- After acknowledgement, delete only rows whose complete `(hlc, nodeId)` clock is at most the sent clock, and merge the exact sent fields into `sync_clock.raw` without lowering a known field clock. A change made during the round stays for the next one; replays never borrow this device's node ID. `SyncApplyEffects.acknowledge` owns this whole step: it stages each sent `auth` pair under the credential coordinator before the Room write, then one transaction deletes the acknowledged outbox rows, binds each winning auth's staged reference, and merges every acknowledged change's sent state — a failed stage or failed merge leaves all of the push's rows intact for a retry.
   - A deleted setting intent also advances its materialisation baseline to `{hash: hash(sentValue), clock: sentClock}` in this acknowledgement transaction, including a stale result awaiting its winning page. Never re-read DataStore for that hash or replace a newer baseline. Remote effect completion advances it to the applied value. Reconciliation skips values already represented by pending local intents, so an acknowledged setting is not re-captured with a fresh clock after restart.
 - A remote value that wins against a pending per-field row (remote clock > outbox `hlc`) deletes that row during apply: the local change lost under LWW and the server would answer `stale` anyway (a `*` row stays, as above).
 - Expected size: tens of rows in normal use; a 300-feed import produces about 1,000 rows (podcasts, members, groups), pushed in one or two rounds.
@@ -1034,6 +1034,28 @@ every sync work name.
 - **Watchdog:** the stream uses 01's derived `SYNC` client without read and call timeouts ([01 Networking baseline](01-foundation.md#networking-baseline); the base client's 30-s read timeout would cut a 60–90-s heartbeat), so the watchdog bounds it instead: no byte for `2 × hb + 15 s` → reconnect. Reconnects wait the server's `retry` (10 s), then back off exponentially to 5 min with ±20 % jitter after repeated failures; a `401` stops it (`Revoked`); a `429` waits `Retry-After`.
 - **Events:** `changed` with `by ≠` this device → a round within 500 ms (coalesced); `by` = this device → ignored.
 - If the server lacks `sse` or a proxy breaks streaming, polling covers it: rounds on foreground, pause and the timers above.
+
+**Implementation note (2026-11-22, MS3).** `SyncEventsClient` supervises one stream
+over `HttpClientKind.SYNC_STREAM` — `SYNC` derived with `readTimeout(0)` and
+`callTimeout(0)` (the same SYNC-mode LAN guard, DNS chain, pool and interceptors;
+Ktor's `SSE` plugin is installed for both kinds). Discovery's `sse` feature gates the
+first open and is re-checked on a 5-min cadence while absent. The gate combines the
+platform flow, `sync_state`'s live-link read (funneled through `SyncScheduler`'s
+`linkStateChanged` callback on every link, unlink and revocation, so a revoke closes
+the stream at once instead of waiting out the watchdog) and the network monitor.
+Android's `SyncEventsGate` emits the UI-or-playback gate with the 60-s grace and an
+immediate initial `false` (a backgrounded start must not wait out the grace before
+the supervisor sees a state); `SyncSchedulingInitializer` starts it at band 200. The
+desktop gate is `DesktopSyncTriggers.awake` (`PowerEvent.Suspending`/`Resumed`),
+started by `DesktopSyncSchedulingInitializer` at band 210. Every (re)connect pokes
+the scheduler because the bus does not replay; remote `changed` events and the
+connect poke coalesce into one `SyncRoundReason.SSE` round 500 ms after the last
+signal, and the event cursor is discarded — the round is the only data path. A `401`
+on open or mid-stream writes `sync_state`'s `markRevoked` (the engine's own write)
+and runs `SyncScheduler.onUnlinked`. `SyncStatus.Linked.activity` derives
+`SYNCING` (the round counter) over `LIVE` (`connected`) over `IDLE`, refreshed by the
+controller's combine collector; Settings › Sync shows it. Diagnostics expose only the
+connected flag — no token or cursor.
 
 ### Token storage
 
@@ -2539,3 +2561,14 @@ All checked 2026-10-05 by the research behind the scope revision unless marked o
 - Debian 12 Java 17 package: https://packages.debian.org/bookworm/openjdk-17-jre-headless · Debian 13 Java 21 package (arm64 and armhf; checked 2026-10-05 in review): https://packages.debian.org/trixie/openjdk-21-jre-headless · Raspberry Pi OS based on Debian 13, released 2025-10-02: https://linuxiac.com/raspberry-pi-os-based-on-debian-13-now-available-for-download/ · Temurin platforms: https://adoptium.net/supported-platforms/ · OpenJDK GPL-2.0 with Classpath Exception: https://openjdk.org/legal/gplv2+ce.html
 - Android local network permission (Android 17 enforcement for target 37, `NEARBY_DEVICES` group, TCP timeouts, DNS exemption; the page lists no address ranges; re-checked 2026-10-05): https://developer.android.com/privacy-and-security/local-network-permission · App Standby bucket limits for jobs (checked 2026-10-05 in review): https://developer.android.com/topic/performance/power/power-details · WorkManager 15-min minimum: https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work · macOS Local Network privacy TN3179: https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy
 - Prototype measurements (Ktor 3.6.0 CIO with sqlite-jdbc on x86-64, idle RSS and 50,000-change push and pull) were taken during the research for this plan on 2026-10-05; they are not externally sourced and are re-measured by S16.
+
+**Implementation note (2026-11-09, linked settings restore recovery).** A linked
+restore reads the strict value/receipt snapshot under the per-key lock before
+Room. Its `captureAt` and the historical intent's predecessor boundary commit in
+one writer transaction. Only then does DataStore atomically write the restored
+value and its captured origin receipt. Recovery therefore retains the archive's
+original complete clock across a crash before or after the store write; an older
+OFF baseline cannot discard the restore or turn it into a fresh edit. If an ACK
+finds an already-known newer account value, it journals that winner for the
+normal settings drain even when the response repeats equal raw clocks. Newer
+local intents still supersede that pending effect.

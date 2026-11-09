@@ -71,6 +71,8 @@ internal class DesktopSecretStore(
 
     override suspend fun get(origin: String): StoredSecret? = core.get(origin)
 
+    override suspend fun originsWithPrefix(prefix: String): Set<String> = core.originsWithPrefix(prefix)
+
     override suspend fun forPodcast(podcastId: Long): BasicCredentials? = core.forPodcast(podcastId)
 
     override suspend fun podcastIndexKey(): Pair<String, String>? = core.podcastIndexKey()

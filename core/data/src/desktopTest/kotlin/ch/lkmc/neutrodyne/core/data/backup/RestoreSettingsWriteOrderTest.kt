@@ -36,7 +36,7 @@ import kotlin.test.assertTrue
 /**
  * 01's Sync write ordering at the linked-restore boundary: a local `set`/`reset` records its
  * newer Room intent and then writes DataStore, while [RestoreSettingsMerge]'s linked historical
- * path records its archive intent and then calls `applyRemote`. A local write that interleaves
+ * path records its archive intent and then calls `applyRecorded`. A local write that interleaves
  * between the restore's Room capture and its DataStore write must not leave the newer pending
  * literal beside the older stored value.
  *
@@ -192,6 +192,11 @@ class RestoreSettingsWriteOrderTest {
             db.withWriteTransaction {
                 db.syncOutboxDao().captureIntent("setting", key.name, "v", json)
             }
+            ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin.Uncaptured
+        }
+        port.registerCommittedRecorder { _, _, _ ->
+            ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin
+                .Captured("historical fixture intent")
         }
         val writeLocks = DataStoreSettingsWriteCoordinator()
         val repository =

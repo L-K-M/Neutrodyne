@@ -52,6 +52,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -63,6 +66,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
+import ch.lkmc.neutrodyne.sync.api.SyncActivity as SyncLiveActivity
 
 /** Which unauthenticated call a failure came from, so a 401 maps to the right problem. */
 internal enum class LinkAuthKind { LOGIN, INVITE, LINK }
@@ -102,9 +106,15 @@ class SyncControllerImpl(
     private val build: BuildInfo,
     private val merger: FirstLinkMerger,
     private val effects: SyncApplyEffects,
+    private val settingsCapture: SettingsCapture,
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
+    private val events: SyncEventsClient,
+    private val activity: SyncActivityState,
+    private val noticeBus: SyncNoticeBus,
+    private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
+    private val credentials: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
 ) : SyncController {
@@ -133,7 +143,9 @@ class SyncControllerImpl(
     override val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
-    override val notices: Flow<SyncNotice> = _notices
+
+    /** The controller's own notices plus the pull-side ones the engine posts on the bus. */
+    override val notices: Flow<SyncNotice> = merge(_notices, noticeBus.notices)
 
     /** The running flow's cancellation handle and the answers the flow waits for. */
     private var linkJob: Job? = null
@@ -162,7 +174,22 @@ class SyncControllerImpl(
 
     init {
         scope.launch { refreshStatus() }
+        // 10 Live updates: the status card's activity line follows the round counter and the
+        // stream's connected flag — refresh whenever the derived value could change.
+        scope.launch {
+            combine(activity.count, events.connected) { _, _ -> currentActivity() }
+                .distinctUntilChanged()
+                .collect { refreshStatus() }
+        }
     }
+
+    /** 10 Live updates: an in-flight round outranks the stream's LIVE, which outranks IDLE. */
+    private fun currentActivity(): SyncLiveActivity =
+        when {
+            activity.active -> SyncLiveActivity.SYNCING
+            events.connected.value -> SyncLiveActivity.LIVE
+            else -> SyncLiveActivity.IDLE
+        }
 
     suspend fun refreshStatus() {
         statusMutex.withLock {
@@ -192,6 +219,7 @@ class SyncControllerImpl(
                         username = address.username(),
                         nodeId = state.nodeId.orEmpty(),
                         lastSyncAtMs = state.lastSyncAt,
+                        activity = currentActivity(),
                         problem = lastRoundProblem.value,
                     )
                 }
@@ -417,7 +445,11 @@ class SyncControllerImpl(
         }
         address.serverUrl()?.let { url -> runCatching { client.logout() } }
         db.syncStateDao().unlink()
+        settingsCapture.clear()
         address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
+        // 10 Passwords: the account's staged auth snapshots leave with the link — under the
+        // coordinator, like every credential delete.
+        credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
         // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
         scheduler.onUnlinked()
         lastRoundProblem.value = null
@@ -432,7 +464,9 @@ class SyncControllerImpl(
         return try {
             client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
             db.syncStateDao().unlink()
+            settingsCapture.clear()
             tokenStore.clear(hostOf(url))
+            credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
             scheduler.onUnlinked()
             lastRoundProblem.value = null
             refreshStatus()
@@ -513,9 +547,13 @@ class SyncControllerImpl(
     override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
         address.setSyncPlaybackSettings(enabled)
         flags.syncPlaybackSettings = enabled
-        // 10 Settings capture: turning the switch on applies the values that stayed pending
-        // while it was off (the server's values win, as at the first link). The drain reads
-        // the just-persisted switch, so the disabled state never drains here.
+        // 10 Settings capture: reconcile against the just-persisted gates — turning the switch
+        // on installs the recorder, replays committed intents and captures account-absent keys;
+        // turning it off makes the recorder inert while the baseline listener stays, so a local
+        // edit made while off is still told apart from an unmaterialized intent.
+        settingsCapture.reconcile()
+        // The pending remote values drain only while the switch is on (the server's values win,
+        // as at the first link); the drain reads the just-persisted switch itself.
         if (enabled) effects.drainSettings()
     }
 
@@ -706,6 +744,9 @@ class SyncControllerImpl(
     /** Nothing to combine: the link completes without a merge (both libraries are empty). */
     private suspend fun completeEmptyLink() {
         db.syncStateDao().enableLinked(clock.now())
+        // 10 Settings capture: the link is durable, so the recorder installs before the state
+        // refresh — a local edit between link and install must not escape the outbox.
+        settingsCapture.reconcile()
         linkFlow.linked(accountName.orEmpty(), deviceName())
         scheduler.onLinked()
         refreshStatus()
@@ -720,6 +761,9 @@ class SyncControllerImpl(
                     merger.merge(choice) { phase, done, total -> linkFlow.merging(phase, done, total) }
             ) {
                 is FirstLinkResult.Completed -> {
+                    // 10 Settings capture: install through the same reconcile as the switch —
+                    // the merge left the link durable and any remote values already drained.
+                    settingsCapture.reconcile()
                     linkFlow.linked(accountName.orEmpty(), deviceName())
                     scheduler.onLinked()
                     refreshStatus()
@@ -841,6 +885,7 @@ class SyncControllerImpl(
 
     private suspend fun markRevoked() {
         db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
+        settingsCapture.clear()
         // 10 Scheduling: a revoked token cancels every sync work name, as an unlink does.
         scheduler.onUnlinked()
         refreshStatus()

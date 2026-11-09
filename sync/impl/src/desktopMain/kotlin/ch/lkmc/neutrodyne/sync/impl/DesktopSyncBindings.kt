@@ -22,6 +22,7 @@ import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -100,13 +101,29 @@ class DesktopSyncTriggers
         private var started = false
         private var lastFocusMs: Long? = null
 
+        /**
+         * 10 Live updates' desktop gate: the events stream runs only while the machine is
+         * awake — a suspend closes it and the resume re-opens it (with the lane poke below
+         * covering the pull for whatever happened while asleep).
+         */
+        val awake = MutableStateFlow(true)
+
         /** Starts the power-resume collector once (the initializer calls it). */
         fun start() {
             if (started) return
             started = true
             scope.launch {
                 power.events.collect { event ->
-                    if (event == PowerEvent.Resumed) pokeLane()
+                    when (event) {
+                        PowerEvent.Suspending -> {
+                            awake.value = false
+                        }
+
+                        PowerEvent.Resumed -> {
+                            awake.value = true
+                            pokeLane()
+                        }
+                    }
                 }
             }
         }
@@ -147,11 +164,15 @@ class DesktopSyncSchedulingInitializer
         // Lazy (01 DI rule 7): the scheduler's dependencies reach the database (band 100).
         private val scheduler: Provider<SyncScheduler>,
         private val triggers: Provider<DesktopSyncTriggers>,
+        private val events: Provider<SyncEventsClient>,
     ) : AppInitializer {
         override val order: Int = 210
 
         override suspend fun run() {
             scheduler().start()
             triggers().start()
+            // 10 Live updates: the supervisor takes the awake gate; suspend closes the stream
+            // and resume reconnects it (its reconnect poke runs the catch-up pull).
+            events().start(triggers().awake, SSE_HEARTBEAT_DESKTOP_SECONDS)
         }
     }

@@ -84,6 +84,9 @@ interface DesktopAppGraph {
     /** 10's sync application service (Settings › Sync, the shell banners). */
     val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
 
+    /** 10 Settings capture: the shared port the recorder installs into while linked. */
+    val settingsSyncPort: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+
     /** 10's parked-state release hook `FeedRefresher` calls after each ingest (MS2). */
     val syncIngestHook: ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 

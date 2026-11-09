@@ -165,6 +165,12 @@ internal class SecretStoreCore(
     /** The stored entry for [origin], canonicalised the way [put] stores it. */
     suspend fun get(origin: String): StoredSecret? = published.entries[storedOrigin(origin)]?.stored
 
+    /** Stored origins under [prefix]; waits for the first load like a [get] caller would. */
+    suspend fun originsWithPrefix(prefix: String): Set<String> {
+        awaitLoaded()
+        return published.entries.keys.filterTo(HashSet()) { it.startsWith(prefix) }
+    }
+
     /** The feed credential of [podcastId] — resolved through `podcast.credentialId`, not the URL. */
     suspend fun forPodcast(podcastId: Long): BasicCredentials? {
         val credentialId = podcasts.byId(podcastId)?.credentialId ?: return null

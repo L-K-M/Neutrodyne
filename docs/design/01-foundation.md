@@ -1217,7 +1217,7 @@ Rules:
 
 **Read failures (2026-10-07, review of `main`).** "Reads never throw" now also covers a file that cannot be read: an `IOException` from DataStore — including a corrupt file whose replacement failed, which DataStore rethrows (for example on a full disk) — makes `observe()` emit and `get()` return the key's default, logged at WARN, without writing; the flow then completes and the next collection reads the file again. Programming errors and cancellation still propagate. A failed write on Settings › Appearance shows "Couldn’t save the setting" and leaves the stored value shown.
 
-**Sync write ordering (review 2026-10-06, MS2).** A `SettingsSyncPort` in `:core:domain`, implemented beside `SettingsRepository` in `:core:data`, supplies `localSyncedChanges`, `applyRemote` and registration of 10's suspending local-intent recorder. `set()` and `reset()` of a synced key share a per-key mutex with remote apply. While linked with settings sync on, record the validated literal value and clock in Room before the DataStore write; if recording fails, DataStore stays unchanged. A DataStore failure after that durable intent leaves it pending for recovery. The stream only wakes scheduling; it is not the durability boundary. At startup 10 completes pending remote and local intents before hash reconciliation ([10 Settings capture](10-sync.md#settings-capture), [10 Durable apply effects](10-sync.md#durable-apply-effects)). Stores in `:core:datastore` remain independent of Room and sync implementations; the repository and port coordinate them through domain contracts. Unlinked writes have no recorder or sync-table cost.
+**Sync write ordering (review 2026-10-06, MS2).** A `SettingsSyncPort` in `:core:domain`, implemented beside `SettingsRepository` in `:core:data`, supplies `localSyncedChanges`, `applyRemote` and registration of 10's suspending local-intent recorder. `set()` and `reset()` of a synced key share a per-key mutex with remote apply. While linked with settings sync on, record the validated literal value and clock in Room before the DataStore write; if recording fails, DataStore stays unchanged. A DataStore failure after that durable intent leaves it pending for recovery. The stream only wakes scheduling; it is not the durability boundary. At startup 10 completes pending remote and local intents before hash reconciliation ([10 Settings capture](10-sync.md#settings-capture), [10 Durable apply effects](10-sync.md#durable-apply-effects)). Stores in `:core:datastore` remain independent of Room and sync implementations; they can atomically pair a portable value with a generic opaque write receipt and read both from one strict snapshot. The repository and port interpret that receipt through domain contracts. The live-gated recorder remains installed while linked, including OFF. OFF and unlinked writes persist uncaptured provenance with the value without requiring Room; captured receipts retain their admitting link and complete clock across gate flips and crashes. Ordinary direct writes clear receipts; the typed backup whitelist excludes this internal metadata. Unlinked writes have no recorder or sync-table cost.
 
 ---
 
@@ -1864,7 +1864,7 @@ OkHttp 5.5.0 is the only transport on both JVM targets ([D10](../PLAN.md#3-key-d
 
 ```kotlin
 // :core:common (commonMain) — visible to the island, to :core:network and to callers
-enum class HttpClientKind { FEED, API, IMAGE, MEDIA, DOWNLOAD, YOUTUBE, SYNC }
+enum class HttpClientKind { FEED, API, IMAGE, MEDIA, DOWNLOAD, YOUTUBE, SYNC, SYNC_STREAM }
 
 // :core:network:okhttp (JVM island)
 /** Credential-free clients; contributed to AppScope and to YtxScope (the :ytx graph builds nothing else). */
@@ -1891,6 +1891,8 @@ class CoreClients @Inject constructor(
     // Guard mode SYNC: passes local addresses only while LocalNetworkAccess.syncAllowed (10's LocalNetworkPermissionGate);
     // no AuthInterceptor: SyncClient adds the device token per request (10)
     val sync: OkHttpClient = coreBuilder(LocalNetworkGuard.Mode.SYNC).callTimeout(60, TimeUnit.SECONDS).build()
+    // 10's events stream: SYNC derived with no read/call timeout (MS3 note 2026-11-22: implemented).
+    val syncStream: OkHttpClient = sync.newBuilder().readTimeout(0, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build()
 }
 
 @SingleIn(AppScope::class)
@@ -1904,7 +1906,7 @@ class NetworkClients @Inject constructor(private val coreClients: CoreClients, a
     val download = base.newBuilder().readTimeout(60, TimeUnit.SECONDS).addInterceptor(IdentityEncodingInterceptor).build()
     operator fun get(kind: HttpClientKind): OkHttpClient = when (kind) {
         FEED -> feed; API -> api; IMAGE -> image; MEDIA -> media; DOWNLOAD -> download
-        YOUTUBE -> coreClients.youtube; SYNC -> coreClients.sync }
+        YOUTUBE -> coreClients.youtube; SYNC -> coreClients.sync; SYNC_STREAM -> coreClients.syncStream }
 }
 /** :ytx per-call IP-family pinning (D74): same pool and dispatcher; every host resolves to [family]'s records only
  *  (all records when it has none). Cached per family. */

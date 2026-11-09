@@ -6,6 +6,9 @@
   <string name="sync_continue">Weiter</string>
   <string name="sync_linked">Mit %1$s verbunden</string>
   <string name="sync_now">Jetzt synchronisieren</string>
+  <string name="sync_activity_idle">Live-Updates inaktiv</string>
+  <string name="sync_activity_syncing">Synchronisierung läuft…</string>
+  <string name="sync_activity_live">Live-Updates verbunden</string>
   <string name="sync_what_syncs">Synchronisiert: Abos, Gruppen, Wiedergabestatus, Positionen, Favoriten, Warteschlange und synchronisierte Einstellungen. Nie synchronisiert: Downloads, Bilder und Feed-Inhalte.</string>
   <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>

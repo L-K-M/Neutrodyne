@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
@@ -43,6 +44,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import okio.Path.Companion.toPath
 import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -346,6 +348,7 @@ class SyncSchedulingTest {
                         override suspend fun onDeleted(uuid: String) = Unit
                     },
                 sharePasswords = { false },
+                coordinator = FakeCredentialCommitCoordinator(),
             )
         return SyncEngine(
             db = db,
@@ -358,7 +361,18 @@ class SyncSchedulingTest {
             tokens = tokens,
             activity = SyncActivityState(),
             gate = FakeLocalNetworkGate(),
-            effects = SyncApplyEffects(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
+            effects =
+                SyncApplyEffects(
+                    db,
+                    FakeSettingsSyncPort(),
+                    TestSettingsWriteCoordinator(),
+                    { true },
+                    secrets,
+                    FakeCredentialCommitCoordinator(),
+                    "__absent_cache__".toPath(),
+                ),
+            capture = SettingsCapture(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
+            notices = SyncNoticeBus(),
         )
     }
 

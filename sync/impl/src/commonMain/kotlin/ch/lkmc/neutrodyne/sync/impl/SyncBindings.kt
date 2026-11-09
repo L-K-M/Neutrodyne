@@ -19,9 +19,11 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import okio.Path.Companion.toPath
 
 /** The sync engine's graph bindings (10 Client sync engine, 01 Dependency injection). */
 @ContributesTo(AppScope::class)
@@ -71,6 +73,7 @@ object SyncBindings {
         syncIngestHook: SyncIngestHook,
         channelSync: GroupChannelSync,
         flags: SyncFlags,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): SyncApplier =
         SyncApplier(
             db = db,
@@ -81,6 +84,7 @@ object SyncBindings {
             syncIngestHook = syncIngestHook,
             channelSync = channelSync,
             sharePasswords = { flags.sharePasswords },
+            coordinator = coordinator,
         )
 
     @Provides
@@ -97,6 +101,8 @@ object SyncBindings {
         activity: SyncActivityState,
         gate: LocalNetworkGate,
         effects: SyncApplyEffects,
+        capture: SettingsCapture,
+        notices: SyncNoticeBus,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -110,6 +116,8 @@ object SyncBindings {
             activity = activity,
             gate = gate,
             effects = effects,
+            capture = capture,
+            notices = notices,
         )
 
     /**
@@ -127,6 +135,7 @@ object SyncBindings {
         clock: Clock,
         @ApplicationScope scope: CoroutineScope,
         hooks: SyncScheduleHooks,
+        events: Provider<SyncEventsClient>,
     ): SyncScheduler =
         SyncScheduler(
             db = db,
@@ -136,6 +145,44 @@ object SyncBindings {
             clock = clock,
             scope = scope,
             hooks = hooks,
+            // Lazy: the events client needs this scheduler for its remote-changed poke, so a
+            // direct constructor edge would cycle. The scheduler only calls the callback on
+            // link/unlink/revoke — long after construction.
+            linkStateChanged = { events().reevaluate() },
+        )
+
+    /** 10 Live updates: the SSE transport rides the `SYNC_STREAM` client inside. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEventTransport(clients: NeutrodyneHttpClients): SyncEventTransport = KtorSyncEventTransport(clients)
+
+    /**
+     * 10 Live updates: the events supervisor. Its `discover` reuses [SyncClient]'s
+     * unauthenticated discovery call, and its callbacks feed the scheduler — the lazy edge
+     * above keeps the pair out of a construction cycle.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEventsClient(
+        db: NeutrodyneDatabase,
+        transport: SyncEventTransport,
+        client: SyncClient,
+        address: SyncServerAddress,
+        tokens: SyncTokenStore,
+        network: NetworkMonitor,
+        @ApplicationScope scope: CoroutineScope,
+        scheduler: SyncScheduler,
+    ): SyncEventsClient =
+        SyncEventsClient(
+            db = db,
+            transport = transport,
+            discover = { url -> client.discover(url) },
+            address = address,
+            tokens = tokens,
+            network = network,
+            scope = scope,
+            onRemoteChanged = { scheduler.onRemoteChanged() },
+            onRevoked = { scheduler.onUnlinked() },
         )
 
     /**
@@ -153,7 +200,34 @@ object SyncBindings {
         settings: SettingsSyncPort,
         writeLocks: SettingsWriteCoordinator,
         address: SyncServerAddress,
-    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks, { address.syncPlaybackSettings() })
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+        storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db,
+            settings,
+            writeLocks,
+            { address.syncPlaybackSettings() },
+            secrets,
+            coordinator,
+            storagePaths.cacheDir.toPath(),
+        )
+
+    /**
+     * 10 Settings capture: the recorder and the materialization baseline the shared port
+     * carries. [SettingsCapture.reconcile] reads the persisted link and switch live at every
+     * lifecycle edge — the start drain, the link's completion, both switch edges, unlink and
+     * revocation — never `SyncFlags`' late cache.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun settingsCapture(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+        writeLocks: SettingsWriteCoordinator,
+        address: SyncServerAddress,
+    ): SettingsCapture = SettingsCapture(db, settings, writeLocks, { address.syncPlaybackSettings() })
 
     /**
      * The first-link merge; the controller drives it from the link state machine. The
@@ -171,6 +245,8 @@ object SyncBindings {
         effects: SyncApplyEffects,
         clock: Clock,
         activity: SyncActivityState,
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -182,5 +258,7 @@ object SyncBindings {
             effects = effects,
             clock = clock,
             activity = activity,
+            secrets = secrets,
+            coordinator = coordinator,
         )
 }

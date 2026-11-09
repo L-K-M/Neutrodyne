@@ -7,8 +7,10 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncClockEntity
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
@@ -17,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -40,6 +43,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -111,7 +115,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
 
                 db.withWriteTransaction {
                     port.recordLocal(PlaybackSettingKeys.SKIP_BACK_MS, 20_000L)
@@ -130,7 +134,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", remoteClock)
@@ -171,7 +175,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", remoteClock)
@@ -212,7 +216,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", remoteClock)
@@ -260,7 +264,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", remoteClock)
@@ -306,7 +310,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = StoringSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", remoteClock)
@@ -364,7 +368,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = FakeSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val clock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", clock)
@@ -448,7 +452,7 @@ abstract class SyncApplyEffectsTestBase {
             try {
                 link(db)
                 val port = StoringSettingsSyncPort()
-                SettingsCapture(db, port).install()
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.install()
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 val pendingClock = Hlc.of(1_577_836_800_000L, 1, remote)
                 seedPending(db, key, "15000", pendingClock)
@@ -680,10 +684,15 @@ abstract class SyncApplyEffectsTestBase {
                 lockHeld.await()
                 val drain =
                     launch {
-                        effects(db, port, coordinator) {
-                            gateRead.complete(Unit)
-                            enabled
-                        }.drainSettings()
+                        effects(
+                            db,
+                            port,
+                            coordinator,
+                            settingsSyncEnabled = {
+                                gateRead.complete(Unit)
+                                enabled
+                            },
+                        ).drainSettings()
                     }
                 gateRead.await()
                 enabled = false
@@ -718,7 +727,7 @@ abstract class SyncApplyEffectsTestBase {
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 applier.applyPage(settingPage(key.name, JsonPrimitive(15000L)), roundId = now)
 
-                effects(db, port).drainAtStart()
+                effects(db, port).drainAtStart(capture(db, port))
                 assertEquals(1, port.applied.size)
                 assertNull(pendingSetting(db, key.name))
 
@@ -728,7 +737,7 @@ abstract class SyncApplyEffectsTestBase {
                 seedPending(db, key, "20000", secondClock)
                 db.withWriteTransaction { db.syncStateDao().unlink() }
 
-                effects(db, port).drainAtStart()
+                effects(db, port).drainAtStart(capture(db, port))
                 assertEquals(1, port.applied.size, "an unlinked device must not drain old account effects")
                 assertTrue(db.syncClockDao().all().isEmpty())
             } finally {
@@ -752,7 +761,7 @@ abstract class SyncApplyEffectsTestBase {
                 val key = PlaybackSettingKeys.SKIP_BACK_MS
                 seedPending(db, key, "15000", Hlc.of(now, 1, remote))
 
-                effects(db, port).drainAtStart()
+                effects(db, port).drainAtStart(capture(db, port))
 
                 assertTrue(port.applied.isEmpty(), "the start drain must not run while unlinked")
                 assertEquals("15000", pendingSetting(db, key.name))
@@ -784,6 +793,7 @@ abstract class SyncApplyEffectsTestBase {
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
             sharePasswords = { false },
+            coordinator = FakeCredentialCommitCoordinator(),
         )
 
     /** The drainer fixture: the persisted-switch gate defaults to on, as the graph wires it. */
@@ -793,13 +803,39 @@ abstract class SyncApplyEffectsTestBase {
         coordinator: ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator =
             TestSettingsWriteCoordinator(),
         settingsSyncEnabled: suspend () -> Boolean = { true },
-    ): SyncApplyEffects = SyncApplyEffects(db, port, coordinator, settingsSyncEnabled)
+        secrets: SecretStore = FakeSecretStore(),
+        credentials: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db,
+            port,
+            coordinator,
+            settingsSyncEnabled,
+            secrets,
+            credentials,
+            "__absent_cache__".toPath(),
+        )
+
+    /** The capture fixture: the same live-gate shape the graph wires. */
+    private fun capture(
+        db: NeutrodyneDatabase,
+        port: SettingsSyncPort,
+        coordinator: SettingsWriteCoordinator = TestSettingsWriteCoordinator(),
+        settingsSyncEnabled: suspend () -> Boolean = { true },
+    ): SettingsCapture = SettingsCapture(db, port, coordinator, settingsSyncEnabled)
 
     private suspend fun link(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
         db.withWriteTransaction {
             db
                 .syncStateDao()
-                .upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001", hlc = 1L shl 16))
+                .upsert(
+                    SyncStateEntity(
+                        enabled = true,
+                        nodeId = "0000000000000001",
+                        hlc = 1L shl 16,
+                        linkedAt = 1L,
+                    ),
+                )
         }
     }
 
