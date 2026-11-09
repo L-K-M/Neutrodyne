@@ -358,6 +358,7 @@ class SyncSchedulingTest {
             tokens = tokens,
             activity = SyncActivityState(),
             gate = FakeLocalNetworkGate(),
+            effects = SyncApplyEffects(db, FakeSettingsSyncPort(), TestSettingsWriteCoordinator()) { true },
         )
     }
 
