@@ -705,9 +705,10 @@ internal class AndroidServiceBridge(
     // move a playing player or seek a wrong item.
     private suspend fun applyPausedPickup(episodeId: Long?) {
         if (episodeId == null || player.isPlaying || player.episodeIdOrNull() != episodeId) return
+        val decidePickup = tracker.capturePausedPickup(episodeId) ?: return
         val stored = ports.positions.observe(episodeId).first() ?: return
         if (player.isPlaying || player.episodeIdOrNull() != episodeId) return
-        val pickup = tracker.pickupPositionMs(episodeId, stored.positionMs) ?: return
+        val pickup = decidePickup(stored.positionMs) ?: return
         tracker.coreSeek { player.seekTo(pickup) }
         tracker.startPositionApplied(pickup)
     }

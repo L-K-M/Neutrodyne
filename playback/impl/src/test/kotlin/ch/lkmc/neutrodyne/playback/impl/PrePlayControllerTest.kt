@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.PrePlaySync
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.core.SeekOrigin
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CancellationException
@@ -30,6 +31,7 @@ import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -198,6 +200,45 @@ class PrePlayControllerTest {
                 assertEquals(0, pulls)
                 pumpUntil { player.currentPosition >= 45_000L }
                 assertTrue(player.currentPosition < 50_000L, "picked-up position ${player.currentPosition}")
+            } finally {
+                connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun aQueuedOwnFlushDuringTheReadNeverRewindsTheResume() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent(positionMs = 12_000)
+            val (service, connection, controller) = bound(h)
+            try {
+                h.run { activate(service.get(), h).await() }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount == 1 && player.currentPosition == 12_000L }
+                player.pause()
+                pumpUntil { !player.isPlaying }
+
+                // The resume's stored-row read snapshots the committed 12 s row but parks
+                // before delivery; a queued own seek flush then commits 40 s and moves the
+                // saver baseline. The stale emission must not drive the pickup seek.
+                h.pickupReadEntered = CompletableDeferred()
+                h.pickupReadGate = CompletableDeferred()
+                val start = h.scope.async { controller.play(PlayOrigin.SYSTEM) }
+                pumpUntil { h.pickupReadEntered.isCompleted }
+
+                // The queued own flush commits 40 s and moves the saver baseline.
+                h.run { h.saver.onSeek(40_000, null, SeekOrigin.USER) }
+                pumpUntil {
+                    h.positions.positions.value[1]
+                        ?.positionMs == 40_000L
+                }
+                h.pickupReadGate?.complete(Unit)
+                pumpUntil { start.isCompleted }
+                assertEquals(PlayResult.Started, h.run { start.await() })
+
+                // The parked 12 s snapshot must not drive the pickup: the baseline still
+                // reflects the own 40 s write, so a row ~40.5 s is unchanged for the saver.
+                assertNull(h.saver.pickupPositionMs(1, 40_500))
             } finally {
                 connection.controller?.release()
                 service.destroy()

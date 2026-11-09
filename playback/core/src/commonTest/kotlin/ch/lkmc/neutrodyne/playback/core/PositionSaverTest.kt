@@ -35,6 +35,46 @@ class PositionSaverTest {
         saver.startPositionApplied(0)
     }
 
+    @Test fun aPausedPickupUsesItsEntryBaselineWhenNothingChanges() {
+        load()
+        saver.startPositionApplied(12_000)
+        val decide = requireNotNull(saver.capturePausedPickup(1))
+        assertNull(decide(12_500))
+        assertEquals(45_000, decide(45_000))
+    }
+
+    @Test fun anOwnWriteInvalidatesAParkedPickupEvenAtTheSamePosition() =
+        runTest {
+            load()
+            saver.startPositionApplied(12_000)
+            val decide = requireNotNull(saver.capturePausedPickup(1))
+            assertEquals(PositionSaveResult.Saved, saver.onPause(12_000, null))
+            assertNull(decide(45_000))
+        }
+
+    @Test fun reloadingTheSameItemInvalidatesItsPreviousPickup() {
+        load()
+        saver.startPositionApplied(12_000)
+        val decide = requireNotNull(saver.capturePausedPickup(1))
+        saver.clear()
+        saver.load(1, 2000, PositionSource.STREAM)
+        saver.startPositionApplied(12_000)
+        assertNull(decide(45_000))
+    }
+
+    @Test fun aResetOrAppliedSeekInvalidatesAParkedPickup() =
+        runTest {
+            load()
+            saver.startPositionApplied(12_000)
+            val beforeReset = requireNotNull(saver.capturePausedPickup(1))
+            assertEquals(PositionSaveResult.Saved, saver.onSeek(0, null, SeekOrigin.USER))
+            assertNull(beforeReset(45_000))
+
+            val beforeSeek = requireNotNull(saver.capturePausedPickup(1))
+            saver.onSeek(20_000, null, SeekOrigin.CORE)
+            assertNull(beforeSeek(45_000))
+        }
+
     @Test fun ticksSaveEveryFiveSecondsOnlyWhileAdvancing() =
         runTest {
             load()

@@ -91,11 +91,8 @@ internal class PositionTracker(
         if (player?.isPlaying == true) onIsPlayingChanged(true)
     }
 
-    /** 06's paused-item pickup: a stored row outside this player's last write/apply wins. */
-    fun pickupPositionMs(
-        episodeId: Long,
-        storedPositionMs: Long,
-    ): Long? = saver.pickupPositionMs(episodeId, storedPositionMs)
+    /** Capture before reading so a queued own save cannot turn an old row into a pickup. */
+    fun capturePausedPickup(episodeId: Long): ((Long) -> Long?)? = saver.capturePausedPickup(episodeId)
 
     fun clear() {
         loadedId = null

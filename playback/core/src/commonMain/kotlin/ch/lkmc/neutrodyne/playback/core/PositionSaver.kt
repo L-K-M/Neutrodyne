@@ -52,7 +52,14 @@ class PositionSaver(
         var lastSavedElapsed: Long,
         /** 06's paused-item pickup baseline: the last position this saver wrote or applied. */
         var baselinePositionMs: Long = -1L,
-    )
+    ) {
+        var baselineRevision: Long = 0L
+
+        fun applyBaseline(positionMs: Long) {
+            baselinePositionMs = positionMs
+            baselineRevision++
+        }
+    }
 
     private var current: Current? = null
 
@@ -71,7 +78,7 @@ class PositionSaver(
     fun startPositionApplied(positionMs: Long) {
         current?.let {
             it.ready = true
-            it.baselinePositionMs = positionMs
+            it.applyBaseline(positionMs)
         }
     }
 
@@ -84,13 +91,26 @@ class PositionSaver(
     fun pickupPositionMs(
         episodeId: Long,
         storedPositionMs: Long,
-    ): Long? {
+    ): Long? = capturePausedPickup(episodeId)?.invoke(storedPositionMs)
+
+    /**
+     * Captures the pickup decision before a suspending row read. A save, seek, reset or
+     * replacement during that read invalidates it, even if a write saved the same value.
+     * The caller still owns the player's item, intent and playing-state checks.
+     */
+    fun capturePausedPickup(episodeId: Long): ((Long) -> Long?)? {
         val item = current?.takeIf { it.episodeId == episodeId } ?: return null
         val baseline = item.baselinePositionMs
-        return if (baseline >= 0 && abs(storedPositionMs - baseline) > PAUSED_PICKUP_EPSILON_MS) {
-            storedPositionMs
-        } else {
-            null
+        if (baseline < 0) return null
+        val revision = item.baselineRevision
+        return { storedPositionMs ->
+            if (current === item && item.baselineRevision == revision &&
+                abs(storedPositionMs - baseline) > PAUSED_PICKUP_EPSILON_MS
+            ) {
+                storedPositionMs
+            } else {
+                null
+            }
         }
     }
 
@@ -143,7 +163,7 @@ class PositionSaver(
         require(positionMs >= 0)
         val item = current ?: return PositionSaveResult.Skipped
         if (origin == SeekOrigin.CORE) {
-            item.baselinePositionMs = positionMs
+            item.applyBaseline(positionMs)
             return PositionSaveResult.Skipped
         }
         if (!item.ready || !item.allowed()) return PositionSaveResult.Skipped
@@ -192,8 +212,7 @@ class PositionSaver(
                     capture.allowed,
                 )
             if (saved) {
-                current?.takeIf { it.episodeId == departure.episodeId }?.baselinePositionMs =
-                    departure.positionMs
+                current?.takeIf { it.episodeId == departure.episodeId }?.applyBaseline(departure.positionMs)
                 PositionSaveResult.Saved
             } else {
                 PositionSaveResult.Skipped
@@ -220,7 +239,7 @@ class PositionSaver(
             }
             item.resetPending = false
             item.lastSavedElapsed = clock.elapsedRealtime()
-            item.baselinePositionMs = 0L
+            item.applyBaseline(0L)
             PositionSaveResult.Saved
         }
     }
@@ -239,7 +258,7 @@ class PositionSaver(
         val result = flush(capture)
         if (result == PositionSaveResult.Saved && current === item) {
             item?.lastSavedElapsed = clock.elapsedRealtime()
-            item?.baselinePositionMs = positionMs
+            item?.applyBaseline(positionMs)
         }
         return result
     }
