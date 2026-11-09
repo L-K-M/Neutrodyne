@@ -2,6 +2,9 @@
 package ch.lkmc.neutrodyne.playback.core
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.domain.PositionWriteGate
+import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.Flow
@@ -23,9 +26,11 @@ import kotlinx.coroutines.flow.update
  * Entries count, because an apply transaction that reported a mark can still roll back: its
  * [release] then undoes only its own contribution, never a freeze a committed transaction owns.
  */
+@ContributesBinding(AppScope::class)
+@ExposeImplBinding
 @SingleIn(AppScope::class)
 @Inject
-class RemotePlayedGuard {
+class RemotePlayedGuard : PositionWriteGate {
     private val marks = MutableStateFlow<Map<Long, Int>>(emptyMap())
 
     /** The currently frozen episode ids. */
@@ -34,7 +39,7 @@ class RemotePlayedGuard {
     fun isFrozen(episodeId: Long): Boolean = episodeId in marks.value
 
     /** The save gate read inside each position transaction: `allowed()` must stay side-effect free. */
-    fun allowsSaves(episodeId: Long): Boolean = !isFrozen(episodeId)
+    override fun allowsSaves(episodeId: Long): Boolean = !isFrozen(episodeId)
 
     /** 10's apply coroutine calls this inside the applying transaction; callable from any thread. */
     fun freeze(episodeId: Long) {

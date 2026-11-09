@@ -94,6 +94,31 @@ class AndroidAppGraphTest {
     }
 
     @Test
+    fun thePlaybackFreezeGuardsTheGraphPositionWriter() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            val podcastId = db.podcastDao().insertPodcast(podcastEntity(feedUrl = "https://gate.example/feed"))
+            val episodeId =
+                db
+                    .ingestDao()
+                    .insertEpisodes(
+                        listOf(episodeEntity(podcastId = podcastId, identityKey = "g:gate")),
+                    ).single()
+            val positions = graph.positionStore()
+            assertThat(
+                positions
+                    .save(episodeId, 20_000, 100_000, ch.lkmc.neutrodyne.core.model.PositionSource.STREAM, 100, 1, {
+                        true
+                    }),
+            ).isTrue()
+            val before = db.positionDao().byEpisode(episodeId)
+            graph.playbackSyncPort.onRemoteMarkedPlayed(episodeId, "Other device")
+            assertThat(positions.reset(episodeId, 200)).isFalse()
+            assertThat(db.positionDao().byEpisode(episodeId)).isEqualTo(before)
+        }
+
+    @Test
     fun downloadComponentsInjectBeforeDatabaseOpen() {
         graph.inject(
             ch.lkmc.neutrodyne.download.impl

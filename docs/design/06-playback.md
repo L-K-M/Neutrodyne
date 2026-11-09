@@ -198,9 +198,9 @@ interface PositionStore {
     fun observe(episodeId: Long): Flow<StoredPosition?>                 // one row; 02's PositionDao.observeFor
     suspend fun save(episodeId: Long, positionMs: Long, durationMs: Long?, source: PositionSource, now: Long,
                      pinStartedAt: Long, allowed: () -> Boolean): Boolean   // allowed() is read inside the transaction
-    suspend fun reset(episodeId: Long, now: Long)                       // explicit reset: syncs as pos with reset = true
-    suspend fun markPlayed(episodeId: Long, now: Long)                  // 02's mark-played chain (reset, Up next removal)
-    suspend fun markUnplayedForReplay(episodeId: Long, now: Long)       // replaying a played episode (Start position)
+    suspend fun reset(episodeId: Long, now: Long): Boolean              // explicit reset; false if the live gate rejects it
+    suspend fun markPlayed(episodeId: Long, now: Long): Boolean         // atomic mark-played chain; false if frozen
+    suspend fun markUnplayedForReplay(episodeId: Long, now: Long): Boolean // first actual replay; false if frozen
     suspend fun setMeasuredDuration(episodeId: Long, durationMs: Long)
 }
 data class StoredPosition(val episodeId: Long, val positionMs: Long, val updatedAt: Long, val playedAt: Long?)
@@ -998,7 +998,7 @@ Guards (N1: at most 5 s lost on a process kill; never 0 over non-zero):
 2. The start position is applied before playback of an item proceeds (`setMediaItems(…, startPositionMs)` or `seekTo` inside `onMediaItemTransition`, both on main before the next tick), so a tick never records a few hundred milliseconds over a saved 45 minutes.
 3. Played-after-start guard: inside the save transaction, if `episode_state.playedAt ≥ pinStartedAt` (the episode was marked played by another path after this playback began) the position is not written. 02's `updateGuarded` parameter `pinStartedAt` is bound to the item's `currentSince` ([edge cases](#queueprojector)), not to the resolver pin's creation time (a pin can be created while pre-buffering).
 4. A failed write (`SQLITE_FULL`) is retried on the next tick.
-5. Remote freeze (MS2): no save is written for an item in `RemotePlayedGuard`; `PositionWriter` evaluates `allowed()` inside the transaction, so a save already queued when sync applies a remote mark-played cannot land after it ([Sync interplay](#sync-interplay) rule 3). 3 covers the same case when the clocks agree; 5 does not depend on the remote device's `playedAt`.
+5. Remote freeze (MS2): no save is written for an item in `RemotePlayedGuard`. Both app graphs bind that same guard as the domain `PositionWriteGate`; `PositionWriter` and `SessionWriter` check it inside the writer transaction, including resets, replay clears and captured departures. A queued write cannot land after sync freezes the item ([Sync interplay](#sync-interplay) rule 3), and a rejected reset or replay clear returns false. Regular position saves also evaluate their caller's `allowed()` there. 3 covers the same case when the clocks agree; 5 does not depend on the remote device's `playedAt`.
 6. Paused-item pickup (MS2): before a paused, loaded item resumes, a stored position that differs by more than 1 s from the last one `PositionSaver` wrote or applied (written by sync or a restore meanwhile) is sought first, so a stale in-memory position never overwrites a newer synced one ([Sync interplay](#sync-interplay) rule 4).
 
 What each save means for sync (all through the capture triggers, [02 Sync capture triggers](02-data-model.md#sync-capture-triggers)): every save updates the outbox's single `pos` row for the episode; only `reset` and the mark-played chain carry `reset: true`; 10 pushes positions on the `PAUSED`, `STOPPED` and `TRANSITIONED` events and at most every 60 s while playing ([Sync interplay](#sync-interplay)).

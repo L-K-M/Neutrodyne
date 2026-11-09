@@ -141,23 +141,23 @@ interface PositionStore {
         allowed: () -> Boolean,
     ): Boolean
 
-    /** Explicit zero clears started status while preserving played status. */
+    /** Explicit zero clears started status; false means the live write gate rejected it. */
     suspend fun reset(
         episodeId: Long,
         now: Long,
-    )
+    ): Boolean
 
-    /** Atomic mark-played chain: played timestamp, position reset, remove from Up next. */
+    /** Atomic played timestamp, position reset and Up next removal; false means the live gate rejected it. */
     suspend fun markPlayed(
         episodeId: Long,
         now: Long,
-    )
+    ): Boolean
 
-    /** Clear played/started at first actual replay, not at prepare or buffering. */
+    /** Clear played/started at first actual replay; false means the live gate rejected it. */
     suspend fun markUnplayedForReplay(
         episodeId: Long,
         now: Long,
-    )
+    ): Boolean
 }
 
 data class StoredEpisodeMarks(

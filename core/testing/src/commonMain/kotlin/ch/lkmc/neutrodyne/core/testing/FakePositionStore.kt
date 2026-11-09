@@ -89,33 +89,36 @@ class FakePositionStore : PositionStore {
     override suspend fun reset(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         record(Call(Operation.RESET, episodeId, now))
-        val old = positions.value[episodeId] ?: return
+        val old = positions.value[episodeId] ?: return true
         positions.value = positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now))
+        return true
     }
 
     override suspend fun markPlayed(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         record(Call(Operation.PLAYED, episodeId, now))
         val old = positions.value[episodeId]
         if (old == null) {
             playedWithoutPosition.getOrPut(episodeId) { now }
-            return
+            return true
         }
         positions.value =
             positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now, playedAt = now, startedAt = null))
+        return true
     }
 
     override suspend fun markUnplayedForReplay(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         record(Call(Operation.REPLAY, episodeId, now))
         playedWithoutPosition.remove(episodeId)
-        val old = positions.value[episodeId] ?: return
+        val old = positions.value[episodeId] ?: return true
         positions.value = positions.value + (episodeId to old.copy(playedAt = null))
+        return true
     }
 }
