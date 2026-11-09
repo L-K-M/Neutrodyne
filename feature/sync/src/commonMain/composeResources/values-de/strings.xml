@@ -88,6 +88,9 @@
   <string name="sync_error_device_gone">Dieses Gerät wurde bereits entfernt.</string>
 
   <!-- Linked settings rows (08 Settings › Sync "Rows while linked"). -->
+  <string name="sync_header_this_device">Dieses Gerät</string>
+  <string name="sync_name_row">Name</string>
+  <string name="sync_rename_this_device">Dieses Gerät umbenennen</string>
   <string name="sync_link_another">Weiteres Gerät verknüpfen</string>
   <string name="sync_link_another_hint">Bestätige ein neues Telefon oder einen neuen Computer mit dem angezeigten Code</string>
   <string name="sync_devices">Geräte</string>
@@ -95,6 +98,15 @@
     <item quantity="one">%1$d verknüpft</item>
     <item quantity="other">%1$d verknüpft</item>
   </plurals>
+  <string name="sync_header_what_syncs">Was synchronisiert wird</string>
+  <string name="sync_playback_settings">Wiedergabeeinstellungen synchronisieren</string>
+  <string name="sync_playback_settings_hint">Tempo, Stille überspringen, Sprungintervalle und ähnliche Vorgaben folgen dir zwischen deinen Geräten</string>
+  <string name="sync_share_passwords">Feed-Passwörter teilen</string>
+  <string name="sync_share_passwords_hint">Deine anderen Geräte können damit private Feeds mit Passwort aktualisieren. Bereits geteilte Passwörter bleiben auf dem Server, bis du ein Feed-Passwort änderst oder deine Daten dort löschst.</string>
+  <string name="sync_share_passwords_title">Feed-Passwörter teilen?</string>
+  <string name="sync_share_passwords_body">Die Passwörter deiner privaten Feeds werden auf %1$s lesbar gespeichert, damit deine anderen Geräte sie verwenden können. Wer die Daten des Servers lesen kann, kann sie lesen.</string>
+  <string name="sync_share_passwords_confirm">Teilen</string>
+  <string name="sync_pref_save_failed">Die Einstellung konnte nicht gespeichert werden</string>
 
   <!-- "Link another device" sheet (08 Link another device). -->
   <string name="sync_approve_code_label">Code auf dem neuen Gerät</string>
