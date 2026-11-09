@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.youtube
 
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.IpFamily
 import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.desktop.smoke.SmokeMode
@@ -134,6 +136,7 @@ class PackagedEngineProofTest {
     private fun proof(
         resources: File?,
         located: PythonRuntime? = null,
+        proofDatabase: () -> NeutrodyneDatabase = { error("the proof must not reach the media phase") },
     ): PackagedEngineProof {
         val dirs = tempAppDirs("nd-proof")
         return PackagedEngineProof(
@@ -147,13 +150,28 @@ class PackagedEngineProofTest {
             capabilities = unexercisedCapabilities,
             context = { YtxContext("en", "US", "test", "V4") },
             clock = DesktopClock,
-            database = { error("the proof must not reach the media phase") },
+            database = proofDatabase,
             playbackController = { error("the proof must not reach the media phase") },
             playbackStateSource = { error("the proof must not reach the media phase") },
             downloadController = { error("the proof must not reach the media phase") },
             localMediaIndex = { error("the proof must not reach the media phase") },
         )
     }
+
+    @Test
+    fun mediaFixtureNeverBecomesDueForRefreshOrPaging() =
+        runBlocking {
+            val database = TestDb.inMemory()
+            try {
+                val seeded = proof(null, proofDatabase = { database }).seedRecordedItem()
+
+                assertThat(database.episodeDao().byId(seeded[1])?.externalMediaId).isEqualTo("aaaaaaaaaaA")
+                assertThat(database.podcastDao().dueForRefresh(Long.MAX_VALUE - 1, scopeAll = true)).isEmpty()
+                assertThat(database.podcastDao().pagingPending(scopeAll = true)).isEmpty()
+            } finally {
+                database.close()
+            }
+        }
 
     private fun scenarioDir(): File =
         tempAppDirs("nd-scenario").data.toFile().parentFile!!.resolve("scenario").apply {
@@ -272,8 +290,7 @@ class PackagedEngineProofTest {
                 "bytes=0-10485759",
                 "bytes=10485760-20971519",
                 "bytes=20971520-22020218",
-            )
-            .inOrder()
+            ).inOrder()
         assertThat(PackagedEngineProof.expectedChunkRanges(CHUNK)).containsExactly("bytes=0-10485759")
         assertThat(PackagedEngineProof.expectedChunkRanges(5)).containsExactly("bytes=0-4")
         assertThat(PackagedEngineProof.expectedChunkRanges(CHUNK + 1))
@@ -344,21 +361,24 @@ class PackagedEngineProofTest {
     fun `downloadChunks rejects a non-206 answer and a short body`() {
         val media = syntheticMedia(MEDIA_TOTAL)
         val chunks = goodChunks(media, 0).toMutableList()
-        val notPartial = failure {
-            PackagedEngineProof.downloadChunks(chunks.map { it.copy(status = 200) }, media, 0)
-        }
+        val notPartial =
+            failure {
+                PackagedEngineProof.downloadChunks(chunks.map { it.copy(status = 200) }, media, 0)
+            }
         assertThat(notPartial).contains("206")
-        val short = failure {
-            PackagedEngineProof.downloadChunks(
-                chunks.map { it.copy(bytesWritten = it.bytesWritten - 1) },
-                media,
-                0,
-            )
-        }
+        val short =
+            failure {
+                PackagedEngineProof.downloadChunks(
+                    chunks.map { it.copy(bytesWritten = it.bytesWritten - 1) },
+                    media,
+                    0,
+                )
+            }
         assertThat(short).contains("bytes")
-        val wrongDigest = failure {
-            PackagedEngineProof.downloadChunks(chunks.map { it.copy(bodySha256 = "0".repeat(64)) }, media, 0)
-        }
+        val wrongDigest =
+            failure {
+                PackagedEngineProof.downloadChunks(chunks.map { it.copy(bodySha256 = "0".repeat(64)) }, media, 0)
+            }
         assertThat(wrongDigest).contains("digest")
     }
 
