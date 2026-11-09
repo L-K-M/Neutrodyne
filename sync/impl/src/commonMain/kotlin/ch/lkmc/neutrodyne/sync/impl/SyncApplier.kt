@@ -60,6 +60,14 @@ data class SyncApplyResult(
     val invalid: Int,
     /** Podcasts this page flagged `needsCredentials` — one `FeedPasswordNeeded` per pull. */
     val feedsNeedingCredentials: List<Long> = emptyList(),
+    /** Remote played marks projected onto the loaded item by this committed transaction. */
+    val remotePlayed: List<RemotePlayedMark> = emptyList(),
+)
+
+/** A remote `played` the committed page projected onto the loaded item (10 Remote played marks). */
+data class RemotePlayedMark(
+    val episodeId: Long,
+    val by: String,
 )
 
 /** The parked `identityKey` of a membership row: `@member:<groupUuid>` (10 Parked state). */
@@ -90,6 +98,8 @@ class SyncApplier(
     private val channelSync: GroupChannelSync,
     private val sharePasswords: () -> Boolean,
     private val coordinator: CredentialCommitCoordinator,
+    private val notices: SyncNoticeBus,
+    private val deviceNames: DeviceNames,
 ) {
     private val clockStore = SyncClockStore(db)
     private val matcher = EpisodeMatcher(db.backupDao())
@@ -97,62 +107,93 @@ class SyncApplier(
     suspend fun applyPage(
         records: List<RecordDto>,
         roundId: Long,
-    ): SyncApplyResult =
-        // The stage→Room-commit→drop span is one credential-commit hold: a staged snapshot is
-        // referenced or discarded only inside the same span, so the orphan sweep — which takes
-        // the same coordinator — can never delete a snapshot a page is still committing.
-        coordinator.withCredentialCommit {
-            // The protected snapshots land before any Room write: a SecretStore failure fails
-            // the page before its cursor or any credential state can advance past an unstaged
-            // auth. SecretStore IO stays outside the Room transaction.
-            val staged = stageAuthCandidatesLocked(db, secrets, records)
-            val dropKeys = mutableListOf<String>()
-            val feedsNeedingCredentials = mutableListOf<Long>()
-            var applied = 0
-            var stale = 0
-            var parked = 0
-            var held = 0
-            var invalid = 0
-            try {
-                db.withWriteTransaction {
-                    db.syncStateDao().withApplying {
-                        val ordered = records.sortedBy { it.coll }
-                        for (dto in ordered) {
-                            val rid = wireRid(dto)
-                            val result =
-                                applyRecord(
-                                    dto,
-                                    roundId,
-                                    rid?.let { staged[it] },
-                                    dropKeys,
-                                    feedsNeedingCredentials,
-                                )
-                            when (result) {
-                                is RecordOutcome.Applied -> applied++
-                                is RecordOutcome.Stale -> stale++
-                                is RecordOutcome.Parked -> parked++
-                                is RecordOutcome.Held -> held++
-                                is RecordOutcome.Invalid -> invalid++
+    ): SyncApplyResult {
+        val remotePlayed = mutableListOf<RemotePlayedMark>()
+        val result =
+            // The stage→Room-commit→drop span is one credential-commit hold: a staged snapshot is
+            // referenced or discarded only inside the same span, so the orphan sweep — which takes
+            // the same coordinator — can never delete a snapshot a page is still committing.
+            coordinator.withCredentialCommit {
+                // The protected snapshots land before any Room write: a SecretStore failure fails
+                // the page before its cursor or any credential state can advance past an unstaged
+                // auth. SecretStore IO stays outside the Room transaction.
+                val staged = stageAuthCandidatesLocked(db, secrets, records)
+                val dropKeys = mutableListOf<String>()
+                val feedsNeedingCredentials = mutableListOf<Long>()
+                var applied = 0
+                var stale = 0
+                var parked = 0
+                var held = 0
+                var invalid = 0
+                try {
+                    db.withWriteTransaction<Unit> {
+                        db.syncStateDao().withApplying<Unit> {
+                            val ordered = records.sortedBy { it.coll }
+                            for (dto in ordered) {
+                                val rid = wireRid(dto)
+                                val result =
+                                    applyRecord(
+                                        dto,
+                                        roundId,
+                                        rid?.let { staged[it] },
+                                        dropKeys,
+                                        feedsNeedingCredentials,
+                                        remotePlayed = remotePlayed,
+                                    )
+                                when (result) {
+                                    is RecordOutcome.Applied -> applied++
+                                    is RecordOutcome.Stale -> stale++
+                                    is RecordOutcome.Parked -> parked++
+                                    is RecordOutcome.Held -> held++
+                                    is RecordOutcome.Invalid -> invalid++
+                                }
                             }
                         }
                     }
+                } catch (failure: Throwable) {
+                    // Only the writer can roll back these contributions; credential cleanup must
+                    // not mask its failure or leave the loaded player frozen after a rollback.
+                    revertMarks(remotePlayed)
+                    throw failure
+                } finally {
+                    // Losing, failed-page and superseded snapshots leave once the commit's
+                    // references are durable; a rollback drops every key this page staged but
+                    // nothing referenced. The re-read happens under the same coordinator hold, so
+                    // a competing committed page's keys survive. A cleanup failure must never
+                    // mask the page's own outcome.
+                    suspendRunCatching {
+                        dropUnreferencedStagedLocked(
+                            db,
+                            secrets,
+                            staged.values.mapTo(HashSet()) { it.storeKey } + dropKeys,
+                        )
+                    }
                 }
-            } finally {
-                // Losing, failed-page and superseded snapshots leave once the commit's
-                // references are durable; a rollback drops every key this page staged but
-                // nothing referenced. The re-read happens under the same coordinator hold, so
-                // a competing committed page's keys survive. A cleanup failure must never
-                // mask the page's own outcome.
-                suspendRunCatching {
-                    dropUnreferencedStagedLocked(
-                        db,
-                        secrets,
-                        staged.values.mapTo(HashSet()) { it.storeKey } + dropKeys,
-                    )
-                }
+                SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials, remotePlayed.toList())
             }
-            SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials)
+        // Device-name lookup may use HTTP. Neither Room nor the credential coordinator is held.
+        postMarks(remotePlayed)
+        return result
+    }
+
+    /** Rolled-back marks release their freeze; the revert must not mask the apply's own failure. */
+    private suspend fun revertMarks(marks: List<RemotePlayedMark>) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            for (mark in marks) {
+                runCatching { playback.onRemoteMarkReverted(mark.episodeId) }
+            }
         }
+    }
+
+    private suspend fun postMarks(marks: List<RemotePlayedMark>) {
+        for (mark in marks) {
+            val title = db.episodeDao().byId(mark.episodeId)?.title ?: continue
+            notices.post(
+                ch.lkmc.neutrodyne.sync.api.SyncNotice
+                    .MarkedPlayedElsewhere(mark.episodeId, title, deviceNames.name(mark.by) ?: mark.by),
+            )
+        }
+    }
 
     private suspend fun wireRid(dto: RecordDto): String? {
         val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: return null
@@ -166,6 +207,7 @@ class SyncApplier(
         dropKeys: MutableList<String> = mutableListOf(),
         feedsNeedingCredentials: MutableList<Long> = mutableListOf(),
         journalParked: Boolean = true,
+        remotePlayed: MutableList<RemotePlayedMark>,
     ): RecordOutcome {
         val coll =
             runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: return RecordOutcome.Invalid
@@ -208,7 +250,7 @@ class SyncApplier(
                 }
 
                 SyncCollection.EPISODE -> {
-                    applyEpisode(resolved, merge)
+                    applyEpisode(resolved, merge, dto.by ?: stored?.by, remotePlayed)
                 }
 
                 SyncCollection.UPNEXT -> {
@@ -632,6 +674,8 @@ class SyncApplier(
     private suspend fun applyEpisode(
         id: RecordId,
         merge: RecordMerge,
+        by: String?,
+        remotePlayed: MutableList<RemotePlayedMark>,
     ): RecordOutcome {
         val episodeId = id as RecordId.Episode
         val podcast =
@@ -662,14 +706,48 @@ class SyncApplier(
                     .byIdentityKey(
                         podcast.id,
                         episodeId.key.value,
-                    )?.let { applyEpisodeState(it.id, merge.record) }
+                    )?.let {
+                        applyEpisodeState(it.id, merge.record)
+                        reportRemotePlayedIfLoaded(it.id, merge, by, remotePlayed)
+                    }
             } else {
                 applyEpisodeState(idInserted, merge.record)
+                reportRemotePlayedIfLoaded(idInserted, merge, by, remotePlayed)
             }
             return RecordOutcome.Applied
         }
         applyEpisodeState(matched, merge.record)
+        reportRemotePlayedIfLoaded(matched, merge, by, remotePlayed)
         return RecordOutcome.Applied
+    }
+
+    /**
+     * 10 Remote played marks 2 + 06 Sync interplay rule 3: a mark on the loaded item whose merged
+     * state is effectively played freezes the loaded player, and only inside the applying
+     * transaction, so the freeze is already set when the mark's commit lands. An older mark a
+     * newer listening position hides derives to in-progress and calls nothing. The mark is also
+     * collected for the post-commit "Marked played on <device>" notice.
+     */
+    private suspend fun reportRemotePlayedIfLoaded(
+        episodeId: Long,
+        merge: RecordMerge,
+        by: String?,
+        remotePlayed: MutableList<RemotePlayedMark>,
+    ) {
+        // A later favourite or other unrelated field can carry an old played state. Only
+        // a newly winning played marker may freeze again or name its writer in a notice.
+        if ("played" !in merge.advanced) return
+        if (EpisodeStateRules.derive(merge.record.fields).state !=
+            ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress.PLAYED
+        ) {
+            return
+        }
+        if (playback.active.value.episodeId != episodeId) return
+        // Register before the callback: a port that froze before throwing still gets its
+        // freeze released by the rollback's revert, and reverting a mark that never froze is
+        // a counted no-op.
+        remotePlayed += RemotePlayedMark(episodeId, by ?: "")
+        playback.onRemoteMarkedPlayed(episodeId, by ?: "")
     }
 
     private suspend fun applyEpisodeState(
@@ -899,7 +977,10 @@ class SyncApplier(
      * that still cannot resolve stays parked for the next ingest, dependency arrival or restart.
      * The caller owns the write transaction and `applying = 1`, so the projections stay echo-free.
      */
-    internal suspend fun applyParkedRows(rows: List<SyncParkedEntity>): SyncApplyResult {
+    internal suspend fun applyParkedRows(
+        rows: List<SyncParkedEntity>,
+        remotePlayed: MutableList<RemotePlayedMark> = mutableListOf(),
+    ): SyncApplyResult {
         var applied = 0
         var stale = 0
         var parked = 0
@@ -920,7 +1001,7 @@ class SyncApplier(
                 invalid++
                 continue
             }
-            when (applyRecord(dto!!, roundId = 0L, journalParked = false)) {
+            when (applyRecord(dto!!, roundId = 0L, journalParked = false, remotePlayed = remotePlayed)) {
                 RecordOutcome.Applied -> {
                     resolved += row.id
                     applied++
@@ -947,14 +1028,24 @@ class SyncApplier(
             }
         }
         if (resolved.isNotEmpty()) db.syncParkedDao().delete(resolved)
-        return SyncApplyResult(applied, stale, parked, held, invalid)
+        return SyncApplyResult(applied, stale, parked, held, invalid, remotePlayed = remotePlayed.toList())
     }
 
     /** [applyParkedRows] in its own write transaction with the capture triggers silenced. */
-    suspend fun applyParkedRecords(rows: List<SyncParkedEntity>): SyncApplyResult =
-        db.withWriteTransaction {
-            db.syncStateDao().withApplying { applyParkedRows(rows) }
-        }
+    suspend fun applyParkedRecords(rows: List<SyncParkedEntity>): SyncApplyResult {
+        val remotePlayed = mutableListOf<RemotePlayedMark>()
+        val result =
+            try {
+                db.withWriteTransaction<SyncApplyResult> {
+                    db.syncStateDao().withApplying<SyncApplyResult> { applyParkedRows(rows, remotePlayed) }
+                }
+            } catch (failure: Throwable) {
+                revertMarks(remotePlayed)
+                throw failure
+            }
+        postMarks(remotePlayed)
+        return result
+    }
 
     private fun decodeParked(row: SyncParkedEntity): RecordDto? =
         runCatching { SyncJson.decodeFromString(RecordDto.serializer(), row.record) }.getOrNull()
