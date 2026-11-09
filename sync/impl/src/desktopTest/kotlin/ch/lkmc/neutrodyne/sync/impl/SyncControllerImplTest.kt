@@ -1025,6 +1025,61 @@ class SyncControllerImplTest {
             }
         }
 
+    /**
+     * 10 Settings capture: enabling "Sync playback settings" drains the values that stayed
+     * pending while it was off (the server's values win); disabling never drains.
+     */
+    @Test
+    fun enablingSyncPlaybackSettingsDrainsThePendingMarker() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val key = ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SKIP_BACK_MS
+                h.address.updateSyncPlaybackSettings(false)
+                h.journalPendingSetting(key, "15000")
+
+                h.controller.setSyncPlaybackSettings(true)
+
+                assertEquals(listOf(true), h.address.writtenSyncPlaybackSettings)
+                assertEquals(1, h.settings.applied.size)
+                assertEquals(
+                    key,
+                    h.settings.applied
+                        .single()
+                        .first,
+                )
+                assertEquals(
+                    "15000",
+                    h.settings.applied
+                        .single()
+                        .second,
+                )
+                assertNull(h.pendingSettingOf(key.name))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun disablingSyncPlaybackSettingsLeavesTheMarkerPending() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val key = ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SKIP_BACK_MS
+                h.address.updateSyncPlaybackSettings(true)
+                h.journalPendingSetting(key, "15000")
+
+                h.controller.setSyncPlaybackSettings(false)
+
+                assertTrue(h.settings.applied.isEmpty(), "disabling must not drain the marker")
+                assertEquals("15000", h.pendingSettingOf(key.name))
+            } finally {
+                h.close()
+            }
+        }
+
     @Test
     fun aReconnectStatusCoversARestoredInstall() =
         runTest {
@@ -1132,6 +1187,10 @@ private class Harness(
             sharePasswords = { flags.sharePasswords },
         )
     val activity = SyncActivityState()
+    val effects =
+        SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()) {
+            address.syncPlaybackSettings()
+        }
     val engine =
         SyncEngine(
             db = db,
@@ -1144,6 +1203,7 @@ private class Harness(
             tokens = tokens,
             activity = activity,
             gate = gate,
+            effects = effects,
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -1156,7 +1216,7 @@ private class Harness(
             engine = engine,
             libraryMerger = libraryMerger,
             storagePaths = testStoragePaths(),
-            effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()),
+            effects = effects,
             clock = clock,
             activity = activity,
         )
@@ -1230,6 +1290,7 @@ private class Harness(
             flags = flags,
             build = build,
             merger = merger,
+            effects = effects,
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
@@ -1295,6 +1356,56 @@ private class Harness(
                 db.syncOutboxDao().captureAll("podcast", SyncControllerImplTest.PODCAST_SYNC_ID)
             }
         }
+    }
+
+    /** Journals one durable remote setting effect, as a committed page would leave it. */
+    suspend fun journalPendingSetting(
+        key: ch.lkmc.neutrodyne.core.model.settings.SettingKey<*>,
+        value: String,
+    ) {
+        val clock =
+            ch.lkmc.neutrodyne.sync.protocol.Hlc.of(
+                now,
+                1,
+                ch.lkmc.neutrodyne.sync.protocol
+                    .NodeId("0000000000000002"),
+            )
+        db.withWriteTransaction {
+            db.syncClockDao().upsert(
+                ch.lkmc.neutrodyne.core.database.SyncClockEntity(
+                    "setting",
+                    key.name,
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson.encodeToString(
+                        RawSyncRecord(
+                            state =
+                                ch.lkmc.neutrodyne.sync.protocol.RecordState(
+                                    coll = ch.lkmc.neutrodyne.sync.protocol.SyncCollection.SETTING,
+                                    fields =
+                                        mapOf(
+                                            "v" to
+                                                ch.lkmc.neutrodyne.sync.protocol.FieldState(
+                                                    kotlinx.serialization.json.JsonPrimitive(value),
+                                                    clock,
+                                                ),
+                                        ),
+                                ),
+                            pendingSetting = PendingSetting(value, clock.toString()),
+                        ),
+                    ),
+                ),
+            )
+        }
+    }
+
+    /** The key's pending marker value, or null when no marker survives. */
+    suspend fun pendingSettingOf(key: String): String? {
+        val row = db.syncClockDao().get("setting", key) ?: return null
+        val raw =
+            runCatching {
+                ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                    .decodeFromString<RawSyncRecord>(row.clocks)
+            }.getOrNull()
+        return raw?.pendingSetting?.value
     }
 
     suspend fun tokenStoreContains(host: String): Boolean = tokens.load(host) != null

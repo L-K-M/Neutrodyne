@@ -383,6 +383,9 @@ class SyncEngineTest {
         val clock = TestClock(NOW)
         val secrets = FakeSecretStore()
         val gate = FakeLocalNetworkGate()
+        val settingsPort = FakeSettingsSyncPort()
+        val effects =
+            SyncApplyEffects(db, settingsPort, TestSettingsWriteCoordinator()) { true }
         val engine =
             SyncEngine(
                 db = db,
@@ -392,7 +395,7 @@ class SyncEngineTest {
                         db = db,
                         clock = clock,
                         secrets = secrets,
-                        settings = FakeSettingsSyncPort(),
+                        settings = settingsPort,
                         playback = NoPlaybackSync,
                         syncIngestHook = SyncIngestHook.None,
                         channelSync =
@@ -434,6 +437,7 @@ class SyncEngineTest {
                 tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
                 activity = activity,
                 gate = gate,
+                effects = effects,
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)
