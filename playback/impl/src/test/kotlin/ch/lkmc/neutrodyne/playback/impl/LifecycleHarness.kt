@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabaseConstructor
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PrePlaySync
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -118,6 +119,12 @@ internal class LifecycleHarness(
         ch.lkmc.neutrodyne.playback.core
             .RemotePlayedGuard()
     val sync = PlaybackSyncBridge(remoteGuard, deferred(positions), scope)
+
+    /**
+     * The pull-before-play port behind [starter]. UI-start tests set it to a recording fake; any
+     * service/system path calling `beforeUiStart` would show up here too — it never should.
+     */
+    var prePlaySync: PrePlaySync = PrePlaySync.None
     private val sources = SourceHarness(File(app.cacheDir, "lifecycle-cache"))
     val index = sources.index
     val resolver = sources.resolver
@@ -228,7 +235,7 @@ internal class LifecycleHarness(
             StartPositionRule(),
             PlayedRule(),
         )
-    private val starter =
+    val starter =
         PlayStarter(
             contexts,
             queues,
@@ -242,6 +249,7 @@ internal class LifecycleHarness(
             StartPositionRule(),
             PlayedRule(),
             setOf(gate),
+            prePlay = Provider { prePlaySync },
         )
     val access =
         PlaybackServiceAccess(
@@ -461,6 +469,7 @@ internal class LifecycleHarness(
             opener,
             deferred(queues),
             deferred(sessions),
+            Provider { starter },
             clock,
             scope,
             Dispatchers.IO,

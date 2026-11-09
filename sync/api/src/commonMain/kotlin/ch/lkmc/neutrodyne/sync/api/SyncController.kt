@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Why a round runs (10 Scheduling on Android / Scheduling on the desktop). */
-enum class SyncRoundReason { FOREGROUND, SYNC_NOW, OUTBOX, PLAYBACK, PERIODIC, SSE, LINK, FIRST_LINK }
+enum class SyncRoundReason { FOREGROUND, SYNC_NOW, OUTBOX, PLAYBACK, PERIODIC, SSE, LINK, FIRST_LINK, PRE_PLAY }
 
 /** One round's outcome, shown in diagnostics (10 Sync round). */
 data class SyncReport(

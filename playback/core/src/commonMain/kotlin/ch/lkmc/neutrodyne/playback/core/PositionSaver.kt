@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CancellationException
+import kotlin.math.abs
 
 /** User seeks can reset; setup/pickup seeks must never overwrite durable progress. */
 enum class SeekOrigin { USER, CORE }
@@ -49,6 +50,8 @@ class PositionSaver(
         var replayCleared: Boolean = false,
         var resetPending: Boolean = false,
         var lastSavedElapsed: Long,
+        /** 06's paused-item pickup baseline: the last position this saver wrote or applied. */
+        var baselinePositionMs: Long = -1L,
     )
 
     private var current: Current? = null
@@ -65,8 +68,30 @@ class PositionSaver(
             Current(episodeId, currentSinceMs, source, replay, allowed, lastSavedElapsed = clock.elapsedRealtime())
     }
 
-    fun startPositionApplied() {
-        current?.ready = true
+    fun startPositionApplied(positionMs: Long) {
+        current?.let {
+            it.ready = true
+            it.baselinePositionMs = positionMs
+        }
+    }
+
+    /**
+     * 06's paused-item pickup: the stored row differing from the last position this saver
+     * wrote or applied for [episodeId] by more than 1 s means an outside writer changed it —
+     * the paused player takes it up. Returns the position to seek to, or null when the row
+     * is unchanged or nothing was written/applied for the item.
+     */
+    fun pickupPositionMs(
+        episodeId: Long,
+        storedPositionMs: Long,
+    ): Long? {
+        val item = current?.takeIf { it.episodeId == episodeId } ?: return null
+        val baseline = item.baselinePositionMs
+        return if (baseline >= 0 && abs(storedPositionMs - baseline) > PAUSED_PICKUP_EPSILON_MS) {
+            storedPositionMs
+        } else {
+            null
+        }
     }
 
     /** Replay is cleared at first actual playback, with retries if that transaction fails. */
@@ -116,8 +141,11 @@ class PositionSaver(
         origin: SeekOrigin,
     ): PositionSaveResult {
         require(positionMs >= 0)
-        if (origin == SeekOrigin.CORE) return PositionSaveResult.Skipped
         val item = current ?: return PositionSaveResult.Skipped
+        if (origin == SeekOrigin.CORE) {
+            item.baselinePositionMs = positionMs
+            return PositionSaveResult.Skipped
+        }
         if (!item.ready || !item.allowed()) return PositionSaveResult.Skipped
         if (positionMs >= RESET_BOUND_MS) return save(positionMs, durationMs)
 
@@ -163,7 +191,13 @@ class PositionSaver(
                     departure.pinStartedAt,
                     capture.allowed,
                 )
-            if (saved) PositionSaveResult.Saved else PositionSaveResult.Skipped
+            if (saved) {
+                current?.takeIf { it.episodeId == departure.episodeId }?.baselinePositionMs =
+                    departure.positionMs
+                PositionSaveResult.Saved
+            } else {
+                PositionSaveResult.Skipped
+            }
         }
     }
 
@@ -186,6 +220,7 @@ class PositionSaver(
             }
             item.resetPending = false
             item.lastSavedElapsed = clock.elapsedRealtime()
+            item.baselinePositionMs = 0L
             PositionSaveResult.Saved
         }
     }
@@ -202,7 +237,10 @@ class PositionSaver(
         }
         val capture = capture(positionMs, durationMs) ?: return PositionSaveResult.Skipped
         val result = flush(capture)
-        if (result == PositionSaveResult.Saved && current === item) item?.lastSavedElapsed = clock.elapsedRealtime()
+        if (result == PositionSaveResult.Saved && current === item) {
+            item?.lastSavedElapsed = clock.elapsedRealtime()
+            item?.baselinePositionMs = positionMs
+        }
         return result
     }
 
@@ -218,5 +256,6 @@ class PositionSaver(
     private companion object {
         const val SAVE_INTERVAL_MS = 5_000L
         const val RESET_BOUND_MS = 1_000L
+        const val PAUSED_PICKUP_EPSILON_MS = 1_000L
     }
 }

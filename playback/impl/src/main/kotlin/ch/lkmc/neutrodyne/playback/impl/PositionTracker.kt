@@ -86,10 +86,16 @@ internal class PositionTracker(
         saver.load(episodeId, currentSinceMs, streamSource(episodeId), replay, allowed)
     }
 
-    fun startPositionApplied() {
-        saver.startPositionApplied()
+    fun startPositionApplied(positionMs: Long) {
+        saver.startPositionApplied(positionMs)
         if (player?.isPlaying == true) onIsPlayingChanged(true)
     }
+
+    /** 06's paused-item pickup: a stored row outside this player's last write/apply wins. */
+    fun pickupPositionMs(
+        episodeId: Long,
+        storedPositionMs: Long,
+    ): Long? = saver.pickupPositionMs(episodeId, storedPositionMs)
 
     fun clear() {
         loadedId = null
