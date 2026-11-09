@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.domain
 
+import ch.lkmc.neutrodyne.core.common.Outcome
+
 /**
  * The sync server's own settings (10 Settings): the portable address and username, and the two
  * device switches. Implemented beside `SettingsRepository` in `:core:data`; `:sync:impl` reads
@@ -24,8 +26,8 @@ interface SyncServerAddress {
 
     suspend fun setUsername(username: String?)
 
-    /** 10 Settings: the device-local switches the Settings › Sync screen writes. */
-    suspend fun setShareFeedPasswords(enabled: Boolean)
+    /** The device-local switches: a failed write preserves the stored value. */
+    suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SettingsError>
 
-    suspend fun setSyncPlaybackSettings(enabled: Boolean)
+    suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SettingsError>
 }

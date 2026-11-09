@@ -1,0 +1,6 @@
+{
+  "total": 22020219,
+  "head": "media-head.m4a",
+  "headSha256": "cb9bcd69dd90575cfba707006ea08de20728d75d77a71f19207f89c2e2bb65c8",
+  "provenance": "head is a byte copy of playback/engine/src/test/resources/media/m4a_lc_2s.m4a (2s AAC-LC M4A engine fixture); total bytes pad it with one MP4 free box"
+}

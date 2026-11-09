@@ -240,6 +240,16 @@ Device-local: `lastViewedAt` ("new since last visit" is per device), `kind` and 
 
 The [definition of done](../PLAN.md#72-definition-of-done-every-milestone) requires every new portable key to declare `synced`; the default for a new key is `false`.
 
+**Implementation note (2026-11-09, device switch writes).** The two device-local
+switch setters return `Outcome<Unit, SyncPreferenceError>`. A failed storage
+write leaves both the stored value and the runtime gate unchanged. Successful
+writes publish the runtime value in the same serialized operation; cancellation
+after persistence cannot leave a stale gate, and an older completion cannot
+replace a newer choice. Once admitted, that local commit finishes even if its
+caller is cancelled. Playback-setting reconciliation and pending remote values
+run only after the preference is saved. The linked-settings controls remain a
+separate UI slice.
+
 ### Per-scope overrides
 
 | Override field (`ScopeOverrides`, [D20](../PLAN.md#3-key-decisions)) | Podcast and group scope |
