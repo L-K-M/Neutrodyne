@@ -34,8 +34,33 @@ REMOTE_DIR = "/sdcard/Android/media/ch.lkmc.neutrodyne.benchmark/additional_test
 
 scenario = json.loads(Path(os.environ["CAPTURE_SCENARIO"]).read_text())
 state_path = Path(os.environ["CAPTURE_STATE"])
-state = json.loads(state_path.read_text())
 args = sys.argv[1:]
+
+if args[:3] == ["-s", scenario["serial"], "logcat"]:
+    import time as _time
+
+    _time.sleep(scenario.get("logcat_start_delay", 0))
+    # The tail streams for the whole run, so it never rewrites the shared
+    # state json (concurrent stat/pull calls own it); its pid goes to a
+    # dedicated file instead.
+    with open(os.environ["CAPTURE_STATE"] + ".logcat", "a") as pid_log:
+        pid_log.write(f"{os.getpid()}\n")
+    marker = scenario.get("logcat_marker")
+    emitted = False
+    deadline = _time.monotonic() + 60
+    while _time.monotonic() < deadline:
+        if marker and not emitted and Path(marker).exists():
+            for name in scenario.get("logcat_moving_names", []):
+                print(
+                    f"11-08 23:19:18.415 D/Benchmark( 2467): Moving /storage/emulated/0/Android/media/"
+                    f"ch.lkmc.neutrodyne.benchmark/{name} to {REMOTE_DIR}/{name}",
+                    flush=True,
+                )
+            emitted = True
+        _time.sleep(0.02)
+    raise SystemExit(0)
+
+state = json.loads(state_path.read_text())
 state["calls"].append(args)
 calls = len(state["calls"])
 online = not scenario.get("never_online") and calls >= scenario.get("online_after", 0)
@@ -61,28 +86,6 @@ if args == ["devices"]:
         print(f"{scenario['serial']}\tdevice")
     else:
         print("List of devices attached")
-elif args[:3] == ["-s", scenario["serial"], "logcat"]:
-    import time as _time
-
-    # The tail streams for the whole run, so it never rewrites the shared
-    # state json (concurrent stat/pull calls own it); its pid goes to a
-    # dedicated file instead.
-    with open(os.environ["CAPTURE_STATE"] + ".logcat", "a") as pid_log:
-        pid_log.write(f"{os.getpid()}\n")
-    marker = scenario.get("logcat_marker")
-    emitted = False
-    deadline = _time.monotonic() + 60
-    while _time.monotonic() < deadline:
-        if marker and not emitted and Path(marker).exists():
-            for name in scenario.get("logcat_moving_names", []):
-                print(
-                    f"11-08 23:19:18.415 D/Benchmark( 2467): Moving /storage/emulated/0/Android/media/"
-                    f"ch.lkmc.neutrodyne.benchmark/{name} to {REMOTE_DIR}/{name}",
-                    flush=True,
-                )
-            emitted = True
-        _time.sleep(0.02)
-    raise SystemExit(0)
 elif args[:3] == ["-s", scenario["serial"], "shell"] and args[3:6] == ["ls", "-1", REMOTE_DIR]:
     if online and calls >= scenario.get("list_after", 0):
         names = list(scenario["names"])
@@ -150,6 +153,13 @@ pid_file = os.environ.get("CAPTURE_CHILD_PID_FILE")
 if pid_file:
     Path(pid_file).write_text(str(os.getpid()))
 time.sleep(float(os.environ.get("CAPTURE_CHILD_SLEEP", "0")))
+ready_file = os.environ.get("CAPTURE_CHILD_WAIT_FOR")
+if ready_file:
+    deadline = time.monotonic() + 10
+    while not Path(ready_file).exists():
+        if time.monotonic() >= deadline:
+            sys.exit("the fake logcat tail did not become ready")
+        time.sleep(0.01)
 marker = os.environ.get("CAPTURE_CHILD_MARKER")
 if marker:
     Path(marker).write_text("marked")
@@ -444,19 +454,45 @@ class BenchmarkLiveCaptureTest(unittest.TestCase):
         )
         self.assertNotIn("was never captured", result.stderr)
 
+    def test_logcat_startup_does_not_read_mutable_poll_state(self):
+        self._scenario(online_after=0, list_after=0, names=[])
+        # A polling adb call may be between truncating and rewriting its JSON.
+        # The streaming logcat process neither consumes nor updates that state.
+        self.state_path.write_text("{")
+        env = dict(os.environ, CAPTURE_SCENARIO=str(self.scenario_path), CAPTURE_STATE=str(self.state_path))
+        process = subprocess.Popen(
+            [sys.executable, str(self.adb), "-s", "emulator-5554", "logcat"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env,
+        )
+        pid_log = Path(f"{self.state_path}.logcat")
+        try:
+            deadline = time.monotonic() + 5
+            while not pid_log.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(pid_log.exists(), "logcat startup read unrelated mutable polling state")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.communicate(timeout=5)
+
     def test_logcat_tail_is_never_orphaned(self):
         marker = self.folder / "teardown.marker"
         self._scenario(
             online_after=0,
             list_after=0,
             names=[],
+            logcat_start_delay=1.8,
             logcat_marker=str(marker),
             logcat_moving_names=[],
         )
         self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
         pid_log = Path(f"{self.state_path}.logcat")
         result, _ = self._run_wrapper(
-            child_env={"CAPTURE_CHILD_MARKER": str(marker), "CAPTURE_CHILD_SLEEP": "0.8"}
+            child_env={
+                "CAPTURE_CHILD_WAIT_FOR": str(pid_log),
+                "CAPTURE_CHILD_MARKER": str(marker),
+                "CAPTURE_CHILD_MARKER_LINGER": "0",
+            }
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue(pid_log.exists(), "the wrapper never started a logcat tail")
