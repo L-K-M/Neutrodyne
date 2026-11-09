@@ -3,6 +3,8 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.model.settings.SyncSettingKeys
@@ -43,11 +45,9 @@ internal class DataStoreSyncServerAddress(
         }
     }
 
-    override suspend fun setShareFeedPasswords(enabled: Boolean) {
+    override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SettingsError> =
         settings.set(SyncSettingKeys.SHARE_FEED_PASSWORDS, enabled)
-    }
 
-    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SettingsError> =
         settings.set(SyncSettingKeys.SYNC_PLAYBACK_SETTINGS, enabled)
-    }
 }

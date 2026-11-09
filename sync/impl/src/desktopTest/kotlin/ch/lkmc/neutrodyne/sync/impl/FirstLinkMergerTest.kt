@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -1776,9 +1777,9 @@ class FirstLinkMergerTest {
 
                     override suspend fun setUsername(username: String?) = Unit
 
-                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
 
-                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
+                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Outcome.Success(Unit)
                 },
             tokens =
                 SyncTokenStore(secrets).apply {

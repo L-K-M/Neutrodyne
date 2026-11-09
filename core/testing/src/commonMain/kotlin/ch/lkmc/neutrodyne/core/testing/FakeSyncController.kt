@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlinx.coroutines.flow.Flow
@@ -163,12 +164,14 @@ class FakeSyncController(
         remoteSession.value = null
     }
 
-    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> {
         playbackSettings += enabled
+        return Outcome.Success(Unit)
     }
 
-    override suspend fun setShareFeedPasswords(enabled: Boolean) {
+    override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SyncPreferenceError> {
         passwordSharing += enabled
+        return Outcome.Success(Unit)
     }
 
     fun post(notice: SyncNotice) {

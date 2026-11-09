@@ -87,11 +87,14 @@ class ProcessLeaseTest {
             }
             assertTrue(ready, "CLI did not become ready")
             val failedDir = dir.resolve("failed-start")
-            val failed = child(failedDir, "serve", port)
+            val failureLog = Files.createTempFile(dir, "failed-bind-", ".stderr")
+            val failed = child(failedDir, "serve", port, errorOutput = failureLog)
             try {
                 assertTrue(failed.waitFor(15, TimeUnit.SECONDS))
                 assertNotEquals(0, failed.exitValue())
                 assertFalse(Files.exists(failedDir.resolve(ServerStorage.CLEAN_MARKER)))
+                val failureText = Files.readString(failureLog)
+                assertTrue(failureText.contains("serve failed; check configuration"), failureText)
             } finally {
                 failed.destroyForcibly()
             }
@@ -107,6 +110,7 @@ class ProcessLeaseTest {
         dir: Path,
         mode: String,
         port: Int? = null,
+        errorOutput: Path? = null,
     ): Process {
         val classpath = checkNotNull(System.getProperty("neutrodyne.server.testClasspath"))
         return ProcessBuilder(
@@ -116,12 +120,13 @@ class ProcessLeaseTest {
             "ch.lkmc.neutrodyne.sync.server.ProcessFixture",
             dir.toString(),
             mode,
-        ).redirectError(ProcessBuilder.Redirect.INHERIT)
-            .apply {
-                environment()[ServerEnv.DATA] = dir.toString()
-                environment()[ServerEnv.UPDATE_CHECK] = "false"
-                if (port != null) environment()[ServerEnv.LISTEN] = "127.0.0.1:$port"
-            }.start()
+        ).redirectError(
+            errorOutput?.let { ProcessBuilder.Redirect.to(it.toFile()) } ?: ProcessBuilder.Redirect.INHERIT,
+        ).apply {
+            environment()[ServerEnv.DATA] = dir.toString()
+            environment()[ServerEnv.UPDATE_CHECK] = "false"
+            if (port != null) environment()[ServerEnv.LISTEN] = "127.0.0.1:$port"
+        }.start()
     }
 
     private fun Process.lineAndExit(): String {
