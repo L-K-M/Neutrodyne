@@ -78,7 +78,7 @@ class PositionSaver(
         if (!item.replay || item.replayCleared) return PositionSaveResult.Skipped
 
         return attempt {
-            store.markUnplayedForReplay(item.episodeId, clock.now())
+            if (!store.markUnplayedForReplay(item.episodeId, clock.now())) return@attempt PositionSaveResult.Skipped
             item.replayCleared = true
             PositionSaveResult.Saved
         }
@@ -180,7 +180,10 @@ class PositionSaver(
         if (!item.allowed()) return PositionSaveResult.Skipped
 
         return attempt {
-            store.reset(item.episodeId, clock.now())
+            if (!store.reset(item.episodeId, clock.now())) {
+                item.resetPending = false
+                return@attempt PositionSaveResult.Skipped
+            }
             item.resetPending = false
             item.lastSavedElapsed = clock.elapsedRealtime()
             PositionSaveResult.Saved

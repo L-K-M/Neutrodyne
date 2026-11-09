@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
@@ -28,6 +29,7 @@ import ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings
 import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
 import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.playback.desktop.DesktopEpisodeSourceResolver
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
@@ -61,10 +63,11 @@ object DesktopPlaybackBindings {
         network: NetworkMonitor,
         routeMonitor: AudioRouteMonitor,
         runtime: Provider<DesktopPlaybackRuntime>,
+        remoteGuard: RemotePlayedGuard,
     ): DesktopPlaybackController =
         DesktopPlaybackController(scope, clock, {
             runtime()
-        }, network, routeMonitor = routeMonitor)
+        }, network, remoteGuard, routeMonitor = routeMonitor)
 
     /** MD2 binds the per-OS monitor; until then there is no route event. */
     @Provides fun routeMonitor(): AudioRouteMonitor = NoOpAudioRouteMonitor
@@ -74,6 +77,9 @@ object DesktopPlaybackBindings {
     @Provides fun state(value: DesktopPlaybackController): PlaybackStateSource = value
 
     @Provides fun maintenance(value: DesktopPlaybackController): PlaybackMaintenance = value
+
+    /** The controller's own port: the scheduler reads the same player's state. */
+    @Provides fun playbackSyncPort(value: DesktopPlaybackController): PlaybackSyncPort = value.syncPort
 
     @Provides
     fun runtime(

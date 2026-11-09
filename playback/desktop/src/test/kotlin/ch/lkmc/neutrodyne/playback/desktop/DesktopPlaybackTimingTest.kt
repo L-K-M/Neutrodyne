@@ -35,6 +35,7 @@ import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PlayedRule
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
 import ch.lkmc.neutrodyne.playback.engine.EngineError
@@ -639,6 +640,7 @@ private class TimingFixture(
             clock,
             { runtime },
             network,
+            RemotePlayedGuard(),
             StandardTestDispatcher(test.testScheduler),
             StandardTestDispatcher(test.testScheduler),
         )
