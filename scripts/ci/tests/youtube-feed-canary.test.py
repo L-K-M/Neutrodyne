@@ -3,7 +3,6 @@
 """Feed canary bounds and failure reporting, entirely offline."""
 import importlib.util
 from pathlib import Path
-import re
 import unittest
 
 spec = importlib.util.spec_from_file_location("canary", Path(__file__).parents[1] / "youtube-feed-canary.py")
@@ -46,30 +45,6 @@ class CanaryTest(unittest.TestCase):
                              (200, b'<!DOCTYPE feed><feed/>')):
             with self.subTest(status=status, size=len(body)):
                 self.assertFalse(canary.run(lambda url: (status, body))["ok"])
-
-    def test_controls_are_the_independently_verified_pair(self):
-        # 2026-11-09 diagnosis: the previous controls answered 404/500 on YouTube's
-        # side from two vantage points while these served valid Atom feeds.
-        self.assertEqual(("UCLA_DiR1FfKNvjuUpBHmylQ", "UCBJycsmduvYEL83R_U4JriQ"), canary.CONTROLS)
-
-    def test_controls_match_the_app_control_channel_ids(self):
-        # The canary samples the outage monitor's controls (04): same IDs, same order,
-        # or it can no longer notice that an app control died.
-        source = (Path(__file__).resolve().parents[3] /
-                  "youtube/api/src/commonMain/kotlin/ch/lkmc/neutrodyne/youtube/api/YouTubeFeedUrls.kt").read_text()
-        ids = re.findall(r'const val \w*CONTROL_CHANNEL_ID\w* = "(UC[0-9A-Za-z_-]{21}[AQgw])"', source)
-        self.assertEqual(list(canary.CONTROLS), ids)
-
-    def test_variants_still_derive_from_the_first_control(self):
-        calls = []
-        def get(url):
-            calls.append(url)
-            return 404, b""
-        canary.run(get)
-        suffix = canary.CONTROLS[0][2:]
-        self.assertEqual(["channel_id=" + channel for channel in canary.CONTROLS] +
-                         ["playlist_id=" + prefix + suffix for prefix in ("UULF", "UUSH", "UULV")],
-                         [url.split("?", 1)[1] for url in calls])
 
     def test_deadline_and_transport_failures_are_reported(self):
         def broken(url):

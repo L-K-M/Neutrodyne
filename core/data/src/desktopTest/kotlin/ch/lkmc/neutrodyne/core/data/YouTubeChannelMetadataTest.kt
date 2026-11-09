@@ -232,7 +232,7 @@ class YouTubeChannelMetadataTest {
                 val entered = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()
                 val channel =
-                    f.resolved(YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID).copy(
+                    f.resolved(YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID).copy(
                         avatarUrl = "https://yt3.ggpht.com/avatar=s900",
                         bannerUrl = "https://yt3.ggpht.com/banner",
                         description = "Plain <text>",

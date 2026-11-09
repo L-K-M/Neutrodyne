@@ -253,6 +253,6 @@ class YtDlpEnricherTest {
     private fun YtxTabPage.json() = Json.encodeToString(YtxTabPage.serializer(), this)
 
     private companion object {
-        val CHANNEL = YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID
+        val CHANNEL = YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID
     }
 }

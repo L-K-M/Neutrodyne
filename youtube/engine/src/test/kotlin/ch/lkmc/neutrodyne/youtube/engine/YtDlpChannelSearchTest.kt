@@ -171,6 +171,6 @@ class YtDlpChannelSearchTest {
     ) = Json.encodeToString(YtxSearchPage.serializer(), YtxSearchPage(cursor, hits, hasMore))
 
     private companion object {
-        val CHANNEL = YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID
+        val CHANNEL = YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID
     }
 }

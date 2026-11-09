@@ -77,7 +77,6 @@ import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
-import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.createDynamicGraphFactory
@@ -223,7 +222,7 @@ class ExternalYouTubeModeTest {
                 }
                 assertTrue(
                     replay.requests.any {
-                        it.url.queryParameter("channel_id") == YouTubeFeedUrls.NASA_CONTROL_CHANNEL_ID
+                        it.url.queryParameter("channel_id") == "UCBR8-60-B28hp2BmDPdntcQ"
                     },
                 )
                 replay.assertPageAndFeedEvidence()
