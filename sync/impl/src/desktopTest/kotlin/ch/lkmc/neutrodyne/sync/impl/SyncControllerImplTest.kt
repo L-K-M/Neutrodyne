@@ -55,6 +55,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
@@ -1038,6 +1039,43 @@ class SyncControllerImplTest {
             }
         }
 
+    /**
+     * The reload and the setters take the one commit guard [SyncFlags] owns: a reload parked
+     * mid-read while a newer toggle commits publishes afterwards — never an older snapshot
+     * over the saved gate (10 Settings capture).
+     */
+    @Test
+    fun aStalePreferenceSnapshotCannotOverwriteANewerCommit() =
+        runTest {
+            val h = harness(this)
+            val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.updateShareFeedPasswords(true)
+                h.address.afterShareRead = {
+                    if (entered.complete(Unit)) release.await()
+                }
+                val reload = async { h.flags.refreshFromStore(h.address) }
+                entered.await()
+                // The reload owns the commit guard with its read parked; the setter queues.
+                val commit = async { h.controller.setShareFeedPasswords(false) }
+                runCurrent()
+                release.complete(Unit)
+                reload.await()
+                commit.await()
+
+                assertFalse(
+                    h.flags.sharePasswords,
+                    "an older snapshot must not overwrite the saved toggle",
+                )
+                assertFalse(h.address.shareFeedPasswords())
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
     @Test
     fun cancellingAfterASwitchCommitsStillPublishesItsRuntimeGate() =
         runTest {
@@ -1364,6 +1402,7 @@ private class Harness(
             effects = effects,
             capture = settingsCapture,
             notices = noticeBus,
+            refreshPreferences = { flags.refreshFromStore(address) },
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -1381,6 +1420,7 @@ private class Harness(
             activity = activity,
             secrets = secrets,
             coordinator = credentials,
+            beforeMerge = { flags.refreshFromStore(address) },
         )
 
     /** A temp-dir StoragePaths for the staging file and directory. */

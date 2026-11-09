@@ -168,10 +168,6 @@ class SyncControllerImpl(
      */
     private val statusMutex = Mutex()
 
-    // Own the store-write/runtime-publication span together. A delayed older completion must
-    // never overwrite a newer gate, and caller cancellation after commit cannot strand it.
-    private val preferenceMutex = Mutex()
-
     init {
         scope.launch { refreshStatus() }
     }
@@ -529,7 +525,7 @@ class SyncControllerImpl(
     }
 
     override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
-        preferenceMutex.withLock {
+        flags.withPreferenceCommit {
             kotlin.coroutines.coroutineContext.ensureActive()
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                 if (address.setSyncPlaybackSettings(enabled) is Outcome.Failure) {
@@ -544,7 +540,7 @@ class SyncControllerImpl(
         }
 
     override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
-        preferenceMutex.withLock {
+        flags.withPreferenceCommit {
             kotlin.coroutines.coroutineContext.ensureActive()
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                 if (address.setShareFeedPasswords(enabled) is Outcome.Failure) {
