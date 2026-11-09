@@ -266,23 +266,39 @@ class TwoClientWireTest {
         return properties
     }
 
-    /** One `user`/`admin` child: output stays in memory so invite codes never reach the log. */
+    /** CLI output stays in a private temporary file; a hung child cannot block a pipe read. */
     private fun serverCli(
         jar: Path,
         properties: Path,
         vararg args: String,
     ): String {
-        val child =
-            ProcessBuilder(
-                listOf(javaBin(), "-jar", jar.toAbsolutePath().toString()) +
-                    args.toList() +
-                    listOf("--config", properties.toAbsolutePath().toString()),
-            ).redirectErrorStream(true)
-                .start()
-        val output = child.inputStream.readBytes().decodeToString()
-        check(child.waitFor(CLI_SECONDS, TimeUnit.SECONDS)) { "server CLI ${args.joinToString(" ")} did not exit" }
-        check(child.exitValue() == 0) { "server CLI ${args.joinToString(" ")} failed: ${redact(output)}" }
-        return output
+        val outputFile = Files.createTempFile(properties.parent, "cli-", ".output")
+        var child: Process? = null
+        try {
+            child =
+                ProcessBuilder(
+                    listOf(javaBin(), "-jar", jar.toAbsolutePath().toString()) +
+                        args.toList() +
+                        listOf("--config", properties.toAbsolutePath().toString()),
+                ).redirectErrorStream(true)
+                    .redirectOutput(outputFile.toFile())
+                    .start()
+            check(child.waitFor(CLI_SECONDS, TimeUnit.SECONDS)) {
+                "server CLI ${args.joinToString(" ")} did not exit"
+            }
+            check(Files.size(outputFile) <= CLI_OUTPUT_LIMIT_BYTES) { "server CLI output exceeded its limit" }
+            val output = Files.readString(outputFile)
+            check(child.exitValue() == 0) { "server CLI ${args.joinToString(" ")} failed: ${redact(output)}" }
+            return output
+        } finally {
+            child?.let {
+                if (it.isAlive) {
+                    it.destroyForcibly()
+                    it.waitFor(SHUTDOWN_SECONDS, TimeUnit.SECONDS)
+                }
+            }
+            Files.deleteIfExists(outputFile)
+        }
     }
 
     private fun javaBin(): String = Path.of(System.getProperty("java.home"), "bin", "java").toString()
@@ -740,6 +756,8 @@ class TwoClientWireTest {
         const val STREAM_BUDGET_MS = 20_000L
         const val STARTUP_BUDGET_MS = 30_000L
         const val CLI_SECONDS = 30L
+        const val CLI_OUTPUT_LIMIT_BYTES = 65_536L
+        const val SHUTDOWN_SECONDS = 5L
         const val POLL_MS = 50L
         const val TEST_BUDGET_MS = 300_000L
 
