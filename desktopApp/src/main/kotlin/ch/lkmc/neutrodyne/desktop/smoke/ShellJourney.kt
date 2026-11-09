@@ -37,9 +37,10 @@ import kotlin.time.TimeSource
  */
 internal class ShellJourney(
     tempPrefix: String,
+    createRoot: (String) -> Path = { Files.createTempDirectory(it) },
 ) {
     val timings = LinkedHashMap<String, Long>()
-    private val root: Path = Files.createTempDirectory(tempPrefix)
+    private val root: Path = createRoot(tempPrefix)
     var graph: DesktopAppGraph? = null
         private set
     private val watchdog: Thread = armWatchdog()
@@ -111,6 +112,17 @@ internal class ShellJourney(
                 if (opened) startedGraph.jobRunner.stop(RUNNER_GRACE)
                 startedGraph.appScope.coroutineContext[Job]?.cancelAndJoin()
                 if (opened) startedGraph.databaseOpener.requireDatabase().close()
+            }
+        }
+        // Compiled engine libraries protect their files and directories. Restore write
+        // access inside this owned tree before deleting children; never follow a link.
+        Files.walk(root).use { paths ->
+            paths.forEach { path ->
+                if (!Files.isSymbolicLink(path)) {
+                    check(
+                        path.toFile().setWritable(true, true),
+                    ) { "Cannot make temporary journey path writable: $path" }
+                }
             }
         }
         Files.walk(root).use { paths ->

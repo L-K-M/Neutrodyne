@@ -65,7 +65,8 @@ exit "${STUB_MSIEXEC_EXIT:-0}"
 EOF
 cat > "$repo/bin/python" <<'EOF'
 #!/bin/sh
-mkdir -p "$5/Neutrodyne"
+# The shipped extractor is invoked as: python extract-zip.py <zip> <dest>.
+mkdir -p "$3/Neutrodyne"
 EOF
 chmod +x "$repo/gradlew" "$repo/scripts/desktop/smoke-start.sh" "$repo/scripts/ci/"*.sh "$repo/bin/"*
 
@@ -78,6 +79,11 @@ run_leg() { # [ENV=x ...] — one leg run; clears records, captures leg.log
 smokes() { if [ -f "$repo/smoke.txt" ]; then grep -c '^SMOKE ' "$repo/smoke.txt"; else echo 0; fi; }
 
 chk "the leg resolves the native path once" test "$(grep -c 'cygpath -w' "$LEG")" -eq 1
+
+# The ZIP smoke extraction must restore the artifact's recorded mtimes: the AOT
+# cache binds the trained JARs' timestamps, and zipfile -e drops them.
+chk "the ZIP smoke uses the timestamp-restoring extractor" grep -q 'extract-zip.py' "$LEG"
+chk "the ZIP smoke no longer uses python -m zipfile -e" test -z "$(grep -F 'python -m zipfile -e' "$LEG")"
 
 # --- msiexec 0: clean install -------------------------------------------------
 chk "msiexec 0 lets the leg finish" run_leg STUB_MSIEXEC_EXIT=0
