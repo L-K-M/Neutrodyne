@@ -1265,6 +1265,13 @@ for image; do :; done
                 # field; either decodes to the trained epoch on this host.
                 info = zipfile.ZipInfo(name, date_time=time.localtime(self.AOT_EPOCH_S)[:6])
                 info.extra = utc_extra
+                # Gradle's Zip records each entry's Unix mode in the external
+                # attributes; the interpreter's exec bit must survive the archive
+                # the same way for the image scan's -x rule to see it. The full
+                # st_mode goes in the high word — extractors honour it only with
+                # the file-type bits set (a bare S_IMODE is ignored).
+                info.create_system = 3
+                info.external_attr = os.stat(path).st_mode << 16
                 info.compress_type = zipfile.ZIP_STORED
                 out.writestr(info, path.read_bytes() if path.is_file() else b"")
         r = self.fx.image_check(archive)
