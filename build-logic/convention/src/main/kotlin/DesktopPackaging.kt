@@ -10,12 +10,14 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.RelativePath
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
@@ -26,6 +28,10 @@ import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
 import org.gradle.process.CommandLineArgumentProvider
 import org.gradle.process.ExecOperations
+import org.gradle.work.InputChanges
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
@@ -37,6 +43,9 @@ import java.nio.ByteOrder
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 /** The four desktop packaging targets of 11's platform matrix (D88, D89). */
@@ -565,14 +574,17 @@ internal object CanonicalJarHash {
 
     /**
      * The Compose-repacked skiko stub and the native files it extracts, derived from the
-     * Licensee-checked source artifact [file] and the target's extraction rule [extracted]
-     * (an entry is extracted when its name, with any `.sha256` suffix removed, is in the set).
-     * The expected stub hash is the canonical content identity of the remaining entries, so
+     * Licensee-checked source artifact [file], the target's extraction rule [extracted]
+     * (an entry is extracted when its name, with any `.sha256` suffix removed, is in the set)
+     * and the foreign-architecture natives [removed] the derived stub drops by the same
+     * suffix rule ([TrimSkikoStubTask]; empty keeps Compose's repack untouched). The
+     * expected stub hash is the canonical content identity of the remaining entries, so
      * the image checker can bind the stub without ever trusting a hash taken from the image.
      */
     data class StubDerivation(
         val expectedHash: String,
         val extracted: List<Pair<String, String>>,
+        val removed: List<Pair<String, String>> = emptyList(),
     )
 
     fun of(file: File): String {
@@ -589,9 +601,13 @@ internal object CanonicalJarHash {
     fun stubOf(
         file: File,
         extracted: Set<String>,
+        removed: Set<String> = emptySet(),
     ): StubDerivation {
+        require(extracted.none { it in removed }) {
+            "a skiko entry cannot be both extracted and removed: ${extracted intersect removed}"
+        }
         val zip = java.util.zip.ZipFile(file)
-        return zip.use { z -> computeStub(z, extracted) }
+        return zip.use { z -> computeStub(z, extracted, removed) }
     }
 
     private fun compute(zip: java.util.zip.ZipFile): String {
@@ -621,6 +637,7 @@ internal object CanonicalJarHash {
     private fun computeStub(
         zip: java.util.zip.ZipFile,
         extracted: Set<String>,
+        removed: Set<String> = emptySet(),
     ): StubDerivation {
         val entries = zip.entries().toList()
         val seen = HashSet<String>()
@@ -632,6 +649,7 @@ internal object CanonicalJarHash {
         }
         val remaining = mutableListOf<Pair<String, ByteArray>>()
         val extractedFiles = mutableListOf<Pair<String, String>>()
+        val removedFiles = mutableListOf<Pair<String, String>>()
         for (entry in entries) {
             val base =
                 if (entry.name.endsWith(".sha256")) {
@@ -648,6 +666,9 @@ internal object CanonicalJarHash {
             if (base in extracted) {
                 extractedFiles += entry.name.substringAfterLast('/') to
                     sha256Hex(normalizedEntryBytes(entry.name, bytes))
+            } else if (base in removed) {
+                removedFiles += entry.name.substringAfterLast('/') to
+                    sha256Hex(normalizedEntryBytes(entry.name, bytes))
             } else {
                 remaining += entry.name to normalizedEntryBytes(entry.name, bytes)
             }
@@ -659,7 +680,11 @@ internal object CanonicalJarHash {
             outer.update(hexToBytes(MessageDigest.getInstance("SHA-256").digest(bytes)))
             outer.update('\n'.code.toByte())
         }
-        return StubDerivation(hexToString(outer.digest()), extractedFiles.sortedBy { it.first })
+        return StubDerivation(
+            hexToString(outer.digest()),
+            extractedFiles.sortedBy { it.first },
+            removedFiles.sortedBy { it.first },
+        )
     }
 
     private fun hexToString(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
@@ -973,6 +998,26 @@ internal fun skikoExtractedNames(
     }
 
 /**
+ * The foreign-architecture skiko native the derived stub must not ship. Of the four
+ * pinned artifacts (skiko-awt-runtime 0.150.1, measured 2026-11-09) only the macOS jar
+ * carries another architecture's library besides the target's (`libskiko-macos-x64.dylib`,
+ * 22,190,816 bytes, beside `libskiko-macos-arm64.dylib`); the linux-x64, linux-arm64 and
+ * windows-x64 jars ship exactly their extracted set, so their derived stubs stay
+ * untouched. A `.sha256` sibling is removed with its library (the extraction rule's
+ * suffix handling). [TrimSkikoStubTask] fails closed when a name listed here is absent
+ * from the pinned source artifact, so a repin that changes the layout stops the build
+ * until this rule is re-measured against the actual artifacts.
+ */
+internal fun skikoForeignNames(
+    os: String,
+    arch: String,
+): Set<String> =
+    when (os) {
+        "macos" -> setOf("libskiko-macos-${if (arch == "arm64") "x64" else "arm64"}.dylib")
+        else -> emptySet()
+    }
+
+/**
  * Writes the Licensee-checked runtime classpath as `<canonical sha256>  name` lines
  * (09 Build-output checks): `check-desktop-image.sh` asserts every JAR of an image is
  * one of these files. Same-named JARs — `api-desktop.jar` comes from four modules, and
@@ -983,7 +1028,10 @@ internal fun skikoExtractedNames(
  * extracts the target's native library and repacks the rest under a fresh content-md5 stamp.
  * Its stub record (`<expected stub hash>  <source name>  <extracted file>=<hash>,…`) is
  * derived here from the source artifact, so the checker binds the stub's canonical content
- * instead of accepting a name prefix.
+ * instead of accepting a name prefix. A fourth `removed:<file>=<hash>,…` field appears when
+ * [skikoForeignNames] drops the foreign-architecture native from the derived stub; the
+ * field is the trim's provenance record (the image carries nothing left to check it
+ * against — the expected hash already binds the trimmed entry set exactly).
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -1018,9 +1066,243 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val match = SKIKO_RUNTIME_JAR.matchEntire(file.name) ?: return null
         val os = match.groupValues[1]
         val arch = match.groupValues[2]
-        val stub = CanonicalJarHash.stubOf(file, skikoExtractedNames(os, arch))
+        val stub =
+            CanonicalJarHash.stubOf(
+                file,
+                skikoExtractedNames(os, arch),
+                skikoForeignNames(os, arch),
+            )
         val extracted = stub.extracted.joinToString(",") { "${it.first}=${it.second}" }
-        return "${stub.expectedHash}  ${file.name}  $extracted"
+        val removed =
+            stub.removed
+                .joinToString(",") { "${it.first}=${it.second}" }
+                .takeIf { it.isNotEmpty() }
+                ?.let { "  removed:$it" }
+                ?: ""
+        return "${stub.expectedHash}  ${file.name}  $extracted$removed"
+    }
+}
+
+/** One trim run's outcome: the stub [stubFile], its size across the rewrite and the removed entry names. */
+internal data class SkikoStubTrim(
+    val stubFile: File,
+    val beforeBytes: Long,
+    val afterBytes: Long,
+    val removed: List<String>,
+)
+
+/**
+ * The stub trim itself, shared by [TrimSkikoStubTask] and its tests: locates Compose's
+ * repacked stub of [source] in the image's app dir, refuses anything that is not exactly
+ * the source minus the target's extracted entries, drops the foreign-architecture
+ * natives of [skikoForeignNames] (`.sha256` siblings included) and rewrites the JAR
+ * atomically. Fails closed when a declared foreign entry is absent from the pinned
+ * source, or when any native entry would remain in the derived stub — a repin that
+ * changes the upstream layout stops the build instead of shipping or silently removing.
+ * A stub that already matches the trimmed derivation is left untouched. [resign] runs
+ * on macOS after a rewrite (the new JAR bytes break the bundle's ad-hoc seal); the task
+ * passes [resignMacImageAdHoc], tests a recorder.
+ */
+internal fun trimSkikoStub(
+    image: File,
+    source: File,
+    os: String,
+    arch: String,
+    resign: (File) -> Unit,
+): SkikoStubTrim {
+    val extracted = skikoExtractedNames(os, arch)
+    val foreign = skikoForeignNames(os, arch)
+    val preTrim = CanonicalJarHash.stubOf(source, extracted)
+    val trimmed = CanonicalJarHash.stubOf(source, extracted, foreign)
+
+    // No arbitrary missing entry: every declared foreign native must exist in the
+    // pinned source, and the derived stub must keep no native payload at all —
+    // anything a future artifact layout adds fails here instead of shipping.
+    val dropped = extracted + foreign
+    java.util.zip.ZipFile(source).use { zip ->
+        for (name in foreign) {
+            if (zip.getEntry(name) == null) {
+                throw GradleException(
+                    "the pinned skiko artifact ${source.name} no longer carries the foreign " +
+                        "native $name; re-measure the upstream artifacts and update " +
+                        "skikoForeignNames (11 Image scan rules)",
+                )
+            }
+        }
+        for (entry in zip.entries().asSequence()) {
+            val base = if (entry.name.endsWith(".sha256")) entry.name.removeSuffix(".sha256") else entry.name
+            if (base in dropped) continue
+            if (base.endsWith(".dylib") || base.endsWith(".so") || base.endsWith(".dll") || base == "icudtl.dat") {
+                throw GradleException(
+                    "the derived skiko stub would still carry the native entry ${entry.name}; " +
+                        "only the declared foreign set of skikoForeignNames may be removed " +
+                        "(11 Image scan rules)",
+                )
+            }
+        }
+    }
+
+    val appDir = File(image, aotImageLayout(os).appDir)
+    val stem = source.name.removeSuffix(".jar")
+    val stubs =
+        appDir
+            .listFiles { f -> f.isFile && f.name.startsWith("skiko-awt-runtime-") && f.name.endsWith(".jar") }
+            .orEmpty()
+            .filter { it.name == source.name || it.name.startsWith("$stem-") }
+    if (stubs.isEmpty()) {
+        val present =
+            appDir
+                .listFiles { f -> f.isFile && f.name.startsWith("skiko-awt-runtime-") }
+                .orEmpty()
+                .joinToString { it.name }
+        throw GradleException(
+            "the image carries no repacked skiko stub for ${source.name} (skiko jars present: " +
+                "${present.ifEmpty { "none" }}); createDistributable derives it",
+        )
+    }
+    if (stubs.size > 1) {
+        throw GradleException(
+            "the image carries more than one skiko stub for ${source.name}: " +
+                stubs.joinToString { it.name },
+        )
+    }
+    val stubFile = stubs.single()
+
+    val actual = CanonicalJarHash.of(stubFile)
+    if (actual == trimmed.expectedHash) {
+        return SkikoStubTrim(stubFile, stubFile.length(), stubFile.length(), emptyList())
+    }
+    if (actual != preTrim.expectedHash) {
+        throw GradleException(
+            "the image's skiko stub ${stubFile.name} is not Compose's repack of the " +
+                "Licensee-checked source artifact ${source.name} (canonical content differs)",
+        )
+    }
+
+    val before = stubFile.length()
+    rewriteSkikoStubWithout(stubFile, foreign)
+    if (CanonicalJarHash.of(stubFile) != trimmed.expectedHash) {
+        throw GradleException(
+            "rewriting the skiko stub ${stubFile.name} did not produce the derived trimmed content",
+        )
+    }
+    if (os == "macos") {
+        resign(image)
+    }
+    return SkikoStubTrim(stubFile, before, stubFile.length(), trimmed.removed.map { it.first })
+}
+
+/** Rewrites [stub] keeping every entry except [dropBases] and their `.sha256` siblings. */
+private fun rewriteSkikoStubWithout(
+    stub: File,
+    dropBases: Set<String>,
+) {
+    val rewritten = File(stub.parentFile, stub.name + ".trimming")
+    try {
+        ZipFile(stub).use { source ->
+            ZipOutputStream(rewritten.outputStream().buffered()).use { out ->
+                for (entry in source.entries().asSequence()) {
+                    val base = if (entry.name.endsWith(".sha256")) entry.name.removeSuffix(".sha256") else entry.name
+                    if (base in dropBases) continue
+                    val copy = ZipEntry(entry.name)
+                    copy.time = entry.time
+                    if (entry.comment != null) copy.comment = entry.comment
+                    out.putNextEntry(copy)
+                    if (!entry.isDirectory) {
+                        source.getInputStream(entry).copyTo(out)
+                    }
+                    out.closeEntry()
+                }
+            }
+        }
+    } catch (e: Exception) {
+        rewritten.delete()
+        throw e
+    }
+    if (!stub.delete() || !rewritten.renameTo(stub)) {
+        rewritten.delete()
+        throw GradleException("could not rewrite the skiko stub $stub")
+    }
+}
+
+/**
+ * Rewrites Compose's repacked skiko stub inside the app image without the
+ * foreign-architecture natives of [skikoForeignNames] (11 Image scan rules). Registered
+ * as `trimSkikoStub`, depending on `createDistributable` and carrying the same
+ * Licensee-checked classpath as [WriteDesktopRuntimeClasspath]; `trainAotCache` depends
+ * on it, so every image path — packaging, the mac-zip flow's bare `createDistributable`
+ * and the dev assemble image — carries the trimmed stub before the AOT cache records the
+ * classpath JARs' sizes and timestamps (a trim after the training would invalidate the
+ * recorded identity). Fails closed when the runtime classpath carries no skiko jar while
+ * the image does (or vice versa), when several would compete, or when the jar's target
+ * does not match the packaging target; [trimSkikoStub] owns the content checks.
+ */
+abstract class TrimSkikoStubTask : DefaultTask() {
+    /** The app image root — internal: the declared inputs below identify the trim. */
+    @get:Internal
+    abstract val appImage: DirectoryProperty
+
+    /** The Licensee-checked runtime classpath whose skiko jar is the stub's source. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val runtimeClasspath: ConfigurableFileCollection
+
+    @get:Input
+    abstract val targetOs: Property<String>
+
+    @get:Input
+    abstract val targetArch: Property<String>
+
+    @TaskAction
+    fun trim() {
+        val os = targetOs.get()
+        val arch = targetArch.get()
+        val sources =
+            runtimeClasspath.files.filter { SKIKO_RUNTIME_JAR.matchEntire(it.name) != null }
+        val appDir = File(appImage.get().asFile, aotImageLayout(os).appDir)
+        val skikoJars =
+            appDir
+                .listFiles { f -> f.isFile && f.name.startsWith("skiko-awt-runtime-") && f.name.endsWith(".jar") }
+                .orEmpty()
+                .toList()
+
+        if (sources.isEmpty()) {
+            if (skikoJars.isNotEmpty()) {
+                throw GradleException(
+                    "the image carries a skiko runtime JAR (${skikoJars.first().name}) but the " +
+                        "runtime classpath has no Licensee-checked source artifact for it",
+                )
+            }
+            return
+        }
+        if (sources.size > 1) {
+            throw GradleException(
+                "the runtime classpath carries more than one skiko runtime jar: " +
+                    sources.joinToString { it.name },
+            )
+        }
+        val source = sources.single()
+        val match = requireNotNull(SKIKO_RUNTIME_JAR.matchEntire(source.name))
+        if (match.groupValues[1] != os || match.groupValues[2] != arch) {
+            throw GradleException(
+                "the runtime classpath's skiko jar ${source.name} does not match the packaging target $os-$arch",
+            )
+        }
+
+        val outcome =
+            trimSkikoStub(appImage.get().asFile, source, os, arch) { image ->
+                resignMacImageAdHoc(image)
+            }
+        if (outcome.removed.isEmpty()) {
+            logger.lifecycle(
+                "trimSkikoStub: ${outcome.stubFile.name} carries no foreign-architecture native",
+            )
+        } else {
+            logger.lifecycle(
+                "trimSkikoStub: ${outcome.stubFile.name} ${outcome.beforeBytes} -> " +
+                    "${outcome.afterBytes} bytes (removed ${outcome.removed.joinToString()})",
+            )
+        }
     }
 }
 
@@ -1064,6 +1346,204 @@ abstract class RestoreDesktopPythonPermissions : DefaultTask() {
     }
 }
 
+
+/**
+ * Compose's `createRuntimeImage` with `jdk.localedata` restricted to the shipped locales
+ * (11 jlink modules; PB27's miss reserved the convention plugin's own jlink step, open
+ * question 12). Compose 1.12.1's `AbstractJLinkTask` emits only `--add-modules`,
+ * `--strip-debug`, `--strip-native-commands`, `--no-header-files`, `--no-man-pages`,
+ * an internal `--compress` and `--output` — there is no `--include-locales` and no DSL
+ * for it, so this subclass appends the one missing pair in [makeArgs]. Everything else —
+ * the Compose configure action's javaHome, module list and destination dir, the argument
+ * file, the tool invocation and every input/output annotation — is inherited unchanged;
+ * [Project.registerDesktopPackagingTasks] swaps the Compose task for this type with
+ * `TaskContainer.replace`, the same mechanism `packageMsi`/`packageDmg` already use.
+ */
+abstract class LocaleRestrictedJLinkTask : AbstractJLinkTask() {
+    /**
+     * The locale tags joined for `--include-locales` (en,de); an [org.gradle.api.tasks.Input]
+     * so the set participates in the task's up-to-date and cache keys.
+     */
+    @get:Input
+    abstract val includedLocales: ListProperty<String>
+
+    override fun makeArgs(tmpDir: File): MutableList<String> {
+        val locales =
+            includedLocales.get().also { tags ->
+                if (tags.isEmpty()) {
+                    throw GradleException("includedLocales is empty: jlink would ship every locale (11 jlink modules)")
+                }
+                for (tag in tags) {
+                    if (tag.isEmpty() || tag.any { it == ',' || it.isWhitespace() }) {
+                        throw GradleException("invalid --include-locales tag '$tag' (11 jlink modules)")
+                    }
+                }
+            }
+        val args = super.makeArgs(tmpDir)
+        if ("--include-locales" in args) {
+            throw GradleException(
+                "the pinned Compose jlink step already restricts locales; drop LocaleRestrictedJLinkTask (11 jlink modules)",
+            )
+        }
+        // The base list ends with the --output pair; keep the plugin option set together
+        // ahead of it so the argument file stays flags-then-output.
+        val output = args.indexOf("--output")
+        if (output < 0) {
+            throw GradleException("the pinned Compose jlink step no longer emits --output (11 jlink modules)")
+        }
+        args.addAll(output, listOf("--include-locales", locales.joinToString(",")))
+        return args
+    }
+}
+
+/**
+ * Compose's `packageMsi`/`packageDmg` task carrying the AOT post-image hook (11 AOT cache).
+ *
+ * Compose 1.12.1 exposes no `--resource-dir` hook: its `freeArgs` are prepended while the
+ * task's own `--resource-dir` is written last (the JDK's `DeployParams.addBundleArgument`
+ * overwrites, so the last one wins), and `prepareWorkingDir` clears that directory after
+ * `doFirst`. The supported extension point is the task itself: this subclass overrides
+ * `prepareWorkingDir` to call the Compose implementation and then drop the format's
+ * `<app name>-post-image` script into Compose's own resource directory, so jpackage's
+ * `ScriptRunner` finds it after the attribute-losing `copyAppImage` and before the WiX/DMG
+ * bundler reads the staging tree. Everything else — the DSL-driven arguments, the WiX
+ * toolchain wiring, the macOS Info.plist generation, the ad-hoc seal, the output
+ * directory — is inherited unchanged; [Project.registerDesktopPackagingTasks] swaps the
+ * Compose task for this type with `TaskContainer.replace`, which keeps the registered
+ * configure actions.
+ */
+abstract class AotTimestampJPackageTask(
+    private val format: TargetFormat,
+) : AbstractJPackageTask(format) {
+    /** The shipped hook for this format, copied into Compose's resource directory. */
+    @get:Internal
+    abstract val postImageHook: RegularFileProperty
+
+    /** jpackage's `ScriptRunner` looks up `<app name>-post-image<ext>` in the resource dir. */
+    @get:Internal
+    protected open val scriptExtension: String =
+        if (format == TargetFormat.Msi) ".wsf" else ".sh"
+
+    override fun prepareWorkingDir(inputChanges: InputChanges) {
+        super.prepareWorkingDir(inputChanges)
+        writePostImageHook(
+            hook = postImageHook.get().asFile,
+            packageName = packageName.get(),
+            scriptExtension = scriptExtension,
+            resourcesDir = jpackageResources.get().asFile,
+        )
+    }
+}
+
+/**
+ * Drops the hook into jpackage's resource directory under the exact name its
+ * `ScriptRunner` looks up (`<app name>-post-image<ext>`). Fails closed when the
+ * shipped hook is missing: packaging without it would ship a strict-cache failure.
+ */
+internal fun writePostImageHook(
+    hook: File,
+    packageName: String,
+    scriptExtension: String,
+    resourcesDir: File,
+) {
+    if (!hook.isFile) {
+        throw GradleException("the AOT post-image hook is missing: $hook")
+    }
+    File(resourcesDir, "$packageName-post-image$scriptExtension").writeBytes(hook.readBytes())
+}
+
+/** Compose's `packageMsi` with the Windows post-image hook. */
+abstract class MsiAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Msi)
+
+/** Compose's `packageDmg` with the macOS post-image hook. */
+abstract class DmgAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Dmg)
+
+/**
+ * Rewrites [zip] so every entry carries the Info-ZIP extended timestamp field
+ * (0x5455): the entry's modification time as UTC seconds. Gradle's Zip records
+ * only the MS-DOS local-time fields — commons-compress writes no 0x5455 — so an
+ * extractor in another timezone would decode a different instant and a strict
+ * AOT launch could pass or fail depending on where the ZIP was built. The
+ * `java.util.zip` itself only emits the field for times outside the DOS range,
+ * so the rewrite sets the entry extra bytes explicitly; decoding the DOS time
+ * back happens on this host, so the recorded instant round-trips exactly.
+ * Entry order and names are preserved; unix-mode external attributes are not —
+ * java.util.zip exposes none, and the Windows image this archives carries none
+ * to lose.
+ */
+internal fun addUtcTimestamps(zip: File) {
+    val rewritten = zip.resolveSibling("${zip.name}.utc")
+    try {
+        rewriteZipWithUtcTimestamps(zip, rewritten)
+    } catch (e: Exception) {
+        rewritten.delete()
+        throw e
+    }
+    if (!zip.delete() || !rewritten.renameTo(zip)) {
+        rewritten.delete()
+        throw GradleException("could not rewrite $zip with UTC timestamps")
+    }
+}
+
+private fun rewriteZipWithUtcTimestamps(
+    zip: File,
+    rewritten: File,
+) {
+    ZipFile(zip).use { source ->
+        ZipOutputStream(rewritten.outputStream().buffered()).use { out ->
+            for (entry in source.entries().asSequence()) {
+                val copy = ZipEntry(entry.name)
+                if (entry.time >= 0) {
+                    copy.time = entry.time
+                    copy.extra = withoutUtcField(entry.extra) + utcTimestampField(entry.time / 1000)
+                } else {
+                    copy.extra = entry.extra
+                }
+                if (entry.comment != null) {
+                    copy.comment = entry.comment
+                }
+                out.putNextEntry(copy)
+                if (!entry.isDirectory) {
+                    source.getInputStream(entry).copyTo(out)
+                }
+                out.closeEntry()
+            }
+        }
+    }
+}
+
+/** The Info-ZIP 0x5455 extended timestamp field: flags=1 (mtime present) plus UTC seconds. */
+private fun utcTimestampField(utcSeconds: Long): ByteArray =
+    ByteBuffer
+        .allocate(9)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putShort(0x5455)
+        .putShort(5)
+        .put(1)
+        .putInt(utcSeconds.toInt())
+        .array()
+
+/**
+ * [extra] minus any 0x5455 fields, so the rewrite stays idempotent and a second
+ * run records one timestamp. Other producers' extra fields pass through.
+ */
+private fun withoutUtcField(extra: ByteArray?): ByteArray {
+    if (extra == null) return ByteArray(0)
+    val out = java.io.ByteArrayOutputStream(extra.size)
+    val fields = ByteBuffer.wrap(extra).order(ByteOrder.LITTLE_ENDIAN)
+    while (fields.remaining() >= 4) {
+        val start = fields.position()
+        val size = fields.getShort(start + 2).toInt() and 0xFFFF
+        val end = start + 4 + size
+        if (end > extra.size) break
+        if ((fields.getShort(start).toInt() and 0xFFFF) != 0x5455) {
+            out.write(extra, start, end - start)
+        }
+        fields.position(end)
+    }
+    return out.toByteArray()
+}
+
 /** The Windows portable ZIP: the app image archived (11 Windows MSI and ZIP). */
 abstract class WindowsZipTask : Zip()
 
@@ -1088,9 +1568,13 @@ internal fun Project.registerDesktopPackagingTasks(
         setupRuntime.map { task ->
             File(File(task.home.get().asFile, target.homeSubdir), "bin/jpackage")
         }
+    val nativeTarget = nativeTargetOf()
 
     // The app image is createDistributable's destinationDir/<name>[.app]; taking it from the
     // task keeps this in step with the plugin's layout instead of hardcoding compose/binaries.
+    // The dir() derivation (not .map) keeps the chain readable at any time: a .map over the
+    // task provider cannot be queried before createDistributable has completed, which the
+    // packaging tasks' appImage reads below would trip.
     val appImageLeaf =
         if (target ==
             DesktopPackagingTarget.MACOS_ARM64
@@ -1099,13 +1583,23 @@ internal fun Project.registerDesktopPackagingTasks(
         } else {
             DESKTOP_PACKAGE_NAME
         }
-    val appImage =
-        tasks
-            .named(
-                "createDistributable",
-                org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
-            ).flatMap { it.destinationDir }
-            .map { it.dir(appImageLeaf) }
+    val createDistributable =
+        tasks.named(
+            "createDistributable",
+            org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
+        )
+    val distributableDir = createDistributable.flatMap { it.destinationDir }
+    val appImage = createDistributable.flatMap { it.destinationDir.dir(appImageLeaf) }
+
+    // --- runtime image: the locale-restricted jlink replaces Compose's createRuntimeImage --
+    // Compose 1.12.1's AbstractJLinkTask has no --include-locales, and PB27's miss reserved
+    // the convention plugin's own jlink step (11 jlink modules, open question 12). The
+    // replace keeps Compose's registered configure action (javaHome, modules,
+    // javaRuntimePropertiesFile, destinationDir — the same mechanism packageMsi/packageDmg
+    // use), so the destination dir stays the one Compose wires into createDistributable's
+    // --runtime-image and this task stays the image's single writer.
+    val createRuntimeImage = tasks.replace("createRuntimeImage", LocaleRestrictedJLinkTask::class.java)
+    createRuntimeImage.includedLocales.set(JLINK_INCLUDED_LOCALES)
 
     // The desktop entry and hicolor icons the DEB/RPM scriptlets install travel inside the
     // image through appResourcesRootDir (11 Links and files from the OS). The PNG set comes
@@ -1162,7 +1656,6 @@ internal fun Project.registerDesktopPackagingTasks(
         // `into` prefix and exclude everything. The tasks are named lazily because
         // :playback:native may not be evaluated when this project is configured.
         dependsOn(":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
-        val nativeTarget = nativeTargetOf()
         from(playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget")) {
             into("${target.id}/native/ffmpeg")
             eachFile {
@@ -1304,6 +1797,113 @@ internal fun Project.registerDesktopPackagingTasks(
             }
         }
 
+    // The runtime-classpath manifest is registered here, ahead of the AOT training task:
+    // the training inputs bind it so a JAR change retrains the archive. The stub trim
+    // shares the classpath: it derives the trimmed stub from the same source artifacts.
+    // Compose resolves project dependencies to their jar artifacts for the image,
+    // so both must ask for jar artifacts too (otherwise project deps show
+    // up as classes directories) and include this project's own jar.
+    val runtimeClasspathJars =
+        configurations.named("runtimeClasspath").map { conf ->
+            conf.incoming
+                .artifactView {
+                    attributes {
+                        attribute(
+                            ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
+                            ArtifactTypeDefinition.JAR_TYPE,
+                        )
+                    }
+                }.files
+        }
+    tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
+        description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
+        runtimeClasspath.from(runtimeClasspathJars)
+        runtimeClasspath.from(tasks.named("jar"))
+        manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
+        stubManifest.set(
+            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
+        )
+    }
+
+    // The stub trim runs between createDistributable and the AOT training: trainAotCache
+    // depends on it below, and the mac-zip flow's bare createDistributable reaches it
+    // through the training finalizer's dependency chain (a dev image with no install kind
+    // trains nothing, but the finalizer's dependencies still trim the stub so the image
+    // matches what writeDesktopRuntimeClasspath records for it).
+    val image = appImage
+    val trimSkikoStub =
+        tasks.register<TrimSkikoStubTask>("trimSkikoStub") {
+            description =
+                "Rewrites the image's skiko stub JAR without the foreign-architecture natives (11 Image scan rules)."
+            dependsOn("createDistributable")
+            this.appImage.set(image)
+            runtimeClasspath.from(runtimeClasspathJars)
+            runtimeClasspath.from(tasks.named("jar"))
+            targetOs.set(target.osWire)
+            targetArch.set(target.archWire)
+        }
+
+    // --- AOT cache: one training launch writes $APPDIR/neutrodyne.aot into the image (PO-42) ---
+    // Every packaging invocation trains: package* tasks depend on the task, and
+    // createDistributable's finalizer covers the bare-image path (mac-zip.sh archives the
+    // image directly — no package task runs). The graph stays acyclic: train needs
+    // createDistributable's output, package* need the trained image, and createDistributable
+    // never depends on a package task.
+    val aotLayout = aotImageLayout(target.osWire)
+    val runtimeJavaName = "java" + if (target.osWire == "windows") ".exe" else ""
+    val trainAotCache =
+        tasks.register<TrainAotCacheTask>("trainAotCache") {
+            group = "distribution"
+            description =
+                "Runs one AOT training launch of the packaged app, verifies the archive under strict mode and leaves it in the image (PO-42, 11 AOT cache)."
+            dependsOn(
+                "createDistributable",
+                setupRuntime,
+                "writeDesktopRuntimeClasspath",
+                trimSkikoStub,
+                ":playback:native:buildFfmpeg",
+                ":playback:native:buildNdmedia",
+            )
+            this.appImage.set(image)
+            launcher.set(image.map { it.file(aotLayout.launcher) })
+            launcherCfg.set(image.map { it.file(aotLayout.cfg) })
+            runtimeRelease.set(image.map { it.file(aotLayout.runtimeRelease) })
+            aotArchive.set(image.map { it.file("${aotLayout.appDir}/$AOT_CACHE_FILE") })
+            runtimeHome.set(setupRuntime.flatMap { it.home })
+            runtimeJavaSource.set(
+                setupRuntime.flatMap { setup ->
+                    setup.home.map { home ->
+                        if (target.homeSubdir.isEmpty()) {
+                            home.file("bin/$runtimeJavaName")
+                        } else {
+                            home.dir(target.homeSubdir).file("bin/$runtimeJavaName")
+                        }
+                    }
+                },
+            )
+            runtimeClasspathManifest.set(
+                tasks
+                    .named(
+                        "writeDesktopRuntimeClasspath",
+                        WriteDesktopRuntimeClasspath::class.java,
+                    ).flatMap { it.manifest },
+            )
+            nativeLibraries.from(
+                playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget"),
+                playbackNative.layout.buildDirectory.dir("ndmedia/$nativeTarget"),
+            )
+            targetOs.set(target.osWire)
+            installKind.set(installKindProperty.orElse(""))
+            expectedInstallKinds.set(target.installKinds)
+            // No install kind means a dev/assemble image: no AOT flag in its .cfg either,
+            // so there is nothing to train and nothing missing — the task simply does not run.
+            onlyIf { installKind.get().isNotBlank() }
+        }
+    tasks.named("createDistributable") { finalizedBy(trainAotCache) }
+    tasks
+        .matching { it.name in AOT_CACHE_CONSUMERS }
+        .configureEach { dependsOn(trainAotCache) }
+
     // --- DEB: jpackage with our own control file and maintainer scripts -----------------------
     tasks.register<JPackageImageTask>("packageDeb") {
         group = "distribution"
@@ -1403,8 +2003,14 @@ internal fun Project.registerDesktopPackagingTasks(
         archiveFileName.set("neutrodyne-$versionName-${target.id}.zip")
         destinationDirectory.set(layout.buildDirectory.dir("desktop-packaging/zip"))
         from(appImage.map { it.asFile.parentFile }) { include("$appImageLeaf/**") }
-        isPreserveFileTimestamps = false
+        // The AOT cache records the classpath JARs' modification times (11 AOT cache), so
+        // the archive must preserve them; trainAotCache normalized every image file to a
+        // fixed timestamp first, which keeps this archive reproducible.
+        isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
+        // The DOS fields above record local time only; add the UTC 0x5455 field so the
+        // artifact's timestamps are unambiguous for any extractor's timezone.
+        doLast { addUtcTimestamps(archiveFile.get().asFile) }
     }
 
     // --- Linux tar.gz: the image as Neutrodyne/, executable bits carried from the image -------
@@ -1420,32 +2026,40 @@ internal fun Project.registerDesktopPackagingTasks(
         // Gradle 9's replacement for dirMode/fileMode: the tar keeps the modes the image files
         // already have (jpackage writes the launcher and jspawnhelper with 0755).
         useFileSystemPermissions()
-        isPreserveFileTimestamps = false
+        // The AOT cache records the classpath JARs' modification times (11 AOT cache), so
+        // the archive must preserve them; trainAotCache normalized every image file to a
+        // fixed timestamp first, which keeps this archive reproducible.
+        isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
     }
 
-    tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
-        description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
-        // Compose resolves project dependencies to their jar artifacts for the image,
-        // so the manifest must ask for jar artifacts too (otherwise project deps show
-        // up as classes directories) and include this project's own jar.
-        runtimeClasspath.from(
-            configurations.named("runtimeClasspath").map { conf ->
-                conf.incoming
-                    .artifactView {
-                        attributes {
-                            attribute(
-                                ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE,
-                                ArtifactTypeDefinition.JAR_TYPE,
-                            )
-                        }
-                    }.files
-            },
-        )
-        runtimeClasspath.from(tasks.named("jar"))
-        manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
-        stubManifest.set(
-            layout.buildDirectory.file("desktop-packaging/runtime-classpath-stubs.txt"),
-        )
-    }
+    // --- MSI/DMG: Compose's tasks carrying the AOT post-image hook ---------------------------
+    // Compose registers packageMsi/packageDmg for the host's target formats. Swap each for
+    // the subclass that drops the format's post-image hook into Compose's own resource
+    // directory during prepareWorkingDir — after the attribute-losing copyAppImage and before
+    // WiX/hdiutil read the staging tree. TaskContainer.replace keeps the configure actions
+    // Compose registered on the provider (the DSL arguments, the WiX toolchain wiring, the
+    // macOS Info.plist generation), so the entry points, the output names and every current
+    // packaging behavior stay; only the task type changes. The `freeArgs` route cannot work:
+    // they are prepended while Compose writes its own --resource-dir last, and the JDK's
+    // last-wins option handling keeps that one.
+    //
+    // The installer argv must consume the trained image: Compose 1.12.1 leaves its non-macOS
+    // package tasks in fresh-image mode (`--input` libs + `--main-jar`, which the JDK turns
+    // into a newly generated image that carries no trained neutrodyne.aot, so the post-image
+    // hook fails the packaging closed — Windows run 42509091764, job 128818030637). Setting
+    // the task's appImage switches Compose's own makeArgs to `--app-image` and drops
+    // --input/--main-jar/--runtime-image; on macOS hosts makeArgs appends <name>.app to the
+    // configured directory itself (the form Compose wires for packageDmg), so packageDmg gets
+    // the destination directory and packageMsi the image inside it. The dependsOn pairing is
+    // the one Compose itself adds when it wires appImage (the archive the installers package
+    // is the one createDistributable + trainAotCache leave there).
+    val packageMsi = tasks.replace("packageMsi", MsiAotTimestampJPackageTask::class.java)
+    packageMsi.postImageHook.set(file("packaging/msi/Neutrodyne-post-image.wsf"))
+    packageMsi.dependsOn(createDistributable)
+    packageMsi.appImage.set(appImage)
+    val packageDmg = tasks.replace("packageDmg", DmgAotTimestampJPackageTask::class.java)
+    packageDmg.postImageHook.set(file("packaging/dmg/Neutrodyne-post-image.sh"))
+    packageDmg.dependsOn(createDistributable)
+    packageDmg.appImage.set(distributableDir)
 }

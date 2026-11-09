@@ -166,6 +166,22 @@ CFG_CRLF_PREEXISTING = (
     b"java-options=-Dneutrodyne.smoke=true\r\n"
 )
 
+# An AOT-configured artifact: the .cfg's [JavaOptions] read the trained archive.
+CFG_AOT = (
+    b"[Application]\n"
+    b"app.classpath=$APPDIR/tiny.jar\n"
+    b"\n"
+    b"[JavaOptions]\n"
+    b"java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot\n"
+)
+VALID_AOT_SMOKE = (
+    'SMOKE {"versionName":"0.1.0","versionCode":1,"installKind":"deb",'
+    '"javaVendor":"Eclipse Adoptium","javaVendorVersion":"Temurin-25+36",'
+    '"javaRuntimeVersion":"25+36","steps":{"graph":40,"window":510},'
+    '"window":"opened","aotCache":"in-use",'
+    '"pending":"database,destinations,ffmpeg,ndmedia,engine,dbus,rss"}'
+)
+
 RUN_BOUND = 30  # the fixture's own bound; the script's watchdog is 1 s in the timeout case
 
 
@@ -766,6 +782,101 @@ class SmokeStartGateTest(unittest.TestCase):
         self.assertNotEqual(0, rc)
         self.assertEqual("", out)
         self.assertIn("failed", err)
+        self.assert_unchanged(cfg, CFG_ABSENT, 0o640)
+
+    # --- strict AOT acceptance (11 AOT cache) -----------------------------------
+    # A .cfg that reads -XX:AOTCache gets -XX:AOTMode=on appended after the
+    # smoke property, and the verdict requires aotCache=in-use — a fallback or
+    # unverified cache is a failure, never an unverified pass.
+
+    def test_aot_image_appends_strict_mode_and_accepts_in_use(self):
+        img, cfg = self.make_image(CFG_AOT, 0o640)
+        self.behave(lines=[VALID_AOT_SMOKE], exit_code=0, record_env=True)
+        rc, out, err = self.run_script(img, 60, self.env(cfg))
+        self.assertEqual(0, rc, err)
+        self.assertEqual(VALID_AOT_SMOKE + "\n", out)
+        self.assertTrue(
+            self.env_record.read_text().endswith("-Dneutrodyne.smoke=true -XX:AOTMode=on"),
+            self.env_record.read_text(),
+        )
+        self.assert_unchanged(cfg, CFG_AOT, 0o640)
+
+    def test_aot_unverified_cache_fails(self):
+        """An existing archive without the strict mode is 'unverified', not a pass."""
+        img, cfg = self.make_image(CFG_AOT, 0o640)
+        line = VALID_AOT_SMOKE.replace('"in-use"', '"unverified"')
+        self.behave(lines=[line], exit_code=0)
+        rc, out, err = self.run_script(img, 60, self.env(cfg))
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assertIn("in-use", err)
+        self.assert_unchanged(cfg, CFG_AOT, 0o640)
+
+    def test_aot_missing_aotcache_field_fails(self):
+        """A report without the honest cache state cannot prove the archive loaded."""
+        img, cfg = self.make_image(CFG_AOT, 0o640)
+        self.behave(lines=[VALID_SMOKE], exit_code=0)
+        rc, out, err = self.run_script(img, 60, self.env(cfg))
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assertIn("in-use", err)
+
+    def test_aot_underscore_mode_off_prevents_launch(self):
+        """_JAVA_OPTIONS overrides everything, so a mode-off there cannot be
+        rescued by our appended =on and must fail before launch."""
+        img, cfg = self.make_image(CFG_AOT, 0o640)
+        self.behave(lines=[VALID_AOT_SMOKE], ran_marker=True)
+        env = self.env(cfg, underscore_java_options="-XX:AOTMode=off")
+        rc, out, err = self.run_script(img, 60, env)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assertIn("strict AOT", err)
+        self.assert_not_launched()
+        self.assert_unchanged(cfg, CFG_AOT, 0o640)
+
+    def test_aot_underscore_cache_override_prevents_launch(self):
+        img, cfg = self.make_image(CFG_AOT, 0o640)
+        self.behave(lines=[VALID_AOT_SMOKE], ran_marker=True)
+        env = self.env(cfg, underscore_java_options="-XX:AOTCache=/tmp/evil.aot")
+        rc, out, err = self.run_script(img, 60, env)
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assert_not_launched()
+
+    def test_aot_cfg_mode_off_prevents_launch(self):
+        """The .cfg wins over JAVA_TOOL_OPTIONS, so its own mode-off cannot be
+        overridden by the request and must fail."""
+        original = CFG_AOT + b"java-options=-XX:AOTMode=off\n"
+        img, cfg = self.make_image(original, 0o640)
+        self.behave(lines=[VALID_AOT_SMOKE], ran_marker=True)
+        rc, out, err = self.run_script(img, 60, self.env(cfg))
+        self.assertNotEqual(0, rc)
+        self.assertEqual("", out)
+        self.assert_not_launched()
+        self.assert_unchanged(cfg, original, 0o640)
+
+    def test_aot_java_tool_options_mode_off_is_overridden(self):
+        """A mode-off inside JAVA_TOOL_OPTIONS is safe: the appended =on is last
+        in the same variable, so the effective mode is still strict."""
+        img, cfg = self.make_image(CFG_AOT, 0o640)
+        self.behave(lines=[VALID_AOT_SMOKE], exit_code=0, record_env=True)
+        env = self.env(cfg, java_tool_options="-XX:AOTMode=off")
+        rc, out, err = self.run_script(img, 60, env)
+        self.assertEqual(0, rc, err)
+        self.assertTrue(
+            self.env_record.read_text().endswith("-XX:AOTMode=off -Dneutrodyne.smoke=true -XX:AOTMode=on"),
+            self.env_record.read_text(),
+        )
+
+    def test_non_aot_image_keeps_ordinary_contract(self):
+        """No -XX:AOTCache in the .cfg: no strict request is appended and an
+        AOTMode in the environment is not this gate's business."""
+        img, cfg = self.make_image(CFG_ABSENT, 0o640)
+        self.behave(lines=[VALID_SMOKE], exit_code=0, record_env=True)
+        env = self.env(cfg, underscore_java_options="-XX:AOTMode=off")
+        rc, out, err = self.run_script(img, 60, env)
+        self.assertEqual(0, rc, err)
+        self.assertNotIn("-XX:AOTMode=on", self.env_record.read_text())
         self.assert_unchanged(cfg, CFG_ABSENT, 0o640)
 
 

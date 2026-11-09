@@ -63,7 +63,14 @@ APPLICATION_DESCRIPTION
 %install
 rm -rf %{buildroot}
 install -d -m 755 %{buildroot}APPLICATION_DIRECTORY
-cp -r %{_sourcedir}APPLICATION_DIRECTORY/* %{buildroot}APPLICATION_DIRECTORY
+# -Rp, not -r: the staged tree's mtimes carry the trained AOT cache's recorded jar
+# timestamps, restored by Neutrodyne-post-image.sh on the staging copy (11 AOT
+# cache); a plain -r would reset them to the rpmbuild time and break the strict
+# cache for the installed files. touch -r gives the install -d target the staged
+# directory's own epoch too — cp -Rp preserves the entries it copies, never the
+# pre-created destination.
+cp -Rp %{_sourcedir}APPLICATION_DIRECTORY/* %{buildroot}APPLICATION_DIRECTORY
+touch -r %{_sourcedir}APPLICATION_DIRECTORY %{buildroot}APPLICATION_DIRECTORY
 %if "xAPPLICATION_LICENSE_FILE" != "x"
 install -d -m 755 "%{buildroot}%{_defaultlicensedir}/%{name}-%{version}"
 install -m 644 "APPLICATION_LICENSE_FILE" "%{buildroot}%{_defaultlicensedir}/%{name}-%{version}/"

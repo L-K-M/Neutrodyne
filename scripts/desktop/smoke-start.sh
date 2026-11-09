@@ -28,6 +28,14 @@
 # `_JAVA_OPTIONS` declaration of the replay property fails before launch, and a
 # missing or contradicting `engine` object fails the verdict.
 #
+# An image whose .cfg reads a trained AOT cache (-XX:AOTCache=) gets a stricter
+# contract: the run appends -XX:AOTMode=on to the child's JAVA_TOOL_OPTIONS and
+# the final SMOKE line must report "aotCache":"in-use" — a fallback, a missing
+# archive or an unverified cache is a failure, never an unverified pass. A
+# conflicting -XX:AOT* option in the .cfg, _JAVA_OPTIONS or JAVA_TOOL_OPTIONS
+# (a mode override or a different archive) fails before launch. Images without
+# the flag keep the ordinary smoke contract.
+#
 # <image dir> is a jpackage app image: `Neutrodyne/` (Windows and Linux), or
 # `Neutrodyne.app` (macOS). Exit 0 = the launcher exited 0 and its final SMOKE
 # line is a JSON object with no `failed` field (plus the `engine` evidence when
@@ -148,13 +156,13 @@ trap request_cancel INT TERM
 # Snapshot the .cfg read-only and compute the child's JAVA_TOOL_OPTIONS. The
 # .cfg's java-options are command-line options and override JAVA_TOOL_OPTIONS;
 # `_JAVA_OPTIONS` overrides both. A conflicting value fails before launch.
-python3 - "$CFG" "$SNAPSHOT" "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" "$REPLAY" >"$RUN_DIR/java-tool-options" <<'PY' || exit 1
+python3 - "$CFG" "$SNAPSHOT" "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" "$REPLAY" "$RUN_DIR/aot-strict" >"$RUN_DIR/java-tool-options" <<'PY' || exit 1
 import hashlib
 import os
 import stat
 import sys
 
-cfg_path, snapshot_path, jto, underscore, replay = sys.argv[1:6]
+cfg_path, snapshot_path, jto, underscore, replay, aot_marker = sys.argv[1:7]
 SMOKE_PROP = "neutrodyne.smoke"
 SMOKE_OPT = "-Dneutrodyne.smoke=true"
 REPLAY_PROP = "neutrodyne.smoke.engineReplay"
@@ -269,6 +277,73 @@ if any(token == REPLAY_PREFIX or token.startswith(REPLAY_PREFIX + "=")
        for token in underscore_tokens):
     fail(f"_JAVA_OPTIONS sets -D{REPLAY_PROP}; the launcher chooses the fixture")
 
+# The launcher's effective AOT options come from the .cfg's [JavaOptions]
+# java-options lines (jpackage's cfg parser reads keys inside their [Section];
+# the section name runs to the last ] on the line). A cfg that reads a trained
+# archive gets the strict contract: the run requests -XX:AOTMode=on and the
+# verdict requires aotCache=in-use, so no source may override the mode or
+# redirect the archive. The .cfg wins over JAVA_TOOL_OPTIONS and _JAVA_OPTIONS
+# wins over both, so the strict request only survives when none of the three
+# fight it.
+cfg_options = []
+in_java_options = False
+for line in text.split("\n"):
+    if os.name == "nt" and line.endswith("\r"):
+        line = line[:-1]
+    if line.startswith("["):
+        end = line.rfind("]")
+        in_java_options = end > 0 and line[1:end] == "JavaOptions"
+        continue
+    if not in_java_options:
+        continue
+    key, separator, option = line.partition("=")
+    if separator and key.strip().lower() == "java-options":
+        cfg_options.append(option.lstrip())
+aot_requested = any(o.startswith("-XX:AOTCache=") for o in cfg_options)
+
+
+def aot_conflicts(tokens, allow_mode=False, allow_cache=False):
+    """-XX:AOT* tokens that would override the strict request or redirect the
+    archive; an allowed flag value still leaves the in-use proof intact."""
+    bad = []
+    for token in tokens:
+        if not token.startswith("-XX:"):
+            continue
+        name = token[4:]
+        if name[:1] in "+-":
+            name = name[1:]
+        name = name.split("=", 1)[0]
+        if not name.startswith("AOT"):
+            continue
+        if token == "-XX:AOTMode=on":
+            continue
+        if allow_mode and name == "AOTMode":
+            continue
+        if allow_cache and name == "AOTCache":
+            continue
+        bad.append(token)
+    return bad
+
+
+if aot_requested:
+    bad = aot_conflicts(underscore_tokens)
+    if bad:
+        fail(f"_JAVA_OPTIONS sets {bad[0]!r}, which would override the strict AOT launch")
+    # JAVA_TOOL_OPTIONS' own AOTMode is safe: our appended =on is last and wins
+    # inside the same variable, and the cfg wins over it anyway.
+    bad = aot_conflicts(jto_tokens, allow_mode=True)
+    if bad:
+        fail(f"JAVA_TOOL_OPTIONS sets {bad[0]!r}, which would override the strict AOT launch")
+    cfg_tokens = []
+    for option in cfg_options:
+        try:
+            cfg_tokens.extend(tokenize(option))
+        except ValueError as error:
+            fail(f"invalid quoting in {cfg_path} java-options: {error}")
+    bad = aot_conflicts(cfg_tokens, allow_cache=True)
+    if bad:
+        fail(f"{cfg_path} declares {bad[0]!r}, which would override the strict AOT launch")
+
 # The last -D wins within JAVA_TOOL_OPTIONS, so our true overrides an earlier
 # false there; unrelated options are preserved. The replay property rides quoted:
 # the JVM honours double quotes inside JAVA_TOOL_OPTIONS, so a fixture path with
@@ -276,6 +351,10 @@ if any(token == REPLAY_PREFIX or token.startswith(REPLAY_PREFIX + "=")
 options = f"{jto} {SMOKE_OPT}".strip() if jto.strip() else SMOKE_OPT
 if replay:
     options = f'{options} {REPLAY_PREFIX}="{replay}"'
+if aot_requested:
+    options += " -XX:AOTMode=on"
+    with open(aot_marker, "w", encoding="ascii") as handle:
+        handle.write("1\n")
 print(options)
 PY
 # A heredoc inside $(...) is misparsed by macOS's system Bash 3.2. Keep the
@@ -456,12 +535,16 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 # The final SMOKE line is the verdict: a JSON object, no `failed` field. stdout
-# carries exactly that line on success.
-if ! python3 - "$OUT" >"$VERDICT" <<'PY'
+# carries exactly that line on success. An AOT-configured image must also
+# report the trained archive in use — the strict request was already applied,
+# so a fallback or unverified cache is a real failure, not a pass.
+if ! python3 - "$OUT" "$RUN_DIR/aot-strict" >"$VERDICT" <<'PY'
 import json
+import os
 import sys
 
 out_path = sys.argv[1]
+aot_strict = os.path.exists(sys.argv[2])
 smoke_lines = []
 with open(out_path, "r", encoding="utf-8", errors="replace") as handle:
     for line in handle:
@@ -483,6 +566,14 @@ if not isinstance(report, dict):
 if "failed" in report:
     print("smoke-start: smoke run reported a failed step:", file=sys.stderr)
     print(payload, file=sys.stderr)
+    sys.exit(1)
+if aot_strict and report.get("aotCache") != "in-use":
+    print(
+        "smoke-start: aotCache reported "
+        f"{report.get('aotCache')!r}, not 'in-use': the image reads -XX:AOTCache "
+        "but the trained archive did not load under the strict -XX:AOTMode=on request",
+        file=sys.stderr,
+    )
     sys.exit(1)
 print(line)
 PY
