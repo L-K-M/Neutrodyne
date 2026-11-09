@@ -1,26 +1,35 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.engine
 
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.ExternalReason
+import ch.lkmc.neutrodyne.youtube.api.BreakerState
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.EngineStatus
+import ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome
+import ch.lkmc.neutrodyne.youtube.api.EngineVersionSource
 import ch.lkmc.neutrodyne.youtube.api.PlatformLimitation
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
+import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** Portable lifecycle only. W4 owns starts/idle timers and ignores late replies after shutdown.
- * The bundled compile identity is fixed for this app-scoped instance; M9a has no activation API.
+ * M9b: the served version comes from `store.active` (bundled or a verified download); update
+ * checks route to [EngineUpdateHooks] and a breaker opening requests `engine-update-now`.
  */
 class YtDlpEngine(
     private val transport: YtxTransport,
@@ -29,7 +38,9 @@ class YtDlpEngine(
     private val preflight: EnginePlatformPreflight,
     private val identity: CompileMarker,
     private val health: YouTubeHealth,
+    private val clock: Clock,
     scope: CoroutineScope,
+    private val hooks: EngineUpdateHooks? = null,
 ) : YouTubeEngine,
     YouTubeCapabilitiesSource {
     private val lock = Any()
@@ -44,6 +55,7 @@ class YtDlpEngine(
     private var hostUnusable = transport.status.value.state == HostState.UNUSABLE
     private var failureRevision = 0L
     private val writes = Channel<Pair<Long, Int>>(Channel.UNLIMITED)
+    private val healthLoaded = CompletableDeferred<Unit>()
     private val mutableStatus = MutableStateFlow(EngineStatus(EngineAvailability.STOPPED, identity.engineVersion))
     override val status = mutableStatus.asStateFlow()
 
@@ -82,9 +94,14 @@ class YtDlpEngine(
                 }
             }
             scope.launch {
-                combine(settings.state, transport.status, store.preparation) { prefs, host, preparation ->
-                    Triple(prefs.enabled, host, preparation)
-                }.collect { (newEnabled, host, _) ->
+                combine(
+                    settings.state,
+                    transport.status,
+                    store.preparation,
+                    store.active,
+                ) { prefs, host, _, _ ->
+                    prefs.enabled to host
+                }.collect { (newEnabled, host) ->
                     synchronized(lock) {
                         if (enabled != newEnabled) {
                             enabled = newEnabled
@@ -99,12 +116,44 @@ class YtDlpEngine(
             }
             // Health-boundary steps keep their original post-restore ordering: reporting the
             // engine version before the restore CAS would drop persisted breaker state, and the
-            // failure identity reset belongs to the same ordering.
+            // failure identity reset belongs to the same ordering. M9b reports the served
+            // version from `store.active`, not the compile identity. The barrier is awaited
+            // once; the breaker watcher waits on the shared gate.
             health.awaitLoaded()
-            synchronized(lock) {
-                health.reportEngineVersion(identity.engineVersion)
-                if (settings.state.value.failureIdentity != identity) recordFailures()
-            }
+            healthLoaded.complete(Unit)
+            var reported =
+                synchronized(lock) {
+                    val served =
+                        store.active.value.current
+                            .ifEmpty { null }
+                    health.reportEngineVersion(served)
+                    if (settings.state.value.failureIdentity != identity) recordFailures()
+                    served
+                }
+            // Activations, rollbacks and resets after the barrier change the served version
+            // without touching settings or host state, so they report through `store.active`.
+            store.active
+                .map { it.current.ifEmpty { null } }
+                .distinctUntilChanged()
+                .collect { version ->
+                    if (version == reported) return@collect
+                    synchronized(lock) {
+                        reported = version
+                        health.reportEngineVersion(version)
+                    }
+                }
+        }
+        scope.launch {
+            healthLoaded.await()
+            var opened = health.state.value.breaker != BreakerState.CLOSED
+            health.state
+                .map { it.breaker }
+                .distinctUntilChanged()
+                .collect { breaker ->
+                    val isOpen = breaker == BreakerState.OPEN
+                    if (isOpen && !opened) hooks?.requestImmediateCheck()
+                    opened = breaker != BreakerState.CLOSED
+                }
         }
         scope.launch {
             settings.awaitLoaded()
@@ -161,6 +210,14 @@ class YtDlpEngine(
         prewarm(PrewarmReason.SCREEN)
     }
 
+    override suspend fun checkForUpdate(): EngineUpdateOutcome =
+        hooks?.runUpdate(EngineUpdateTrigger.MANUAL)
+            ?: EngineUpdateOutcome.Failed(TransientKind.ENGINE_UNAVAILABLE)
+
+    override suspend fun resetToBundled() {
+        hooks?.resetToBundled()
+    }
+
     private fun observeHost(host: HostStatus) {
         if (host == previousHost) return
         val previous = previousHost
@@ -191,8 +248,13 @@ class YtDlpEngine(
                             previous.lastExit != HostExit.START_FAILED
                     )
                 ) {
-                    failures = (failures + 1).coerceAtMost(3)
-                    recordFailures()
+                    // A downloaded active or a staged trial is the monitor's/updater's problem;
+                    // the start-failure counter only applies to the bundled engine.
+                    val active = store.active.value
+                    if (active.source == EngineVersionSource.BUNDLED && active.trial == null) {
+                        failures = (failures + 1).coerceAtMost(3)
+                        recordFailures()
+                    }
                 }
             }
 
@@ -240,11 +302,22 @@ class YtDlpEngine(
                 availability == EngineAvailability.NOT_YET_AVAILABLE -> ExternalReason.NOT_YET_AVAILABLE
                 else -> null
             }
+        val active = store.active.value
+        val update = settings.state.value
         mutableStatus.value =
             EngineStatus(
                 availability = availability,
-                version = identity.engineVersion.takeUnless { absent },
-                // M9a does not ship the JS provider, regardless of a host diagnostic flag.
+                // Until loadStatus() fills `current`, the engine on disk is still the bundle —
+                // report it instead of a transient null (04 status diagnostics).
+                version = active.current.ifEmpty { identity.engineVersion }.takeIf { !absent },
+                source = active.source,
+                bundledVersion = active.bundled.takeIf { it.isNotEmpty() && !absent },
+                updatePolicy = update.updatePolicy,
+                lastCheckAtMs = update.lastCheckAtMs,
+                lastOutcome = update.lastOutcome,
+                approvalsStale =
+                    update.heartbeatAtMs?.let { clock.now() - it > STALE_HEARTBEAT_MS } == true,
+                // M9b does not ship the JS provider, regardless of a host diagnostic flag.
                 platformLimitation = limitation ?: PlatformLimitation.HOST_UNUSABLE.takeIf { hostUnusable },
             )
         mutableCapabilities.value = capabilitiesFor(reason)
@@ -253,5 +326,10 @@ class YtDlpEngine(
     private fun capabilitiesFor(reason: ExternalReason?): YouTubeCapabilities {
         val available = reason == null
         return YouTubeCapabilities(available, available, available, available, available, reason)
+    }
+
+    private companion object {
+        /** 04 Update flow: a valid heartbeat older than 48 h marks the approval channel stale. */
+        const val STALE_HEARTBEAT_MS = 48L * 60 * 60 * 1000
     }
 }

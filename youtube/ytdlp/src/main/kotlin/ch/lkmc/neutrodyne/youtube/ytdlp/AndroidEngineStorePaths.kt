@@ -36,6 +36,18 @@ class AndroidEngineStorePaths(
             String(text, 0, count)
         }
 
+    override fun manifestKeysText(): String =
+        application.assets
+            .open("ytdlp/keys/engine-manifest-ed25519.pub")
+            .bufferedReader()
+            .use { it.readText() }
+
+    override fun upstreamKeyText(): String =
+        application.assets
+            .open("ytdlp/keys/yt-dlp-release-key.asc")
+            .bufferedReader()
+            .use { it.readText() }
+
     private companion object {
         const val MAX_METADATA_CHARS = 4096
     }

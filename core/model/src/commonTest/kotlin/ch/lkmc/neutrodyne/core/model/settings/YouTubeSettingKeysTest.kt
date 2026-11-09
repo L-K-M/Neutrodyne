@@ -21,8 +21,9 @@ class YouTubeSettingKeysTest {
                 "youtube.volume_levelling",
                 "youtube.auto_download",
                 "youtube.auto_download_keep_latest",
+                "youtube.engine_updates",
             )
-        assertEquals(19, YouTubeSettingKeys.ALL.size)
+        assertEquals(23, YouTubeSettingKeys.ALL.size)
         for (key in YouTubeSettingKeys.ALL) {
             assertTrue(key in AllSettingKeys.list)
             assertEquals(if (key.name in portable) SettingsFile.PORTABLE else SettingsFile.DEVICE, key.file)
@@ -53,7 +54,19 @@ class YouTubeSettingKeysTest {
         assertFalse(AllSettingKeys.acceptsValue(YouTubeSettingKeys.RATE_LIMIT_LEVEL, -1))
         assertFalse(AllSettingKeys.acceptsValue(YouTubeSettingKeys.BREAKER_OPEN_UNTIL, -1L))
         assertFalse(AllSettingKeys.acceptsValue(YouTubeSettingKeys.AUDIO_QUALITY, "OPUS"))
-        assertTrue(YouTubeSettingKeys.ALL.none { it.name.contains("updates") || it.name.contains("last_check") })
+        // The update policy is portable; check state and the approval heartbeat stay device-bound.
+        assertEquals(YouTubeEngineUpdatePolicy.APPROVED, YouTubeSettingKeys.ENGINE_UPDATES.default)
+        assertEquals(
+            YouTubeEngineUpdatePolicy.entries.toList(),
+            YouTubeSettingKeys.ENGINE_UPDATES.values.toList(),
+        )
+        assertEquals(SettingsFile.PORTABLE, YouTubeSettingKeys.ENGINE_UPDATES.file)
+        assertEquals(SettingsFile.DEVICE, YouTubeSettingKeys.ENGINE_LAST_CHECK_AT.file)
+        assertEquals(SettingsFile.DEVICE, YouTubeSettingKeys.ENGINE_LAST_OUTCOME.file)
+        assertEquals(SettingsFile.DEVICE, YouTubeSettingKeys.ENGINE_HEARTBEAT_AT.file)
+        assertEquals(0L, YouTubeSettingKeys.ENGINE_LAST_CHECK_AT.default)
+        assertEquals("", YouTubeSettingKeys.ENGINE_LAST_OUTCOME.default)
+        assertEquals(0L, YouTubeSettingKeys.ENGINE_HEARTBEAT_AT.default)
     }
 
     @Test fun rowArtworkIsPortableButNeverSynced() {

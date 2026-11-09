@@ -534,6 +534,7 @@ class ResolverHealthIntegrationTest {
                 FakeEnginePlatformPreflight(),
                 CompileMarker(42, "2026.08.19", "3.14"),
                 health,
+                clock,
                 scope.backgroundScope,
             )
         val client = YtDlpClient(transport, clock, scope.backgroundScope)

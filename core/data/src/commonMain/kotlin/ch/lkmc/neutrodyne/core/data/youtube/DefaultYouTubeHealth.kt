@@ -17,8 +17,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -40,6 +43,8 @@ internal class DefaultYouTubeHealth(
 ) : YouTubeExtractionHealth {
     private val mutableState = MutableStateFlow(YouTubeHealthState())
     private val extraction = MutableStateFlow(ExtractionHealthState())
+    private val mutableOutcomes = MutableSharedFlow<ExtractionOutcome>(extraBufferCapacity = 64)
+    override val outcomes: SharedFlow<ExtractionOutcome> = mutableOutcomes.asSharedFlow()
 
     @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
     override val state: StateFlow<YouTubeHealthState> =
@@ -216,6 +221,7 @@ internal class DefaultYouTubeHealth(
         reservation: ExtractionReservation,
         outcome: ExtractionOutcome,
     ) {
+        if (reservation.id !in extraction.value.reservations) return
         changeExtraction { before ->
             if (reservation.id !in before.reservations) return@changeExtraction before
             before.report(outcome, clock.now(), reservation.id == before.trial).copy(
@@ -223,11 +229,13 @@ internal class DefaultYouTubeHealth(
                 trial = if (reservation.id == before.trial) null else before.trial,
             )
         }
+        mutableOutcomes.tryEmit(outcome)
     }
 
     // Compatibility/media reports never take or finish a trial. Admitted extraction uses tokens.
     override fun reportExtraction(outcome: ExtractionOutcome) {
         changeExtraction { it.report(outcome, clock.now(), false) }
+        mutableOutcomes.tryEmit(outcome)
     }
 
     override fun reportRateLimited(nowMs: Long) {

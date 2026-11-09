@@ -80,6 +80,19 @@ android {
     sourceSets["test"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
 }
 
+// The profile generator runs against nonMinifiedRelease, which the baseline-profile plugin creates
+// after the android block and whose source set it fills from release. It needs the benchmark-only
+// seed receiver, which never enters the published release build type (09 Macrobenchmark and
+// profiles). This callback runs after the plugin's own finalizeDsl, so the manifest override sticks.
+extensions.configure<com.android.build.api.variant.ApplicationAndroidComponentsExtension> {
+    finalizeDsl { app ->
+        app.sourceSets.matching { it.name == "nonMinifiedRelease" }.configureEach {
+            kotlin.srcDir("src/benchmarkRelease/kotlin")
+            manifest.srcFile("src/benchmarkRelease/AndroidManifest.xml")
+        }
+    }
+}
+
 // KMP libraries have one resource variant. Keep all unit-test variants available,
 // but reject publication tasks when the test-only pseudo resource tree is selected.
 if (providers.gradleProperty("neutrodyne.pseudoLocales").orNull == "true") {
@@ -93,15 +106,18 @@ tasks.withType<Test>().configureEach {
     exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")
 }
 
-// The profile consumer creates this build type after the application DSL is evaluated.
+// The profile consumer creates these build types after the application DSL is evaluated.
 // Fixture helpers must never enter debug, release or another published runtime. Their own
 // test libraries stay out too: Licensee validates this variant's classpath, and junit
 // (EPL-1.0) and truth's URL-licensed asm transitive are not on D3's allow-list.
-configurations.matching { it.name == "benchmarkReleaseImplementation" }.configureEach {
-    exclude(group = "junit", module = "junit")
-    exclude(group = "com.google.truth", module = "truth")
-    dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
-}
+configurations
+    .matching {
+        it.name == "benchmarkReleaseImplementation" || it.name == "nonMinifiedReleaseImplementation"
+    }.configureEach {
+        exclude(group = "junit", module = "junit")
+        exclude(group = "com.google.truth", module = "truth")
+        dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
+    }
 
 // The profile plugin copies release's manifest over its generated build type.
 // Restore the shell-only fixture manifest after that plugin finalizes the DSL.
