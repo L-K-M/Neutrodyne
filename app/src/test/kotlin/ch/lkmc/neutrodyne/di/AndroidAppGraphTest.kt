@@ -546,6 +546,9 @@ class AndroidAppGraphTest {
                 // at 220 beside the refresh observer.
                 "SyncSchedulingInitializer" to 200..299,
                 "SyncForegroundObserverInitializer" to 200..299,
+                // 10 Durable apply effects: the start drain sits at 160, after the database
+                // open and before every scheduling arm.
+                "SyncStartupDrainInitializer" to 101..199,
                 // 05's work table: periodic arm, watcher and durable-work reconciliation.
                 "AutoBackupInitializer" to 200..299,
                 // M11b's maintenance arm belongs to the periodic scheduling band.

@@ -101,6 +101,7 @@ class SyncControllerImpl(
     private val flags: SyncFlags,
     private val build: BuildInfo,
     private val merger: FirstLinkMerger,
+    private val effects: SyncApplyEffects,
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
@@ -512,6 +513,10 @@ class SyncControllerImpl(
     override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
         address.setSyncPlaybackSettings(enabled)
         flags.syncPlaybackSettings = enabled
+        // 10 Settings capture: turning the switch on applies the values that stayed pending
+        // while it was off (the server's values win, as at the first link). The drain reads
+        // the just-persisted switch, so the disabled state never drains here.
+        if (enabled) effects.drainSettings()
     }
 
     override suspend fun setShareFeedPasswords(enabled: Boolean) {

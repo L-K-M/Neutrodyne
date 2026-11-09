@@ -618,6 +618,12 @@ class DesktopAppGraphTest {
             .isLessThan(orders.getValue("DesktopDownloadIndexInitializer"))
         assertThat(orders.getValue("DesktopDownloadIndexInitializer"))
             .isLessThan(orders.getValue("DesktopRunnerInitializer"))
+        // 10 Durable apply effects: the start drain (band 160) precedes the runner and the
+        // sync scheduling arm, so pending remote settings apply before any push.
+        assertThat(orders.getValue("SyncStartupDrainInitializer"))
+            .isLessThan(orders.getValue("DesktopRunnerInitializer"))
+        assertThat(orders.getValue("SyncStartupDrainInitializer"))
+            .isLessThan(orders.getValue("DesktopSyncSchedulingInitializer"))
     }
 
     /**
