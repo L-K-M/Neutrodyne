@@ -30,8 +30,8 @@ class SyncStartupDrainInitializer
         override suspend fun run() {
             // The volatile share gate primes before the drain and the band-191 parked recovery
             // read it — the persisted switch, not the restart default, is what they observe.
-            // The portable address guards first: an unconfigured start resolves no switch read
-            // and no provider beyond this one (01 DI rule 7, no eager flags or engine work).
+            // Only configured devices read the saved switches. The existing drain retains
+            // its linked-state guard; band 100 has already opened the database here.
             val addr = address()
             if (addr.serverUrl() != null) flags.refreshFromStore(addr)
             effects().drainAtStart(capture())

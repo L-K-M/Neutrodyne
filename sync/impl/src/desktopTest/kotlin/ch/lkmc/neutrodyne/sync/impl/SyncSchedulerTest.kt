@@ -221,6 +221,81 @@ class SyncSchedulerTest {
             assertEquals(listOf(SyncRoundReason.OUTBOX), deps.rounds)
         }
 
+    // --- 10 Live updates: the remote-change poke ------------------------------------------------
+
+    @Test
+    fun `a burst of remote changes coalesces into one SSE round`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+
+            repeat(5) { deps.scheduler.onRemoteChanged() }
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.await { deps.rounds.isNotEmpty() }
+
+            assertEquals(listOf(SyncRoundReason.SSE), deps.rounds)
+        }
+
+    @Test
+    fun `a remote change defers to the push on a non-interactive platform`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.interactive = false
+
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.await { deps.pushes.isNotEmpty() }
+
+            assertEquals(listOf(SyncRoundReason.SSE), deps.pushes)
+            assertTrue(deps.rounds.isEmpty())
+        }
+
+    @Test
+    fun `an unlink before the coalesce window drops the pending SSE round`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+
+            deps.scheduler.onRemoteChanged()
+            deps.scheduler.onUnlinked()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS * 2)
+            runCurrent()
+            deps.awaitQuiet()
+
+            assertTrue(deps.rounds.isEmpty())
+            assertTrue(deps.pushes.isEmpty())
+        }
+
+    @Test
+    fun `link and unlink both signal the link-state funnel`() =
+        runTest {
+            val deps = deps()
+
+            deps.scheduler.onLinked()
+            deps.scheduler.onUnlinked()
+
+            assertEquals(listOf("link-state", "link-state"), deps.linkStates)
+        }
+
+    @Test
+    fun `a revoked SSE round cancels the platform work instead of deferring`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.roundFailsWith = SyncTransportException(401, null, "nope")
+
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.await { deps.unlinks.isNotEmpty() }
+
+            assertTrue(deps.pushes.isEmpty())
+            assertEquals(listOf("unlinked"), deps.unlinks)
+        }
+
     // --- playback rows wait for a boundary ----------------------------------------------------
 
     @Test
@@ -345,6 +420,7 @@ class SyncSchedulerTest {
         var interactive: Boolean = true
         var roundFailsWith: Throwable? = null
         val unlinks = mutableListOf<String>()
+        val linkStates = mutableListOf<String>()
 
         private val clock = scope.clock
 
@@ -376,6 +452,7 @@ class SyncSchedulerTest {
                             unlinks += "unlinked"
                         }
                     },
+                linkStateChanged = { linkStates += "link-state" },
             )
 
         fun clockNow(): Long = clock.now()

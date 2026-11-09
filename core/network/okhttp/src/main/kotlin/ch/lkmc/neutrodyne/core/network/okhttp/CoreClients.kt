@@ -111,6 +111,17 @@ class CoreClients(
             .callTimeout(SYNC_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
 
+    // 10's events stream (Live updates): the SSE call derives from `sync` — same SYNC-mode LAN
+    // guard, DNS chain and pool — but with no read and no call timeout, so a heartbeat-driven
+    // stream can stay open far past the 30 s read timeout the rest of the family obeys. The
+    // client-side watchdog (2×hb + 15 s of silence) is what closes a dead stream.
+    val syncStream: OkHttpClient =
+        sync
+            .newBuilder()
+            .readTimeout(0, TimeUnit.SECONDS)
+            .callTimeout(0, TimeUnit.SECONDS)
+            .build()
+
     /** 11's wake path: pooled sockets do not survive a system sleep. */
     override fun evict() {
         pool.evictAll()

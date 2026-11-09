@@ -26,6 +26,12 @@ internal const val OUTBOX_DEBOUNCE_MS = 2_000L
 internal const val PLAYING_TICK_MS = 60_000L
 
 /**
+ * 10 Live updates: remote `changed` events and reconnects coalesce into one round 500 ms
+ * after the last signal — a burst of pushes on the server lands as a single pull here.
+ */
+internal const val SSE_ROUND_DELAY_MS = 500L
+
+/**
  * The platform half of 10's scheduling tables. `SyncScheduler` (shared) owns the triggers; the
  * platform decides where an outbox push goes and what link/unlink arms.
  */
@@ -68,6 +74,12 @@ class SyncScheduler(
     private val clock: Clock,
     @param:ApplicationScope private val scope: CoroutineScope,
     private val hooks: SyncScheduleHooks,
+    /**
+     * 10 Live updates: every link, unlink and revocation calls this so the events stream can
+     * re-evaluate its gates — it is [SyncEventsClient.reevaluate] once the client is wired.
+     * A default no-op keeps bare-scheduler tests working.
+     */
+    private val linkStateChanged: suspend () -> Unit = {},
 ) {
     /** Serializes this scheduler's rounds; the engine's own mutex covers rounds from other callers. */
     private val roundMutex = Mutex()
@@ -82,6 +94,7 @@ class SyncScheduler(
     private val groupDeletes = mutableMapOf<String, Long>()
     private var maturityJob: Job? = null
     private var debounceJob: Job? = null
+    private var remoteRoundJob: Job? = null
 
     /**
      * Launches the collectors once (the platform's start-up initializer calls it): the outbox
@@ -118,8 +131,11 @@ class SyncScheduler(
         }
     }
 
-    /** A link completed: arm the platform's periodic mechanism. */
-    suspend fun onLinked() = hooks.onLinked()
+    /** A link completed: arm the platform's periodic mechanism and re-check the stream. */
+    suspend fun onLinked() {
+        hooks.onLinked()
+        linkStateChanged()
+    }
 
     /** Unlink or revoke: drop the in-memory undo bookkeeping and cancel the platform's work. */
     suspend fun onUnlinked() {
@@ -129,7 +145,23 @@ class SyncScheduler(
         val self = coroutineContext.job
         debounceJob?.takeIf { it != self }?.cancel()
         maturityJob?.takeIf { it != self }?.cancel()
+        remoteRoundJob?.takeIf { it != self }?.cancel()
         hooks.onUnlinked()
+        linkStateChanged()
+    }
+
+    /**
+     * 10 Live updates: the events stream signals here — a remote `changed` or a (re)connect —
+     * and one coalesced round runs 500 ms after the last signal. SSE is signaling only; the
+     * round is the authoritative pull (`SyncRoundReason.SSE`).
+     */
+    internal fun onRemoteChanged() {
+        remoteRoundJob?.cancel()
+        remoteRoundJob =
+            scope.launch {
+                delay(SSE_ROUND_DELAY_MS)
+                roundOrFallback(SyncRoundReason.SSE)
+            }
     }
 
     /** `true` while a captured change may legitimately reach the server (R7.1). */

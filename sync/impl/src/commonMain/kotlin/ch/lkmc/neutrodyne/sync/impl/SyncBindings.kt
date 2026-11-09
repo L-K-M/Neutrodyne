@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
@@ -136,6 +137,7 @@ object SyncBindings {
         clock: Clock,
         @ApplicationScope scope: CoroutineScope,
         hooks: SyncScheduleHooks,
+        events: Provider<SyncEventsClient>,
     ): SyncScheduler =
         SyncScheduler(
             db = db,
@@ -145,6 +147,44 @@ object SyncBindings {
             clock = clock,
             scope = scope,
             hooks = hooks,
+            // Lazy: the events client needs this scheduler for its remote-changed poke, so a
+            // direct constructor edge would cycle. The scheduler only calls the callback on
+            // link/unlink/revoke — long after construction.
+            linkStateChanged = { events().reevaluate() },
+        )
+
+    /** 10 Live updates: the SSE transport rides the `SYNC_STREAM` client inside. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEventTransport(clients: NeutrodyneHttpClients): SyncEventTransport = KtorSyncEventTransport(clients)
+
+    /**
+     * 10 Live updates: the events supervisor. Its `discover` reuses [SyncClient]'s
+     * unauthenticated discovery call, and its callbacks feed the scheduler — the lazy edge
+     * above keeps the pair out of a construction cycle.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEventsClient(
+        db: NeutrodyneDatabase,
+        transport: SyncEventTransport,
+        client: SyncClient,
+        address: SyncServerAddress,
+        tokens: SyncTokenStore,
+        network: NetworkMonitor,
+        @ApplicationScope scope: CoroutineScope,
+        scheduler: SyncScheduler,
+    ): SyncEventsClient =
+        SyncEventsClient(
+            db = db,
+            transport = transport,
+            discover = { url -> client.discover(url) },
+            address = address,
+            tokens = tokens,
+            network = network,
+            scope = scope,
+            onRemoteChanged = { scheduler.onRemoteChanged() },
+            onRevoked = { scheduler.onUnlinked() },
         )
 
     /**
