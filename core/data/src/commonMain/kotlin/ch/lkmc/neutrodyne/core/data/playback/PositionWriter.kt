@@ -10,6 +10,8 @@ import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.PositionWriteGate
+import ch.lkmc.neutrodyne.core.domain.StoredEpisodeMarks
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import dev.zacsweers.metro.ContributesBinding
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.map
 internal class PositionWriter(
     private val db: NeutrodyneDatabase,
     private val clock: Clock,
+    private val writeGate: PositionWriteGate = PositionWriteGate.Unrestricted,
 ) : PositionStore {
     override fun observe(episodeId: Long): Flow<StoredPosition?> =
         db.invalidationTracker
@@ -32,12 +35,25 @@ internal class PositionWriter(
             .map {
                 db.withReadTransaction {
                     db.positionDao().byEpisode(episodeId)?.let {
+                        val state = db.episodeStateDao().byEpisode(episodeId)
                         StoredPosition(
                             it.episodeId,
                             it.positionMs,
                             it.updatedAt,
-                            db.episodeStateDao().byEpisode(episodeId)?.playedAt,
+                            state?.playedAt,
+                            state?.startedAt,
                         )
+                    }
+                }
+            }.distinctUntilChanged()
+
+    override fun observeMarks(episodeId: Long): Flow<StoredEpisodeMarks?> =
+        db.invalidationTracker
+            .createFlow("episode_state")
+            .map {
+                db.withReadTransaction {
+                    db.episodeStateDao().byEpisode(episodeId)?.let {
+                        StoredEpisodeMarks(it.playedAt, it.startedAt)
                     }
                 }
             }.distinctUntilChanged()
@@ -55,7 +71,9 @@ internal class PositionWriter(
         require(durationMs == null || durationMs >= 0)
 
         return db.withWriteTransaction {
-            db.savePosition(episodeId, positionMs, durationMs, source, now, pinStartedAt, allowed)
+            db.savePosition(episodeId, positionMs, durationMs, source, now, pinStartedAt) {
+                writeGate.allowsSaves(episodeId) && allowed()
+            }
         }
     }
 
@@ -76,28 +94,38 @@ internal class PositionWriter(
     override suspend fun reset(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         require(now >= 0)
-        db.withWriteTransaction {
+        return db.withWriteTransaction {
+            if (!writeGate.allowsSaves(episodeId)) return@withWriteTransaction false
             db.positionDao().reset(listOf(episodeId), now)
             db.episodeStateDao().clearStarted(episodeId, now)
+            true
         }
     }
 
     override suspend fun markPlayed(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         require(now >= 0)
-        db.withWriteTransaction { db.markEpisodesPlayed(listOf(episodeId), now) }
+        return db.withWriteTransaction {
+            if (!writeGate.allowsSaves(episodeId)) return@withWriteTransaction false
+            db.markEpisodesPlayed(listOf(episodeId), now)
+            true
+        }
     }
 
     override suspend fun markUnplayedForReplay(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         require(now >= 0)
-        db.withWriteTransaction { db.episodeStateDao().markUnplayed(listOf(episodeId), now) }
+        return db.withWriteTransaction {
+            if (!writeGate.allowsSaves(episodeId)) return@withWriteTransaction false
+            db.episodeStateDao().markUnplayed(listOf(episodeId), now)
+            true
+        }
     }
 }
 
