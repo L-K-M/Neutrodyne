@@ -212,6 +212,69 @@ class DesktopPlaybackControllerTest {
             }
         }
 
+    /**
+     * The projector's applied generation only mirrors committed session generations and
+     * can lag it (emissions conflate, an apply is skipped or fails mid-handler). An
+     * automatic transition the engine already made must still commit against the live
+     * session; expecting the lagged generation drops it and desyncs playback for good.
+     */
+    @Test
+    fun anAutomaticTransitionCommitsWhenTheSessionIsAheadOfTheProjection() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                assertEquals(
+                    PlayResult.Started,
+                    fixture.controller.playFeed(
+                        FeedSource.Group(group),
+                        FeedFilters(unplayedOnly = true),
+                        FeedOrder.NEWEST_FIRST,
+                    ),
+                )
+                fixture.awaitEpisode(3)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 119_000
+                fixture.engine.transition(2)
+                fixture.awaitEpisode(2)
+                // Advance the persisted generation behind the controller's back, as a
+                // coalesced emission or a competing writer would leave the projector.
+                val sessions =
+                    fixture.graph.databaseOpener
+                        .requireDatabase()
+                        .playSessionDao()
+                val session = requireNotNull(sessions.get())
+                sessions.write(session.copy(generation = session.generation + 1))
+                fixture.engine.transition(1)
+                fixture.awaitEpisode(1)
+                assertEquals(
+                    1L,
+                    fixture.graph
+                        .queueRepository()
+                        .observeSession()
+                        .first()
+                        ?.currentEpisodeId,
+                )
+                // The drain completes: the last item's end still finishes the session.
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 119_000
+                fixture.engine.end()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it == null }
+                        .first()
+                }
+                assertNull(
+                    fixture.graph
+                        .queueRepository()
+                        .observeSession()
+                        .first()
+                        ?.currentEpisodeId,
+                )
+            }
+        }
+
     @Test
     fun coalescedEndsOfShortItemsStillDrainTheQueue() =
         runBlocking {

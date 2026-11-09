@@ -693,10 +693,12 @@ class DesktopPlaybackController(
         val projection = requireNotNull(projector)
         val currentId = engineCurrentId ?: return
         val current = projection.entries.firstOrNull { it.item.episodeId == currentId }?.item ?: return
-        val revision = SessionRevision(current.episodeId, projection.generation)
         // Re-read the live tail before deciding, including edits not yet collected by the projector.
+        // The applied generation is only a lagging mirror; expecting it drops the commit
+        // when an emission coalesced or an apply was skipped.
         val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-        if (queue.generation != revision.generation || queue.current?.episodeId != current.episodeId) return
+        if (queue.current?.episodeId != current.episodeId) return
+        val revision = SessionRevision(current.episodeId, queue.generation)
         val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
         val entries = value.planner.window(queue, value.media.observe(ids).first())
         val next = entries.getOrNull(1)?.item
@@ -870,7 +872,12 @@ class DesktopPlaybackController(
         notifications.emit(PlaybackEvent.Skipped(failedId, titleOf(failedId), reason))
         val departure = value.saver.capture(position(), durationMs, PlaybackExit.END)?.departure
         val next = projection.entries.getOrNull(failedIndex + 1)
-        val revision = SessionRevision(outgoingId, projection.generation)
+        // Expect the live session, not the projector's applied generation: it lags
+        // when an emission coalesced or an apply was skipped, and the outgoing item
+        // already ended either way.
+        val live = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+        if (live.current?.episodeId != outgoingId) return
+        val revision = SessionRevision(outgoingId, live.generation)
         val generation =
             if (next == null) {
                 value.sessions.endSession(departure, revision, clock.now())
@@ -1035,11 +1042,30 @@ class DesktopPlaybackController(
             publish()
             return
         }
+        // The expected revision must be the live session's, not the projector's
+        // applied generation: Room emissions conflate and a failed apply leaves the
+        // projection behind, which silently dropped a transition the engine had
+        // already made and desynced the session for good.
+        val live = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+        if (live.current?.episodeId == toId) {
+            // Another path (the collector's advance, a duplicated event) already
+            // committed this arrival; only the local view needs to catch up.
+            engineCurrentId = toId
+            publish()
+            return
+        }
+        if (live.current?.episodeId != fromId) return
         val outgoing = projection.entries.firstOrNull { it.item.episodeId == fromId } ?: return
         val arrival = projection.entries.firstOrNull { it.item.episodeId == toId } ?: return
         val row = arrival.media ?: return
-        val revision = SessionRevision(fromId, projection.generation)
-        val departure = value.saver.capture(event.fromPositionMs, durationMs, PlaybackExit.AUTO)?.departure ?: return
+        val revision = SessionRevision(fromId, live.generation)
+        // A null capture means the saver was already unloaded; commit anyway or the
+        // engine and session permanently desync for the want of one position save.
+        val departure =
+            value.saver
+                .capture(event.fromPositionMs, durationMs, PlaybackExit.AUTO)
+                ?.departure
+                ?.takeIf { it.episodeId == fromId }
         val generation =
             value.sessions.onTransition(departure, toId, arrival.item.origin, revision, clock.now()) ?: return
         value.planner.appliedOwnGeneration(generation)
@@ -1234,10 +1260,11 @@ class DesktopPlaybackController(
     private suspend fun endOfEpisode() {
         val value = requireNotNull(runtime)
         val id = engineCurrentId ?: return
-        val projection = projector ?: return
+        projector ?: return
         val capture = value.saver.capture(position(), durationMs, PlaybackExit.END)
         if (capture != null && capture.departure.writePosition && capture.departure.markPlayed) {
-            if (value.sessions.markBoundaryPlayed(id, SessionRevision(id, projection.generation), clock.now())) {
+            val live = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+            if (value.sessions.markBoundaryPlayed(id, SessionRevision(id, live.generation), clock.now())) {
                 completedBoundary = id
             }
         }
