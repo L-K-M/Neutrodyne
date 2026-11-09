@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkLocation
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -27,6 +28,8 @@ import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
+import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -50,6 +53,8 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -503,6 +508,50 @@ class SyncControllerImplTest {
                 assertTrue(h.controller.approveLink("WDJB-MJHT") is Outcome.Success)
                 assertTrue(h.controller.confirmLink("WDJB-MJHT", approve = false) is Outcome.Success)
                 assertTrue(h.client.calls.contains("confirm:" + normaliseUserCode("WDJB-MJHT") + ":false"))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun theStatusActivityFollowsTheStreamAndTheRound() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.controller.refreshStatus()
+                assertEquals(
+                    SyncActivity.IDLE,
+                    (h.controller.status.value as SyncStatus.Linked).activity,
+                )
+
+                // 10 Live updates: the real supervisor path — gate open, link live — drives
+                // the scripted transport; `connected` moves the card to LIVE.
+                h.events.start(MutableStateFlow(true), 60)
+                h.events.reevaluate()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.LIVE
+                }
+
+                h.activity.begin()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.SYNCING
+                }
+                h.activity.end()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.LIVE
+                }
+
+                h.eventsTransport.sessions
+                    .single()
+                    .close()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity ==
+                        SyncActivity.IDLE
+                }
             } finally {
                 h.close()
             }
@@ -1002,11 +1051,123 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun overlappingPasswordSwitchWritesCannotPublishAnOlderRuntimeGate() =
+        runTest {
+            val h = harness(this)
+            val committed = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.updateShareFeedPasswords(true)
+                h.flags.sharePasswords = true
+                h.address.afterShareWrite = { enabled ->
+                    if (!enabled) {
+                        committed.complete(Unit)
+                        release.await()
+                    }
+                }
+                val first = async { h.controller.setShareFeedPasswords(false) }
+                committed.await()
+                val second =
+                    async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                        h.controller.setShareFeedPasswords(true)
+                    }
+                release.complete(Unit)
+                first.await()
+                second.await()
+
+                assertEquals(h.address.shareFeedPasswords(), h.flags.sharePasswords)
+                assertTrue(h.flags.sharePasswords)
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
+    @Test
+    fun cancellingAfterASwitchCommitsStillPublishesItsRuntimeGate() =
+        runTest {
+            val h = harness(this)
+            val committed = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.tick()
+                h.address.afterShareWrite = {
+                    committed.complete(Unit)
+                    release.await()
+                }
+                val write = async { h.controller.setShareFeedPasswords(true) }
+                committed.await()
+                write.cancel()
+                release.complete(Unit)
+                write.join()
+
+                assertTrue(h.address.shareFeedPasswords())
+                assertTrue(h.flags.sharePasswords, "a committed preference must survive caller cancellation")
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
+    @Test
+    fun failedPasswordSharingWritesKeepStoredAndRuntimeValues() =
+        runTest {
+            for (before in listOf(false, true)) {
+                val h = harness(this)
+                try {
+                    h.tick()
+                    h.address.updateShareFeedPasswords(before)
+                    h.flags.sharePasswords = before
+                    h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                    val result: Any? = h.controller.setShareFeedPasswords(!before)
+
+                    assertEquals(
+                        before,
+                        h.flags.sharePasswords,
+                        "a failed write must not change the runtime gate",
+                    )
+                    assertEquals(before, h.address.shareFeedPasswords())
+                    assertEquals<Any?>(Outcome.Failure(SyncPreferenceError.WriteFailed), result)
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
+    fun failedPlaybackSettingWritesKeepStoredAndRuntimeValues() =
+        runTest {
+            for (before in listOf(false, true)) {
+                val h = harness(this)
+                try {
+                    h.tick()
+                    h.address.updateSyncPlaybackSettings(before)
+                    h.flags.syncPlaybackSettings = before
+                    h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                    val result: Any? = h.controller.setSyncPlaybackSettings(!before)
+
+                    assertEquals(
+                        before,
+                        h.flags.syncPlaybackSettings,
+                        "a failed write must not change the runtime gate",
+                    )
+                    assertEquals(before, h.address.syncPlaybackSettings())
+                    assertEquals<Any?>(Outcome.Failure(SyncPreferenceError.WriteFailed), result)
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
     fun shareFeedPasswordsWritesTheSettingAndTheCache() =
         runTest {
             val h = harness(this)
             try {
-                h.controller.setShareFeedPasswords(true)
+                assertEquals(Outcome.Success(Unit), h.controller.setShareFeedPasswords(true))
                 assertEquals(listOf(true), h.address.writtenShareFeedPasswords)
                 assertTrue(h.flags.sharePasswords)
             } finally {
@@ -1019,7 +1180,7 @@ class SyncControllerImplTest {
         runTest {
             val h = harness(this)
             try {
-                h.controller.setSyncPlaybackSettings(false)
+                assertEquals(Outcome.Success(Unit), h.controller.setSyncPlaybackSettings(false))
                 assertEquals(listOf(false), h.address.writtenSyncPlaybackSettings)
                 assertFalse(h.flags.syncPlaybackSettings)
             } finally {
@@ -1031,6 +1192,31 @@ class SyncControllerImplTest {
      * 10 Settings capture: enabling "Sync playback settings" drains the values that stayed
      * pending while it was off (the server's values win); disabling never drains.
      */
+    @Test
+    fun aFailedPlaybackSwitchWriteLeavesRemoteSettingsPending() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val key = ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SKIP_BACK_MS
+                h.address.updateSyncPlaybackSettings(false)
+                h.flags.syncPlaybackSettings = false
+                h.journalPendingSetting(key, "15000")
+                h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                assertEquals(
+                    Outcome.Failure(SyncPreferenceError.WriteFailed),
+                    h.controller.setSyncPlaybackSettings(true),
+                )
+
+                assertFalse(h.flags.syncPlaybackSettings)
+                assertTrue(h.settings.applied.isEmpty())
+                assertEquals("15000", h.pendingSettingOf(key.name))
+            } finally {
+                h.close()
+            }
+        }
+
     @Test
     fun enablingSyncPlaybackSettingsDrainsThePendingMarker() =
         runTest {
@@ -1260,7 +1446,7 @@ private class Harness(
 
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()
-    val scheduler =
+    val scheduler: SyncScheduler =
         SyncScheduler(
             db = db,
             round = { reason -> engine.round(reason) },
@@ -1284,6 +1470,42 @@ private class Harness(
                         schedulerCalls += "unlinked"
                     }
                 },
+            linkStateChanged = { events.reevaluate() },
+        )
+
+    /**
+     * The events supervisor over the scripted transport: tests drive the stream through
+     * `eventsTransport`'s sessions and watch `connected` move the status activity.
+     */
+    val eventsTransport = FakeSyncEventTransport()
+    val events: SyncEventsClient =
+        SyncEventsClient(
+            db = db,
+            transport = eventsTransport.transport(),
+            discover = { _ ->
+                ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument(
+                    name = "test",
+                    serverVersion = "1.0",
+                    protocol =
+                        ch.lkmc.neutrodyne.sync.protocol.dto
+                            .ProtocolRange(1, 1),
+                    features = listOf("sse"),
+                    maxBatch = 200,
+                    maxSkewMs = 60_000,
+                    serverTime = "2026-01-01T00:00:00Z",
+                )
+            },
+            address = address,
+            tokens = tokens,
+            network =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeNetworkMonitor(
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeNetworkMonitor.ONLINE,
+                    ),
+            scope = controllerScope,
+            onRemoteChanged = { scheduler.onRemoteChanged() },
+            onRevoked = { scheduler.onUnlinked() },
         )
     val build =
         BuildInfo(
@@ -1317,6 +1539,8 @@ private class Harness(
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
+            events = events,
+            activity = activity,
             noticeBus = noticeBus,
             secrets = secrets,
             credentials = credentials,

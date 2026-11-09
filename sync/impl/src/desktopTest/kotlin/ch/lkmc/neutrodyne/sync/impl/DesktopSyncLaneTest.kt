@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -145,6 +146,33 @@ class DesktopSyncLaneTest {
             deps.lane.poke(SyncRoundReason.PLAYBACK)
             deps.run()
             assertTrue(deps.rounds.isEmpty())
+        }
+
+    @Test
+    fun nonAuthFailurePreservesTheFailureWithoutRevoking() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            val rejection = SyncTransportException(503, null, "unavailable")
+            var revoked = false
+            val lane =
+                DesktopSyncLane(
+                    db = deps.db,
+                    round = { throw rejection },
+                    network = deps.network,
+                    clock = deps.clock,
+                    poker = Provider { JobLanePoker {} },
+                    onRevoked = { revoked = true },
+                )
+            val failure =
+                try {
+                    lane.run(Instant.fromEpochMilliseconds(deps.clock.now()))
+                    null
+                } catch (failure: SyncTransportException) {
+                    failure
+                }
+            assertSame(rejection, failure)
+            assertTrue(!revoked)
         }
 
     // --- plumbing --------------------------------------------------------------------------------

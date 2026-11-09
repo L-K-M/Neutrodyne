@@ -240,6 +240,16 @@ Device-local: `lastViewedAt` ("new since last visit" is per device), `kind` and 
 
 The [definition of done](../PLAN.md#72-definition-of-done-every-milestone) requires every new portable key to declare `synced`; the default for a new key is `false`.
 
+**Implementation note (2026-11-09, device switch writes).** The two device-local
+switch setters return `Outcome<Unit, SyncPreferenceError>`. A failed storage
+write leaves both the stored value and the runtime gate unchanged. Successful
+writes publish the runtime value in the same serialized operation; cancellation
+after persistence cannot leave a stale gate, and an older completion cannot
+replace a newer choice. Once admitted, that local commit finishes even if its
+caller is cancelled. Playback-setting reconciliation and pending remote values
+run only after the preference is saved. The linked-settings controls remain a
+separate UI slice.
+
 ### Per-scope overrides
 
 | Override field (`ScopeOverrides`, [D20](../PLAN.md#3-key-decisions)) | Podcast and group scope |
@@ -1034,6 +1044,28 @@ every sync work name.
 - **Watchdog:** the stream uses 01's derived `SYNC` client without read and call timeouts ([01 Networking baseline](01-foundation.md#networking-baseline); the base client's 30-s read timeout would cut a 60–90-s heartbeat), so the watchdog bounds it instead: no byte for `2 × hb + 15 s` → reconnect. Reconnects wait the server's `retry` (10 s), then back off exponentially to 5 min with ±20 % jitter after repeated failures; a `401` stops it (`Revoked`); a `429` waits `Retry-After`.
 - **Events:** `changed` with `by ≠` this device → a round within 500 ms (coalesced); `by` = this device → ignored.
 - If the server lacks `sse` or a proxy breaks streaming, polling covers it: rounds on foreground, pause and the timers above.
+
+**Implementation note (2026-11-22, MS3).** `SyncEventsClient` supervises one stream
+over `HttpClientKind.SYNC_STREAM` — `SYNC` derived with `readTimeout(0)` and
+`callTimeout(0)` (the same SYNC-mode LAN guard, DNS chain, pool and interceptors;
+Ktor's `SSE` plugin is installed for both kinds). Discovery's `sse` feature gates the
+first open and is re-checked on a 5-min cadence while absent. The gate combines the
+platform flow, `sync_state`'s live-link read (funneled through `SyncScheduler`'s
+`linkStateChanged` callback on every link, unlink and revocation, so a revoke closes
+the stream at once instead of waiting out the watchdog) and the network monitor.
+Android's `SyncEventsGate` emits the UI-or-playback gate with the 60-s grace and an
+immediate initial `false` (a backgrounded start must not wait out the grace before
+the supervisor sees a state); `SyncSchedulingInitializer` starts it at band 200. The
+desktop gate is `DesktopSyncTriggers.awake` (`PowerEvent.Suspending`/`Resumed`),
+started by `DesktopSyncSchedulingInitializer` at band 210. Every (re)connect pokes
+the scheduler because the bus does not replay; remote `changed` events and the
+connect poke coalesce into one `SyncRoundReason.SSE` round 500 ms after the last
+signal, and the event cursor is discarded — the round is the only data path. A `401`
+on open or mid-stream writes `sync_state`'s `markRevoked` (the engine's own write)
+and runs `SyncScheduler.onUnlinked`. `SyncStatus.Linked.activity` derives
+`SYNCING` (the round counter) over `LIVE` (`connected`) over `IDLE`, refreshed by the
+controller's combine collector; Settings › Sync shows it. Diagnostics expose only the
+connected flag — no token or cursor.
 
 ### Token storage
 

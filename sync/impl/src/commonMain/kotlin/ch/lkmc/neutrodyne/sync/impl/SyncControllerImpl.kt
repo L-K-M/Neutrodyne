@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
@@ -52,6 +53,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -64,6 +67,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
+import ch.lkmc.neutrodyne.sync.api.SyncActivity as SyncLiveActivity
 
 /** Which unauthenticated call a failure came from, so a 401 maps to the right problem. */
 internal enum class LinkAuthKind { LOGIN, INVITE, LINK }
@@ -107,6 +111,8 @@ class SyncControllerImpl(
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
+    private val events: SyncEventsClient,
+    private val activity: SyncActivityState,
     private val noticeBus: SyncNoticeBus,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
     private val credentials: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
@@ -167,9 +173,28 @@ class SyncControllerImpl(
      */
     private val statusMutex = Mutex()
 
+    // Own the store-write/runtime-publication span together. A delayed older completion must
+    // never overwrite a newer gate, and caller cancellation after commit cannot strand it.
+    private val preferenceMutex = Mutex()
+
     init {
         scope.launch { refreshStatus() }
+        // 10 Live updates: the status card's activity line follows the round counter and the
+        // stream's connected flag — refresh whenever the derived value could change.
+        scope.launch {
+            combine(activity.count, events.connected) { _, _ -> currentActivity() }
+                .distinctUntilChanged()
+                .collect { refreshStatus() }
+        }
     }
+
+    /** 10 Live updates: an in-flight round outranks the stream's LIVE, which outranks IDLE. */
+    private fun currentActivity(): SyncLiveActivity =
+        when {
+            activity.active -> SyncLiveActivity.SYNCING
+            events.connected.value -> SyncLiveActivity.LIVE
+            else -> SyncLiveActivity.IDLE
+        }
 
     suspend fun refreshStatus() {
         statusMutex.withLock {
@@ -199,6 +224,7 @@ class SyncControllerImpl(
                         username = address.username(),
                         nodeId = state.nodeId.orEmpty(),
                         lastSyncAtMs = state.lastSyncAt,
+                        activity = currentActivity(),
                         problem = lastRoundProblem.value,
                     )
                 }
@@ -523,23 +549,32 @@ class SyncControllerImpl(
         remoteSession.value = null
     }
 
-    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
-        address.setSyncPlaybackSettings(enabled)
-        flags.syncPlaybackSettings = enabled
-        // 10 Settings capture: reconcile against the just-persisted gates — turning the switch
-        // on installs the recorder, replays committed intents and captures account-absent keys;
-        // turning it off makes the recorder inert while the baseline listener stays, so a local
-        // edit made while off is still told apart from an unmaterialized intent.
-        settingsCapture.reconcile()
-        // The pending remote values drain only while the switch is on (the server's values win,
-        // as at the first link); the drain reads the just-persisted switch itself.
-        if (enabled) effects.drainSettings()
-    }
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
+        preferenceMutex.withLock {
+            kotlin.coroutines.coroutineContext.ensureActive()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                if (address.setSyncPlaybackSettings(enabled) is Outcome.Failure) {
+                    return@withContext Outcome.Failure(SyncPreferenceError.WriteFailed)
+                }
+                flags.syncPlaybackSettings = enabled
+                // Reconcile only after persistence; enabling then drains durable remote settings.
+                settingsCapture.reconcile()
+                if (enabled) effects.drainSettings()
+                Outcome.Success(Unit)
+            }
+        }
 
-    override suspend fun setShareFeedPasswords(enabled: Boolean) {
-        address.setShareFeedPasswords(enabled)
-        flags.sharePasswords = enabled
-    }
+    override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
+        preferenceMutex.withLock {
+            kotlin.coroutines.coroutineContext.ensureActive()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                if (address.setShareFeedPasswords(enabled) is Outcome.Failure) {
+                    return@withContext Outcome.Failure(SyncPreferenceError.WriteFailed)
+                }
+                flags.sharePasswords = enabled
+                Outcome.Success(Unit)
+            }
+        }
 
     private suspend fun runLink(
         serverUrl: String,

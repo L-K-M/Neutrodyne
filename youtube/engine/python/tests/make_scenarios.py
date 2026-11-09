@@ -5,9 +5,11 @@ This is deliberately not a live recorder: all requests terminate in SyntheticRH.
 Run manually with the pinned asset on PYTHONPATH to refresh synthetic API vectors.
 """
 
+import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 from unittest.mock import patch
 
 from yt_dlp.networking.common import RequestHandler, Response
@@ -17,6 +19,9 @@ from neutrodyne_ytx.errors import ShimError
 from neutrodyne_ytx.replay import request_key, scrub
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'src/test/resources/recorded'
+MEDIA_HEAD = Path(__file__).resolve().parents[4] / 'playback/engine/src/test/resources/media/m4a_lc_2s.m4a'
+MEDIA_TOTAL = 22_020_219  # real M4A head + one MP4 free box (FixtureMediaBytes pads it)
+MEDIA_REPLICAS = 10  # replay consumes each exchange once; the packaged proof re-resolves
 VIDEO_ID = 'aaaaaaaaaaA'
 CHANNEL_ID = 'UC' + 'a' * 21 + 'A'
 CTX = {'hl': 'en', 'gl': 'US', 'ua': 'Neutrodyne synthetic test', 'ipFamily': 'V4'}
@@ -136,6 +141,35 @@ def generate(output=FIXTURES, scenarios=None):
         print(scenario, len(SyntheticRH.records), str(result)[:200])
 
 
+def media(output=FIXTURES, replicas=MEDIA_REPLICAS):
+    """The packaged media proof's scenario (MD3 AC2): `resolve`'s own request/result
+    and exchange stream, replicated so ReplayRH's once-per-exchange consumption
+    survives the proof's repeated resolves, plus the deterministic loopback
+    fixture metadata and a byte copy of its real M4A head."""
+    directory = output / 'media'
+    directory.mkdir(parents=True, exist_ok=True)
+    source = output / 'resolve'
+    http = json.loads((source / 'http.json').read_text())
+    http['provenance'] += (f'; exchanges replicated x{replicas} for the packaged'
+                           ' media proof\'s repeated resolves')
+    http['exchanges'] = http['exchanges'] * replicas
+    (directory / 'http.json').write_text(json.dumps(http, separators=(',', ':')) + '\n')
+    for name in ('request.json', 'result.json'):
+        shutil.copyfile(source / name, directory / name)
+    head_bytes = MEDIA_HEAD.read_bytes()
+    (directory / 'media-head.m4a').write_bytes(head_bytes)
+    (directory / 'media.json').write_text(json.dumps({
+        'total': MEDIA_TOTAL,
+        'head': 'media-head.m4a',
+        'headSha256': hashlib.sha256(head_bytes).hexdigest(),
+        'provenance': 'head is a byte copy of playback/engine/src/test/resources/media/'
+                      'm4a_lc_2s.m4a (2s AAC-LC M4A engine fixture); total bytes pad it '
+                      'with one MP4 free box',
+    }, indent=2) + '\n')
+    print('media', len(http['exchanges']), 'exchanges')
+
+
 if __name__ == '__main__':
     with patch('time.time', return_value=1792368000):
         generate()
+        media()

@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.UserAgentProvider
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
 import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -18,6 +19,10 @@ import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.desktop.smoke.EngineSmokeProof
 import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
+import ch.lkmc.neutrodyne.download.api.DownloadController
+import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.PlatformLimitation
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
@@ -410,7 +415,9 @@ object DesktopYouTubeBindingsModule {
     /**
      * MD3 AC2's packaged engine proof (11 Smoke mode step 6): the engine build's binding
      * for the graph's `engineSmokeProof`. It stays inert until the packaged smoke arms
-     * `neutrodyne.smoke.engineReplay` — nothing else calls it.
+     * `neutrodyne.smoke.engineReplay` — nothing else calls it. The application services
+     * arrive as lambdas so the proof's media phase stays a fixture harness boundary: the
+     * controllers keep their own ports, never a database or socket of their own.
      */
     @Provides
     @SingleIn(AppScope::class)
@@ -425,6 +432,11 @@ object DesktopYouTubeBindingsModule {
         capabilities: YouTubeCapabilitiesSource,
         context: () -> YtxContext,
         clock: Clock,
+        databaseOpener: DatabaseOpener,
+        playbackController: PlaybackController,
+        playbackStateSource: PlaybackStateSource,
+        downloadController: () -> DownloadController,
+        localMediaIndex: LocalMediaIndex,
     ): EngineSmokeProof? =
         PackagedEngineProof(
             engineResources,
@@ -437,6 +449,11 @@ object DesktopYouTubeBindingsModule {
             capabilities,
             context,
             clock,
+            database = { databaseOpener.requireDatabase() },
+            playbackController = { playbackController },
+            playbackStateSource = { playbackStateSource },
+            downloadController = downloadController,
+            localMediaIndex = { localMediaIndex },
         )
 
     @Provides
