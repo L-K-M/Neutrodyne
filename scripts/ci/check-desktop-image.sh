@@ -251,9 +251,14 @@ check_ffmpeg() {
 # Membership is the jar's basename. The skiko stub is a repacked derivative whose image
 # name the build cannot predict, so it is bound by the stub manifest
 # (runtime-classpath-stubs.txt): `<expected stub hash>  <source name>
-# <extracted file>=<hash>,…`, derived from the Licensee-checked source artifact and the
-# target extraction rule at build time -- never from the image. A name prefix or a
-# matching version row alone is not acceptance.
+# <extracted file>=<hash>,…[,  removed:<file>=<hash>,…]`, derived from the
+# Licensee-checked source artifact and the target extraction rule at build time --
+# never from the image. The optional `removed:` field is the provenance of the
+# build-time trim that drops the foreign-architecture skiko native from the derived
+# stub (macOS only, the one pinned artifact that carries another arch); the image
+# carries nothing left to check it against -- the expected hash already binds the
+# trimmed entry set exactly. A name prefix or a matching version row alone is not
+# acceptance.
 skiko_stub_record() {
     local base="$1" stub_manifest="$2" rest os arch version stamp src
     case "$base" in
@@ -327,6 +332,15 @@ check_jars() {
             rest="${record#"$want_hash"  }"
             src_name="${rest%%  *}"
             specs="${rest#"$src_name"  }"
+            # The optional fourth field is the trim's provenance record
+            # (`removed:<name>=<hash>,…`). Strip it before the extracted-native
+            # specs; any other fourth field is a malformed record and fails closed.
+            case "$specs" in
+                *"  removed:"*) specs="${specs%%  removed:*}" ;;
+            esac
+            case "$specs" in
+                *"  "*) fail "malformed skiko stub record for $src_name: $base" ;;
+            esac
             case "$seen" in
                 *"|${src_name}|"*) fail "duplicate skiko stub JAR: ${path#"$img"/}" ;;
             esac

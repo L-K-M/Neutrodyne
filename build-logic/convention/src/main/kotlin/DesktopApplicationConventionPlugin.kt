@@ -188,6 +188,14 @@ internal val JLINK_MODULES =
         "jdk.unsupported",
     )
 
+/**
+ * The locales jlink keeps inside `jdk.localedata` (11 jlink modules, PB27): English covers
+ * the shipped `en-US` strings and UI fallback, German the `de` resources the app carries;
+ * every other locale falls back to root. Compose 1.12.1's jlink step cannot express
+ * `--include-locales`, so the convention plugin's own jlink task adds it.
+ */
+internal val JLINK_INCLUDED_LOCALES = listOf("en", "de")
+
 /** Tasks that execute or probe the javaHome JDK and therefore need the pinned runtime unpacked first. */
 internal val RUNTIME_IMAGE_CONSUMERS =
     setOf(
