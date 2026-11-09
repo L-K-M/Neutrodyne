@@ -4,6 +4,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -42,13 +43,24 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             helper = root / "scripts/ci/preserve-emulator-crashes.py"
             helper.parent.mkdir(parents=True)
             shutil.copyfile(ROOT / "scripts/ci/preserve-emulator-crashes.py", helper)
+            shutil.copyfile(ROOT / "scripts/ci/assert-selected-tests.py", helper.with_name("assert-selected-tests.py"))
             record = root / "arguments.json"
             gradle = root / "gradlew"
             gradle.write_text(
                 f"#!{sys.executable}\n"
                 "import json, os, sys\n"
                 "from pathlib import Path\n"
-                "Path(os.environ['GMD_ARGUMENTS']).write_text(json.dumps(sys.argv[1:]))\n"
+                "record = Path(os.environ['GMD_ARGUMENTS'])\n"
+                "calls = json.loads(record.read_text()) if record.exists() else []\n"
+                "calls.append(sys.argv[1:]); record.write_text(json.dumps(calls))\n"
+                "selector = next((a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith('-Pandroid.testInstrumentationRunnerArguments.class=')), '')\n"
+                "selected = selector.split(',')[0]  # pinned GMD parser loses comma tails\n"
+                "if selected in ('ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest', 'ch.lkmc.neutrodyne.SmokeTest'):\n"
+                "    count = 5 if selected.endswith('.SmokeTest') else 1\n"
+                "    result = Path('app/build/outputs/androidTest-results/managedDevice/debug/api36')\n"
+                "    result.mkdir(parents=True, exist_ok=True)\n"
+                "    cases = ''.join(f'<testcase classname=\"{selected}\" name=\"case{i}\" />' for i in range(count))\n"
+                "    (result / 'TEST-selected.xml').write_text('<testsuite>' + cases + '</testsuite>')\n"
             )
             gradle.chmod(0o755)
             result = subprocess.run(
@@ -65,7 +77,8 @@ class GmdDeviceBudgetTest(unittest.TestCase):
                 timeout=10,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            return json.loads(record.read_text())
+            self.last_calls = json.loads(record.read_text())
+            return self.last_calls[-1]
 
     def _run_scope(self, scope):
         script = _run_block("GMD nightly group (debug)").replace("${{ inputs.scope }}", scope)
@@ -95,9 +108,33 @@ class GmdDeviceBudgetTest(unittest.TestCase):
         self.assertIn("api36DebugAndroidTest", arguments)
         self.assertIn(
             "-Pandroid.testInstrumentationRunnerArguments.class="
-            "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest",
+            "ch.lkmc.neutrodyne.SmokeTest",
             arguments,
         )
+
+    def test_youtube_smoke_selects_both_classes_without_compound_arguments(self):
+        self._run_scope("youtube-smoke")
+        selectors = [
+            [arg.split("=", 1)[1] for arg in call
+             if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")]
+            for call in self.last_calls
+        ]
+        self.assertEqual([
+            ["ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest"],
+            ["ch.lkmc.neutrodyne.SmokeTest"],
+        ], selectors)
+
+    def test_runner_selectors_do_not_use_the_broken_comma_bridge(self):
+        # AGP serializes its argument map with commas; the pinned engine splits that
+        # string again. Literal compound selectors silently lose their tail.
+        selectors = re.compile(r"-Pandroid\.testInstrumentationRunnerArguments\.(?:class|annotation|notAnnotation)=([^\s]+)")
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            for value in selectors.findall(workflow.read_text()):
+                self.assertNotIn(",", value, f"{workflow.name}: use serial selections or a verified suite")
+        conventions = (ROOT / "build-logic/convention/src/main/kotlin/DeviceTestConventions.kt").read_text()
+        exclusion = re.search(r'CI_EXCLUDED_ANNOTATIONS\s*=\s*"([^"]+)"', conventions)
+        self.assertIsNotNone(exclusion)
+        self.assertNotIn(",", exclusion.group(1), "GMD must receive the entire exclusion")
 
     def test_m10_a11y_runs_four_serial_invocations_one_per_class(self):
         classes = [

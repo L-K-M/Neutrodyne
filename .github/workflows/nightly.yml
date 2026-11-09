@@ -91,10 +91,25 @@ jobs:
           readonly CRASH_PRESERVER_PID=$!
           trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
           if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
-            ./gradlew --info "${GMD_LIMITS[@]}" api36DebugAndroidTest \
-              -Pneutrodyne.testScope=nightly \
-              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
-              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
+            # AGP 9.4.1 splits comma-valued runner arguments. Select each class separately,
+            # and keep both reports before the next GMD task replaces its output directory.
+            readonly SMOKE_EVIDENCE=build/outputs/androidTest-results/youtube-smoke
+            mkdir -p "$SMOKE_EVIDENCE"
+            for smoke_case in YouTubeReleaseSmokeTest:1 SmokeTest:5; do
+              smoke_class="${smoke_case%:*}"
+              smoke_count="${smoke_case#*:}"
+              ./gradlew --info "${GMD_LIMITS[@]}" api36DebugAndroidTest \
+                -Pneutrodyne.testScope=nightly \
+                -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
+                -Pandroid.testInstrumentationRunnerArguments.class="ch.lkmc.neutrodyne.$smoke_class"
+              python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results \
+                --device api36 --require-class "ch.lkmc.neutrodyne.$smoke_class" --require-cases "$smoke_count"
+              mkdir -p "$SMOKE_EVIDENCE/$smoke_class"
+              cp -R app/build/outputs/androidTest-results/. "$SMOKE_EVIDENCE/$smoke_class/"
+            done
+            python3 scripts/ci/assert-selected-tests.py "$SMOKE_EVIDENCE" --device api36 \
+              --require-class ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest \
+              --require-class ch.lkmc.neutrodyne.SmokeTest --require-cases 6
           elif [ "${{ inputs.scope }}" = "downloads" ]; then
             ./gradlew --info "${GMD_LIMITS[@]}" nightlyGroupDebugAndroidTest \
               -Pneutrodyne.testScope=nightly \

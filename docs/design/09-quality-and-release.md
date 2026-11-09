@@ -133,7 +133,7 @@ Serves N9 and the client side of N13. Two complementary layers:
 ### Flakiness policy
 
 - Common, desktop JVM, host and server tests must be deterministic; a flaky JVM test is a bug fixed or reverted within 24 h. Seeded generators (mutations, convergence) print their seed, and a failing seed becomes a regression test.
-- An instrumented test that fails intermittently is annotated `@androidx.test.filters.FlakyTest` with a comment linking its issue within 24 h; blocking runs exclude `FlakyTest`, the nightly run includes it. A desktop-matrix test that fails intermittently on one target gets the JUnit category `Flaky` (`:core:testing`), excluded from `desktop-matrix`'s blocking step and run in a non-blocking step. Either must be fixed or deleted within 14 days.
+- An instrumented test that fails intermittently is annotated `@androidx.test.filters.FlakyTest` and `@Nightly` with a comment linking its issue within 24 h; blocking runs exclude `Nightly`, and the nightly run includes it. Both markers are required while AGP 9.4.1's managed-device bridge splits comma-valued runner arguments. A desktop-matrix test that fails intermittently on one target gets the JUnit category `Flaky` (`:core:testing`), excluded from `desktop-matrix`'s blocking step and run in a non-blocking step. Either must be fixed or deleted within 14 days.
 - No automatic test retries in CI (retries hide real races such as position-loss bugs). Managed-device infrastructure failures (emulator boot timeout) may be re-run manually once. The one automatic retry is infrastructure, not tests: `release.yml` runs each desktop and image job's build steps a second time when the first attempt fails ([release.yml](#releaseyml), risk P15).
 
 ### Naming and style rules
@@ -199,7 +199,7 @@ internal fun Project.configureAndroidTesting(ext: CommonExtension) {
     ext.defaultConfig.testInstrumentationRunnerArguments["clearPackageData"] = "true"
     if (providers.gradleProperty("neutrodyne.testScope").getOrElse("ci") == "ci")   // nightly/release scopes run everything
         ext.defaultConfig.testInstrumentationRunnerArguments["notAnnotation"] =
-            "ch.lkmc.neutrodyne.core.testing.Nightly,androidx.test.filters.FlakyTest"
+            "ch.lkmc.neutrodyne.core.testing.Nightly"
     ext.testOptions.unitTests.isIncludeAndroidResources = true   // Robolectric + Roborazzi need merged resources
     ext.testOptions.unitTests.isReturnDefaultValues = false      // unmocked android.* calls fail loudly
     ext.testOptions.animationsDisabled = true
@@ -454,6 +454,9 @@ fun assumeTier(required: ScreenshotTier) { if (ScreenshotTier.current < required
 - Pseudo-locales `en-XA` and `ar-XB` for Compose resources and Android `res/` come from [Pseudo-locales and RTL](#pseudo-locales-and-rtl); `check-apk.sh --published` and `check-desktop-image.sh` assert that no published artefact carries them.
 
 ### Gradle Managed Devices
+
+The `youtube-smoke` debug lane selects `YouTubeReleaseSmokeTest` and `SmokeTest` in two serial invocations. Each requires its own non-skipped case evidence (1 and 5 cases), copies its output before the next invocation, and checks all six cases together. A comma-separated `class` argument loses the second class in AGP 9.4.1. No extra suite is added to the app's default discovery.
+
 
 Configured in `neutrodyne.android.testing` for the `com.android.*` modules (`:app`, `:playback:impl`, `:benchmark`) and, from the same build-logic table, by `neutrodyne.kmp.library` for a KMP module's device-test compilation (`withDeviceTest { }`: `:core:database` only) — the device-test DSL carries `managedDevices`, `instrumentationRunner`, `instrumentationRunnerArguments`, `animationsDisabled` and `execution` itself; the orchestrator resolves from `androidTestUtil`, which `ManagedDeviceTestTask` reads per project (wired 2026-10-08). Only those have device tests ([Placement rule](#test-pyramid)). Task names carry the test component: `<device><variant>AndroidTest` for the Android modules (`api26DebugAndroidTest`, `ciGroupDebugAndroidTest`), `<device>AndroidDeviceTest` for KMP (`api26AndroidDeviceTest`, `ciGroupAndroidDeviceTest`, `connectedAndroidDeviceTest`).
 
