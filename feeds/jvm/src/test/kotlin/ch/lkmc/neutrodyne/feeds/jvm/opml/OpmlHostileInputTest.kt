@@ -7,12 +7,11 @@ import ch.lkmc.neutrodyne.feeds.opml.OpmlReadResult
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReader
 import ch.lkmc.neutrodyne.feeds.opml.ParseMode
 import okio.Buffer
+import okio.source
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlin.time.Duration
-import kotlin.time.measureTimedValue
 
 /**
  * The XML leg of the hostile-input table (05 Testing): generated documents trip every cap and the
@@ -239,36 +238,85 @@ class OpmlHostileInputTest {
      * Timed against a same-size `&`-free baseline instead of a wall-clock budget, so machine
      * load slows both runs alike: bounded scans stay near 1x, an unbounded one reaches ~6x.
      * The `&#xZZZZ;` fails both pull legs unconditionally, so the salvage scanner is under test.
+     *
+     * The ratio is measured, not sampled once: one unmeasured read per shape warms the
+     * bounded `;` scan's JIT path — a single cold run bills compilation to the dense side,
+     * which is what pushed a loaded CI worker past the guard — and paired rounds in
+     * alternating order feed a median, so a GC pause or a busy neighbour taxes one sample
+     * instead of the whole comparison.
      */
     @Test(timeout = HOSTILE_TIMEOUT_MS)
     fun ampDenseSalvageValuesStayLinear() {
-        val baseline = timedSalvage("a".repeat(AMP_RUN))
-        val dense = timedSalvage("&".repeat(AMP_RUN) + ";")
+        // Fixtures before any timing: building the ~36 MB document inside a measured read
+        // would bill its allocation to one side of the ratio.
+        val baseline = ampDenseDocument("a".repeat(AMP_RUN))
+        val dense = ampDenseDocument("&".repeat(AMP_RUN) + ";")
+
+        salvageRead(baseline)
+        salvageRead(dense)
+
+        val baselineTimes = LongArray(AMP_DENSE_ROUNDS)
+        val denseTimes = LongArray(AMP_DENSE_ROUNDS)
+        for (round in 0 until AMP_DENSE_ROUNDS) {
+            if (round % 2 == 0) {
+                baselineTimes[round] = timedSalvage(baseline)
+                denseTimes[round] = timedSalvage(dense)
+            } else {
+                denseTimes[round] = timedSalvage(dense)
+                baselineTimes[round] = timedSalvage(baseline)
+            }
+        }
+        val baselineMedian = baselineTimes.median()
+        val denseMedian = denseTimes.median()
+        println(
+            "ampDenseSalvageValuesStayLinear: baseline ${baselineTimes.contentToString()} " +
+                "dense ${denseTimes.contentToString()} " +
+                "ratio=${denseMedian.toDouble() / baselineMedian}",
+        )
 
         assertTrue(
-            dense < baseline * AMP_DENSE_MAX_RATIO,
-            "dense $dense vs baseline $baseline ratio=${dense / baseline}",
+            denseMedian < baselineMedian * AMP_DENSE_MAX_RATIO,
+            "dense median ${denseMedian}ns vs baseline median ${baselineMedian}ns " +
+                "ratio=${denseMedian.toDouble() / baselineMedian}",
         )
     }
 
-    /** Reads [AMP_DENSE_TAGS] outlines carrying [value] and returns the salvage read's duration. */
-    private fun timedSalvage(value: String): Duration {
-        val doc =
-            buildString {
-                append("<opml version=\"1.0\"><body>")
-                repeat(AMP_DENSE_TAGS) {
-                    append("<outline type=\"rss\" xmlUrl=\"https://x.example.com/\" text=\"")
-                    append(value)
-                    append("\" note=\"&#xZZZZ;\"/>")
-                }
-                append("</body></opml>")
+    /** The [AMP_DENSE_TAGS]-outline document carrying [value] as every `text`, built once. */
+    private fun ampDenseDocument(value: String): ByteArray =
+        buildString {
+            append("<opml version=\"1.0\"><body>")
+            repeat(AMP_DENSE_TAGS) {
+                append("<outline type=\"rss\" xmlUrl=\"https://x.example.com/\" text=\"")
+                append(value)
+                append("\" note=\"&#xZZZZ;\"/>")
             }
-        val bytes = doc.encodeToByteArray()
+            append("</body></opml>")
+        }.encodeToByteArray()
 
-        val (result, elapsed) = measureTimedValue { read(bytes) }
+    /**
+     * One read of [bytes] asserting the same boundary as before — the pull legs fail and
+     * salvage wins. The opener streams the fixture per pass instead of copying it into a
+     * `Buffer`: three cascade passes times ~36 MB of copy was churn the 128 MB heap had to
+     * collect inside the timed region.
+     */
+    private fun salvageRead(bytes: ByteArray) {
+        val result = reader.read({ bytes.inputStream().source() })
         val ok = assertIs<OpmlReadResult.Ok>(result)
         assertEquals(ParseMode.SALVAGE, ok.document.mode)
-        return elapsed
+    }
+
+    /** A collection outside the clock, then one timed read: the last read's garbage is not this one's. */
+    private fun timedSalvage(bytes: ByteArray): Long {
+        System.gc()
+        val start = System.nanoTime()
+        salvageRead(bytes)
+        return System.nanoTime() - start
+    }
+
+    /** [AMP_DENSE_ROUNDS] is odd, so the sorted middle is the median sample. */
+    private fun LongArray.median(): Long {
+        sort()
+        return this[size / 2]
     }
 
     /** The entity scan sees through UTF-16 units, not only single-byte text. */
@@ -292,6 +340,9 @@ class OpmlHostileInputTest {
         const val AMP_RUN = 60_000
         const val AMP_DENSE_TAGS = 300
         const val AMP_DENSE_MAX_RATIO = 3
+
+        /** Timed round pairs per shape; odd so the median is an observed sample. */
+        const val AMP_DENSE_ROUNDS = 5
 
         const val DEEP_NESTING = 10_000
         const val FEED_FLOOD = 100_001

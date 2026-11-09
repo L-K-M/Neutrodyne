@@ -471,6 +471,27 @@ private fun File.isMacho(): Boolean {
 }
 
 /**
+ * Re-seals a macOS image ad hoc after a task rewrote payload inside the bundle (the AOT
+ * archive, the trimmed skiko stub): every Mach-O inside out, the bundle last — the order
+ * [macAdHocResignTargets] computes — then `codesign --verify --deep --strict`; the old
+ * signature is never presumed valid.
+ */
+internal fun resignMacImageAdHoc(image: File) {
+    for (target in macAdHocResignTargets(image)) {
+        runChecked("codesign", "--force", "--sign", "-", target.absolutePath)
+    }
+    runChecked("codesign", "--verify", "--deep", "--strict", image.absolutePath)
+}
+
+private fun runChecked(vararg argv: String) {
+    val process = ProcessBuilder(*argv).redirectErrorStream(true).start()
+    val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
+    if (process.waitFor() != 0) {
+        throw GradleException("${argv.joinToString(" ")} failed:\n$output")
+    }
+}
+
+/**
  * The image runtime's missing `bin/java`: `-XX:AOTCacheOutput` makes the JVM fork
  * `java.home/bin/java` at shutdown, but the jlink'd image runtime carries no native
  * commands (11 jlink modules). [provisionImageJava] copies the pinned runtime's own
@@ -903,18 +924,7 @@ abstract class TrainAotCacheTask : DefaultTask() {
      * `packageDmg`/`mac-zip.sh` archives it — the old signature is never presumed valid.
      */
     private fun resignAdHoc(image: File) {
-        for (target in macAdHocResignTargets(image)) {
-            runChecked("codesign", "--force", "--sign", "-", target.absolutePath)
-        }
-        runChecked("codesign", "--verify", "--deep", "--strict", image.absolutePath)
-    }
-
-    private fun runChecked(vararg argv: String) {
-        val process = ProcessBuilder(*argv).redirectErrorStream(true).start()
-        val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
-        if (process.waitFor() != 0) {
-            throw GradleException("${argv.joinToString(" ")} failed:\n$output")
-        }
+        resignMacImageAdHoc(image)
     }
 
     private companion object {
