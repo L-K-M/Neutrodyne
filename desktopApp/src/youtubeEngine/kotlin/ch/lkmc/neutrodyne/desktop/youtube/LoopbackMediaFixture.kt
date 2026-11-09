@@ -14,6 +14,7 @@ import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 
 /**
  * The proof-local loopback media fixture for MD3 AC2's packaged proof: a `ServerSocket`
@@ -92,6 +93,35 @@ internal class LoopbackMediaFixture(
 
     /** A snapshot of the answered requests so far; later requests never mutate it. */
     fun requests(): List<ServedRequest> = synchronized(recordLock) { records.toList() }
+
+    /**
+     * After the caller releases playback, wait for its handlers to finish before counting
+     * completed requests. Pausing alone can leave a response body in flight. Later traffic
+     * still belongs after this boundary and must pass the download's exact range gate.
+     */
+    fun awaitRequestBoundary(timeoutMs: Long = BOUNDARY_WAIT_MS): Int {
+        require(timeoutMs > 0)
+        val started = System.nanoTime()
+        val budget = TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        val quietPeriod = TimeUnit.MILLISECONDS.toNanos(BOUNDARY_QUIET_MS)
+        var quietSince: Long? = null
+        while (true) {
+            check(!closed) { "the media fixture closed before its request boundary" }
+            val now = System.nanoTime()
+            val idle = workers.isEmpty() && clients.isEmpty() && workerPermits.availablePermits() == MAX_WORKERS
+            if (idle) {
+                val since = quietSince
+                if (since == null) quietSince = now
+                if (since != null && now - since >= quietPeriod) return requests().size
+            } else {
+                quietSince = null
+            }
+            if (now - started >= budget) {
+                throw IOException("media fixture requests did not settle before the phase boundary")
+            }
+            Thread.sleep(BOUNDARY_POLL_MS)
+        }
+    }
 
     /** Owned threads still alive — `0` after a settled [close], checked by tests. */
     fun liveThreadCount(): Int = workers.count { it.isAlive } + if (acceptThread.isAlive) 1 else 0
@@ -438,6 +468,9 @@ internal class LoopbackMediaFixture(
         private const val DRAIN_BUFFER_BYTES = 8 * 1024
         private const val JOIN_WAIT_MS = 2_000L
         private const val SHUTDOWN_WAIT_MS = 5_000L
+        private const val BOUNDARY_WAIT_MS = 10_000L // includes the response linger and drain budgets
+        private const val BOUNDARY_QUIET_MS = 100L
+        private const val BOUNDARY_POLL_MS = 10L
 
         private const val MAX_HEAD_BYTES = 16 * 1024
         private const val MAX_HEADER_LINES = 64
