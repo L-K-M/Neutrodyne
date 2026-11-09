@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.smoke
 
+import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
@@ -21,6 +22,7 @@ import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 
 /**
  * 11 Smoke mode step 1's "no URL-scheme, file-association or login-item registration"
@@ -70,7 +72,11 @@ class ShellJourneyTest {
         val journey = ShellJourney("test-journey-", createRoot = { root })
         try {
             assertThat(compiled.toFile().setReadOnly()).isTrue()
-            assertThat(lib.toFile().setReadOnly()).isTrue()
+            if (AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS) {
+                Files.setAttribute(lib, "dos:readonly", true)
+            } else {
+                assertThat(lib.toFile().setReadOnly()).isTrue()
+            }
 
             journey.cleanUp()
 
@@ -79,9 +85,109 @@ class ShellJourneyTest {
             journey.disarmWatchdog()
             // The pre-fix implementation cannot delete the fixture; restore test-owned modes.
             if (Files.exists(root)) {
-                Files.walk(root).use { paths -> paths.forEach { it.toFile().setWritable(true, true) } }
+                Files.walk(root).use { paths ->
+                    paths.forEach {
+                        if (AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS) {
+                            Files.setAttribute(it, "dos:readonly", false)
+                        } else {
+                            it.toFile().setWritable(true, true)
+                        }
+                    }
+                }
                 Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
             }
+        }
+    }
+
+    @Test
+    fun `restoreWritable returns a read-only POSIX entry to owner-writable`() {
+        val dir = Files.createTempDirectory("test-journey-posix-")
+        try {
+            assumeTrue("POSIX permission check", Files.getFileStore(dir).supportsFileAttributeView("posix"))
+            val file = Files.writeString(dir.resolve("engine.pyc"), "compiled fixture")
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"))
+            assumeTrue("the read-only mode binds this account", !Files.isWritable(file))
+
+            ShellJourney.restoreWritable(file)
+
+            assertThat(Files.getPosixFilePermissions(file))
+                .isEqualTo(PosixFilePermissions.fromString("rw-r--r--"))
+            assertThat(Files.isWritable(file)).isTrue()
+        } finally {
+            Files.walk(dir).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+        }
+    }
+
+    @Test
+    fun `restoreWritable clears the DOS read-only attribute on Windows`() {
+        assumeTrue("DOS host check", AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS)
+        val dir = Files.createTempDirectory("test-journey-dos-")
+        try {
+            val file = Files.writeString(dir.resolve("engine.pyc"), "compiled fixture")
+            Files.setAttribute(file, "dos:readonly", true)
+            Files.setAttribute(dir, "dos:readonly", true)
+
+            ShellJourney.restoreWritable(file)
+            ShellJourney.restoreWritable(dir)
+
+            assertThat(Files.getAttribute(file, "dos:readonly")).isEqualTo(false)
+            assertThat(Files.getAttribute(dir, "dos:readonly")).isEqualTo(false)
+        } finally {
+            runCatching { Files.setAttribute(dir.resolve("engine.pyc"), "dos:readonly", false) }
+            runCatching { Files.setAttribute(dir, "dos:readonly", false) }
+            Files.walk(dir).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+        }
+    }
+
+    @Test
+    fun `restoreWritable never restores through a symbolic link`() {
+        val outside = Files.createTempDirectory("test-journey-link-target-")
+        try {
+            assumeTrue("POSIX symlink permission check", Files.getFileStore(outside).supportsFileAttributeView("posix"))
+            val permissions = PosixFilePermissions.fromString("r--r--r--")
+            val target = Files.writeString(outside.resolve("target"), "outside fixture")
+            Files.setPosixFilePermissions(target, permissions)
+            val inside = Files.createTempDirectory("test-journey-link-")
+            try {
+                val link = Files.createSymbolicLink(inside.resolve("link"), target)
+
+                ShellJourney.restoreWritable(link)
+
+                assertThat(Files.getPosixFilePermissions(target)).isEqualTo(permissions)
+            } finally {
+                Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"))
+                Files.walk(inside).use { paths ->
+                    paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+                }
+            }
+        } finally {
+            Files.walk(outside).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+        }
+    }
+
+    @Test
+    fun `restoreWritable leaves a writable mode alone`() {
+        val dir = Files.createTempDirectory("test-journey-writable-")
+        try {
+            assumeTrue("POSIX permission check", Files.getFileStore(dir).supportsFileAttributeView("posix"))
+            val file = Files.writeString(dir.resolve("engine.pyc"), "compiled fixture")
+            Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
+
+            ShellJourney.restoreWritable(file)
+
+            assertThat(Files.getPosixFilePermissions(file)).isEqualTo(PosixFilePermissions.fromString("rw-------"))
+        } finally {
+            Files.walk(dir).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+        }
+    }
+
+    @Test
+    fun `restoreWritable accepts an entry that already vanished`() {
+        val dir = Files.createTempDirectory("test-journey-vanished-")
+        try {
+            ShellJourney.restoreWritable(dir.resolve("gone"))
+        } finally {
+            Files.deleteIfExists(dir)
         }
     }
 
