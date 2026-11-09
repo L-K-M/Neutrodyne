@@ -254,7 +254,11 @@ private fun FeedList(
         onIds = onVisibleIds,
     )
 
-    Column(Modifier.fillMaxSize()) {
+    // Cached rows stay visible during a new refresh. Expose the same settled condition used
+    // above for first-draw reporting, so instrumentation cannot mistake cached content for it.
+    Column(
+        Modifier.fillMaxSize().testTag(if (refreshState is LoadState.Loading) "feed_loading" else "feed_settled"),
+    ) {
         // 08's paging-error rule (revised 2026-10-14): every load failure over a non-empty
         // list — append, prepend or refresh — pins a banner under the app bar. With 05's
         // placeholders the spec's append footer can sit thousands of rows away, a prepend

@@ -177,6 +177,8 @@ jobs:
           python3 scripts/ci/tests/check-runtime-sources.test.py
           python3 scripts/ci/tests/smoke-start.test.py
           python3 scripts/ci/tests/network-capture.test.py
+          python3 scripts/ci/tests/benchmark-live-capture.test.py
+          python3 scripts/ci/tests/assert-benchmark-run.test.py
           python3 scripts/ci/tests/nightly-windows-identity.test.py
       - name: Preserve a formatting repair patch
         if: failure()
@@ -313,7 +315,7 @@ jobs:
             -PtestBuildType=release :app:dumpReleaseR8Inputs
           python3 scripts/ci/trace-instrumentation-abi.py --check
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :app:assembleBenchmarkRelease :benchmark:assembleBenchmarkRelease :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :app:assembleBenchmarkRelease :benchmark:assembleBenchmarkRelease :app:assembleNonMinifiedRelease :benchmark:assembleNonMinifiedRelease :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs

@@ -39,7 +39,22 @@ android {
     }
     experimentalProperties["android.experimental.self-instrumenting"] = true
 }
-androidComponents { beforeVariants { it.enable = it.buildType == "benchmarkRelease" } }
+// The producer plugin creates `nonMinifiedRelease` (profile generation) and
+// `benchmarkRelease` (Macrobenchmarks); `release` and `debug` stay disabled so the
+// module builds only the two variants that run on a managed device.
+androidComponents {
+    beforeVariants {
+        it.enable = it.buildType == "benchmarkRelease" || it.buildType == "nonMinifiedRelease"
+    }
+    onVariants(selector().withBuildType("nonMinifiedRelease")) { variant ->
+        // Other test classes exercise benchmarkRelease's fixtures and Macrobenchmark rules.
+        // The profile producer runs only its generator on this unminified target.
+        variant.instrumentationRunnerArguments.put(
+            "class",
+            "ch.lkmc.neutrodyne.benchmark.BaselineProfileGenerator",
+        )
+    }
+}
 baselineProfile {
     managedDevices += "bench34"
     useConnectedDevices = false

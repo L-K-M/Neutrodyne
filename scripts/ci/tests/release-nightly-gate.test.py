@@ -126,6 +126,7 @@ class ReleaseNightlyGateTest(unittest.TestCase):
                     {"name": "unit", "conclusion": "success"},
                     {"name": "repro", "conclusion": "failure"},
                     {"name": "youtube-canary", "conclusion": conclusion},
+                    {"name": "benchmark", "conclusion": conclusion},
                     *MS1_SUCCESSES,
                 ])
 

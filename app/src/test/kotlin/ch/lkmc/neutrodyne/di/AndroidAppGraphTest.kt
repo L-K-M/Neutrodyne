@@ -425,6 +425,18 @@ class AndroidAppGraphTest {
     }
 
     /**
+     * MS2 wiring: the app graph's post-ingest hook must be 10's `SyncParkedStateApplier` — never
+     * the M1a `None` default, whose silent drop lost parked records behind the cursor. Resolving
+     * it must stay cheap (01 DI rule 7): the database is not open yet, and the hook defers it.
+     */
+    @Test
+    fun theSyncIngestHookIsTheParkedStateApplier() {
+        assertThat(graph.syncIngestHook)
+            .isInstanceOf(ch.lkmc.neutrodyne.sync.impl.SyncParkedStateApplier::class.java)
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    /**
      * M3 C1: `ExportRepository` binds through the Android seam — `prepare` mints the cache
      * file AND a `content://{applicationId}.fileprovider/export/…` URI resolved by the
      * manifest's FileProvider, proving the authority and the `export/` root end to end.
@@ -525,6 +537,9 @@ class AndroidAppGraphTest {
                 "FirstLaunchRestoreInitializer" to 100..119,
                 // M1b's `credential-load` sits at 120: after the database, before refresh work.
                 "CredentialLoadInitializer" to 120..199,
+                // 10 Parked state: the start-up recovery runs at 191 — after the database open
+                // (100) and root's startup drain (190), before the scheduling arms (200).
+                "SyncParkedRecoveryInitializer" to 190..199,
                 "PeriodicRefreshInitializer" to 200..299,
                 "RefreshForegroundObserverInitializer" to 200..299,
                 // 10 Scheduling on Android: `sync-periodic` arm at 200, the foreground observer
@@ -556,6 +571,7 @@ class AndroidAppGraphTest {
                 "EngineStatusInitializer" to 150..150,
                 "YouTubeNetworkInitializer" to 150..150,
                 "EnginePreparationObserver" to 210..210,
+                "EngineUpdateInitializer" to 200..200,
                 "YouTubeBreakerNotifier" to 200..200,
                 "EngineFilesCleanup" to 300..300,
             )
