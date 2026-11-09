@@ -36,7 +36,9 @@ class NightlyWindowsIdentityTest(unittest.TestCase):
         cls.packages = _job_block(cls.source, "desktop-packages")
 
     def test_scopes_are_declared_in_the_input_description(self):
-        description = self.source.split("        description:", 1)[1].split("\n", 1)[0]
+        scope = self.source.split("      scope:\n", 1)[1]
+        # A folded YAML scalar continues until the next input property.
+        description = scope.split("        description:", 1)[1].split("\n        default:", 1)[0]
         self.assertIn("desktop-windows", description)
         self.assertIn("windows-identity", description)
 
