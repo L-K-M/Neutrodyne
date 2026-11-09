@@ -110,67 +110,67 @@ class SyncApplier(
     ): SyncApplyResult {
         val remotePlayed = mutableListOf<RemotePlayedMark>()
         val result =
-        // The stage→Room-commit→drop span is one credential-commit hold: a staged snapshot is
-        // referenced or discarded only inside the same span, so the orphan sweep — which takes
-        // the same coordinator — can never delete a snapshot a page is still committing.
-        coordinator.withCredentialCommit {
-            // The protected snapshots land before any Room write: a SecretStore failure fails
-            // the page before its cursor or any credential state can advance past an unstaged
-            // auth. SecretStore IO stays outside the Room transaction.
-            val staged = stageAuthCandidatesLocked(db, secrets, records)
-            val dropKeys = mutableListOf<String>()
-            val feedsNeedingCredentials = mutableListOf<Long>()
-            var applied = 0
-            var stale = 0
-            var parked = 0
-            var held = 0
-            var invalid = 0
-            try {
-                db.withWriteTransaction {
-                    db.syncStateDao().withApplying {
-                        val ordered = records.sortedBy { it.coll }
-                        for (dto in ordered) {
-                            val rid = wireRid(dto)
-                            val result =
-                                applyRecord(
-                                    dto,
-                                    roundId,
-                                    rid?.let { staged[it] },
-                                    dropKeys,
-                                    feedsNeedingCredentials,
-                                    remotePlayed = remotePlayed,
-                                )
-                            when (result) {
-                                is RecordOutcome.Applied -> applied++
-                                is RecordOutcome.Stale -> stale++
-                                is RecordOutcome.Parked -> parked++
-                                is RecordOutcome.Held -> held++
-                                is RecordOutcome.Invalid -> invalid++
+            // The stage→Room-commit→drop span is one credential-commit hold: a staged snapshot is
+            // referenced or discarded only inside the same span, so the orphan sweep — which takes
+            // the same coordinator — can never delete a snapshot a page is still committing.
+            coordinator.withCredentialCommit {
+                // The protected snapshots land before any Room write: a SecretStore failure fails
+                // the page before its cursor or any credential state can advance past an unstaged
+                // auth. SecretStore IO stays outside the Room transaction.
+                val staged = stageAuthCandidatesLocked(db, secrets, records)
+                val dropKeys = mutableListOf<String>()
+                val feedsNeedingCredentials = mutableListOf<Long>()
+                var applied = 0
+                var stale = 0
+                var parked = 0
+                var held = 0
+                var invalid = 0
+                try {
+                    db.withWriteTransaction<Unit> {
+                        db.syncStateDao().withApplying<Unit> {
+                            val ordered = records.sortedBy { it.coll }
+                            for (dto in ordered) {
+                                val rid = wireRid(dto)
+                                val result =
+                                    applyRecord(
+                                        dto,
+                                        roundId,
+                                        rid?.let { staged[it] },
+                                        dropKeys,
+                                        feedsNeedingCredentials,
+                                        remotePlayed = remotePlayed,
+                                    )
+                                when (result) {
+                                    is RecordOutcome.Applied -> applied++
+                                    is RecordOutcome.Stale -> stale++
+                                    is RecordOutcome.Parked -> parked++
+                                    is RecordOutcome.Held -> held++
+                                    is RecordOutcome.Invalid -> invalid++
+                                }
                             }
                         }
                     }
+                } catch (failure: Throwable) {
+                    // Only the writer can roll back these contributions; credential cleanup must
+                    // not mask its failure or leave the loaded player frozen after a rollback.
+                    revertMarks(remotePlayed)
+                    throw failure
+                } finally {
+                    // Losing, failed-page and superseded snapshots leave once the commit's
+                    // references are durable; a rollback drops every key this page staged but
+                    // nothing referenced. The re-read happens under the same coordinator hold, so
+                    // a competing committed page's keys survive. A cleanup failure must never
+                    // mask the page's own outcome.
+                    suspendRunCatching {
+                        dropUnreferencedStagedLocked(
+                            db,
+                            secrets,
+                            staged.values.mapTo(HashSet()) { it.storeKey } + dropKeys,
+                        )
+                    }
                 }
-            } catch (failure: Throwable) {
-                // Only the writer can roll back these contributions; credential cleanup must
-                // not mask its failure or leave the loaded player frozen after a rollback.
-                revertMarks(remotePlayed)
-                throw failure
-            } finally {
-                // Losing, failed-page and superseded snapshots leave once the commit's
-                // references are durable; a rollback drops every key this page staged but
-                // nothing referenced. The re-read happens under the same coordinator hold, so
-                // a competing committed page's keys survive. A cleanup failure must never
-                // mask the page's own outcome.
-                suspendRunCatching {
-                    dropUnreferencedStagedLocked(
-                        db,
-                        secrets,
-                        staged.values.mapTo(HashSet()) { it.storeKey } + dropKeys,
-                    )
-                }
+                SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials, remotePlayed.toList())
             }
-            SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials, remotePlayed.toList())
-        }
         // Device-name lookup may use HTTP. Neither Room nor the credential coordinator is held.
         postMarks(remotePlayed)
         return result
