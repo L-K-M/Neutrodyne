@@ -478,7 +478,9 @@ class DesktopAotTrainingRealTest {
         try {
             val extracted = extractImage(packaged)
             try {
-                val jar = extracted.walkTopDown().first { it.isFile && it.name.endsWith(".jar") }
+                val jar =
+                    aotClasspathJars(File(extracted, cfgRelative).readText(), extracted, osWire)
+                        .first { it.isFile }
                 assertTrue(jar.setLastModified(jar.lastModified() + 1000L), "the drift was applied")
                 val result =
                     launchImage(
