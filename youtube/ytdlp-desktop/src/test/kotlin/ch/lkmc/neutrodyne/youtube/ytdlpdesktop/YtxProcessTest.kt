@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -250,11 +251,14 @@ class YtxProcessTest {
                         }
                     }
                 }
-            withTimeout(15_000) {
-                while (transport.status.value.queued == 0) delay(20)
-            }
-            assertEquals(4, transport.status.value.running)
-            assertEquals(1, transport.status.value.queued)
+            // Calls queue before the worker pool fills. Observe the complete admission state,
+            // rather than treating the first queued call as proof that four calls are running.
+            val admitted =
+                withTimeout(15_000) {
+                    transport.status.first { it.running == 4 && it.queued == 1 }
+                }
+            assertEquals(4, admitted.running)
+            assertEquals(1, admitted.queued)
             transport.shutdown()
             calls.forEach { assertIs<YtxCallException>(it.await().exceptionOrNull()) }
         }
