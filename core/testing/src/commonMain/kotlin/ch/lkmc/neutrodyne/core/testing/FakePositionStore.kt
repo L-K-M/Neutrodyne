@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.StoredEpisodeMarks
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.MEASURED_DURATION_TOLERANCE_MS
 import ch.lkmc.neutrodyne.core.model.PositionSource
@@ -35,6 +36,13 @@ class FakePositionStore : PositionStore {
 
     override fun observe(episodeId: Long): Flow<StoredPosition?> =
         positions.map { it[episodeId] }.distinctUntilChanged()
+
+    override fun observeMarks(episodeId: Long): Flow<StoredEpisodeMarks?> =
+        positions
+            .map { map ->
+                map[episodeId]?.let { StoredEpisodeMarks(it.playedAt, it.startedAt) }
+                    ?: playedWithoutPosition[episodeId]?.let { StoredEpisodeMarks(it, null) }
+            }.distinctUntilChanged()
 
     private fun record(call: Call) {
         calls += call
@@ -81,32 +89,36 @@ class FakePositionStore : PositionStore {
     override suspend fun reset(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         record(Call(Operation.RESET, episodeId, now))
-        val old = positions.value[episodeId] ?: return
+        val old = positions.value[episodeId] ?: return true
         positions.value = positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now))
+        return true
     }
 
     override suspend fun markPlayed(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         record(Call(Operation.PLAYED, episodeId, now))
         val old = positions.value[episodeId]
         if (old == null) {
             playedWithoutPosition.getOrPut(episodeId) { now }
-            return
+            return true
         }
-        positions.value = positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now, playedAt = now))
+        positions.value =
+            positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now, playedAt = now, startedAt = null))
+        return true
     }
 
     override suspend fun markUnplayedForReplay(
         episodeId: Long,
         now: Long,
-    ) {
+    ): Boolean {
         record(Call(Operation.REPLAY, episodeId, now))
         playedWithoutPosition.remove(episodeId)
-        val old = positions.value[episodeId] ?: return
+        val old = positions.value[episodeId] ?: return true
         positions.value = positions.value + (episodeId to old.copy(playedAt = null))
+        return true
     }
 }

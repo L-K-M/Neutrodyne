@@ -84,6 +84,9 @@ interface DesktopAppGraph {
     /** 10's sync application service (Settings › Sync, the shell banners). */
     val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
 
+    /** 06 Sync interplay: the engine's playback side — the controller's own port, never a stub. */
+    val playbackSyncPort: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
+
     /** 10 Settings capture: the shared port the recorder installs into while linked. */
     val settingsSyncPort: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 

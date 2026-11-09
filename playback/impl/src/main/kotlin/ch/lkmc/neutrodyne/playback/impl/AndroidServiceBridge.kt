@@ -72,6 +72,8 @@ internal class AndroidServiceBridge(
                 }
             },
             onTick = ::onPositionTick,
+            onCurrentChanged = access.remoteGuard::currentChanged,
+            afterPauseSave = access.sync::paused,
         )
     private val applier = EffectivePlaybackApplier(ports.effective, scope)
     private val arbiter = EndOfItemPauseArbiter(player)
@@ -97,6 +99,7 @@ internal class AndroidServiceBridge(
             tracker,
             applier,
             access.history,
+            access.remoteGuard,
             access.clock,
             // Schedule initial collection after attach so a pending session start can reserve it.
             CoroutineScope(scope.coroutineContext + Dispatchers.Main),
@@ -105,6 +108,8 @@ internal class AndroidServiceBridge(
             resumePolicy = { access.prefs.current.value.resumePolicy },
             pauseAtBoundary = { arbiter.sleepTimerArmed || arbiter.blockBeforeNext },
             boundaryCompleted = { access.hub.event(PlaybackEvent.MarkedPlayed(it)) },
+            afterTransition = access.sync::transitioned,
+            afterSessionEnd = access.sync::stopped,
             localChanges = access.localChanges,
         )
     private val recovery =
@@ -180,6 +185,8 @@ internal class AndroidServiceBridge(
                 }
             }
         jobs += scope.launch { recovery.issue.collect { publish() } }
+        // 06 Sync interplay: the sync bridge re-projects after a freeze install or lift.
+        access.sync.attach(notifyPlayer = projector::requestReproject)
         updateBoundary()
         publish()
     }
@@ -554,6 +561,7 @@ internal class AndroidServiceBridge(
             } finally {
                 player.stop()
                 stopService()
+                access.sync.stopped()
             }
         }
 
@@ -583,6 +591,8 @@ internal class AndroidServiceBridge(
                 access.gate.clearPending()
                 serviceIssue = null
                 stopService()
+                // The session-clear transaction committed: a Stopped boundary, not a bare clear.
+                generation?.let { access.sync.stopped() }
             } finally {
                 projector.endOwnWrite(generation)
             }
@@ -622,6 +632,9 @@ internal class AndroidServiceBridge(
     private fun publish() {
         if (detached) return
         val id = player.episodeIdOrNull()
+        // 06 Sync interplay: `active` names the loaded item (NOT_LOADED means nothing plays).
+        val loaded = id != null && player.playbackState != Player.STATE_IDLE
+        access.sync.updateActive(id?.takeIf { loaded }, player.isPlaying)
         val row = id?.let { access.index[it] }
         current.value =
             row?.let {
@@ -676,7 +689,10 @@ internal class AndroidServiceBridge(
         projector.detach()
         recovery.detach()
         player.removeListener(this)
-        tracker.detach(snapshot)
+        // The teardown job emits the flush's Stopped after the save; the bridge clears `active`
+        // before that boundary, so a release reading it sees nothing playing.
+        val teardown = tracker.detach(snapshot) { access.sync.stopped() }
+        access.sync.detachAfter(teardown)
         access.applicationScope.launch(Dispatchers.Main.immediate, start = CoroutineStart.UNDISPATCHED) {
             withContext(NonCancellable) { applier.detach() }
         }
