@@ -118,6 +118,38 @@ class KtorSyncClientTest {
         }
 
     @Test
+    fun aLinkApproveDecodesThePendingDevice() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(
+                json(
+                    """{"deviceName":"Anna's phone","platform":"android","appVersion":"0.9.3",""" +
+                        """"requestedAt":"2026-11-04T10:00:00Z","purpose":"device","sameNetwork":false}""",
+                ),
+            )
+
+            val response = fixture.client.linkApprove(fixture.baseUrl, "link-tok", "WDJB-MJHT")
+
+            val request = fixture.take()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/auth/link/approve", request.url.encodedPath)
+            assertEquals("Bearer link-tok", request.headers["Authorization"])
+            assertEquals(PROTOCOL_VERSION.toString(), request.headers["Neutrodyne-Sync-Protocol"])
+            assertTrue(
+                request.body
+                    ?.utf8()
+                    .orEmpty()
+                    .contains("\"userCode\":\"WDJB-MJHT\""),
+            )
+            assertEquals("Anna's phone", response.deviceName)
+            assertEquals("android", response.platform)
+            assertEquals("0.9.3", response.appVersion)
+            assertEquals("2026-11-04T10:00:00Z", response.requestedAt)
+            assertEquals("device", response.purpose)
+            assertEquals(false, response.sameNetwork)
+        }
+
+    @Test
     fun aLinkConfirmApproveAcceptsTheEmptyNoContentReply() =
         runTest {
             val fixture = fixture()

@@ -529,6 +529,30 @@ public object NdIcons {
         symbolIcon(
             "M160-120q-33 0-56.5-23.5T80-200v-440q0-33 23.5-56.5T160-720h160v-80q0-33 23.5-56.5T400-880h160q33 0 56.5 23.5T640-800v80h160q33 0 56.5 23.5T880-640v440q0 33-23.5 56.5T800-120H160Zm0-80h640v-440H160v440Zm240-520h160v-80H400v80ZM160-200v-440 440Z",
         )
+
+    /** Sync device platform `android` (`phone_android`, 08 Devices). */
+    public val PhoneAndroid: ImageVector =
+        symbolIcon(
+            "M260-40q-24.75 0-42.37-17.63Q200-75.25 200-100v-760q0-24 18-42t42-18h438q24.75 0 42.38 17.62Q758-884.75 758-860v150q18 3 30 16.95 12 13.96 12 31.63V-587q0 19-12 33t-30 17v437q0 24.75-17.62 42.37Q722.75-40 698-40H260Zm0-60h438v-760H260v760Zm0 0v-760 760Zm240-89q9-9 9-21t-9-21q-9-9-21-9t-21 9q-9 9-9 21t9 21q9 9 21 9t21-9Z",
+        )
+
+    /** Sync device platform `windows` (`desktop_windows`, 08 Devices). */
+    public val DesktopWindows: ImageVector =
+        symbolIcon(
+            "M420-180v-100H140q-24 0-42-18t-18-42v-440q0-24 18-42t42-18h680q24 0 42 18t18 42v440q0 24-18 42t-42 18H540v100h56q12.75 0 21.38 8.68 8.62 8.67 8.62 21.5 0 12.82-8.62 21.32-8.63 8.5-21.38 8.5H364q-12.75 0-21.37-8.68-8.63-8.67-8.63-21.5 0-12.82 8.63-21.32 8.62-8.5 21.37-8.5h56ZM140-340h680v-440H140v440Zm0 0v-440 440Z",
+        )
+
+    /** Sync device platform `macos` (`laptop_mac`, 08 Devices). */
+    public val LaptopMac: ImageVector =
+        symbolIcon(
+            "M57-160q-23.51 0-40.26-17.63Q0-195.25 0-220h141q-24 0-42-18t-18-42v-500q0-24 18-42t42-18h678q24 0 42 18t18 42v500q0 24-18 42t-42 18h141q0 25-17.62 42.5Q924.75-160 900-160H57Zm447-32q10-10 10-24t-10-24q-10-10-24-10t-24 10q-10 10-10 24t10 24q10 10 24 10t24-10Zm-363-88h678v-500H141v500Zm0 0v-500 500Z",
+        )
+
+    /** Sync device platform `gpodder` and other clients (`sync_alt`, 08 Devices). */
+    public val SyncAlt: ImageVector =
+        symbolIcon(
+            "m194-281 98 98q9 9 9 21t-9 21q-9 9-21 9t-21-9L101-290q-5-5-7-10t-2-11q0-6 2-11t7-10l150-150q9-9 21-9t21 9q9 9 9 21t-9 21l-99 99h616q13 0 21.5 8.5T840-311q0 13-8.5 21.5T810-281H194Zm572-337H150q-13 0-21.5-8.5T120-648q0-13 8.5-21.5T150-678h616l-99-99q-9-9-9-21t9-21q9-9 21-9t21 9l150 150q5 5 7 10t2 11q0 6-2 11t-7 10L710-478q-9 9-21 9t-21-9q-9-9-9-21t9-21l98-98Z",
+        )
 }
 
 private const val SYMBOL_VIEWPORT: Float = 960f

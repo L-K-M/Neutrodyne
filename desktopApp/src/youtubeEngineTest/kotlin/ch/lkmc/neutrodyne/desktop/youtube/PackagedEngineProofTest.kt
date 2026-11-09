@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.youtube
 
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.IpFamily
 import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.desktop.smoke.SmokeMode
@@ -134,6 +136,7 @@ class PackagedEngineProofTest {
     private fun proof(
         resources: File?,
         located: PythonRuntime? = null,
+        proofDatabase: () -> NeutrodyneDatabase = { error("the proof must not reach the media phase") },
     ): PackagedEngineProof {
         val dirs = tempAppDirs("nd-proof")
         return PackagedEngineProof(
@@ -147,8 +150,28 @@ class PackagedEngineProofTest {
             capabilities = unexercisedCapabilities,
             context = { YtxContext("en", "US", "test", "V4") },
             clock = DesktopClock,
+            database = proofDatabase,
+            playbackController = { error("the proof must not reach the media phase") },
+            playbackStateSource = { error("the proof must not reach the media phase") },
+            downloadController = { error("the proof must not reach the media phase") },
+            localMediaIndex = { error("the proof must not reach the media phase") },
         )
     }
+
+    @Test
+    fun mediaFixtureNeverBecomesDueForRefreshOrPaging() =
+        runBlocking {
+            val database = TestDb.inMemory()
+            try {
+                val seeded = proof(null, proofDatabase = { database }).seedRecordedItem()
+
+                assertThat(database.episodeDao().byId(seeded[1])?.externalMediaId).isEqualTo("aaaaaaaaaaA")
+                assertThat(database.podcastDao().dueForRefresh(Long.MAX_VALUE - 1, scopeAll = true)).isEmpty()
+                assertThat(database.podcastDao().pagingPending(scopeAll = true)).isEmpty()
+            } finally {
+                database.close()
+            }
+        }
 
     private fun scenarioDir(): File =
         tempAppDirs("nd-scenario").data.toFile().parentFile!!.resolve("scenario").apply {
@@ -259,6 +282,174 @@ class PackagedEngineProofTest {
         assertThat(PackagedEngineProof.replayArming()).isNull()
     }
 
+    /** `expectedChunkRanges` chunks in `YouTubeTransferSource.CHUNK_BYTES` pieces with a closed tail. */
+    @Test
+    fun `expectedChunkRanges covers two full chunks plus the tail`() {
+        assertThat(PackagedEngineProof.expectedChunkRanges(MEDIA_TOTAL))
+            .containsExactly(
+                "bytes=0-10485759",
+                "bytes=10485760-20971519",
+                "bytes=20971520-22020218",
+            ).inOrder()
+        assertThat(PackagedEngineProof.expectedChunkRanges(CHUNK)).containsExactly("bytes=0-10485759")
+        assertThat(PackagedEngineProof.expectedChunkRanges(5)).containsExactly("bytes=0-4")
+        assertThat(PackagedEngineProof.expectedChunkRanges(CHUNK + 1))
+            .containsExactly("bytes=0-10485759", "bytes=10485760-10485760")
+            .inOrder()
+    }
+
+    /** A synthetic ftyp-headed body: `FixtureMediaBytes`' contract without a test resource. */
+    private fun syntheticMedia(total: Long): FixtureMediaBytes {
+        val head = ByteArray(16)
+        head[0] = 0
+        head[1] = 0
+        head[2] = 0
+        head[3] = 16
+        "ftyp".toByteArray(Charsets.US_ASCII).copyInto(head, 4)
+        return FixtureMediaBytes(head, total)
+    }
+
+    private fun served(
+        ordinal: Long,
+        range: String?,
+        status: Int = 206,
+        bytesWritten: Long = 0,
+        bodySha256: String? = "d".repeat(64),
+    ) = LoopbackMediaFixture.ServedRequest(ordinal, "GET", "/audio", range, status, bytesWritten, bodySha256)
+
+    /** The three good records whose body digests match the composition's own ranges. */
+    private fun goodChunks(
+        media: FixtureMediaBytes,
+        firstOrdinal: Long,
+    ): List<LoopbackMediaFixture.ServedRequest> {
+        val out = mutableListOf<LoopbackMediaFixture.ServedRequest>()
+        var offset = 0L
+        var ordinal = firstOrdinal
+        while (offset < media.size) {
+            val length = minOf(CHUNK, media.size - offset)
+            out +=
+                served(
+                    ordinal++,
+                    "bytes=$offset-${offset + length - 1}",
+                    bytesWritten = length,
+                    bodySha256 = PackagedEngineProof.sha256Hex(media.readRange(offset, length.toInt())),
+                )
+            offset += length
+        }
+        return out
+    }
+
+    @Test
+    fun `downloadChunks accepts the expected post-boundary chunk evidence`() {
+        val media = syntheticMedia(MEDIA_TOTAL)
+        val playback = listOf(served(0, "bytes=0-1023"), served(1, "bytes=0-"))
+        val chunks = PackagedEngineProof.downloadChunks(playback + goodChunks(media, 2), media, 2)
+        assertThat(chunks).isEqualTo(PackagedEngineProof.expectedChunkRanges(MEDIA_TOTAL))
+    }
+
+    @Test
+    fun `downloadChunks rejects missing or extra ranges`() {
+        val media = syntheticMedia(MEDIA_TOTAL)
+        val chunks = goodChunks(media, 0)
+        val missing = failure { PackagedEngineProof.downloadChunks(chunks.drop(1), media, 0) }
+        assertThat(missing).contains("expected")
+        val extra = failure { PackagedEngineProof.downloadChunks(chunks + chunks.last(), media, 0) }
+        assertThat(extra).contains("expected")
+    }
+
+    @Test
+    fun `downloadChunks rejects a non-206 answer and a short body`() {
+        val media = syntheticMedia(MEDIA_TOTAL)
+        val chunks = goodChunks(media, 0).toMutableList()
+        val notPartial =
+            failure {
+                PackagedEngineProof.downloadChunks(chunks.map { it.copy(status = 200) }, media, 0)
+            }
+        assertThat(notPartial).contains("206")
+        val short =
+            failure {
+                PackagedEngineProof.downloadChunks(
+                    chunks.map { it.copy(bytesWritten = it.bytesWritten - 1) },
+                    media,
+                    0,
+                )
+            }
+        assertThat(short).contains("bytes")
+        val wrongDigest =
+            failure {
+                PackagedEngineProof.downloadChunks(chunks.map { it.copy(bodySha256 = "0".repeat(64)) }, media, 0)
+            }
+        assertThat(wrongDigest).contains("digest")
+    }
+
+    @Test
+    fun `downloadChunks rejects a wrong boundary`() {
+        val media = syntheticMedia(MEDIA_TOTAL)
+        val message =
+            failure {
+                PackagedEngineProof.downloadChunks(
+                    goodChunks(media, 0) + goodChunks(media, 3).take(1),
+                    media,
+                    0,
+                )
+            }
+        assertThat(message).contains("expected")
+    }
+
+    @Test
+    fun `media spec reads only a well-formed contract`() {
+        val dir = tempAppDirs("nd-spec").data.toFile().parentFile!!
+        assertThat(PackagedEngineProof.MediaScenarioSpec.read(dir)).isNull()
+
+        dir.resolve("media.json").writeText("not json")
+        val malformed = failure { PackagedEngineProof.MediaScenarioSpec.read(dir) }
+        assertThat(malformed).contains("media.json")
+
+        dir.resolve("media.json").writeText("""{"total": 100, "headSha256": "${"a".repeat(64)}"}""")
+        assertThat(failure { PackagedEngineProof.MediaScenarioSpec.read(dir) }).contains("head")
+
+        dir.resolve("media.json").writeText(
+            """{"total": 100, "head": "h.m4a", "headSha256": "not-hex"}""",
+        )
+        assertThat(failure { PackagedEngineProof.MediaScenarioSpec.read(dir) }).contains("headSha256")
+
+        dir.resolve("media.json").writeText(
+            """{"total": 100, "head": "../escape", "headSha256": "${"a".repeat(64)}"}""",
+        )
+        assertThat(failure { PackagedEngineProof.MediaScenarioSpec.read(dir) }).contains("head")
+
+        dir.resolve("media.json").writeText(
+            """{"total": 22020219, "head": "media-head.m4a", "headSha256": "${"a".repeat(64)}"}""",
+        )
+        val spec = PackagedEngineProof.MediaScenarioSpec.read(dir)
+        assertThat(spec).isNotNull()
+        assertThat(spec!!.total).isEqualTo(22020219L)
+        assertThat(spec.head).isEqualTo("media-head.m4a")
+    }
+
+    @Test
+    fun `media spec refuses a head whose digest differs`() {
+        val dir = tempAppDirs("nd-spec-head").data.toFile().parentFile!!
+        val head = ByteArray(16)
+        head[3] = 16
+        "ftyp".toByteArray(Charsets.US_ASCII).copyInto(head, 4)
+        dir.resolve("head.m4a").writeBytes(head)
+        val spec =
+            PackagedEngineProof.MediaScenarioSpec(
+                total = 1024L,
+                head = "head.m4a",
+                headSha256 = "0".repeat(64),
+            )
+        assertThat(failure { spec.openFixture(dir) }).contains("digest")
+
+        val honest = spec.copy(headSha256 = PackagedEngineProof.sha256Hex(head))
+        honest.openFixture(dir).use { fixture ->
+            assertThat(fixture.media.size).isEqualTo(1024L)
+            assertThat(fixture.mediaUrl).startsWith("http://127.0.0.1:")
+            assertThat(fixture.mediaUrl).endsWith("/audio")
+        }
+    }
+
     /**
      * The packaged proof end-to-end on this host: a fake image whose `engine/` carries the
      * real bundled resources (`syncEngineResources` output), the pinned CA bundle and a
@@ -352,6 +543,11 @@ class PackagedEngineProofTest {
                         capabilities = engineCtl,
                         context = context,
                         clock = DesktopClock,
+                        database = { error("the resolve-only proof must not reach the media phase") },
+                        playbackController = { error("the resolve-only proof must not reach the media phase") },
+                        playbackStateSource = { error("the resolve-only proof must not reach the media phase") },
+                        downloadController = { error("the resolve-only proof must not reach the media phase") },
+                        localMediaIndex = { error("the resolve-only proof must not reach the media phase") },
                     ).run(replay)
                 }
 
@@ -463,6 +659,12 @@ class PackagedEngineProofTest {
         }
 
     private companion object {
+        /** The recorded media scenario's composed body size (media.json's `total`). */
+        const val MEDIA_TOTAL = 22_020_219L
+
+        /** `YouTubeTransferSource.CHUNK_BYTES`, restated for expected-range checks. */
+        const val CHUNK = 10L * 1024 * 1024
+
         val DEV_PROPERTIES = listOf("neutrodyne.ytx.python", "neutrodyne.engineResources", "neutrodyne.rootDir")
         val PROOF_PROPERTIES =
             DEV_PROPERTIES +

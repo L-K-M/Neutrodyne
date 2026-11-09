@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
+import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
@@ -490,6 +491,8 @@ class SyncControllerImplTest {
                 assertEquals("android", pending.platform)
                 assertEquals("1.0.0", pending.appVersion)
                 assertTrue(pending.requestedAtMs > 0)
+                assertEquals(LinkPurpose.DEVICE, pending.purpose)
+                assertTrue(pending.sameNetwork)
                 val confirmed = h.controller.confirmLink("wdjb-mjht", approve = true)
                 assertTrue(confirmed is Outcome.Success)
                 assertTrue(h.client.calls.contains("approve:" + normaliseUserCode("wdjb mjht")))
@@ -563,9 +566,112 @@ class SyncControllerImplTest {
             val h = harness(this)
             try {
                 h.seedLinked()
-                h.client.approve = { throw SyncTransportException(401, "unauthorized", "") }
+                // The server's bad-code signal on the authenticated link endpoints is 404
+                // (`missingAuth`), never 401 — 401 would be the dead token (10 Errors).
+                h.client.approve = { throw SyncTransportException(404, "not_found", "") }
                 val result = h.controller.approveLink("WDJB-MJHT")
                 assertEquals(SyncProblem.InvalidCode, (result as Outcome.Failure).error)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun anExpiredCodeOnConfirmFails() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.client.confirm = { _, _ -> throw SyncTransportException(404, "not_found", "") }
+                val result = h.controller.confirmLink("WDJB-MJHT", approve = true)
+                assertEquals(SyncProblem.InvalidCode, (result as Outcome.Failure).error)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aDeadTokenOnApproveRevokesTheLink() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                // 401 on the authenticated approve call means the token died (10 Errors),
+                // not a bad code — the link must be marked revoked like every other endpoint.
+                h.client.approve = { throw SyncTransportException(401, "unauthorized", "") }
+                val result = h.controller.approveLink("WDJB-MJHT")
+                assertEquals(SyncProblem.Revoked, (result as Outcome.Failure).error)
+                awaitRevoked(h)
+                assertTrue(h.controller.status.value is SyncStatus.Revoked)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aDeadTokenOnConfirmRevokesTheLink() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.client.confirm = { _, _ -> throw SyncTransportException(401, "unauthorized", "") }
+                val result = h.controller.confirmLink("WDJB-MJHT", approve = true)
+                assertEquals(SyncProblem.Revoked, (result as Outcome.Failure).error)
+                awaitRevoked(h)
+                assertTrue(h.controller.status.value is SyncStatus.Revoked)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun anUnknownPurposeFailsClosed() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                // The server only ever sends `device`/`web`; anything else must not be
+                // presented as a device grant (10 Link codes, consent phishing).
+                h.client.approve = {
+                    LinkApproveResponse("Mystery", "android", "1.0.0", "2026-11-04T10:00:00Z", "passwordreset", true)
+                }
+                val result = h.controller.approveLink("WDJB-MJHT")
+                assertTrue(result is Outcome.Failure, "an unknown purpose never yields a PendingDevice")
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aGoneDeviceOnRenameIsTyped() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                // Seeding writes the row directly; nothing re-triggers the status read, so ask.
+                h.controller.refreshStatus()
+                // 404 on PATCH /devices/{id} is the missing row (10 Errors: refresh the list),
+                // not a wrong-server report and not a revoked token.
+                h.client.rename = { _, _ -> throw SyncTransportException(404, "not_found", "") }
+                val result = h.controller.renameDevice("dev-2", "Office")
+                assertEquals(SyncProblem.DeviceGone, (result as Outcome.Failure).error)
+                assertTrue(h.controller.status.value is SyncStatus.Linked)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aGoneDeviceOnRevokeIsTyped() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.controller.refreshStatus()
+                h.client.revoke = { _ -> throw SyncTransportException(404, "not_found", "") }
+                val result = h.controller.revokeDevice("dev-2")
+                assertEquals(SyncProblem.DeviceGone, (result as Outcome.Failure).error)
+                assertTrue(h.controller.status.value is SyncStatus.Linked)
             } finally {
                 h.close()
             }

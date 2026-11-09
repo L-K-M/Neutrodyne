@@ -85,4 +85,47 @@
   <string name="sync_error_clock_skew">Die Uhrzeit dieses Geräts ist falsch, daher können seine Änderungen nicht eingeordnet werden. Stelle die Uhr automatisch ein und synchronisiere dann erneut.</string>
   <string name="sync_error_quota">Dein Konto auf %1$s ist voll. Bitte die Administration um mehr Platz.</string>
   <string name="sync_error_not_a_server">%1$s ist kein Neutrodyne-Sync-Server. Prüfe die Adresse.</string>
+  <string name="sync_error_device_gone">Dieses Gerät wurde bereits entfernt.</string>
+
+  <!-- Linked settings rows (08 Settings › Sync "Rows while linked"). -->
+  <string name="sync_link_another">Weiteres Gerät verknüpfen</string>
+  <string name="sync_link_another_hint">Bestätige ein neues Telefon oder einen neuen Computer mit dem angezeigten Code</string>
+  <string name="sync_devices">Geräte</string>
+  <plurals name="sync_devices_linked">
+    <item quantity="one">%1$d verknüpft</item>
+    <item quantity="other">%1$d verknüpft</item>
+  </plurals>
+
+  <!-- "Link another device" sheet (08 Link another device). -->
+  <string name="sync_approve_code_label">Code auf dem neuen Gerät</string>
+  <string name="sync_approve_code_hint">XXXX-XXXX</string>
+  <string name="sync_approve_link_question">%1$s verknüpfen?</string>
+  <string name="sync_approve_sign_in_question">%1$s anmelden?</string>
+  <string name="sync_approve_pending_detail">%1$s · Neutrodyne %2$s · angefragt %3$s</string>
+  <string name="sync_approve_purpose_device">%1$s erhält deine gesamte Bibliothek.</string>
+  <string name="sync_approve_purpose_web">Dadurch wird ein Browser bei deinem Konto angemeldet.</string>
+  <string name="sync_approve_other_network">Von einem anderen Netzwerk angefragt. Bestätige nur ein Gerät, das du in der Hand hast.</string>
+  <string name="sync_approve_link">Verknüpfen</string>
+  <string name="sync_approve_dont_link">Nicht verknüpfen</string>
+  <string name="sync_approve_linked">%1$s ist verknüpft</string>
+  <string name="sync_approve_declined">Verknüpfung abgelehnt</string>
+  <string name="sync_approve_rate_limited">Zu viele Versuche. Bitte das neue Gerät um einen neuen Code.</string>
+
+  <!-- Devices list (08 Devices). -->
+  <string name="sync_device_this">Dieses Gerät</string>
+  <string name="sync_device_last_seen">Zuletzt gesehen: %1$s</string>
+  <string name="sync_device_never_seen">Seit 6 Monaten nicht gesehen</string>
+  <string name="sync_device_version">Neutrodyne %1$s</string>
+  <string name="sync_device_rename">Umbenennen</string>
+  <string name="sync_device_remove">Entfernen</string>
+  <string name="sync_device_rename_title">%1$s umbenennen</string>
+  <string name="sync_device_name_label">Gerätename</string>
+  <string name="sync_device_name_hint">1–40 Zeichen</string>
+  <string name="sync_device_remove_title">%1$s entfernen?</string>
+  <string name="sync_device_remove_body">Es synchronisiert dann nicht mehr. Seine Bibliothek bleibt darauf.</string>
+  <string name="sync_device_removed">%1$s entfernt</string>
+  <string name="sync_device_renamed">Umbenannt in %1$s</string>
+  <string name="sync_devices_empty">Keine Geräte verknüpft.</string>
+  <string name="sync_devices_manage_link">Du kannst Geräte auch auf %1$s verwalten</string>
+  <string name="sync_device_menu">Geräteaktionen</string>
 </resources>
