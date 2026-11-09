@@ -627,6 +627,10 @@ class SettingsScreensTest {
                                 ),
                                 desktopIntegration,
                                 Provider { FakePodcastRepository() },
+                                Provider {
+                                    ch.lkmc.neutrodyne.core.testing
+                                        .FakeSyncController()
+                                },
                                 ch.lkmc.neutrodyne.core.testing
                                     .FakeYouTubeCapabilitiesSource(),
                                 ch.lkmc.neutrodyne.core.testing

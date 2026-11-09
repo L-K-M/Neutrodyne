@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.feature.sync
 import androidx.compose.runtime.Composable
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
+import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SyncSettingsKey
@@ -25,10 +27,16 @@ object SyncNavigation {
     fun entries(
         syncController: Provider<SyncController>,
         backups: Provider<BackupRepository>,
+        address: Provider<SyncServerAddress>,
+        buildInfo: BuildInfo,
     ): EntryProviderInstaller =
         {
             entry<SyncSettingsKey>(metadata = NdSceneMetadata.paneDetail()) {
-                SyncSettingsScreen(syncController())
+                SyncSettingsScreen(
+                    syncController(),
+                    address(),
+                    "${buildInfo.repoUrl}#run-the-server",
+                )
             }
             entry<SyncSetupKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
                 SyncSetupScreen(syncController(), key.serverUrl, backups())

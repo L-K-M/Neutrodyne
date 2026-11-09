@@ -13,6 +13,8 @@ import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -23,6 +25,7 @@ import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -172,7 +175,15 @@ abstract class SettingsCaptureTestBase {
 
                 // The start ordering: recovery first, then the remote drain — the remote value
                 // wins, the intent stays queued, and the older intent was never materialized.
-                SyncApplyEffects(db, port, coordinator) { true }.drainAtStart(capture)
+                SyncApplyEffects(
+                    db,
+                    port,
+                    coordinator,
+                    { true },
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    "__absent_cache__".toPath(),
+                ).drainAtStart(capture)
 
                 assertEquals(key, port.applied.single().first)
                 assertEquals("15000", port.applied.single().second)
@@ -202,7 +213,15 @@ abstract class SettingsCaptureTestBase {
                 port.recordLocal(key, 20_000L)
                 seedPending(db, key, "15000", remoteClock)
 
-                SyncApplyEffects(db, port, coordinator) { true }.drainAtStart(capture)
+                SyncApplyEffects(
+                    db,
+                    port,
+                    coordinator,
+                    { true },
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    "__absent_cache__".toPath(),
+                ).drainAtStart(capture)
 
                 // Recovery materialized the local intent; the drain cleared the superseded marker
                 // without applying it.
@@ -289,15 +308,29 @@ abstract class SettingsCaptureTestBase {
                 seedPending(db, key, "15000", Hlc.of(now, 1, remote))
 
                 // Off: neither recovery nor the drain runs the remote write.
-                SyncApplyEffects(db, port, coordinator) { switchOn }
-                    .drainAtStart(SettingsCapture(db, port, coordinator) { switchOn })
+                SyncApplyEffects(
+                    db,
+                    port,
+                    coordinator,
+                    { switchOn },
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    "__absent_cache__".toPath(),
+                ).drainAtStart(SettingsCapture(db, port, coordinator) { switchOn })
                 assertTrue(port.applied.isEmpty())
                 assertEquals("15000", pendingOf(db, key)?.value)
 
                 // On: the server-wins drain applies it.
                 switchOn = true
-                SyncApplyEffects(db, port, coordinator) { switchOn }
-                    .drainAtStart(SettingsCapture(db, port, coordinator) { switchOn })
+                SyncApplyEffects(
+                    db,
+                    port,
+                    coordinator,
+                    { switchOn },
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    "__absent_cache__".toPath(),
+                ).drainAtStart(SettingsCapture(db, port, coordinator) { switchOn })
                 assertEquals(key, port.applied.single().first)
                 assertEquals("15000", port.applied.single().second)
                 assertNull(pendingOf(db, key))
@@ -1200,7 +1233,15 @@ abstract class SettingsCaptureTestBase {
                         }
                     }
                 val locks = TestSettingsWriteCoordinator()
-                SyncApplyEffects(db, typed, locks) { true }.drainSettings()
+                SyncApplyEffects(
+                    db,
+                    typed,
+                    locks,
+                    { true },
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    "__absent_cache__".toPath(),
+                ).drainSettings()
                 assertEquals("1.0", typed.currentJson(key))
                 SettingsCapture(db, typed, locks) { true }.reconcile()
                 assertNull(db.syncOutboxDao().get("setting", key.name, "v"))

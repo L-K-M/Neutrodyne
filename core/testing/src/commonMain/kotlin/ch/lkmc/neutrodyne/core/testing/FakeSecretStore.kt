@@ -43,6 +43,12 @@ class FakeSecretStore(
      */
     val podcastCredentialIds = MutableStateFlow<Map<Long, Long>>(emptyMap())
 
+    /**
+     * Injected failure for [put]/[get]/[remove]: a locked or failed store leaves a caller's
+     * durable state untouched, which the protected-auth drain tests need.
+     */
+    var failure: Throwable? = null
+
     override suspend fun awaitLoaded() {
         loadBarrier.await()
     }
@@ -60,16 +66,24 @@ class FakeSecretStore(
         attributes: Map<String, String>,
     ): Long? =
         mutex.withLock {
+            failure?.let { throw it }
             val id = rows.value[origin]?.id ?: nextId++
             rows.value =
                 rows.value + (origin to Row(id, StoredSecret(username, secret.copyOf(), attributes)))
             id
         }
 
-    override suspend fun get(origin: String): StoredSecret? = rows.value[origin]?.stored
+    override suspend fun get(origin: String): StoredSecret? {
+        failure?.let { throw it }
+        return rows.value[origin]?.stored
+    }
+
+    override suspend fun originsWithPrefix(prefix: String): Set<String> =
+        rows.value.keys.filterTo(HashSet()) { it.startsWith(prefix) }
 
     override suspend fun remove(origin: String) {
         mutex.withLock {
+            failure?.let { throw it }
             rows.value = rows.value - origin
         }
     }

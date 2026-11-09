@@ -875,6 +875,9 @@ class SyncParkedStateTest {
             syncIngestHook = SyncIngestHook.None,
             channelSync = NoGroupChannelSync,
             sharePasswords = { false },
+            coordinator =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeCredentialCommitCoordinator(),
         )
 
     private fun parkedApplier(
@@ -962,8 +965,19 @@ class SyncParkedStateTest {
                     kotlinx.coroutines.runBlocking { save("sync.example", "token") }
                 },
             activity = SyncActivityState(),
+            notices = SyncNoticeBus(),
             gate = FakeLocalNetworkGate(),
-            effects = SyncApplyEffects(db, settingsPort, writeLocks) { true },
+            effects =
+                SyncApplyEffects(
+                    db,
+                    settingsPort,
+                    writeLocks,
+                    { true },
+                    FakeSecretStore(),
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeCredentialCommitCoordinator(),
+                    okio.FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "nd-parked-no-auth-cache",
+                ),
             capture = SettingsCapture(db, settingsPort, writeLocks) { true },
         )
     }

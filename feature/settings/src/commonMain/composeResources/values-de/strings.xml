@@ -9,6 +9,13 @@
     <string name="settings_about_summary">Version und Build</string>
     <string name="settings_licences">Lizenzen</string>
     <string name="settings_licences_summary">Open-Source-Lizenzen der mitgelieferten Komponenten</string>
+    <string name="settings_sync">Sync</string>
+    <string name="settings_sync_off">Aus</string>
+    <string name="settings_sync_reconnect">Erneut mit %1$s verbinden</string>
+    <string name="settings_sync_unfinished">Verknüpfung abschließen</string>
+    <string name="settings_sync_linked">Verknüpft</string>
+    <string name="settings_sync_linked_at">Verknüpft · synchronisiert %1$s</string>
+    <string name="settings_sync_revoked">Dieses Gerät wurde getrennt</string>
 
     <string name="appearance_theme">Design</string>
     <string name="appearance_theme_system">Systemstandard</string>

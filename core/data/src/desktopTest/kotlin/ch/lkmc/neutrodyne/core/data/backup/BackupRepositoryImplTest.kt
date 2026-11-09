@@ -1254,6 +1254,8 @@ class BackupRepositoryImplTest {
 
         override suspend fun remove(origin: String) = inner.remove(origin)
 
+        override suspend fun originsWithPrefix(prefix: String): Set<String> = inner.originsWithPrefix(prefix)
+
         override suspend fun forPodcast(podcastId: Long): BasicCredentials? {
             forPodcastCalls++
             return inner.forPodcast(podcastId)
