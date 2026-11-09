@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
+import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
@@ -63,6 +64,7 @@ public object SettingsNavigation {
         runtime: UpdateRuntimeInputs,
         desktopIntegration: DesktopIntegration?,
         podcasts: Provider<PodcastRepository>,
+        syncController: Provider<SyncController>,
         capabilities: YouTubeCapabilitiesSource,
         engine: YouTubeEngine,
         youtubeHealth: YouTubeHealth,
@@ -106,6 +108,7 @@ public object SettingsNavigation {
                     checker,
                     platformInfo.kind,
                     buildInfo.desktop?.os,
+                    syncController(),
                 )
             }
             entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->

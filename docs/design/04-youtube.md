@@ -1677,6 +1677,8 @@ Serves N11, R3.9, R8.6; mitigates risks M1r, M8r. Delivered in M9a (recorded res
 - Upstream: yt-dlp issues, nightlies and stable releases (in 2026, breaks were fixed upstream within 0–2 days: the `android_vr` 403s of 2026-08-17 by stable 2026.08.19, [#17456](https://github.com/yt-dlp/yt-dlp/issues/17456); the n-challenge break of 2026-03-03 mitigated the same day and fixed in stable 2026.03.13, [releases](https://github.com/yt-dlp/yt-dlp/releases)). yt-dlp's JS-free path depends on the single `visionos` client; when it goes, the [JS challenge provider](#js-challenge-provider) or a newer client in a yt-dlp release is the way back.
 - CI: an `engine-canary` issue (a new yt-dlp stable release fails the shim's tests through either adapter), the nightly `engine-nightly-canary` (the shim against yt-dlp's nightly build; informational, the early warning for plugin or internal API drift, M8r), and the nightly live `youtube-canary` ([Testing](#testing)).
 
+The `youtube-canary` nightly scope runs the live probes by themselves. A failed engine report includes a bounded stage (`lookup-mkbhd`, `lookup-nasa`, `resolve`, `chunk` or `unknown`) and an allowlisted shim error code or `UNEXPECTED`. It omits raw exceptions and media URLs. These reports diagnose availability; engine approval still follows the gate below.
+
 ### Engine canary
 
 The workflow, its schedule, environment and release publication are 09's ([09 engine-canary.yml](09-quality-and-release.md#engine-canaryyml)); what it tests is defined here. Every 6 h and on `workflow_dispatch(tag)`:

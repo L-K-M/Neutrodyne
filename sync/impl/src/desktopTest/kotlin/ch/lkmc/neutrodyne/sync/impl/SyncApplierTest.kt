@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -430,6 +431,7 @@ class SyncApplierTest {
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
             sharePasswords = { false },
+            coordinator = FakeCredentialCommitCoordinator(),
         )
     }
 

@@ -30,6 +30,9 @@ import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SyncSettingsKey
+import ch.lkmc.neutrodyne.core.ui.FeedDates
+import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -55,9 +58,18 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_off
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_on
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync_linked
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync_linked_at
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync_off
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync_reconnect
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync_revoked
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_sync_unfinished
 import ch.lkmc.neutrodyne.feature.settings.resources.updates_available
 import ch.lkmc.neutrodyne.feature.settings.resources.updates_title
 import ch.lkmc.neutrodyne.feature.settings.resources.youtube_title
+import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
@@ -65,7 +77,9 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
  * The Settings home list (08 Settings screens; M0a shows Appearance and About, M1a adds Feeds).
  * It is the gear's target, pushed on the selected tab's stack, so it keeps a back arrow. The Feeds
  * row's summary is the live refresh interval ("Every 4 hours" in 08's wireframe); the Desktop row
- * — desktop only — summarizes the "When the window is closed" choice.
+ * — desktop only — summarizes the "When the window is closed" choice. The Sync row (MS2) is the
+ * only sync UI while unconfigured (R7.1); [sync] is nullable like `LicencesSource` — the shells
+ * always bind it, and previews or test fixtures that omit it simply show no row.
  */
 @Composable
 internal fun SettingsHomeRoute(
@@ -73,6 +87,7 @@ internal fun SettingsHomeRoute(
     checker: AppUpdateChecker? = null,
     platform: PlatformKind = PlatformKind.ANDROID,
     desktopOs: DesktopOs? = null,
+    sync: SyncController? = null,
 ) {
     val navigator = LocalAppNavigator.current
     val updateState = checker?.state?.collectAsStateWithLifecycle()?.value
@@ -138,6 +153,15 @@ internal fun SettingsHomeRoute(
             SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
                 navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
             })
+            if (sync != null) {
+                val status by sync.status.collectAsStateWithLifecycle()
+                SettingsRow(
+                    icon = NdIcons.Sync,
+                    title = stringResource(SettingsRes.string.settings_sync),
+                    summary = syncSummary(status),
+                    onClick = { navigator.push(SyncSettingsKey) },
+                )
+            }
             SettingsRow(
                 icon = NdIcons.History,
                 title = stringResource(SettingsRes.string.settings_backup),
@@ -204,3 +228,43 @@ internal fun SettingsHomeRoute(
         }
     }
 }
+
+/**
+ * The Sync row's summary — the short `SyncStatus` text of 08's Sync-status table ("Linked ·
+ * synced 2 min", "Off"). `:core:ui`'s `SyncStatusText` mapper is the full MS2 deliverable and
+ * cannot host `:sync:api` types under the declared module edges, so the row keeps its own short
+ * text here; a `Linked` problem falls back to "Linked" and stays on the detail screen.
+ */
+@Composable
+private fun syncSummary(status: SyncStatus): String =
+    when (status) {
+        is SyncStatus.NotConfigured -> {
+            stringResource(SettingsRes.string.settings_sync_off)
+        }
+
+        is SyncStatus.Reconnect -> {
+            stringResource(SettingsRes.string.settings_sync_reconnect, hostOf(status.serverUrl))
+        }
+
+        is SyncStatus.LinkUnfinished -> {
+            stringResource(SettingsRes.string.settings_sync_unfinished)
+        }
+
+        is SyncStatus.Linked -> {
+            val syncedAt = status.lastSyncAtMs
+            if (status.problem == null && syncedAt != null) {
+                stringResource(
+                    SettingsRes.string.settings_sync_linked_at,
+                    FeedDates.relative(syncedAt, LocalUiClock.current.now()).asString(),
+                )
+            } else {
+                stringResource(SettingsRes.string.settings_sync_linked)
+            }
+        }
+
+        is SyncStatus.Revoked -> {
+            stringResource(SettingsRes.string.settings_sync_revoked)
+        }
+    }
+
+private fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')

@@ -48,6 +48,7 @@ kotlin {
             implementation(project(":core:network"))
             implementation(project(":feeds"))
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.okio)
         }
     }
 }

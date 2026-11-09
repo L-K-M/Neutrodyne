@@ -17,7 +17,6 @@ import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
-import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -121,18 +120,32 @@ class SourceReader(
             .sorted()
     }
 
-    /** The opted-in `auth` field value; `null` when the podcast has no credential. */
-    suspend fun authField(rid: String): FieldValue? {
+    /**
+     * The podcast's credential as one coherent pair: `credentialId` resolves its credential
+     * row's exact origin and the secret is read under that same origin — never a guessed or
+     * separately re-read origin (10 Passwords / origin association). A missing credential
+     * row or secret is an omission, not an installable pair.
+     */
+    suspend fun authSnapshot(rid: String): Pair<String, JsonObject>? {
         val podcast = podcast(rid) ?: return null
-        val credentials = secrets.forPodcast(podcast.id) ?: return null
-        return FieldValue(
+        return podcast.credentialId?.let { authPairFor(it) }
+    }
+
+    private suspend fun authPairFor(credentialId: Long): Pair<String, JsonObject>? {
+        val origin =
+            db
+                .credentialDao()
+                .byIds(listOf(credentialId))
+                .firstOrNull()
+                ?.origin ?: return null
+        val stored = secrets.get(origin) ?: return null
+        return origin to
             JsonObject(
                 buildMap {
-                    put("u", JsonPrimitive(credentials.username))
-                    put("p", JsonPrimitive(credentials.password))
+                    put("u", JsonPrimitive(stored.username))
+                    put("p", JsonPrimitive(stored.secret.concatToString()))
                 },
-            ),
-        )
+            )
     }
 
     suspend fun field(
@@ -177,6 +190,15 @@ class SourceReader(
                         podcast.episodeOrder?.let { put("episodeOrder", JsonPrimitive(it.name)) }
                         put("youtubeVariants", JsonPrimitive(podcast.youtubeVariants))
                         put("needsCredentials", JsonPrimitive(podcast.needsCredentials || podcast.credentialId != null))
+                        // The origin and its credential bytes come out of one coherent read:
+                        // `credentialId` resolves the credential row's exact origin, the
+                        // secret is read under that origin — so a `*` snapshot can never pair
+                        // bytes with an origin they did not write with. `auth` joins the
+                        // expansion only while sharing is on — the same gate ChangeBuilder
+                        // applies to the explicit field row (10 Passwords).
+                        val authPair = podcast.credentialId?.let { authPairFor(it) }
+                        authPair?.let { put("credentialOrigin", JsonPrimitive(it.first)) }
+                        if (sharePasswords()) authPair?.let { put("auth", it.second) }
                         overrides(rid, isGroup = false).forEach { (name, value) -> put(name, value) }
                     },
                     mapOf("feedKeys" to feedKeys(rid).toSet()),
@@ -331,15 +353,8 @@ class SourceReader(
             ?.origin
             ?.let(::JsonPrimitive)
 
-    private suspend fun authOf(podcast: PodcastEntity): JsonElement? {
-        val credentials = secrets.forPodcast(podcast.id) ?: return null
-        return JsonObject(
-            buildMap {
-                put("u", JsonPrimitive(credentials.username))
-                put("p", JsonPrimitive(credentials.password))
-            },
-        )
-    }
+    private suspend fun authOf(podcast: PodcastEntity): JsonElement? =
+        podcast.credentialId?.let { authPairFor(it) }?.second
 
     private fun groupValue(
         group: PodcastGroupEntity,

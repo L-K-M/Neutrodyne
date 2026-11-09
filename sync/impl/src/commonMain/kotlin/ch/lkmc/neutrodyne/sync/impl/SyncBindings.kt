@@ -22,6 +22,7 @@ import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import okio.Path.Companion.toPath
 
 /** The sync engine's graph bindings (10 Client sync engine, 01 Dependency injection). */
 @ContributesTo(AppScope::class)
@@ -71,6 +72,7 @@ object SyncBindings {
         syncIngestHook: SyncIngestHook,
         channelSync: GroupChannelSync,
         flags: SyncFlags,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): SyncApplier =
         SyncApplier(
             db = db,
@@ -81,6 +83,7 @@ object SyncBindings {
             syncIngestHook = syncIngestHook,
             channelSync = channelSync,
             sharePasswords = { flags.sharePasswords },
+            coordinator = coordinator,
         )
 
     @Provides
@@ -97,6 +100,8 @@ object SyncBindings {
         activity: SyncActivityState,
         gate: LocalNetworkGate,
         effects: SyncApplyEffects,
+        capture: SettingsCapture,
+        notices: SyncNoticeBus,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -110,6 +115,8 @@ object SyncBindings {
             activity = activity,
             gate = gate,
             effects = effects,
+            capture = capture,
+            notices = notices,
         )
 
     /**
@@ -153,7 +160,34 @@ object SyncBindings {
         settings: SettingsSyncPort,
         writeLocks: SettingsWriteCoordinator,
         address: SyncServerAddress,
-    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks, { address.syncPlaybackSettings() })
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+        storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db,
+            settings,
+            writeLocks,
+            { address.syncPlaybackSettings() },
+            secrets,
+            coordinator,
+            storagePaths.cacheDir.toPath(),
+        )
+
+    /**
+     * 10 Settings capture: the recorder and the materialization baseline the shared port
+     * carries. [SettingsCapture.reconcile] reads the persisted link and switch live at every
+     * lifecycle edge — the start drain, the link's completion, both switch edges, unlink and
+     * revocation — never `SyncFlags`' late cache.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun settingsCapture(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+        writeLocks: SettingsWriteCoordinator,
+        address: SyncServerAddress,
+    ): SettingsCapture = SettingsCapture(db, settings, writeLocks, { address.syncPlaybackSettings() })
 
     /**
      * The first-link merge; the controller drives it from the link state machine. The
@@ -171,6 +205,8 @@ object SyncBindings {
         effects: SyncApplyEffects,
         clock: Clock,
         activity: SyncActivityState,
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -182,5 +218,7 @@ object SyncBindings {
             effects = effects,
             clock = clock,
             activity = activity,
+            secrets = secrets,
+            coordinator = coordinator,
         )
 }
