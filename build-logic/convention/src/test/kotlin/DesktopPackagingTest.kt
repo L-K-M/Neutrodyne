@@ -1694,7 +1694,10 @@ class DesktopPackagingTest {
             assertEquals("en,de", argv[locales + 1])
             val output = argv.indexOf("--output")
             assertTrue(output > locales, "--include-locales after --output in: ${argv.joinToString(" ")}")
-            assertFalse("--compress" in argv, "--compress grows the download size (measured): ${argv.joinToString(" ")}")
+            assertFalse(
+                "--compress" in argv,
+                "--compress grows the download size (measured): ${argv.joinToString(" ")}",
+            )
         } finally {
             fixture.project.projectDir.deleteRecursively()
         }
@@ -1712,20 +1715,21 @@ class DesktopPackagingTest {
         try {
             val (argv, tool) = runCreateRuntimeImage(fixture)
 
-            val expected = buildList {
-                for (module in JLINK_MODULES) {
-                    add("--add-modules")
-                    add(module)
+            val expected =
+                buildList {
+                    for (module in JLINK_MODULES) {
+                        add("--add-modules")
+                        add(module)
+                    }
+                    add("--strip-debug")
+                    add("--no-header-files")
+                    add("--no-man-pages")
+                    add("--strip-native-commands")
+                    add("--include-locales")
+                    add("en,de")
+                    add("--output")
+                    add(fixture.runtimeDir.absolutePath)
                 }
-                add("--strip-debug")
-                add("--no-header-files")
-                add("--no-man-pages")
-                add("--strip-native-commands")
-                add("--include-locales")
-                add("en,de")
-                add("--output")
-                add(fixture.runtimeDir.absolutePath)
-            }
             assertEquals(expected, argv)
             assertEquals(File(fixture.fakeJdk, "bin/jlink").absolutePath, tool)
         } finally {
@@ -1741,7 +1745,8 @@ class DesktopPackagingTest {
      */
     @Test
     fun `the locale restriction keeps spaced destination paths intact`() {
-        val spacedRuntimeDir = File(Files.createTempDirectory("runtime-image-spaced").toFile(), "dir with spaces/runtime")
+        val spacedRuntimeDir =
+            File(Files.createTempDirectory("runtime-image-spaced").toFile(), "dir with spaces/runtime")
         val fixture =
             runtimeImageFixture(DesktopPackagingTarget.WINDOWS_X64, destinationDir = spacedRuntimeDir)
         try {
@@ -1806,7 +1811,9 @@ class DesktopPackagingTest {
             assertEquals(JLINK_MODULES, producer.modules.get())
             assertEquals(
                 fixture.runtimeDir.absolutePath,
-                producer.destinationDir.get().asFile.absolutePath,
+                producer.destinationDir
+                    .get()
+                    .asFile.absolutePath,
             )
 
             val jlinkTasks =
@@ -1826,7 +1833,10 @@ class DesktopPackagingTest {
                     (dependency as? TaskProvider<*>)?.name ?: dependency.toString()
                 }
             assertTrue("createRuntimeImage" in depNames, depNames.toString())
-            val trainAotCache = fixture.project.tasks.named("trainAotCache").get()
+            val trainAotCache =
+                fixture.project.tasks
+                    .named("trainAotCache")
+                    .get()
             val trainDeps =
                 trainAotCache.dependsOn.map { dependency ->
                     (dependency as? TaskProvider<*>)?.name ?: dependency.toString()
