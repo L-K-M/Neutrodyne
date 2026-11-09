@@ -72,7 +72,11 @@ class ShellJourneyTest {
         val journey = ShellJourney("test-journey-", createRoot = { root })
         try {
             assertThat(compiled.toFile().setReadOnly()).isTrue()
-            assertThat(lib.toFile().setReadOnly()).isTrue()
+            if (AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS) {
+                Files.setAttribute(lib, "dos:readonly", true)
+            } else {
+                assertThat(lib.toFile().setReadOnly()).isTrue()
+            }
 
             journey.cleanUp()
 
@@ -81,7 +85,15 @@ class ShellJourneyTest {
             journey.disarmWatchdog()
             // The pre-fix implementation cannot delete the fixture; restore test-owned modes.
             if (Files.exists(root)) {
-                Files.walk(root).use { paths -> paths.forEach { it.toFile().setWritable(true, true) } }
+                Files.walk(root).use { paths ->
+                    paths.forEach {
+                        if (AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS) {
+                            Files.setAttribute(it, "dos:readonly", false)
+                        } else {
+                            it.toFile().setWritable(true, true)
+                        }
+                    }
+                }
                 Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
             }
         }

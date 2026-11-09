@@ -159,9 +159,8 @@ internal class ShellJourney(
 
         /**
          * `dos:readonly` is the platform's read-only marker only on a DOS file system. A
-         * Unix store can advertise the `dos` view too — a mounted FAT volume maps the
-         * attribute onto the same write permission the POSIX branch restores — so the
-         * attribute is consulted on a DOS host alone.
+         * Unix store can advertise both POSIX and DOS views. Keep its existing POSIX
+         * permission semantics and consult the DOS marker on Windows alone.
          */
         private val DOS_HOST = AppDirs.DesktopOs.current() == AppDirs.DesktopOs.WINDOWS
 
@@ -173,15 +172,16 @@ internal class ShellJourney(
          * `File.setWritable` is deliberately not the guard: on Windows it reports failure
          * even for directories that are perfectly writable — the hosted windows-x64 AOT
          * training run failed this way on a freshly created temporary root. Actual
-         * writability is checked first, then the platform's own read-only marker is
-         * cleared and read back: the owner-write bit on a POSIX store, `dos:readonly` on
+         * writability can short-circuit POSIX restoration. On Windows a directory can
+         * report writable while its DOS marker is still read-only, so always clear and
+         * read back that marker: the owner-write bit on a POSIX store, `dos:readonly` on
          * a DOS host. A marker that still reads read-only fails the cleanup instead of
          * letting the delete pass hit it unprepared.
          */
         internal fun restoreWritable(path: Path) {
             if (Files.isSymbolicLink(path)) return
             if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return
-            if (Files.isWritable(path)) return
+            if (!DOS_HOST && Files.isWritable(path)) return
             val restored =
                 when {
                     Files.getFileStore(path).supportsFileAttributeView("posix") -> restorePosixWritable(path)
