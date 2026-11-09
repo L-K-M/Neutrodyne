@@ -1410,6 +1410,8 @@ for image; do :; done
                 # The producer writes the DOS local time plus the UTC 0x5455
                 # field; either decodes to the trained epoch on this host.
                 info = zipfile.ZipInfo(name, date_time=time.localtime(self.AOT_EPOCH_S)[:6])
+                info.create_system = 3
+                info.external_attr = path.stat().st_mode << 16
                 info.extra = utc_extra
                 info.compress_type = zipfile.ZIP_STORED
                 out.writestr(info, path.read_bytes() if path.is_file() else b"")
