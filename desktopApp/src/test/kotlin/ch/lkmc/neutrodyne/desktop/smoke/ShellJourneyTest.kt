@@ -40,6 +40,34 @@ import java.nio.file.attribute.PosixFilePermissions
  */
 class ShellJourneyTest {
     @Test
+    fun theSharedJourneyCleanupReleasesTheMprisBusName() =
+        runBlocking {
+            val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+            assumeTrue(
+                "private Linux session bus required",
+                System.getProperty("os.name").startsWith("Linux") && address?.startsWith("unix:") == true,
+            )
+            val journey = ShellJourney("test-journey-mpris-")
+            var cleaned = false
+            try {
+                journey.runPrologue()
+                assertThat(checkNotNull(journey.graph).systemMediaSession)
+                    .isInstanceOf(ch.lkmc.neutrodyne.desktop.system.LinuxMprisSession::class.java)
+                journey.cleanUp()
+                cleaned = true
+                ch.lkmc.neutrodyne.desktop.system.LinuxMprisSession
+                    .open(address)
+                    .use { }
+            } finally {
+                try {
+                    if (!cleaned) journey.cleanUp()
+                } finally {
+                    journey.disarmWatchdog()
+                }
+            }
+        }
+
+    @Test
     fun `the real prologue disables automatic update lanes in its temporary store`() =
         runBlocking {
             val journey = ShellJourney("test-journey-updates-")
