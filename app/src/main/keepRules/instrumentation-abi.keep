@@ -4565,7 +4565,7 @@
 -keep class ch.lkmc.neutrodyne.sync.impl.LinkedRestoreCoordinatorImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope$ProvideIntoSetMarkedPlayedElsewhereInitializerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetMarkedPlayedElsewhereInitializer(ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker);
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetMarkedPlayedElsewhereInitializer(ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker, ch.lkmc.neutrodyne.core.database.DatabaseOpener);
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope$ProvideIntoSetMarkedPlayedElsewhereInitializerMetroFactory {
   ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope$ProvideIntoSetMarkedPlayedElsewhereInitializerMetroFactory$Companion Companion;

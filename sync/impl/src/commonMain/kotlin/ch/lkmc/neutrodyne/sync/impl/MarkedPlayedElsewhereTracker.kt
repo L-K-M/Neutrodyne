@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.sync.impl
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhere
 import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhereSource
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
@@ -58,7 +61,7 @@ class MarkedPlayedElsewhereTracker(
      * notice posted after [start] — long before the band-100 open that all producers sit
      * behind — is captured even while the replay-0 SharedFlow still has no collector.
      */
-    fun start() {
+    fun start(awaitReady: suspend () -> Unit = {}) {
         if (!started.compareAndSet(false, true)) return
         val stamper: (SyncNotice) -> Unit = { notice ->
             (notice as? SyncNotice.MarkedPlayedElsewhere)?.let { n ->
@@ -77,6 +80,7 @@ class MarkedPlayedElsewhereTracker(
             bus.preEmit.compareAndSet(stamper, null)
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            awaitReady()
             state.nowPlaying
                 .combine(posted) { now, mark ->
                     mark?.takeIf { it.episodeId == now?.episodeId && it.loadId == now?.loadId }
@@ -88,16 +92,20 @@ class MarkedPlayedElsewhereTracker(
 /**
  * Band-90 arming, ahead of the band-100 database open: every path that can post
  * [SyncNotice.MarkedPlayedElsewhere] sits behind the open, so subscribing first loses nothing.
- * Resolving the tracker only builds db-free state — [PlaybackStateSource] keeps repositories
- * behind providers and the opener gate — so this early construction cannot suspend on the open
- * it precedes.
+ * The stamper is database-free. Playback observation waits for the normal opener's successful
+ * gate: it must not start its own durable-state open before band 100, nor fail permanently when
+ * that first open needs a user retry.
  */
 @ContributesIntoSet(AppScope::class)
 @Inject
 class MarkedPlayedElsewhereInitializer(
     private val tracker: MarkedPlayedElsewhereTracker,
+    private val opener: DatabaseOpener,
 ) : AppInitializer {
     override val order: Int = 90
 
-    override suspend fun run() = tracker.start()
+    override suspend fun run() =
+        tracker.start {
+            opener.openState.first { it is DatabaseOpenState.Opened }
+        }
 }
