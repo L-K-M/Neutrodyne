@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
@@ -132,7 +133,15 @@ class SyncControllerImpl(
     private val credentials: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
+    private val diagnosticsReader: SyncDiagnosticsReader =
+        SyncDiagnosticsReader(db, address, gate, engine.diagnosticsRuntime, io),
 ) : SyncController {
+    override suspend fun diagnostics(): Outcome<
+        ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot,
+        ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError,
+    > =
+        diagnosticsReader.read()
+
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.NotConfigured)
     override val status: StateFlow<SyncStatus> = _status.asStateFlow()
 
@@ -176,7 +185,7 @@ class SyncControllerImpl(
     /** A non-terminal round problem shown on the status card until the next good round. */
     private val lastRoundProblem = MutableStateFlow<SyncProblem?>(null)
 
-    private val discovery = ServerDiscovery(client)
+    private val discovery = ServerDiscovery(client, engine.diagnosticsRuntime)
 
     /**
      * Publications are serialized so a refresh that read an older `sync_state` can never
@@ -236,6 +245,7 @@ class SyncControllerImpl(
     private suspend fun refreshStatusLocked() {
         val url = address.serverUrl()
         val state = db.syncStateDao().get()
+        engine.diagnosticsRuntime.activate(state.diagnosticProfile(url))
         val token = url?.let { tokenStore.load(hostOf(it)) }
         _status.value =
             when {
@@ -492,7 +502,7 @@ class SyncControllerImpl(
         } catch (failure: Throwable) {
             lastRoundProblem.value = classify(failure)
         }
-        return admittedDisconnect(expected) {
+        return admittedDisconnect(expected, SyncProblem.Revoked) {
             expected.serverUrl?.let { runCatching { client.logout() } }
             db.syncStateDao().unlink()
             settingsCapture.clear()
@@ -516,7 +526,7 @@ class SyncControllerImpl(
             } ?: return Outcome.Failure(SyncProblem.Revoked)
         val url = expected.serverUrl ?: return Outcome.Failure(SyncProblem.Revoked)
         refreshGateVerdict()
-        return admittedDisconnect(expected) {
+        return admittedDisconnect(expected, SyncProblem.Revoked) {
             try {
                 client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
                 db.syncStateDao().unlink()
@@ -550,24 +560,71 @@ class SyncControllerImpl(
 
     /**
      * After admission the application owns the request and cleanup. Leaving the screen cancels
-     * only its await; the RPC remains cancellable by its normal timeout or application shutdown.
-     * Recheck after the optional push so an old confirmation never disconnects a newer link.
+     * only its await; the operation completes on the application scope. Recheck under the
+     * identity mutex so an old confirmation never disconnects a newer link.
      */
-    private suspend fun admittedDisconnect(
+    private suspend fun <E> admittedDisconnect(
         expected: DisconnectIdentity,
-        operation: suspend () -> Outcome<Unit, SyncProblem>,
-    ): Outcome<Unit, SyncProblem> {
+        stale: E,
+        operation: suspend () -> Outcome<Unit, E>,
+    ): Outcome<Unit, E> {
         coroutineContext.ensureActive()
         return scope
             .async(start = CoroutineStart.UNDISPATCHED) {
                 identityMutex.withLock {
                     if (disconnectIdentity() != expected) {
-                        Outcome.Failure(SyncProblem.Revoked)
+                        Outcome.Failure(stale)
                     } else {
                         operation()
                     }
                 }
             }.await()
+    }
+
+    override suspend fun forgetServer(): Outcome<Unit, ForgetServerError> {
+        val expected =
+            identityMutex.withLock {
+                if (forgettableIdentity()) disconnectIdentity() else null
+            } ?: return Outcome.Failure(ForgetServerError.StaleLink)
+        return admittedDisconnect(expected, ForgetServerError.StaleLink) {
+            // The portable pair is the commit point: a failed write leaves both stored values —
+            // and every other link trace — exactly as admitted, and the status never reads
+            // NotConfigured while they survive.
+            if (address.clearServerIdentity() is Outcome.Failure) {
+                return@admittedDisconnect Outcome.Failure(ForgetServerError.WriteFailed)
+            }
+            try {
+                // The link's local bookkeeping goes with the forgotten server (02's unlink wipe);
+                // the library tables are untouched. No push, logout or purge — the operation
+                // never talks to the server it forgets.
+                db.syncStateDao().unlink()
+                expected.serverUrl?.let { tokenStore.clear(hostOf(it)) }
+                credentials.withCredentialCommit { secrets.dropStagedAuthSnapshots() }
+                settingsCapture.clear()
+                // 10 Scheduling: forgetting cancels every sync work name and closes the stream.
+                scheduler.onUnlinked()
+                lastRoundProblem.value = null
+                Outcome.Success(Unit)
+            } finally {
+                // The commit either landed or nothing did — refresh either way so a post-commit
+                // failure cannot leave a stale status on screen.
+                refreshStatus()
+            }
+        }
+    }
+
+    /**
+     * Whether the current state reads `Reconnect` or `Revoked` — the only states 08 offers
+     * "Forget server" on. Mirrors [refreshStatusLocked]'s mapping so an action admitted against
+     * one of those cards can never clear a live or pending link. Read under [identityMutex].
+     */
+    private suspend fun forgettableIdentity(): Boolean {
+        val url = address.serverUrl() ?: return false
+        val state = db.syncStateDao().get() ?: return false
+        if (state.lastError == SYNC_ERROR_REVOKED) return true
+        if (state.enabled && state.linkedAt != null && tokenStore.load(hostOf(url)) != null) return false
+        if (state.deviceId != null && state.linkedAt == null) return false
+        return state.deviceId != null || state.serverUrl == null
     }
 
     override suspend fun renameDevice(

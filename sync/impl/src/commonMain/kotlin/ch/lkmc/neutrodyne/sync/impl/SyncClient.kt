@@ -131,11 +131,16 @@ class SyncTransportException(
  * [SyncClient] over the `SYNC` Ktor client (10 Protocol). The bearer token is added per request,
  * never through an interceptor shared with other clients. Bodies are JSON; the server's gzip
  * response compression is handled by the engine's client.
+ *
+ * [tokenForBase], when bound, resolves the credential for the exact base URL the request will
+ * hit: each authenticated call fixes its [AuthContext] once, so a saved-address change between
+ * the URL read and the credential read cannot pair one server's URL with another's token.
  */
 class KtorSyncClient(
     private val clients: NeutrodyneHttpClients,
     private val tokenProvider: suspend () -> String?,
     private val baseUrlProvider: suspend () -> String,
+    private val tokenForBase: (suspend (String) -> String?)? = null,
 ) : SyncClient {
     private val client: HttpClient = clients.client(HttpClientKind.SYNC)
 
@@ -195,49 +200,94 @@ class KtorSyncClient(
     }
 
     override suspend fun logout() {
-        postNoContent(baseUrlProvider(), "/api/v1/auth/logout", Unit)
+        val ctx = authContext()
+        postNoContent(ctx.baseUrl, "/api/v1/auth/logout", Unit, ctx.token)
     }
 
-    override suspend fun devices(): List<DeviceDto> = getJson(baseUrlProvider().trimEnd('/') + "/api/v1/devices")
+    override suspend fun devices(): List<DeviceDto> {
+        val ctx = authContext()
+        return getJson(ctx.baseUrl.trimEnd('/') + "/api/v1/devices", ctx.token)
+    }
 
     override suspend fun renameDevice(
         deviceId: String,
         name: String,
-    ): DeviceDto = patchJson(baseUrlProvider(), "/api/v1/devices/$deviceId", DeviceRenameRequest(name))
-
-    override suspend fun revokeDevice(deviceId: String) {
-        delete("${baseUrlProvider()}/api/v1/devices/$deviceId", tokenProvider())
+    ): DeviceDto {
+        val ctx = authContext()
+        return patchJson(ctx.baseUrl, "/api/v1/devices/$deviceId", DeviceRenameRequest(name), ctx.token)
     }
 
-    override suspend fun account(): AccountSummary = getJson(baseUrlProvider().trimEnd('/') + "/api/v1/account")
+    override suspend fun revokeDevice(deviceId: String) {
+        val ctx = authContext()
+        delete("${ctx.baseUrl}/api/v1/devices/$deviceId", ctx.token)
+    }
+
+    override suspend fun account(): AccountSummary {
+        val ctx = authContext()
+        return getJson(ctx.baseUrl.trimEnd('/') + "/api/v1/account", ctx.token)
+    }
 
     override suspend fun sync(
         since: String?,
         changes: List<ChangeDto>,
-    ): SyncResponse = postJson(baseUrlProvider(), "/api/v1/sync", SyncRequest(since, changes), tokenProvider())
+    ): SyncResponse {
+        val ctx = authContext()
+        return postJson(ctx.baseUrl, "/api/v1/sync", SyncRequest(since, changes), ctx.token)
+    }
 
     override suspend fun changes(
         since: String?,
         limit: Int,
     ): ChangesPage {
-        val base = baseUrlProvider().trimEnd('/')
-        return getJson("$base/api/v1/changes?since=${since?.encodeURLParameter() ?: ""}&limit=$limit")
+        val ctx = authContext()
+        val base = ctx.baseUrl.trimEnd('/')
+        return getJson("$base/api/v1/changes?since=${since?.encodeURLParameter() ?: ""}&limit=$limit", ctx.token)
     }
 
     override suspend fun reset(
         confirm: String,
         mode: String,
         beforeCursor: String?,
-    ): AccountSummary =
-        postJson(
-            baseUrlProvider(),
+    ): AccountSummary {
+        val ctx = authContext()
+        return postJson(
+            ctx.baseUrl,
             "/api/v1/account/reset",
             AccountResetRequest(confirm, mode, beforeCursor),
-            tokenProvider(),
+            ctx.token,
         )
+    }
 
-    // Endpoints answering a bare 204 must not decode a body; `auth` is explicit because a call
-    // without an override token still authenticates through `tokenProvider` (logout does).
+    /**
+     * One authenticated request's endpoint and credential, fixed together: the token is loaded
+     * for the exact base URL the request targets, so a saved-address switch between the two
+     * reads can never pair one server's URL with another server's token.
+     */
+    private class AuthContext(
+        val baseUrl: String,
+        val token: String?,
+    ) {
+        override fun toString(): String = "AuthContext(baseUrl=$baseUrl, token=<redacted>)"
+    }
+
+    private suspend fun authContext(): AuthContext {
+        val baseUrl = baseUrlProvider()
+        // With `tokenForBase` bound the credential is looked up for the URL just read; a null
+        // result is a genuinely absent token, never a cue to re-resolve through `tokenProvider`
+        // — that re-reads the saved address and could return another host's token. Callers
+        // constructed without it (test fixtures) keep the decoupled provider lookup.
+        val token =
+            if (tokenForBase != null) {
+                tokenForBase.invoke(baseUrl)
+            } else {
+                tokenProvider()
+            }
+        return AuthContext(baseUrl, token)
+    }
+
+    // Endpoints answering a bare 204 must not decode a body; `auth` is explicit — an
+    // authenticated call sends the token it was given (the request context's, possibly none),
+    // never a refetched one.
     private suspend inline fun <reified B : Any> postNoContent(
         baseUrl: String,
         path: String,
@@ -262,7 +312,7 @@ class KtorSyncClient(
         return client.post(url) {
             contentType(ContentType.Application.Json)
             header("Neutrodyne-Sync-Protocol", PROTOCOL_VERSION.toString())
-            if (auth) (token ?: tokenProvider())?.let { header("Authorization", "Bearer $it") }
+            if (auth) token?.let { header("Authorization", "Bearer $it") }
             setBody(SyncJson.encodeToString(body))
         }
     }
@@ -283,12 +333,13 @@ class KtorSyncClient(
         baseUrl: String,
         path: String,
         body: B,
+        token: String?,
     ): T {
         val response =
             client.patch(baseUrl.trimEnd('/') + path) {
                 contentType(ContentType.Application.Json)
                 header("Neutrodyne-Sync-Protocol", PROTOCOL_VERSION.toString())
-                tokenProvider()?.let { header("Authorization", "Bearer $it") }
+                token?.let { header("Authorization", "Bearer $it") }
                 setBody(SyncJson.encodeToString(body))
             }
         if (!response.status.isSuccess()) throw problem(response)
@@ -297,12 +348,13 @@ class KtorSyncClient(
 
     private suspend inline fun <reified T> getJson(
         url: String,
+        token: String? = null,
         auth: Boolean = true,
     ): T {
         val response =
             client.get(url) {
                 header("Neutrodyne-Sync-Protocol", PROTOCOL_VERSION.toString())
-                if (auth) tokenProvider()?.let { header("Authorization", "Bearer $it") }
+                if (auth) token?.let { header("Authorization", "Bearer $it") }
             }
         if (!response.status.isSuccess()) throw problem(response)
         return SyncJson.decodeFromString<T>(response.bodyAsText())

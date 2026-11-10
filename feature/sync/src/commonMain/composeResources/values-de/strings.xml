@@ -9,14 +9,19 @@
   <string name="sync_activity_idle">Live-Updates inaktiv</string>
   <string name="sync_activity_syncing">Synchronisierung läuft…</string>
   <string name="sync_activity_live">Live-Updates verbunden</string>
-  <string name="sync_what_syncs">Synchronisiert: Abos, Gruppen, Wiedergabestatus, Positionen, Favoriten, Warteschlange und synchronisierte Einstellungen. Nie synchronisiert: Downloads, Bilder und Feed-Inhalte.</string>
-  <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
+  <string name="sync_what_syncs">Synchronisiert: Abos (einschließlich privater Feed-Links), Gruppen und ihre Reihenfolge, Wiedergabestatus, Positionen, Favoriten, Warteschlange, die aktuelle Wiedergabe, Podcast- und Gruppen-Wiedergabeeinstellungen sowie (mit „Wiedergabeeinstellungen synchronisieren“) deine Wiedergabe-Vorgaben. Nicht synchronisiert: Downloads und Audiodateien, Bilder, automatische Downloads, Speicher, Benachrichtigungen, Aktualisierungszeitplan, Darstellung, die YouTube-Engine und Update-Einstellungen.</string>
+  <string name="sync_reconnect">Erneut mit %1$s verbinden</string>
+  <string name="sync_reconnect_body">Diese Kopie von Neutrodyne ist noch nicht verknüpft. Seit der Wiederherstellung oder dem Kopieren wurde nichts synchronisiert.</string>
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
   <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
   <string name="sync_server_address">Serveradresse</string>
   <string name="sync_run_server">So betreibst du einen Server</string>
   <string name="sync_reconnect_action">Erneut verbinden</string>
   <string name="sync_link_again">Erneut verknüpfen</string>
+  <string name="sync_forget_server">Server vergessen</string>
+  <string name="sync_forget_stale">Die gespeicherte Verknüpfung hat sich geändert, während der Server vergessen wurde. Nichts wurde entfernt; prüfe den Status oben.</string>
+  <string name="sync_forget_failed">Der Server konnte nicht vergessen werden. Die gespeicherten Sync-Daten sind unverändert.</string>
+  <string name="sync_forget_unexpected">Beim Vergessen des Servers ist etwas schiefgelaufen. Prüfe den Status oben und versuche es erneut.</string>
 
   <string name="sync_setup_title">Gerät verknüpfen</string>
   <string name="sync_setup_address_hint">sync.example.org</string>
@@ -99,6 +104,8 @@
     <item quantity="other">%1$d verknüpft</item>
   </plurals>
   <string name="sync_header_what_syncs">Was synchronisiert wird</string>
+  <string name="sync_expanded">Erweitert</string>
+  <string name="sync_collapsed">Eingeklappt</string>
   <string name="sync_playback_settings">Wiedergabeeinstellungen synchronisieren</string>
   <string name="sync_playback_settings_hint">Tempo, Stille überspringen, Sprungintervalle und ähnliche Vorgaben folgen dir zwischen deinen Geräten</string>
   <string name="sync_share_passwords">Feed-Passwörter teilen</string>
@@ -149,6 +156,41 @@
   <string name="sync_devices_empty">Keine Geräte verknüpft.</string>
   <string name="sync_devices_manage_link">Du kannst Geräte auch auf %1$s verwalten</string>
   <string name="sync_device_menu">Geräteaktionen</string>
+
+  <!-- Sync diagnostics (08 Sync diagnostics, 10 Diagnostics). -->
+  <string name="sync_diagnostics_row">Diagnose</string>
+  <string name="sync_diag_title">Sync-Diagnose</string>
+  <string name="sync_diag_refresh">Aktualisieren</string>
+  <string name="sync_diag_copied">Diagnose kopiert</string>
+  <string name="sync_diag_unavailable">Die Sync-Diagnose konnte nicht geladen werden. Versuche es erneut.</string>
+  <string name="sync_diag_unknown">Unbekannt</string>
+  <string name="sync_diag_section_server">Server</string>
+  <string name="sync_diag_section_sync">Sync</string>
+  <string name="sync_diag_section_rounds">Runden</string>
+  <string name="sync_diag_server_version">Serverversion</string>
+  <string name="sync_diag_protocol">Protokoll</string>
+  <string name="sync_diag_account">Konto</string>
+  <string name="sync_diag_device">Dieses Gerät</string>
+  <string name="sync_diag_lan">Lokales Netzwerk</string>
+  <string name="sync_diag_last_sync">Letzte Synchronisierung</string>
+  <string name="sync_diag_clock_offset">Uhrenversatz</string>
+  <string name="sync_diag_stream">Live-Verbindung</string>
+  <string name="sync_diag_reconnects">Neuverbindungen</string>
+  <string name="sync_diag_last_error">Letzter Fehler</string>
+  <string name="sync_diag_cursor">Cursor</string>
+  <string name="sync_diag_parked">Zurückgestellte Änderungen</string>
+  <string name="sync_diag_held">Zurückgehaltene Änderungen</string>
+  <string name="sync_diag_pending">Ausstehende Änderungen</string>
+  <string name="sync_diag_last_round">Letzte Runde</string>
+  <string name="sync_diag_rounds_empty">Noch keine Runden aufgezeichnet</string>
+  <string name="sync_diag_collection_podcast">Podcasts</string>
+  <string name="sync_diag_collection_group">Gruppen</string>
+  <string name="sync_diag_collection_member">Mitglieder</string>
+  <string name="sync_diag_collection_episode">Episoden</string>
+  <string name="sync_diag_collection_upnext">Als Nächstes</string>
+  <string name="sync_diag_collection_session">Sitzung</string>
+  <string name="sync_diag_collection_setting">Einstellungen</string>
+  <string name="sync_diag_collection_other">Andere</string>
 
   <!-- Held-changes review and dialog (08 Settings › Sync status card, Held changes). -->
   <plurals name="sync_held_waiting">
