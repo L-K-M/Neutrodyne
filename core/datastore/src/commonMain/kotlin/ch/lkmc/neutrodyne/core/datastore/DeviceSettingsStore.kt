@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.core.datastore
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 
 /**
@@ -13,5 +15,18 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
  * directly for their own `DEVICE` keys.
  */
 class DeviceSettingsStore internal constructor(
-    dataStore: DataStore<Preferences>,
-) : SettingStore by SettingStoreImpl(SettingsFile.DEVICE, dataStore)
+    private val dataStore: DataStore<Preferences>,
+) : SettingStore by SettingStoreImpl(SettingsFile.DEVICE, dataStore) {
+    /**
+     * Removes every key's stored value in one atomic commit — the device file's counterpart of
+     * [SettingsStore.resetAll]. Device keys are never synced, so there are no write receipts.
+     */
+    suspend fun resetAll(keys: List<SettingKey<*>>) {
+        keys.forEach { require(it.file == SettingsFile.DEVICE) { "'${it.name}' is not a device key" } }
+        dataStore.edit { preferences ->
+            for (key in keys) {
+                SettingPreferences.remove(preferences, key)
+            }
+        }
+    }
+}

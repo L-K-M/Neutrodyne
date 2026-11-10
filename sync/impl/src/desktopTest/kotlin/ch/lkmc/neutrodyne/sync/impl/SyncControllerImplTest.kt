@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.LinkState
@@ -889,7 +890,7 @@ class SyncControllerImplTest {
             try {
                 h.seedLinked()
                 h.client.syncHandler = { _, _ -> throw java.io.IOException("offline") }
-                h.client.logout = { throw java.io.IOException("offline") }
+                h.client.logoutHandler = { throw java.io.IOException("offline") }
                 val result = h.controller.unlink()
                 assertTrue(result is Outcome.Success)
                 assertFalse(h.tokenStoreContains(host))
@@ -1428,6 +1429,204 @@ class SyncControllerImplTest {
             }
         }
 
+    @Test
+    fun aReconnectForgetClearsThePairTheLinkMetadataAndKeepsTheLibrary() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedReconnect()
+                h.addLocalPodcast()
+                h.captureLocalPodcast()
+                h.controller.refreshStatus()
+                assertTrue(h.controller.status.value is SyncStatus.Reconnect)
+                assertTrue(h.db.syncOutboxDao().count() > 0)
+
+                val result = h.controller.forgetServer()
+
+                assertTrue(result is Outcome.Success)
+                assertNull(h.address.serverUrl())
+                assertNull(h.address.username())
+                assertEquals(SyncStatus.NotConfigured, h.controller.status.value)
+                // No round, push or logout: the forgotten server is never contacted.
+                assertTrue(h.client.calls.isEmpty())
+                assertEquals(
+                    1,
+                    h.db
+                        .podcastDao()
+                        .allForExport()
+                        .size,
+                )
+                val state = h.db.syncStateDao().get()
+                assertNull(state?.deviceId)
+                assertNull(state?.linkedAt)
+                assertEquals(0, h.db.syncOutboxDao().count())
+                assertEquals(0, h.db.syncClockDao().count())
+                assertTrue("unlinked" in h.schedulerCalls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aRevokedForgetClearsThePairTheTokenAndTheMarker() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
+                h.controller.refreshStatus()
+                assertTrue(h.controller.status.value is SyncStatus.Revoked)
+                assertTrue(h.tokenStoreContains(host))
+
+                val result = h.controller.forgetServer()
+
+                assertTrue(result is Outcome.Success)
+                assertNull(h.address.serverUrl())
+                assertNull(h.address.username())
+                assertFalse(h.tokenStoreContains(host))
+                assertEquals(SyncStatus.NotConfigured, h.controller.status.value)
+                val state = h.db.syncStateDao().get()
+                assertNull(state?.lastError)
+                assertNull(state?.deviceId)
+                assertTrue(h.client.calls.isEmpty())
+                assertTrue("unlinked" in h.schedulerCalls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aLinkedProfileIsNotForgettable() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+
+                val result = h.controller.forgetServer()
+
+                assertEquals(Outcome.Failure(ForgetServerError.StaleLink), result)
+                assertEquals(serverUrl, h.address.serverUrl())
+                assertTrue(h.tokenStoreContains(host))
+                assertEquals(
+                    DEVICE_ID,
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.deviceId,
+                )
+                assertTrue(h.client.calls.isEmpty())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun anUnfinishedLinkIsNotForgettable() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinkUnfinished()
+
+                val result = h.controller.forgetServer()
+
+                assertEquals(Outcome.Failure(ForgetServerError.StaleLink), result)
+                assertEquals(serverUrl, h.address.serverUrl())
+                assertTrue(h.tokenStoreContains(host))
+                assertEquals(
+                    DEVICE_ID,
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.deviceId,
+                )
+                assertTrue(h.client.calls.isEmpty())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFailedForgetWriteKeepsBothValuesAndTheLinkState() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedReconnect()
+                h.controller.refreshStatus()
+                h.address.nextPreferenceError = SettingsError.WriteFailed
+
+                val result = h.controller.forgetServer()
+
+                assertEquals(Outcome.Failure(ForgetServerError.WriteFailed), result)
+                assertEquals(serverUrl, h.address.serverUrl())
+                assertEquals("alice", h.address.username())
+                // Nothing else was touched: the status stays Reconnect, the residue remains.
+                assertTrue(h.controller.status.value is SyncStatus.Reconnect)
+                assertEquals(
+                    DEVICE_ID,
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.deviceId,
+                )
+                assertTrue(h.address.identityClears.isEmpty())
+                assertTrue(h.client.calls.isEmpty())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aSecondForgetSeesTheCommittedOne() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedReconnect()
+
+                val first = async { h.controller.forgetServer() }
+                val second = async { h.controller.forgetServer() }
+                val outcomes = listOf(first.await(), second.await())
+
+                assertEquals(1, outcomes.count { it is Outcome.Success })
+                assertEquals(1, outcomes.count { it == Outcome.Failure(ForgetServerError.StaleLink) })
+                assertNull(h.address.serverUrl())
+                assertEquals(SyncStatus.NotConfigured, h.controller.status.value)
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * Leaving the screen cancels only the caller's await: once admitted, the committed local
+     * operation finishes on the application scope and the status still reaches NotConfigured.
+     */
+    @Test
+    fun cancellingAnAdmittedForgetStillCompletesIt() =
+        runTest {
+            val h = harness(this)
+            val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            try {
+                h.seedReconnect()
+                h.controller.refreshStatus()
+                h.address.onIdentityClear = {
+                    entered.complete(Unit)
+                    release.await()
+                }
+                val call = async { h.controller.forgetServer() }
+                entered.await()
+                call.cancel()
+                release.complete(Unit)
+                call.join()
+
+                await(h) { h.controller.status.value == SyncStatus.NotConfigured }
+                assertNull(h.address.serverUrl())
+                assertNull(h.address.username())
+            } finally {
+                release.complete(Unit)
+                h.close()
+            }
+        }
+
     private fun harness(
         scope: TestScope,
         secrets: SecretStore = FakeSecretStore(),
@@ -1474,10 +1673,11 @@ class SyncControllerImplTest {
 }
 
 /** The controller, its collaborators and the scripted client for one test. */
-private class Harness(
+internal class Harness(
     private val scope: TestScope,
     private val now: Long,
     val secrets: SecretStore = FakeSecretStore(),
+    controllerDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
 ) {
     /**
      * The controller's own scope, cancelled before the database closes. A supervisor like the
@@ -1485,7 +1685,7 @@ private class Harness(
      */
     private val controllerJob = kotlinx.coroutines.SupervisorJob()
     private val controllerScope =
-        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob)
+        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob + controllerDispatcher)
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
@@ -1745,6 +1945,42 @@ private class Harness(
         tokens.save("sync.example", "nds_test")
     }
 
+    /** Seeds a restored install: the full linked `sync_state` without its token (Reconnect). */
+    suspend fun seedReconnect() {
+        address.updateServerUrl("https://sync.example")
+        address.updateUsername("alice")
+        db.withWriteTransaction {
+            db.syncStateDao().upsert(
+                SyncStateEntity(
+                    enabled = true,
+                    serverUrl = "https://sync.example",
+                    accountId = SyncControllerImplTest.ACCOUNT_ID,
+                    deviceId = SyncControllerImplTest.DEVICE_ID,
+                    nodeId = "0000000000000001",
+                    linkedAt = now,
+                    lastSyncAt = now,
+                ),
+            )
+        }
+    }
+
+    /** Seeds a link whose token is stored but the first-link step never finished (LinkUnfinished). */
+    suspend fun seedLinkUnfinished() {
+        address.updateServerUrl("https://sync.example")
+        db.withWriteTransaction {
+            db.syncStateDao().upsert(
+                SyncStateEntity(
+                    enabled = false,
+                    serverUrl = "https://sync.example",
+                    accountId = SyncControllerImplTest.ACCOUNT_ID,
+                    deviceId = SyncControllerImplTest.DEVICE_ID,
+                    nodeId = "0000000000000001",
+                ),
+            )
+        }
+        tokens.save("sync.example", "nds_test")
+    }
+
     /** Puts one podcast row in the outbox, as an un-pushed local edit would. */
     suspend fun captureLocalPodcast() {
         db.withWriteTransaction {
@@ -1824,7 +2060,7 @@ private class Harness(
 }
 
 /** A [SyncClient] whose every call is scripted and recorded. */
-private class ScriptedSyncClient : SyncClient {
+internal class ScriptedSyncClient : SyncClient {
     val calls = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
     val revokes = mutableListOf<String>()
@@ -1850,7 +2086,7 @@ private class ScriptedSyncClient : SyncClient {
         DeviceDto(id, name, "android", "1.0.0", null, false, false)
     }
     var revoke: suspend (String) -> Unit = {}
-    var logout: suspend () -> Unit = {}
+    var logoutHandler: suspend () -> Unit = {}
     var summary: AccountSummary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
     var changesHandler: suspend (String?) -> ChangesPage = { emptyPage() }
     var syncHandler: suspend (String?, List<ChangeDto>) -> SyncResponse = { _, changes -> defaultSyncResponse(changes) }
@@ -1919,7 +2155,7 @@ private class ScriptedSyncClient : SyncClient {
 
     override suspend fun logout() {
         calls += "logout"
-        logout()
+        logoutHandler()
     }
 
     override suspend fun devices(): List<DeviceDto> {
@@ -1979,7 +2215,7 @@ private class ScriptedSyncClient : SyncClient {
     }
 }
 
-private class FakeNetErrorClassifier(
+internal class FakeNetErrorClassifier(
     var result: NetError = NetError.Offline,
 ) : NetErrorClassifier {
     override fun classify(e: Throwable): NetError = result

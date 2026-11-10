@@ -10,13 +10,18 @@
   <string name="sync_activity_syncing">Syncing…</string>
   <string name="sync_activity_live">Live updates connected</string>
   <string name="sync_what_syncs">Synced: subscriptions, groups, played state, positions, favourites, Up next and synced settings. Never synced: downloads, artwork and feed contents.</string>
-  <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
+  <string name="sync_reconnect">Reconnect to %1$s</string>
+  <string name="sync_reconnect_body">This copy of Neutrodyne isn't linked yet. Nothing has been synced since it was restored or copied.</string>
   <string name="sync_finish_link">Finish linking to %1$s.</string>
   <string name="sync_revoked">This device was unlinked from %1$s.</string>
   <string name="sync_server_address">Server address</string>
   <string name="sync_run_server">How to run a server</string>
   <string name="sync_reconnect_action">Reconnect</string>
   <string name="sync_link_again">Link again</string>
+  <string name="sync_forget_server">Forget server</string>
+  <string name="sync_forget_stale">The saved link changed while the server was being forgotten. Nothing was cleared; check the status above.</string>
+  <string name="sync_forget_failed">The server couldn't be forgotten. The saved sync data is unchanged.</string>
+  <string name="sync_forget_unexpected">Something went wrong while forgetting the server. Check the status above, then try again.</string>
 
   <string name="sync_setup_title">Link a device</string>
   <string name="sync_setup_address_hint">sync.example.org</string>
@@ -88,6 +93,9 @@
   <string name="sync_error_device_gone">That device is already gone.</string>
 
   <!-- Linked settings rows (08 Settings › Sync "Rows while linked"). -->
+  <string name="sync_header_this_device">This device</string>
+  <string name="sync_name_row">Name</string>
+  <string name="sync_rename_this_device">Rename this device</string>
   <string name="sync_link_another">Link another device</string>
   <string name="sync_link_another_hint">Approve a new phone or computer with the code it shows</string>
   <string name="sync_devices">Devices</string>
@@ -95,6 +103,24 @@
     <item quantity="one">%1$d linked</item>
     <item quantity="other">%1$d linked</item>
   </plurals>
+  <string name="sync_header_what_syncs">What syncs</string>
+  <string name="sync_playback_settings">Sync playback settings</string>
+  <string name="sync_playback_settings_hint">Speed, skip silence, skip intervals and similar defaults follow you between devices</string>
+  <string name="sync_share_passwords">Share feed passwords</string>
+  <string name="sync_share_passwords_hint">Lets your other devices refresh private feeds that need a password. Passwords already shared stay on the server until you change a feed's password or delete your data there.</string>
+  <string name="sync_share_passwords_title">Share feed passwords?</string>
+  <string name="sync_share_passwords_body">The passwords of your private feeds are stored on %1$s in readable form so your other devices can use them. Anyone who can read the server's data can read them.</string>
+  <string name="sync_share_passwords_confirm">Share</string>
+  <string name="sync_pref_save_failed">Couldn't save the setting</string>
+  <string name="sync_unlink_device">Unlink this device</string>
+  <string name="sync_unlink_title">Unlink this device?</string>
+  <string name="sync_unlink_body">It stops syncing; its library stays as it is, and your other devices keep syncing.</string>
+  <string name="sync_unlink_confirm">Unlink</string>
+  <string name="sync_delete_data">Delete my data on the server</string>
+  <string name="sync_delete_title">Delete your data on %1$s?</string>
+  <string name="sync_delete_body">Removes your subscriptions, groups, listening history, Up next and synced settings from the server, including its backups of your account, and unlinks all your devices. Every device keeps its own library. The server's nightly backups keep a copy for up to 7 days.</string>
+  <string name="sync_delete_field">Type DELETE to confirm</string>
+  <string name="sync_delete_confirm">Delete</string>
 
   <!-- "Link another device" sheet (08 Link another device). -->
   <string name="sync_approve_code_label">Code shown on the new device</string>
