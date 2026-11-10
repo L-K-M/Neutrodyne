@@ -402,7 +402,7 @@ class FirstLinkMerger(
                     by = dto.by,
                     authReference = auth?.first,
                     pendingAuth = auth?.second,
-                ),
+                ).withConfirmed(null.confirm(incoming)),
             )
         }
         adoptPulledState(pull.cursor, pull.maxClockPacked)
@@ -1103,12 +1103,13 @@ class FirstLinkMerger(
                     clockStore.put(
                         coll.wire,
                         rid,
-                        (stored ?: RawSyncRecord(state)).copy(
-                            state = state,
-                            by = dto.by ?: stored?.by,
-                            authReference = auth?.reference ?: stored?.authReference,
-                            pendingAuth = auth?.pending ?: stored?.pendingAuth,
-                        ),
+                        (stored ?: RawSyncRecord(state))
+                            .copy(
+                                state = state,
+                                by = dto.by ?: stored?.by,
+                                authReference = auth?.reference ?: stored?.authReference,
+                                pendingAuth = auth?.pending ?: stored?.pendingAuth,
+                            ).withConfirmed(stored.confirm(incoming)),
                     )
                 }
             }
@@ -1172,10 +1173,11 @@ class FirstLinkMerger(
                     clockStore.put(
                         SyncCollection.SETTING.wire,
                         key.name,
-                        (stored ?: RawSyncRecord(record)).copy(
-                            state = record,
-                            pendingSetting = PendingSetting(value.toString(), record.maxClock?.toString() ?: ""),
-                        ),
+                        (stored ?: RawSyncRecord(record))
+                            .copy(
+                                state = record,
+                                pendingSetting = PendingSetting(value.toString(), record.maxClock?.toString() ?: ""),
+                            ).withConfirmed(stored.confirm(record)),
                     )
                     if (stored?.pendingSetting != null && stored.pendingSetting?.value != value.toString()) {
                         // keep the newer pending marker: the fresh write above is authoritative
@@ -1221,6 +1223,7 @@ class FirstLinkMerger(
             for (key in keys) {
                 val row = db.syncClockDao().get(key.coll, key.rid) ?: continue
                 val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: continue
+                val confirmed = raw.confirmed().state
                 db.withWriteTransaction {
                     requireSyncProfile(profile, db.syncStateDao().get())
                     db.syncStateDao().withApplying {
@@ -1229,7 +1232,7 @@ class FirstLinkMerger(
                         // capture carries both played and playedAt, so an older separate replay
                         // must not overwrite its paired timestamp during change construction.
                         if (pending.any { it.field == "*" }) return@withApplying
-                        for ((name, field) in raw.state.fields) {
+                        for ((name, field) in confirmed.fields) {
                             val stampClock = field.c ?: continue
                             if (name == "playedAt" &&
                                 pending.any {
@@ -1251,8 +1254,8 @@ class FirstLinkMerger(
                                     field.v.toString(),
                                 )
                         }
-                        raw.state.growSets.forEach { (name, values) ->
-                            val stampClock = raw.state.maxClock ?: return@forEach
+                        confirmed.growSets.forEach { (name, values) ->
+                            val stampClock = confirmed.maxClock ?: return@forEach
                             db
                                 .syncOutboxDao()
                                 .captureStored(
@@ -1415,7 +1418,11 @@ class FirstLinkMerger(
     ) {
         // A seed never overwrites a fuller raw record an earlier step already stored.
         if (clockStore.get(coll.wire, rid) != null) return
-        clockStore.put(coll.wire, rid, RawSyncRecord(RecordState(coll, fields)))
+        clockStore.put(
+            coll.wire,
+            rid,
+            RawSyncRecord(RecordState(coll, fields), accepted = AcceptedSyncRecord(RecordState(coll), 0L)),
+        )
     }
 
     private fun stamp(

@@ -2483,7 +2483,7 @@ class FirstLinkMergerTest {
                                         mapOf(
                                             "played" to
                                                 ch.lkmc.neutrodyne.sync.protocol.FieldState(
-                                                    JsonPrimitive(true),
+                                                    JsonPrimitive(false),
                                                     stored,
                                                 ),
                                             "playedAt" to
@@ -2605,9 +2605,13 @@ class FirstLinkMergerTest {
                             checkNotNull(take().body).utf8(),
                         )
                 assertEquals("c:0000000a:2", pushed.since)
+                pushed.changes.forEach {
+                    ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+                        .change(it)
+                }
                 val fields = pushed.changes.single { it.coll == "episode" }.fields
                 assertEquals(stored.toString(), fields["played"]?.c)
-                assertEquals(JsonPrimitive(true), fields["played"]?.v)
+                assertEquals(JsonPrimitive(false), fields["played"]?.v)
                 assertEquals(stored.toString(), fields["playedAt"]?.c)
                 assertEquals(JsonNull, fields["playedAt"]?.v)
                 assertEquals(pending.toString(), fields["fav"]?.c)

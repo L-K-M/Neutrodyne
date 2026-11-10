@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -293,6 +294,85 @@ class SyncClockCorrectionTest {
                     Hlc(repaired.hlc, NodeId(repaired.nodeId)).toString(),
                     SyncClockStore(db).get("setting", key.name)?.settingHash?.clock,
                 )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun acceptedParkedClocksCannotBeRewrittenAsLocalIntents() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seedState(db, FUTURE_MS)
+                seedOutbox(db, "fav", FUTURE_MS, "true")
+                val id =
+                    ch.lkmc.neutrodyne.sync.protocol.RecordId.Episode(
+                        ch.lkmc.neutrodyne.sync.protocol
+                            .PodcastId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                        ch.lkmc.neutrodyne.sync.protocol
+                            .EpisodeKey("guid:parked"),
+                    )
+                val accepted =
+                    RecordState(
+                        SyncCollection.EPISODE,
+                        fields =
+                            mapOf(
+                                "fav" to FieldState(JsonPrimitive(true), Hlc.of(FUTURE_MS, 0, NodeId(OWN_NODE))),
+                            ),
+                    ).toDto(id, 1, null)
+                ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+                    .record(accepted)
+                val json =
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                        .encodeToString(accepted)
+                db.syncParkedDao().park(
+                    ch.lkmc.neutrodyne.core.database.SyncParkedEntity(
+                        podcastSyncId = id.podcast.value,
+                        identityKey = id.key.value,
+                        record = json,
+                        receivedAt = SERVER_NOW_MS,
+                    ),
+                )
+                val before = db.syncOutboxDao().rows()
+                val profile = checkNotNull(db.syncStateDao().get())
+                device(db).engine.observeServerTime(profile, SERVER_TIME, SENT_AT_MS, RECEIVED_AT_MS)
+                assertEquals(before, db.syncOutboxDao().rows(), "accepted future history blocks unsafe repair")
+                assertEquals(
+                    json,
+                    db
+                        .syncParkedDao()
+                        .all()
+                        .single()
+                        .record,
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun unreadableParkedMetadataRollsBackTheCorrection() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seedState(db, FUTURE_MS)
+                seedOutbox(db, "fav", FUTURE_MS, "true")
+                db.syncParkedDao().park(
+                    ch.lkmc.neutrodyne.core.database.SyncParkedEntity(
+                        podcastSyncId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        identityKey = "guid:unreadable",
+                        record = "{broken",
+                        receivedAt = SERVER_NOW_MS,
+                    ),
+                )
+                val before = checkNotNull(db.syncStateDao().get())
+                val rows = db.syncOutboxDao().rows()
+                assertFailsWith<okio.IOException> {
+                    device(db).engine.observeServerTime(before, SERVER_TIME, SENT_AT_MS, RECEIVED_AT_MS)
+                }
+                assertEquals(before, db.syncStateDao().get())
+                assertEquals(rows, db.syncOutboxDao().rows())
             } finally {
                 db.close()
             }
