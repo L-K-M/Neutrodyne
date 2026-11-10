@@ -2562,6 +2562,7 @@
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.SettingsRepository {
   public java.lang.Object get(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
+  public java.lang.Object getOrThrow(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
   public kotlinx.coroutines.flow.Flow observe(ch.lkmc.neutrodyne.core.model.settings.SettingKey);
   public kotlinx.coroutines.flow.Flow observePortableSnapshot();
   public java.lang.Object reset(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
