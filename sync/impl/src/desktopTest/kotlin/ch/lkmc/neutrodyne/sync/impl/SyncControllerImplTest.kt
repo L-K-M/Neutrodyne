@@ -1964,6 +1964,56 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun applyingHeldUnsubscribeKeepsTheQueueRemovalClock() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.seedLinked()
+                val queueRid = PODCAST_SYNC_ID + "g:one"
+                val removal =
+                    RecordDto(
+                        coll = "upnext",
+                        id =
+                            buildJsonObject {
+                                put("p", JsonPrimitive(PODCAST_SYNC_ID))
+                                put("k", JsonPrimitive("g:one"))
+                            },
+                        seq = 1,
+                        by = OTHER_ACCOUNT_ID,
+                        fields =
+                            mapOf(
+                                "in" to
+                                    FieldValue(
+                                        JsonPrimitive(false),
+                                        Hlc.of(now, 3, NodeId("0000000000000002")).toString(),
+                                    ),
+                            ),
+                    )
+                assertEquals(1, h.applier.applyPage(listOf(removal), roundId = 1).applied)
+                val clock = assertNotNull(h.db.syncClockDao().get("upnext", queueRid))
+                val held = insertHeld(h, heldAt = 1, podcasts = listOf(PODCAST_SYNC_ID))
+                await(h) {
+                    h.controller.heldChanges.value
+                        .singleOrNull()
+                        ?.id == held
+                }
+
+                h.controller.resolveHeld(held, HeldResolution.APPLY)
+                await(h) {
+                    h.controller.heldChanges.value
+                        .isEmpty()
+                }
+                assertNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                assertNull(h.db.syncHeldDao().byId(held))
+                assertEquals(clock, h.db.syncClockDao().get("upnext", queueRid))
+                assertEquals(0, h.db.syncOutboxDao().count())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun aRevokedForgetClearsThePairTheTokenAndTheMarker() =
         runTest {
             val h = harness(this)

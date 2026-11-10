@@ -515,16 +515,32 @@ abstract class PodcastDao(
 
     /**
      * `PodcastDao.deleteCascade(podcastId)`: person/funding rows, the cleared `PODCAST` context,
-     * the unshared credential, the parked records and clock rows, then the podcast itself — the
+     * the unshared credential, the parked records and unused clock rows, then the podcast itself — the
      * FK cascades delete `episode` (+ its children, state, position, Up next, download),
      * `podcast_url_alias`, `podcast_settings`, `podcast_group_member` and
      * `episode_guid_provenance` (D98: feed-scoped knowledge dies with the subscription);
      * `SET NULL` clears `play_session.currentEpisodeId` and `import_item.podcastId`. While linked
      * (MS0+) the caller wraps this in `SyncStateDao.withApplying` for a sync-origin unsubscribe.
+     * The linked device retains Up next clocks so a server removal seen before the unsubscribe
+     * cannot be forgotten when the queue entries cascade away.
      */
     suspend fun deleteCascade(
         podcastId: Long,
         now: Long,
+    ) = deleteCascade(podcastId, now, CascadeCause.UNSUBSCRIBE)
+
+    /** A merged-away ID has no remaining queue of its own; purge its child clocks too. */
+    suspend fun deleteMergeLoserCascade(
+        podcastId: Long,
+        now: Long,
+    ) = deleteCascade(podcastId, now, CascadeCause.MERGE)
+
+    private enum class CascadeCause { UNSUBSCRIBE, MERGE }
+
+    private suspend fun deleteCascade(
+        podcastId: Long,
+        now: Long,
+        cause: CascadeCause,
     ) {
         db.withWriteTransaction {
             deletePersonsOfPodcast(podcastId)
@@ -532,7 +548,8 @@ abstract class PodcastDao(
             clearPodcastContext(podcastId, now)
             deleteUnsharedCredential(podcastId)
             deleteSyncParkedOfPodcast(podcastId)
-            deleteSyncClocksOfPodcast(podcastId)
+            val keepQueueClocks = cause == CascadeCause.UNSUBSCRIBE && db.syncStateDao().get()?.enabled == true
+            deleteSyncClocksOfPodcast(podcastId, keepQueueClocks)
             deletePodcastRow(podcastId)
         }
     }
@@ -577,15 +594,18 @@ abstract class PodcastDao(
     )
     protected abstract suspend fun deleteSyncParkedOfPodcast(podcastId: Long)
 
-    /** The episode, Up next and member clock rows of this podcast; its own row stays as tombstone. */
+    /** The podcast's own tombstone stays, and linked unsubscribes keep its Up next fences. */
     @Query(
         "DELETE FROM sync_clock WHERE" +
-            " (coll IN ('episode', 'upnext') AND" +
+            " (coll IN ('episode', 'upnext') AND (:keepQueueClocks = 0 OR coll <> 'upnext') AND" +
             "  substr(rid, 1, 36) = (SELECT syncId FROM podcast WHERE id = :podcastId))" +
             " OR (coll = 'member' AND" +
             "  substr(rid, 37, 36) = (SELECT syncId FROM podcast WHERE id = :podcastId))",
     )
-    protected abstract suspend fun deleteSyncClocksOfPodcast(podcastId: Long)
+    protected abstract suspend fun deleteSyncClocksOfPodcast(
+        podcastId: Long,
+        keepQueueClocks: Boolean,
+    )
 
     @Query("DELETE FROM podcast WHERE id = :podcastId")
     protected abstract suspend fun deletePodcastRow(podcastId: Long)
