@@ -57,6 +57,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
@@ -1646,12 +1647,14 @@ class FirstLinkMergerTest {
             try {
                 link(db, enabled = true)
                 val gate = CompletableDeferred<Unit>()
+                val entered = CompletableDeferred<Unit>()
                 val client =
                     object : SyncClient by ScriptedClient(emptyList()) {
                         override suspend fun changes(
                             since: String?,
                             limit: Int,
                         ): ChangesPage {
+                            entered.complete(Unit)
                             gate.await()
                             return ChangesPage(emptyList(), "c:00000001:1", false, "")
                         }
@@ -1672,11 +1675,17 @@ class FirstLinkMergerTest {
                         secrets = FakeSecretStore(),
                         coordinator = FakeCredentialCommitCoordinator(),
                     )
-                val job = launch { merger.resync() }
-                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
-                assertTrue(activity.active, "the resync must mark sync active while it runs")
-                gate.complete(Unit)
-                job.join()
+                val job = async { merger.resync() }
+                try {
+                    select<Unit> {
+                        entered.onAwait { }
+                        job.onAwait { error("Resync returned before entering its pull: $it") }
+                    }
+                    assertTrue(activity.active, "the resync must mark sync active while its pull waits")
+                } finally {
+                    gate.complete(Unit)
+                }
+                assertTrue(job.await() is FirstLinkResult.Completed)
                 assertEquals(0, activity.count.value, "a completed resync clears the activity flag")
                 assertFalse(activity.active)
             } finally {
