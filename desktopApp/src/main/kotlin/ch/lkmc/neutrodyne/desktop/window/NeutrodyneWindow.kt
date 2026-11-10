@@ -78,6 +78,8 @@ import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOfferDialog
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
+import ch.lkmc.neutrodyne.desktop.notifications.DesktopSyncHeldNotifier
+import ch.lkmc.neutrodyne.desktop.notifications.observeSyncHeldNotifications
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_body
 import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_title
@@ -163,6 +165,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     repoUrl: String = "",
     crashOffer: DesktopCrashOffer? = null,
     syncController: (() -> SyncController)? = null,
+    syncHeldNotifier: (() -> DesktopSyncHeldNotifier)? = null,
     reconnectDismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
 ) {
     val state = rememberNeutrodyneWindowState()
@@ -234,6 +237,23 @@ internal fun ApplicationScope.NeutrodyneWindow(
             behaviour = snapshotFlow { closeBehaviour },
             busy = busySignal.busy,
             onQuit = { quitRequest() },
+        )
+    }
+
+    // 10's held-batch desktop notification (08's "Sync is waiting for you"): hidden means
+    // the Compose-side hide or an iconified window — an unfocused but visible one is not.
+    // One collector for the window's life: it lives and dies with the composition and only
+    // touches the lazy thunks behind the database-open gate.
+    val syncControllerThunk by rememberUpdatedState(syncController)
+    val syncHeldThunk by rememberUpdatedState(syncHeldNotifier)
+    LaunchedEffect(Unit) {
+        val resolveController = syncControllerThunk ?: return@LaunchedEffect
+        val resolveNotifier = syncHeldThunk ?: return@LaunchedEffect
+        observeSyncHeldNotifications(
+            gate = snapshotFlow { openState is DatabaseOpenState.Opened },
+            hidden = snapshotFlow { hidden || state.isMinimized },
+            syncController = resolveController,
+            notifier = resolveNotifier,
         )
     }
 

@@ -244,6 +244,12 @@ interface DesktopAppGraph {
     val newEpisodePoster: NewEpisodePoster
 
     /**
+     * 10's held-batch notice (08's "Sync is waiting for you" row) — the window's collector
+     * resolves it behind the database-open gate together with [syncController].
+     */
+    val syncHeldNotifier: ch.lkmc.neutrodyne.desktop.notifications.DesktopSyncHeldNotifier
+
+    /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
      * [provideDatabase], which blocks until the band-100 open finishes — held behind a lambda at
      * the call site so an early quit never pays it, and by then the runner is the started
