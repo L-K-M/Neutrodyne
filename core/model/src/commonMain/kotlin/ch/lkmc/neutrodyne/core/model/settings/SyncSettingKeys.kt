@@ -19,6 +19,9 @@ object SyncSettingKeys {
     val SHARE_FEED_PASSWORDS: SettingKey.Bool =
         SettingKey.Bool("sync.share_feed_passwords", false, SettingsFile.DEVICE)
 
+    /** Daily account-check receipt and hashed account notice receipts; never backed up or synced. */
+    val ACCOUNT_NOTICE_STATE: SettingKey.Text = SettingKey.Text("sync.account_notice_state", "", SettingsFile.DEVICE)
+
     val ALL: List<SettingKey<*>> =
-        listOf(SERVER_URL, USERNAME, DEVICE_NAME, SYNC_PLAYBACK_SETTINGS, SHARE_FEED_PASSWORDS)
+        listOf(SERVER_URL, USERNAME, DEVICE_NAME, SYNC_PLAYBACK_SETTINGS, SHARE_FEED_PASSWORDS, ACCOUNT_NOTICE_STATE)
 }

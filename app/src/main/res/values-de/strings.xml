@@ -4,6 +4,7 @@
   <string name="channel_group_new_episodes">Neue Episoden</string>
   <string name="channel_new_episodes_default">Andere Podcasts</string>
   <string name="channel_import_backup">Import und Sicherung</string>
+  <string name="channel_sync_held">Zurückgehaltene Sync-Änderungen</string>
   <string name="import_into_neutrodyne">In Neutrodyne importieren</string>
   <string name="nothing_to_import">Nichts zu importieren</string>
   <string name="import_unreadable">Diese Datei konnte nicht geöffnet werden. Wähle sie direkt in Neutrodyne aus.</string>
