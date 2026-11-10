@@ -134,6 +134,9 @@ class MainActivity : AppCompatActivity() {
                     RootSlots(
                         player = { slot ->
                             feedback()
+                            // The sync bridge's navigator attachment: the player slot is composed
+                            // under NeutrodyneRoot, where LocalAppNavigator exists.
+                            syncRoot.feedback()
                             PlayerRoute(slot, upNext = { PlayerUpNextRoute(slot.navigate) })
                         },
                         userMessages = syncRoot.userMessages,
@@ -176,6 +179,9 @@ class MainActivity : AppCompatActivity() {
                             disableUpdateChecks = updates.disable,
                             continueHere = syncRoot.continueHere,
                             dismissRemoteSession = syncRoot.dismissRemoteSession,
+                            // A snackbar action tap: sync notices dispatch their own; foreign ids
+                            // (none on Android) stay inert.
+                            userMessageAction = { id -> syncRoot.messageAction(id) },
                             playbackKey = { key ->
                                 dispatchPlaybackKey(
                                     key,

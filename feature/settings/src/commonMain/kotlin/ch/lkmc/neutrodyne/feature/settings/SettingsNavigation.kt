@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SyncAccountHelpKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
@@ -145,6 +146,9 @@ public object SettingsNavigation {
             }
             entry<DiagnosticsKey>(metadata = NdSceneMetadata.paneDetail()) {
                 DiagnosticsPage()
+            }
+            entry<SyncAccountHelpKey>(metadata = NdSceneMetadata.paneDetail()) {
+                SyncAccountHelpPage()
             }
         }
 
