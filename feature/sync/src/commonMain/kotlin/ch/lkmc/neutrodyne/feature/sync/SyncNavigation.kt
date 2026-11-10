@@ -43,7 +43,7 @@ object SyncNavigation {
                 )
             }
             entry<SyncSetupKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
-                SyncSetupScreen(syncController(), key.serverUrl, backups())
+                SyncSetupScreen(syncController(), key.serverUrl, backups(), address())
             }
             entry<SyncDevicesKey>(metadata = NdSceneMetadata.paneDetail()) {
                 SyncDevicesScreen(syncController())

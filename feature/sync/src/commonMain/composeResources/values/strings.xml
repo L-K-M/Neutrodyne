@@ -35,6 +35,7 @@
   <string name="sync_setup_private_feeds">, including %1$d private feed links</string>
   <string name="sync_setup_encrypted">The connection is encrypted (HTTPS).</string>
   <string name="sync_setup_not_encrypted">The connection isn\'t encrypted (http).</string>
+  <string name="sync_setup_identity_read_failed">Couldn't read the saved username. Enter it manually, or try again.</string>
   <string name="sync_setup_method_code">Link code</string>
   <string name="sync_setup_method_invite">Invite code</string>
   <string name="sync_setup_method_password">Password</string>
