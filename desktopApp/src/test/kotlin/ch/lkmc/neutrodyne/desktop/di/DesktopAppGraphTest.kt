@@ -247,7 +247,8 @@ class DesktopAppGraphTest {
             graph.databaseOpener.awaitOpen()
             assertThat(graph.playbackController.play()).isEqualTo(PlayResult.NothingToPlay())
             graph.desktopPlaybackController.shutdown()
-            graph.databaseOpener.requireDatabase().close()
+            // The pool closes only after [closeGraph] joins the appScope collectors —
+            // closing it here would race their Room reads (see the update-graph crash).
         }
 
     /** Download-time chapters (06 Chapters): the graph binds the desktop container reader, so
@@ -262,34 +263,30 @@ class DesktopAppGraphTest {
         runBlocking<Unit> {
             graph.databaseOpener.awaitOpen()
             val db = graph.databaseOpener.requireDatabase()
-            try {
-                val channel =
-                    db.podcastDao().insertPodcast(
-                        podcastEntity().copy(
-                            sourceType = SourceType.YOUTUBE_CHANNEL,
-                            youtubeChannelId = "UC" + "0".repeat(21) + "A",
-                        ),
-                    )
-                val id =
-                    db.episodeDao().insertStub(
-                        episodeEntity(podcastId = channel).copy(externalMediaId = "aaaaaaaaaaA", durationMs = 30_000),
-                    )
-                db.ingestDao().fillYouTubeDescription(
-                    id,
-                    EpisodeDescriptionCodec.encode(
-                        "0:00 Intro\n0:10 Next\n0:20 End",
-                        DescriptionFormat.PLAIN_TEXT,
-                        DescriptionCompleteness.COMPLETE,
+            val channel =
+                db.podcastDao().insertPodcast(
+                    podcastEntity().copy(
+                        sourceType = SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = "UC" + "0".repeat(21) + "A",
                     ),
-                    "notes",
                 )
-                graph.chapterRepository().ensureCurrentLoaded(id)
-                val rows = graph.chapterRepository().observe(id).first()
-                assertThat(rows.map { it.startMs }).containsExactly(0L, 10_000L, 20_000L).inOrder()
-                assertThat(rows.map { it.source }.toSet()).containsExactly(ChapterSource.YOUTUBE_DESC)
-            } finally {
-                db.close()
-            }
+            val id =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = channel).copy(externalMediaId = "aaaaaaaaaaA", durationMs = 30_000),
+                )
+            db.ingestDao().fillYouTubeDescription(
+                id,
+                EpisodeDescriptionCodec.encode(
+                    "0:00 Intro\n0:10 Next\n0:20 End",
+                    DescriptionFormat.PLAIN_TEXT,
+                    DescriptionCompleteness.COMPLETE,
+                ),
+                "notes",
+            )
+            graph.chapterRepository().ensureCurrentLoaded(id)
+            val rows = graph.chapterRepository().observe(id).first()
+            assertThat(rows.map { it.startMs }).containsExactly(0L, 10_000L, 20_000L).inOrder()
+            assertThat(rows.map { it.source }.toSet()).containsExactly(ChapterSource.YOUTUBE_DESC)
         }
 
     @Test
@@ -500,17 +497,15 @@ class DesktopAppGraphTest {
     fun theBoundYouTubeHealthPersistsTheBuildVersionMarker() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
-            try {
-                val health = graph.youTubeHealth
-                assertThat(health::class.simpleName).isEqualTo("DefaultYouTubeHealth")
-                health.awaitLoaded()
-                repeat(5) { health.reportExtraction(ExtractionOutcome.ParseFailure("video$it")) }
-                health.awaitLoaded()
-                assertThat(graph.settingsRepository.get(YouTubeSettingKeys.BREAKER_VERSION_CODE))
-                    .isEqualTo(buildInfo.versionCode)
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
-            }
+            val health = graph.youTubeHealth
+            assertThat(health::class.simpleName).isEqualTo("DefaultYouTubeHealth")
+            health.awaitLoaded()
+            repeat(5) { health.reportExtraction(ExtractionOutcome.ParseFailure("video$it")) }
+            health.awaitLoaded()
+            assertThat(graph.settingsRepository.get(YouTubeSettingKeys.BREAKER_VERSION_CODE))
+                .isEqualTo(buildInfo.versionCode)
+            // The health collector's retry path still reaches `db()` — the pool must stay
+            // open until [closeGraph] joins the scope, never closed under live collectors.
         }
 
     /** M1a: the graph binds the opener the window's start-up gate maps (01 Splash and start-up gate). */
@@ -784,22 +779,18 @@ class DesktopAppGraphTest {
     fun desktopAutomaticDownloadsAndMoveLanesResolveWithSharedOwners() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
-            try {
-                assertThat(graph.autoDownloadPlanner()::class.simpleName).isEqualTo("AutoDownloadPlannerImpl")
-                assertThat(graph.cleanupPlanner()::class.simpleName).isEqualTo("CleanupPlannerImpl")
-                assertThat(graph.downloadMover()::class.simpleName).isEqualTo("DownloadMoverImpl")
-                assertThat(graph.autoDownloadPlanner()).isSameInstanceAs(graph.autoDownloadPlanner())
-                assertThat(graph.cleanupPlanner()).isSameInstanceAs(graph.cleanupPlanner())
-                assertThat(graph.downloadMover()).isSameInstanceAs(graph.downloadMover())
-                assertThat(graph.jobRunner.status.value.keys).containsAtLeast(
-                    "downloads-manual",
-                    "downloads-auto",
-                    "downloads-move",
-                )
-                assertThat(graph.initializers.count { it::class.simpleName == "DesktopDownloadObservers" }).isEqualTo(1)
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
-            }
+            assertThat(graph.autoDownloadPlanner()::class.simpleName).isEqualTo("AutoDownloadPlannerImpl")
+            assertThat(graph.cleanupPlanner()::class.simpleName).isEqualTo("CleanupPlannerImpl")
+            assertThat(graph.downloadMover()::class.simpleName).isEqualTo("DownloadMoverImpl")
+            assertThat(graph.autoDownloadPlanner()).isSameInstanceAs(graph.autoDownloadPlanner())
+            assertThat(graph.cleanupPlanner()).isSameInstanceAs(graph.cleanupPlanner())
+            assertThat(graph.downloadMover()).isSameInstanceAs(graph.downloadMover())
+            assertThat(graph.jobRunner.status.value.keys).containsAtLeast(
+                "downloads-manual",
+                "downloads-auto",
+                "downloads-move",
+            )
+            assertThat(graph.initializers.count { it::class.simpleName == "DesktopDownloadObservers" }).isEqualTo(1)
         }
 
     private companion object {
