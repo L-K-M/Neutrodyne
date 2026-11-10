@@ -15,6 +15,8 @@ import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
 import ch.lkmc.neutrodyne.sync.api.SyncLanGateState
 import ch.lkmc.neutrodyne.sync.api.SyncPendingCollection
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import dev.zacsweers.metro.Inject
@@ -93,7 +95,7 @@ class SyncDiagnosticsReader internal constructor(
                 streamState = memory.streamState,
                 reconnectCount = memory.reconnectCount,
                 lanGate = lanGate,
-                lastErrorCode = errorCode(stored.state?.lastError),
+                lastErrorCode = errorCode(stored.state?.lastError) ?: roundErrorCode(memory.rounds.lastOrNull()),
                 cursorPrefix = stored.state?.cursor?.take(CURSOR_PREFIX_LENGTH),
             ),
         )
@@ -115,6 +117,25 @@ class SyncDiagnosticsReader internal constructor(
             code == SYNC_ERROR_REVOKED -> code
             SyncErrorCode.entries.any { it.wire == code } -> code
             else -> "UNKNOWN"
+        }
+
+    private fun roundErrorCode(round: SyncRoundSummary?): String? =
+        when (round?.failure) {
+            SyncRoundFailure.TRANSPORT -> {
+                round.httpStatus?.takeIf { it in 100..599 }?.let { "HTTP_$it" } ?: "TRANSPORT"
+            }
+
+            SyncRoundFailure.PROTOCOL -> {
+                round.protocolCode?.takeIf { code -> SyncErrorCode.entries.any { it.wire == code } } ?: "PROTOCOL"
+            }
+
+            SyncRoundFailure.UNEXPECTED -> {
+                "UNEXPECTED"
+            }
+
+            null -> {
+                null
+            }
         }
 
     private fun pendingCollection(wire: String): SyncPendingCollection =

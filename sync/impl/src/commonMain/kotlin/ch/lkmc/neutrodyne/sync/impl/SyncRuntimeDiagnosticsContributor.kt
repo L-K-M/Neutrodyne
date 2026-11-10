@@ -67,4 +67,5 @@ internal fun SyncDiagnosticsSnapshot.runtimeLines(): List<DiagnosticsLine> =
         add(DiagnosticsLine("reconnectCount", reconnectCount.toString()))
         add(DiagnosticsLine("lanGate", lanGate.name))
         add(DiagnosticsLine("cursorPrefix", cursorPrefix ?: "none"))
+        add(DiagnosticsLine("runtimeErrorCode", lastErrorCode ?: "none"))
     }

@@ -64,7 +64,7 @@ interface SyncController {
 
     fun syncNow()
 
-    /** Local-only diagnostics. Never makes a request or reads a credential. */
+    /** Local diagnostics; no sync RPC or credential access. */
     suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError>
 
     /** Approves nothing yet; returns the device the code names (10 Link methods). */
