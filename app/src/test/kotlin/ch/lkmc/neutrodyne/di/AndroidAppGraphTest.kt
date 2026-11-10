@@ -105,13 +105,15 @@ class AndroidAppGraphTest {
 
     /**
      * Graph-owned work must die before the database it may still be reading. An
-     * application-scope coroutine suspended inside Room's `Pool.acquire` throws
-     * `Connection pool is closed` when the pool closes underneath it, and the debug
-     * handler rethrows the failure on the main looper — CI 462's
-     * `theCredentialLookupIsTheSecretStore` crash, attributed to whichever test
-     * drained the shared queue. Cancel and join every graph child first, close the
-     * opened pool second, then run the looper so a failure a child already posted
-     * lands on the test that produced it instead of a later one.
+     * application-scope coroutine whose read lands on the closed pool throws a
+     * closed-resource SQLException (`Connection pool is closed` inside Room's
+     * acquire/`useConnection`, `Database is closed` at `RoomDatabase.useConnection`'s
+     * `throwIfClosed`), and the debug handler rethrows the failure on the main
+     * looper — CI 462's `theCredentialLookupIsTheSecretStore` crash, attributed to
+     * whichever test drained the shared queue. Cancel and join every graph child
+     * first, close the opened pool second, then run the looper so a failure a
+     * child already posted lands on the test that produced it instead of a later
+     * one.
      */
     @After
     fun shutdownGraph() =
@@ -476,20 +478,31 @@ class AndroidAppGraphTest {
     }
 
     /**
-     * CI 462's crash, reproduced deterministically (run 42757540920, unit job 129635302258:
-     * `android.database.SQLException: Error code: 21, message: Connection pool is closed`
-     * from `androidx.room3.coroutines.Pool.acquire` on the IO dispatcher). WAL sizes the
-     * reader pool at four (`WAL_DEFAULT_NUMBER_OF_READERS`); holding all four connections
-     * parks the next reader inside `Pool.acquire`'s permit wait — the in-flight position
-     * CI's reader occupied when `close()` won the race. `Pool.close` never releases the
-     * semaphore: the parked reader wakes only when a holder recycles, then meets
-     * `isClosed` and throws. `SyncControllerImpl.init` launches exactly such an uncaught
-     * graph-owned read (`scope.launch { refreshStatus() }` → `db.syncStateDao().get()`),
-     * and the application scope's debug handler rethrows it on the main looper — the
-     * delivery path that attributed the crash to whichever test drained the queue.
+     * The ownership violation behind CI 462's crash (run 42757540920, unit job
+     * 129635302258: `android.database.SQLException: Error code: 21, message:
+     * Connection pool is closed` from `androidx.room3.coroutines.Pool.acquire` on the
+     * IO dispatcher): the OLD order closed the pool while graph-owned work was still
+     * alive, and the application scope's debug handler rethrew the uncaught child
+     * failure on the shared main looper — attributed to whichever test drained it.
+     * WAL sizes the reader pool at four (`WAL_DEFAULT_NUMBER_OF_READERS`); holding all
+     * four parks the next reader inside `Pool.acquire`'s permit wait, the in-flight
+     * position CI's reader occupied. `SyncControllerImpl.init` launches three uncaught
+     * graph-owned database children (two `refreshStatus` reads of
+     * `db.syncStateDao().get()` plus the `syncHeldDao().observeAll()` collector).
+     *
+     * The exact CI throw is NOT pinned here — `Pool.close` never releases
+     * `connectionPermits`, and every holder's `NonCancellable` recycle dies in
+     * `markRecycled` on the reaped wrapper before `pool.recycle` runs, so parked
+     * waiters never resume and are silently cancelled. What is deterministic: a
+     * reader arriving after `close()` meets `throwIfClosed`'s `"Database is closed"`
+     * at `RoomDatabase.useConnection`'s entry; arrivals inside `onClosed`'s
+     * native-close window additionally throw the CI spelling
+     * `"Connection pool is closed"`; and the reaped holders post
+     * `"connection is closed"`. Every spelling is the same failure — an unjoined
+     * graph reader on a closed resource, delivered through the real handler.
      */
     @Test
-    fun anUnjoinedGraphReaderMeetsTheClosedPoolAsCiSaw() =
+    fun unjoinedGraphReadersCrashOnClosedResources() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
             val db = graph.databaseOpener.requireDatabase()
@@ -509,18 +522,17 @@ class AndroidAppGraphTest {
             val controller = graph.syncController
             db.close()
             release.complete(Unit)
-            // A reader that arrives only now meets `isClosed` at `useConnection`'s entry
-            // check — the deterministic twin of the in-flight `Pool.acquire` throw.
-            // Joining it before the scope dies guarantees it ran to the throw: nothing
-            // cancels it first, so the "Connection pool is closed" post always lands
-            // regardless of which parked coroutine wins the wake-up race.
+            // A reader launched only now always throws `throwIfClosed`'s
+            // "Database is closed" at `RoomDatabase.useConnection`'s entry — the
+            // deterministic post-close throw, one step removed from `Pool.acquire`'s
+            // `isClosed`. Joining it before the scope dies guarantees it ran: nothing
+            // cancels it first.
             graph.appScope.launch { db.syncStateDao().get() }.join()
             graph.appScope.coroutineContext.job
                 .cancelAndJoin()
             // Every uncaught child failure was posted to the main looper. Draining it
-            // must surface SQLITE_MISUSE closed-resource crashes: "Connection pool is
-            // closed" from an acquire that meets `isClosed`, or "connection is closed"
-            // from a `useConnection` recycle whose wrapper `Pool.close` reaped mid-use.
+            // must surface only closed-resource crashes — any other post means an
+            // unexpected failure escaped the graph unexamined.
             val posted = mutableListOf<Throwable>()
             var rounds = 0
             while (!shadowOf(Looper.getMainLooper()).isIdle && rounds++ < LOOPER_DRAIN_ROUNDS) {
@@ -534,15 +546,20 @@ class AndroidAppGraphTest {
             for (failure in posted) {
                 assertThat(failure).hasMessageThat().contains("closed")
             }
-            assertThat(posted.mapNotNull { it.message }.count { "pool is closed" in it }).isAtLeast(1)
+            // Guaranteed by the joined reader's "Database is closed"; the CI spelling
+            // "Connection pool is closed" counts too when an in-window child produces it.
+            assertThat(
+                posted.mapNotNull { it.message }.count { "Database is closed" in it || "pool is closed" in it },
+            ).isAtLeast(1)
             assertThat(controller.status.value).isEqualTo(SyncStatus.NotConfigured)
         }
 
     /**
      * The ordering the class' `@After` enforces for every test: graph-owned work is
-     * cancelled and joined before the opened pool may close, so no reader can meet
-     * `isClosed` — each dies at the permit wait with a `CancellationException` instead
-     * of a `Connection pool is closed` posted to the main looper.
+     * cancelled and joined before the opened pool may close, so no reader can reach
+     * a closed resource — each dies at the permit wait or before it with a
+     * `CancellationException` instead of a closed-resource crash posted to the
+     * main looper.
      */
     @Test
     fun graphReadersAreCancelledAndJoinedBeforeThePoolCloses() =
@@ -560,8 +577,9 @@ class AndroidAppGraphTest {
                 }
             }
             assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue()
-            // A graph-scope read and `SyncControllerImpl.init`'s `refreshStatus` both park
-            // at `Pool.acquire`'s permit wait while the reader pool is fully held.
+            // A graph-scope read and `SyncControllerImpl.init`'s database children
+            // (`refreshStatus` plus the `syncHeld` observer) park at `Pool.acquire`'s
+            // permit wait while the reader pool is fully held.
             val parked = graph.appScope.launch { db.syncStateDao().get() }
             val controller = graph.syncController
             graph.appScope.coroutineContext.job
