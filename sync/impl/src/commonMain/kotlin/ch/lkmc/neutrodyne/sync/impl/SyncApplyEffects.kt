@@ -452,6 +452,11 @@ class SyncApplyEffects(
                         pendingSetting = materializeWinner,
                         pendingAuth = stored?.pendingAuth,
                         settingIntent = stored?.settingIntent,
+                        rejectedSetting =
+                            stored?.rejectedSetting?.takeIf { rejected ->
+                                rejected.clock?.let { runCatching { Hlc.parse(it) }.getOrNull() }?.let { it > clock } ==
+                                    true
+                            },
                     ),
                 ),
             ),

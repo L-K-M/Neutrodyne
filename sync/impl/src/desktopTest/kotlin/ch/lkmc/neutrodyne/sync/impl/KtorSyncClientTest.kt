@@ -102,6 +102,19 @@ class KtorSyncClientTest {
         }
 
     @Test
+    fun anOversizePushExposesTheHttpStatusForAdaptiveBatching() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(
+                json("""{"type":"about:blank","title":"Too large","status":413,"code":"payload_too_large"}""", 413),
+            )
+            val failure = assertFailsWith<SyncTransportException> { fixture.client.sync(null, emptyList()) }
+            assertEquals(413, failure.status)
+            assertEquals("payload_too_large", failure.code)
+            assertEquals("/api/v1/sync", fixture.take().url.encodedPath)
+        }
+
+    @Test
     fun theChangesRequestTrimsTheBaseAndEncodesTheCursor() =
         runTest {
             val fixture = fixture()

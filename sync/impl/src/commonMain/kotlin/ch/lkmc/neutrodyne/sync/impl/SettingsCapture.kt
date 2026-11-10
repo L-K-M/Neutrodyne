@@ -299,6 +299,33 @@ class SettingsCapture(
         return settings.canonicalJson(key, json)
     }
 
+    /** Caller owns the profile writer; this records no accepted value and performs no store IO. */
+    internal suspend fun rejectOversizeSetting(row: SyncOutboxEntity) {
+        if (row.coll != SyncCollection.SETTING.wire || row.field != "v") return
+        val literal =
+            row.value?.let { canonicalLiteral(row.rid, it) }
+                ?: throw IOException("rejected setting literal is unreadable")
+        val entry = db.syncClockDao().get(row.coll, row.rid)
+        val raw = entry?.clocks?.let(::decode)
+        if (entry != null && raw == null) throw IOException("setting metadata is unreadable")
+        val stored = raw ?: RawSyncRecord(RecordState(SyncCollection.SETTING))
+        db.syncClockDao().upsert(
+            SyncClockEntity(
+                row.coll,
+                row.rid,
+                encode(
+                    stored.copy(
+                        rejectedSetting =
+                            SettingBaseline(
+                                settingBaselineHash(literal),
+                                Hlc(row.hlc, NodeId(row.nodeId)).toString(),
+                            ),
+                    ),
+                ),
+            ),
+        )
+    }
+
     /** Baselines [json] at [clock] when that is newer — merged into the fresh row, one transaction. */
     private suspend fun advanceBaseline(
         key: SettingKey<*>,
@@ -446,6 +473,17 @@ class SettingsCapture(
                 val snapshot = settings.currentSnapshot(key) ?: return@withLock
                 val current = snapshot.json
                 val state = db.syncStateDao().get() ?: return@withLock
+                val rejected = raw?.rejectedSetting
+                val rejectedReceipt =
+                    raw?.settingIntent?.takeIf { it.clock == rejected?.clock }?.receiptClock ?: rejected?.clock
+                if (rejected != null && rejectedReceipt != null &&
+                    captureClock(snapshot.origin, state)?.toString() == rejectedReceipt &&
+                    matchesBaseline(key, current, rejected)
+                ) {
+                    // A 413 already retired this exact materialized local receipt. An explicit
+                    // new edit has its own outbox row/receipt; off-switch writes have no clock.
+                    return@withLock
+                }
                 val uncaptured = snapshot.origin != null && captureClock(snapshot.origin, state) == null
                 val accepted = raw?.state?.fields?.get("v")
                 val baseline = raw?.settingHash

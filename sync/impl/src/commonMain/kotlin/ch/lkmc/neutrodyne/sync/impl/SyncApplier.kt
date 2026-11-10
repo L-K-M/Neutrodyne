@@ -318,6 +318,7 @@ class SyncApplier(
                     pendingSetting = pendingSetting ?: stored?.pendingSetting,
                     pendingAuth = auth?.pending ?: stored?.pendingAuth,
                     settingIntent = stored?.settingIntent,
+                    rejectedSetting = stored?.rejectedSetting,
                 ),
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)

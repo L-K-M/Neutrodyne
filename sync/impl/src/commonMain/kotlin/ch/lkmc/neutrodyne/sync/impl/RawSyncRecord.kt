@@ -30,6 +30,8 @@ data class RawSyncRecord(
     val settingHash: SettingBaseline? = null,
     /** The predecessor snapshot of a local intent, committed atomically with its outbox row. */
     val settingIntent: SettingIntent? = null,
+    /** A rejected local setting receipt, kept separately from accepted server fields. */
+    val rejectedSetting: SettingBaseline? = null,
     /** A winning remote setting awaiting its DataStore write. */
     val pendingSetting: PendingSetting? = null,
     /** A winning remote credential awaiting its `SecretStore.put` and `credentialId` write. */
