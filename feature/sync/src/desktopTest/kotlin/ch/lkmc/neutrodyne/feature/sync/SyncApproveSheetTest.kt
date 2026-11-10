@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -37,6 +38,7 @@ import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
+import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlinx.coroutines.CompletableDeferred
@@ -409,6 +411,14 @@ internal class GatedSyncController(
     var devicesGate: CompletableDeferred<Unit>? = null
     var renameGate: CompletableDeferred<Unit>? = null
     var revokeGate: CompletableDeferred<Unit>? = null
+    var playbackSettingsGate: CompletableDeferred<Unit>? = null
+    var sharePasswordsGate: CompletableDeferred<Unit>? = null
+
+    /**
+     * Where successful switch writes land, mirroring `SyncControllerImpl`'s persistence through
+     * `SyncServerAddress`; a sink failure becomes `SyncPreferenceError.WriteFailed`.
+     */
+    var preferenceSink: SyncServerAddress? = null
 
     override suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem> {
         approveGate?.await()
@@ -439,5 +449,27 @@ internal class GatedSyncController(
     override suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem> {
         revokeGate?.await()
         return fake.revokeDevice(deviceId)
+    }
+
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> {
+        playbackSettingsGate?.await()
+        fake.setSyncPlaybackSettings(enabled)
+        val sink = preferenceSink ?: return Outcome.Success(Unit)
+        return if (sink.setSyncPlaybackSettings(enabled) is Outcome.Failure) {
+            Outcome.Failure(SyncPreferenceError.WriteFailed)
+        } else {
+            Outcome.Success(Unit)
+        }
+    }
+
+    override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SyncPreferenceError> {
+        sharePasswordsGate?.await()
+        fake.setShareFeedPasswords(enabled)
+        val sink = preferenceSink ?: return Outcome.Success(Unit)
+        return if (sink.setShareFeedPasswords(enabled) is Outcome.Failure) {
+            Outcome.Failure(SyncPreferenceError.WriteFailed)
+        } else {
+            Outcome.Success(Unit)
+        }
     }
 }
