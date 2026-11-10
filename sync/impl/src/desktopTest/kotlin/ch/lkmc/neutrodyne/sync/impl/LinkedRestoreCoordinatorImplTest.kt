@@ -177,7 +177,7 @@ class LinkedRestoreCoordinatorImplTest {
                 sharePasswords = { false },
                 coordinator = credentials,
                 notices = SyncNoticeBus(),
-                deviceNames = DeviceNames { emptyList() },
+                deviceNames = ClientDeviceNames { emptyList() },
             )
         val effects =
             SyncApplyEffects(
