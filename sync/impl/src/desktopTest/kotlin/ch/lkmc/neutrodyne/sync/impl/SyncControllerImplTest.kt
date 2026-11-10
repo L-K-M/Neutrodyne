@@ -1506,6 +1506,7 @@ private class Harness(
             db = db,
             client = client,
             applier = applier,
+            playback = NoPlaybackSync,
             clock = clock,
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },

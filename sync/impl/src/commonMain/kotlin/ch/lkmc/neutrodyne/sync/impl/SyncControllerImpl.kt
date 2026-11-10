@@ -1001,6 +1001,9 @@ class SyncControllerImpl(
     private suspend fun refreshHeld() {
         _heldChanges.value =
             db.syncHeldDao().all().mapNotNull { row ->
+                // Only a HELD row is a prompt; STAGED and DEFERRED rows are the guard's
+                // in-flight state (10 Mass-change guard 2-4).
+                if (MassChangeGuard.stateOf(row.batch) != HeldState.HELD) return@mapNotNull null
                 val batch =
                     runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull()
                         ?: return@mapNotNull null

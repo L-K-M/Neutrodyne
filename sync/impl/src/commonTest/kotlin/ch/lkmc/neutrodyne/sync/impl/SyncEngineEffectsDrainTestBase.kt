@@ -101,6 +101,7 @@ abstract class SyncEngineEffectsDrainTestBase {
                 db = db,
                 client = client,
                 applier = applier(db, port, clock, secrets, credentials),
+                playback = NoPlaybackSync,
                 clock = clock,
                 secrets = secrets,
                 sharePasswords = { false },
