@@ -11,6 +11,7 @@
   <string name="channel_group_new_episodes">New episodes</string>
   <string name="channel_new_episodes_default">Other podcasts</string>
   <string name="channel_import_backup">Import and backup</string>
+  <string name="channel_sync_held">Held sync changes</string>
   <string name="import_into_neutrodyne">Import into Neutrodyne</string>
   <string name="nothing_to_import">Nothing to import</string>
   <string name="import_unreadable">Couldn\'t open this file. Try choosing it from inside Neutrodyne.</string>
