@@ -194,4 +194,21 @@
   <string name="sync_diag_collection_session">Session</string>
   <string name="sync_diag_collection_setting">Settings</string>
   <string name="sync_diag_collection_other">Other</string>
+
+  <!-- Held-changes review and dialog (08 Settings › Sync status card, Held changes). -->
+  <plurals name="sync_held_waiting">
+    <item quantity="one">%1$d change is waiting for you</item>
+    <item quantity="other">%1$d changes are waiting for you</item>
+  </plurals>
+  <string name="sync_held_title">%1$s removed %2$s</string>
+  <string name="sync_held_title_groups">%1$s removed %2$s and %3$s</string>
+  <string name="sync_held_question">Apply this on this device too?</string>
+  <plurals name="sync_held_and_more">
+    <item quantity="one">and %1$d more</item>
+    <item quantity="other">and %1$d more</item>
+  </plurals>
+  <string name="sync_held_apply">Apply</string>
+  <string name="sync_held_keep_mine">Keep mine</string>
+  <string name="sync_held_keep_mine_hint">Keeps them here and adds them back on your other devices</string>
+  <string name="sync_held_decide_later">Decide later</string>
 </resources>
