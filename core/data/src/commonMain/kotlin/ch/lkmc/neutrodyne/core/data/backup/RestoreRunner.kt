@@ -20,7 +20,6 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
-import ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
@@ -120,7 +119,7 @@ internal class RestoreRunner(
     suspend fun run(sessionId: Long): RestoreRunResult = mutex.withLock { runLocked(sessionId) }
 
     private suspend fun runLocked(sessionId: Long): RestoreRunResult {
-        val request =
+        val pending =
             when (val gate = db.withReadTransaction { gateLocked(sessionId) }) {
                 Gate.NotPending -> {
                     return RestoreRunResult.NotPending
@@ -130,12 +129,29 @@ internal class RestoreRunner(
                     gate.request
                 }
             }
+        // 05/08: the actual link answer is read outside the Room transaction (the coordinator
+        // reads settings and the secret store). A stale `linkedAt` (copied database, revoked
+        // token, disabled switch or missing token) must not offer the linked path; the stored
+        // ALL_DEVICES reach keeps its claim-cleared state on the linked path.
+        val linkedHost =
+            when (val link = linkedSync.actualLinkedHost()) {
+                is Outcome.Success -> link.value
+                is Outcome.Failure -> return RestoreRunResult.Retry(sessionId, link.error)
+            }
+        val request = pending.withActualLink(linkedHost != null)
 
         progressFlow.value = RestoreProgress.Running(sessionId, PHASE_VALIDATE, 0, 0)
         // 05 step 1 first: the payload is validated before any unlink, so a bad archive cancels
         // the session without deleting the token or clearing the sync tables.
         val staged =
-            when (val outcome = stager.inspect(payloads.payloadFile(request.payloadPath), stagingRoot)) {
+            when (
+                val outcome =
+                    stager.inspect(
+                        payloads.payloadFile(request.payloadPath),
+                        stagingRoot,
+                        resolvedLinkHost = ResolvedLinkHost(linkedHost),
+                    )
+            ) {
                 is Outcome.Failure -> return failRestore(sessionId, outcome.error, request.auto)
                 is Outcome.Success -> outcome.value
             }
@@ -160,10 +176,10 @@ internal class RestoreRunner(
      * `optionsJson` carrying `restoreRequestedAt` and a mode, and a payload to re-validate.
      * A corrupt options row is logged and left alone — never replaced with defaults.
      *
-     * The link answer is re-read too (05): a linked Merge captures with the backup's
-     * timestamps; a Replace with reach ALL_DEVICES ran its claim-time `linkedAt` clear, so
-     * it stays on the linked execution path through its stored reach; a Replace that is no
-     * longer linked (the user unlinked meanwhile) degrades to the plain local rules.
+     * The link answer is read outside this transaction (05/08): a linked Merge captures with
+     * the backup's timestamps; a Replace with reach ALL_DEVICES ran its claim-time `linkedAt`
+     * clear, so it stays on the linked execution path through its stored reach; a Replace that
+     * is no longer linked (the user unlinked meanwhile) degrades to the plain local rules.
      */
     private suspend fun gateLocked(sessionId: Long): Gate {
         val session = db.importDao().sessionById(sessionId) ?: return Gate.NotPending
@@ -184,7 +200,6 @@ internal class RestoreRunner(
                     return Gate.NotPending
                 }
         val payloadPath = session.payloadPath ?: return Gate.NotPending
-        val linked = db.syncStateDao().get()?.linkedAt != null
         // The stored reach decides: THIS_DEVICE on an unlinked device is the plain local
         // Replace; ALL_DEVICES keeps its claim-cleared unlinked state on the linked path.
         val reach =
@@ -193,20 +208,36 @@ internal class RestoreRunner(
             } else {
                 LinkedRestoreReach.THIS_DEVICE
             }
-        val linkedReplace = mode == RestoreMode.REPLACE && (linked || reach == LinkedRestoreReach.ALL_DEVICES)
         return Gate.Requested(
-            RequestedRestore(
+            PendingRestore(
                 mode = mode,
                 categories = options.restoreCategories,
                 payloadPath = payloadPath,
                 auto = options.fromAndroidBackup,
-                linkedMerge = linked && mode == RestoreMode.MERGE,
-                // ALL_DEVICES keeps its claim-cleared unlinked state; the unlinked Replace
-                // rules apply to the writes, and the finish runs the upload/prune steps.
-                suppressCapture = linkedReplace && reach == LinkedRestoreReach.ALL_DEVICES,
-                unlinkFirst = linkedReplace && reach == LinkedRestoreReach.THIS_DEVICE,
-                completeAllDevices = linkedReplace && reach == LinkedRestoreReach.ALL_DEVICES,
+                reach = reach,
             ),
+        )
+    }
+
+    /**
+     * The link-derived execution flags (05 Restore while linked): a linked Merge captures with
+     * the backup's timestamps; THIS_DEVICE unlinks first; ALL_DEVICES keeps its claim-cleared
+     * unlinked state on the linked path, so the finish runs the upload/prune steps. A false
+     * [actuallyLinked] on THIS_DEVICE degrades to the plain local rules — a stale `linkedAt`
+     * must never unlink, log out or clear the remembered profile.
+     */
+    private fun PendingRestore.withActualLink(actuallyLinked: Boolean): RequestedRestore {
+        val linkedReplace =
+            mode == RestoreMode.REPLACE && (actuallyLinked || reach == LinkedRestoreReach.ALL_DEVICES)
+        return RequestedRestore(
+            mode = mode,
+            categories = categories,
+            payloadPath = payloadPath,
+            auto = auto,
+            linkedMerge = actuallyLinked && mode == RestoreMode.MERGE,
+            suppressCapture = linkedReplace && reach == LinkedRestoreReach.ALL_DEVICES,
+            unlinkFirst = linkedReplace && reach == LinkedRestoreReach.THIS_DEVICE,
+            completeAllDevices = linkedReplace && reach == LinkedRestoreReach.ALL_DEVICES,
         )
     }
 
@@ -462,11 +493,22 @@ internal class RestoreRunner(
         data object NotPending : Gate
 
         data class Requested(
-            val request: RequestedRestore,
+            val request: PendingRestore,
         ) : Gate
     }
 
     /** The persisted intent decoded out of the session row (`optionsJson` + `payloadPath`). */
+    private class PendingRestore(
+        val mode: RestoreMode,
+        val categories: Set<RestoreCategory>,
+        val payloadPath: String,
+        /** `ImportOptions.fromAndroidBackup` — this session adopted the auto-snapshot. */
+        val auto: Boolean,
+        /** The stored reach; THIS_DEVICE unless a Replace claimed ALL_DEVICES. */
+        val reach: LinkedRestoreReach,
+    )
+
+    /** The execution flags [PendingRestore.withActualLink] derives from the live link answer. */
     private class RequestedRestore(
         val mode: RestoreMode,
         val categories: Set<RestoreCategory>,

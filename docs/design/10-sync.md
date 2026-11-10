@@ -624,6 +624,21 @@ Content-Type: application/problem+json
   - `captureKind = REPLAY` distinguishes accepted replays from unaccepted LOCAL captures. Offset correction re-stamps only LOCAL rows from this node; foreign and same-node replays keep their complete original clock. A clock admission failure on a replay is surfaced, never silently repaired by changing the accepted write.
   - After a server restore it returns what the restored copy lost, removals included (a device whose local unsubscribe was acknowledged and then lost pushes its `subscribed = false` again). After a GC-driven `410` (a device unseen for 180 days), records deleted elsewhere and purged after 365 days come back from this device — the accepted price of "Merge never removes local data".
 
+**Implementation note (2026-11-10, cursor recovery).** An eligible linked round
+handles `410 cursor_expired` inside its existing round mutex. Recovery streams
+pages through the normal field applier and mass-change guard, then captures
+replays before adopting the final cursor. It keeps the expired cursor until
+all replay rows are durable, so cancellation or a capture failure retries the
+full pull. This replaces the proposed recovery staging file; ordinary
+first-link staging remains separate. Replay scans page through 128 clock keys
+and decode one raw record at a time. The current scan reasserts every known
+field, including unchanged server fields, rather than selecting only missing
+or newer fields. This adds idempotent upload work and retains original clocks;
+selective replay and automatic clock-offset correction remain open work.
+A rejected replay retains its original clock and stops recovery's immediate
+resend. Clock-skew rejection surfaces `ClockSkew`; rejection never emits the
+successful `Resynced` notice.
+
 ### Versioning
 
 - `PROTOCOL_VERSION` changes only for incompatible changes (a changed meaning, a removed field, a new required member). Additive changes — new optional members, new fields in a collection, new `features` — keep version 1: older peers ignore what they do not know, and the server stores unknown fields as `Lww`. A new field whose kind is not `Lww` (a new grow-set or max field) would merge wrongly on an older server, so it ships behind a new `features` flag and clients send it only to servers that advertise the flag.
@@ -1116,6 +1131,32 @@ connected flag — no token or cursor.
 - **Android:** `KeystoreCredentialStore` — the `credential` table encrypted with the Android Keystore key ([03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore), [02 credential](02-data-model.md#credential)). 01's `AuthInterceptor` matches feed origins only, so a `sync:` origin is never sent to a feed host; 02's `db-maintenance` credential sweep must keep `sync:%` origins (it removes credentials no podcast references).
 - **Desktop:** `DesktopSecretStore` ([PO-44](../PLAN.md#48-further-product-owner-decisions)): DPAPI on Windows, a `0600` file elsewhere. The `sync:<host>` entry also carries an installation fingerprint (member `fp`: SHA-256 of the machine ID, OS user name and data-directory path — not the host name, which macOS changes with the network; 11 owns the definition and the file format, [11 Secrets](11-desktop.md#secrets)); on a mismatch — a data directory copied to another computer — the token is not used and Settings › Sync shows "Reconnect", so two machines never share a device ID and an HLC node ([Relinking, reconnecting and copied installations](#relinking-reconnecting-and-copied-installations)).
 - The token never appears in logs, crash reports, diagnostics exports or backups ([N3](../PLAN.md#22-non-functional-requirements)); the `SYNC` OkHttp client adds it per request in `SyncClient`, not through an interceptor shared with other clients.
+
+**Implementation note (2026-11-10, account ownership).** Identity writes and
+round startup share a lock. A round captures the saved URL, that URL's token
+and the link identity before acquiring the round mutex, then uses an immutable
+transport view. Structured first-link calls can read their writer's identity
+without acquiring the same lock twice. Replies, acknowledgements and cursor
+writes verify the captured link inside their database transactions; stale
+responses cannot mutate a replacement link. Authorisation disables capture
+and records the new pending identity before saving its token or address. A
+partial credential write therefore leaves sync disabled and retains the
+local library instead of running the old account with new credentials.
+Direct control requests capture the same credentials and identity. A late 401
+can revoke only its owning link, including cleanup after the engine has already
+marked that link revoked. First-link merges also hold the identity lock until
+all their writes and cancellation cleanup finish. The event stream uses the
+same ownership check for its credential snapshot, remote-change signal and
+401 cleanup. A stable link identity change replaces the open stream even
+when both accounts are linked. Pending authorization closes the old stream;
+its own gate cancellation cannot interrupt committed revocation cleanup.
+
+After successful authentication to a different server or account, the pending
+profile starts with empty clock, outbox, parked and held tables and resets its
+HLC namespace and offset. Visible library rows remain for the explicit merge
+choice to seed under the new identity. Reauthentication to the same server and
+account retains its accepted clocks and pending writes; a failed password
+attempt never clears them.
 
 ### Local-network gate
 

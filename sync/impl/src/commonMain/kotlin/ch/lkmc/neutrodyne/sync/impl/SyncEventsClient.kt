@@ -2,12 +2,15 @@
 
 package ch.lkmc.neutrodyne.sync.impl
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.sync.api.SyncStreamState
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangedEvent
@@ -22,8 +25,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +40,8 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
@@ -217,6 +222,8 @@ class SyncEventsClient(
     private val onRemoteChanged: suspend () -> Unit,
     private val onRevoked: suspend () -> Unit,
     private val random: Random = Random,
+    private val diagnosticsRuntime: SyncRuntimeDiagnostics = SyncRuntimeDiagnostics(),
+    private val identityMutex: SyncIdentityLock = SyncIdentityLock(),
 ) {
     /** `SyncActivity.LIVE` while a stream is open (10 Live updates). */
     private val _connected = MutableStateFlow(false)
@@ -226,14 +233,15 @@ class SyncEventsClient(
     private val allowed = MutableStateFlow(false)
 
     /**
-     * `sync_state`'s live-link reading, kept hot: `SyncScheduler` funnels every link change
-     * through [reevaluate], so an unlink or revocation closes the stream at once instead of
-     * waiting out a stream read or the watchdog.
+     * The stable live-link identity. A true-to-true account replacement must also close the
+     * old stream; cursor and clock progress do not restart it. Scheduler link changes and
+     * pending authorization writes update it through [reevaluate].
      */
-    private val linkLive = MutableStateFlow(false)
+    private val linkLive = MutableStateFlow<SyncLinkIdentity?>(null)
 
     @Volatile private var started = false
     private var heartbeatSeconds = SSE_HEARTBEAT_DESKTOP_SECONDS
+    private var diagnosticsTicket: SyncDiagnosticTicket? = null
 
     /**
      * Starts the supervisor once (the platform's start-up initializer calls it). [allowedFlow]
@@ -248,22 +256,34 @@ class SyncEventsClient(
         started = true
         this.heartbeatSeconds = heartbeatSeconds
         scope.launch { allowedFlow.collect { allowed.value = it } }
-        scope.launch { linkLive.value = db.isSyncLinked() }
+        scope.launch { reevaluate() }
         scope.launch { supervise() }
     }
 
     /** `SyncScheduler`'s funnel for link, unlink and revoke — re-reads the gate at once. */
     internal suspend fun reevaluate() {
-        linkLive.value = db.isSyncLinked()
+        identityMutex.withLock {
+            linkLive.value =
+                db
+                    .syncStateDao()
+                    .get()
+                    ?.takeIf { it.isLive() }
+                    ?.linkIdentity()
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun supervise() {
-        combine(allowed, linkLive, network.status) { a, l, n -> a && l && n.isConnected }
+        combine(allowed, linkLive, network.status) { a, link, n -> link.takeIf { a && n.isConnected } }
             .distinctUntilChanged()
-            .collectLatest { run ->
+            .collectLatest { owner ->
                 _connected.value = false
-                if (run) runLoop()
+                try {
+                    if (owner != null) runLoop(owner)
+                } finally {
+                    _connected.value = false
+                    diagnosticsTicket?.let { diagnosticsRuntime.streamState(it, SyncStreamState.STOPPED) }
+                }
             }
     }
 
@@ -271,11 +291,26 @@ class SyncEventsClient(
      * The reconnect loop for one gate-open period: connect → read → wait → connect, until the
      * gate closes (collectLatest cancels it) or the link reads dead between attempts.
      */
-    private suspend fun runLoop() {
+    private suspend fun runLoop(owner: SyncLinkIdentity) {
         var failures = 0
         var retryMs = SERVER_RETRY_MS
-        while (coroutineContext.isActive && db.isSyncLinked()) {
-            when (val outcome = runOnce { retryMs = it }) {
+        while (coroutineContext.isActive) {
+            if (!owns(owner)) {
+                reevaluate()
+                return
+            }
+            val outcome = runOnce(owner) { retryMs = it }
+            diagnosticsTicket?.let {
+                diagnosticsRuntime.streamState(
+                    it,
+                    when (outcome) {
+                        Outcome.NoSse -> SyncStreamState.UNSUPPORTED
+                        Outcome.Idle, Outcome.Superseded, is Outcome.Revoked -> SyncStreamState.STOPPED
+                        else -> SyncStreamState.WAITING
+                    },
+                )
+            }
+            when (outcome) {
                 // A clean end (24-h cap, shutdown, a proxy hop) reconnects at the server's
                 // own cadence; a stream that opened proves the route works, so no backoff.
                 Outcome.Ended -> {
@@ -293,8 +328,14 @@ class SyncEventsClient(
                     delay(FEATURE_RECHECK_MS)
                 }
 
-                Outcome.Revoked -> {
-                    markRevoked()
+                is Outcome.Revoked -> {
+                    markRevoked(outcome.profile)
+                    reevaluate()
+                    return
+                }
+
+                Outcome.Superseded -> {
+                    reevaluate()
                     return
                 }
 
@@ -309,43 +350,65 @@ class SyncEventsClient(
             }
         }
         // A link change that raced past the scheduler funnel still flips the gate here.
-        linkLive.value = db.isSyncLinked()
+        reevaluate()
     }
 
-    private suspend fun runOnce(onServerRetry: (Long) -> Unit): Outcome {
-        val url = address.serverUrl() ?: return Outcome.Idle
-        val deviceId = db.syncStateDao().get()?.deviceId
-        val token = tokens.load(hostOf(url))
-        // A linked row without a token is the "Reconnect" state — idle, not live.
-        if (deviceId == null || token == null) return Outcome.Idle
+    private suspend fun runOnce(
+        owner: SyncLinkIdentity,
+        onServerRetry: (Long) -> Unit,
+    ): Outcome {
+        val context =
+            identityMutex.withLock {
+                val state = db.syncStateDao().get() ?: return@withLock null
+                if (!state.isLive() || state.linkIdentity() != owner) return@withLock null
+                val url = address.serverUrl() ?: return@withLock null
+                if (url != state.serverUrl || state.deviceId == null) return@withLock null
+                val token = tokens.load(hostOf(url)) ?: return@withLock null
+                StreamContext(state, url, token)
+            } ?: return Outcome.Idle
+        val state = context.profile
+        val url = context.url
+        val token = context.token
+        val deviceId = checkNotNull(state.deviceId)
+        val ticket = diagnosticsRuntime.activate(state.diagnosticProfile(url))
+        diagnosticsTicket = ticket
+        diagnosticsRuntime.streamState(ticket, SyncStreamState.CONNECTING)
 
         val features =
             try {
-                discover(url).features
+                val document = discover(url)
+                diagnosticsRuntime.rememberVersion(url, document.serverVersion)
+                document.features
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
-                return failure.asOutcome()
+                return failure.asOutcome(state)
             }
         // 10 Live updates: connect only while the server advertises the events endpoint.
+        if (!owns(owner)) return Outcome.Superseded
         if (FEATURE_SSE !in features) return Outcome.NoSse
 
+        diagnosticsRuntime.streamOpening(ticket)
         val session =
             try {
                 transport.open(url, token, heartbeatSeconds)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
-                return failure.asOutcome()
+                return failure.asOutcome(state)
             }
-        _connected.value = true
         // The bus does not replay (10 EventBus): pushes missed while this device was
         // disconnected surface only through a round, so every (re)connect pokes one.
-        onRemoteChanged()
         return try {
-            readStream(session, deviceId, onServerRetry)
+            // The session is already open: cancellation/failure in the initial poke must
+            // release it and clear the connected state just like a read failure.
+            if (!signalRemote(owner)) return Outcome.Superseded
+            _connected.value = true
+            diagnosticsRuntime.streamState(ticket, SyncStreamState.CONNECTED)
+            readStream(session, state, deviceId, onServerRetry)
         } finally {
             _connected.value = false
+            diagnosticsRuntime.streamState(ticket, SyncStreamState.STOPPED)
             runCatching { session.close() }
         }
     }
@@ -356,10 +419,13 @@ class SyncEventsClient(
      */
     private suspend fun readStream(
         session: SyncEventSession,
+        profile: SyncStateEntity,
         deviceId: String,
         onServerRetry: (Long) -> Unit,
     ): Outcome =
-        coroutineScope {
+        supervisorScope {
+            // A failed producer must reach receiveCatching for status classification;
+            // ordinary coroutineScope cancels this reader before it can handle the 401.
             val watchdogMs = heartbeatSeconds * 2_000L + WATCHDOG_SLACK_MS
             val channel = session.events.produceIn(this)
             try {
@@ -368,12 +434,12 @@ class SyncEventsClient(
                         try {
                             withTimeout(watchdogMs) { channel.receiveCatching() }
                         } catch (timeout: TimeoutCancellationException) {
-                            return@coroutineScope Outcome.Failed
+                            return@supervisorScope Outcome.Failed
                         }
-                    result.exceptionOrNull()?.let { return@coroutineScope it.asOutcome() }
+                    result.exceptionOrNull()?.let { return@supervisorScope it.asOutcome(profile) }
                     when (val event = result.getOrNull()) {
                         null -> {
-                            return@coroutineScope Outcome.Ended
+                            return@supervisorScope Outcome.Ended
                         }
 
                         is SyncStreamEvent.Comment -> {}
@@ -384,7 +450,9 @@ class SyncEventsClient(
 
                         is SyncStreamEvent.Changed -> {
                             // Our own push's echo is ignored; a missing `by` counts as remote.
-                            if (event.by != deviceId) onRemoteChanged()
+                            if (event.by != deviceId && !signalRemote(profile.linkIdentity())) {
+                                return@supervisorScope Outcome.Superseded
+                            }
                         }
                     }
                 }
@@ -396,11 +464,11 @@ class SyncEventsClient(
             Outcome.Ended
         }
 
-    private fun Throwable.asOutcome(): Outcome =
+    private fun Throwable.asOutcome(profile: SyncStateEntity): Outcome =
         (this as? SyncTransportException)?.let { e ->
             when {
                 e.status == HTTP_UNAUTHORIZED -> {
-                    Outcome.Revoked
+                    Outcome.Revoked(profile)
                 }
 
                 e.status == HTTP_TOO_MANY_REQUESTS -> {
@@ -415,14 +483,49 @@ class SyncEventsClient(
 
     /**
      * 10 Errors: the same write `SyncEngine.markRevoked` performs, then the same cancel path.
-     * `linkLive` drops here too — without it the gate stays stale-`true` and a re-link's
-     * `reevaluate` has no edge to reopen on.
+     * Only the captured account may be revoked. Clearing its live identity also closes the
+     * stream and lets a later re-link reopen it.
      */
-    private suspend fun markRevoked() {
-        db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
-        linkLive.value = false
-        onRevoked()
+    private suspend fun markRevoked(expected: SyncStateEntity) {
+        identityMutex.withLock {
+            if (address.serverUrl() != expected.serverUrl) return@withLock
+            val owned =
+                db.withWriteTransaction {
+                    if (!sameSyncIdentity(expected, db.syncStateDao().get())) return@withWriteTransaction false
+                    db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
+                    true
+                }
+            if (!owned) return@withLock
+            // Its own gate update cancels this stream job. Finish the owned local cleanup
+            // before releasing identity ownership, even when collectLatest cancels us.
+            withContext(NonCancellable) {
+                linkLive.value = null
+                onRevoked()
+            }
+        }
     }
+
+    private suspend fun owns(owner: SyncLinkIdentity): Boolean = identityMutex.withLock { ownsLocked(owner) }
+
+    private suspend fun ownsLocked(owner: SyncLinkIdentity): Boolean {
+        val state = db.syncStateDao().get() ?: return false
+        return state.isLive() && state.linkIdentity() == owner && address.serverUrl() == owner.serverUrl
+    }
+
+    private suspend fun signalRemote(owner: SyncLinkIdentity): Boolean =
+        identityMutex.withLock {
+            if (!ownsLocked(owner)) return@withLock false
+            onRemoteChanged()
+            true
+        }
+
+    private fun SyncStateEntity.isLive(): Boolean = enabled && linkedAt != null && lastError != SYNC_ERROR_REVOKED
+
+    private class StreamContext(
+        val profile: SyncStateEntity,
+        val url: String,
+        val token: String,
+    )
 
     /** Server `retry` × 2^(n-1) capped at 5 min, ±20 % jitter (10 Live updates). */
     private fun backoffMs(
@@ -452,7 +555,12 @@ class SyncEventsClient(
         data object Failed : Outcome
 
         /** `401` — the link is revoked; record it and stop. */
-        data object Revoked : Outcome
+        data class Revoked(
+            val profile: SyncStateEntity,
+        ) : Outcome
+
+        /** The request belongs to a replaced link; restart only for the current identity. */
+        data object Superseded : Outcome
     }
 
     private companion object {
