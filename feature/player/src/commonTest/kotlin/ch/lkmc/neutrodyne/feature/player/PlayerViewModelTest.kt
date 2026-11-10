@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
+import ch.lkmc.neutrodyne.core.testing.FakeMarkedPlayedElsewhereSource
 import ch.lkmc.neutrodyne.core.testing.FakePlatformInfo
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController.Action
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
+import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhere
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
@@ -62,6 +64,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
     private val settings = FakeSettingsRepository()
     private val queue = FakeQueueRepository()
     private val chapters = FakeChapterRepository()
+    private val marks = FakeMarkedPlayedElsewhereSource()
     private val store = ViewModelStore()
 
     private fun TestScope.model(
@@ -79,6 +82,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 queueRepository,
                 chapterRepository,
                 artwork = { artwork },
+                markedPlayedElsewhere = marks,
                 externalOpenService =
                     ch.lkmc.neutrodyne.core.testing
                         .FakeYouTubeExternalOpen(),
@@ -125,6 +129,34 @@ class PlayerViewModelTest : MainDispatcherTest() {
             controller.state.nowPlaying.value = null
             runCurrent()
             assertNull(vm.uiState.value.colors)
+        }
+
+    @Test fun retainedElsewhereMarkShowsForTheLoadedItemAndFollowsChanges() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow(7)
+            val vm = model()
+            runCurrent()
+            marks.markedPlayedElsewhere.value = MarkedPlayedElsewhere(7, "Work PC", 7)
+            runCurrent()
+            assertEquals(
+                MarkedPlayedElsewhere(7, "Work PC", 7),
+                vm.uiState.value.markedPlayedElsewhere,
+            )
+            marks.markedPlayedElsewhere.value = null
+            runCurrent()
+            assertNull(vm.uiState.value.markedPlayedElsewhere)
+        }
+
+    @Test fun aLatchedElsewhereMarkForAnotherItemStaysHidden() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow(7)
+            marks.markedPlayedElsewhere.value = MarkedPlayedElsewhere(9, "Work PC", 9)
+            val vm = model()
+            runCurrent()
+            assertNull(vm.uiState.value.markedPlayedElsewhere)
+            controller.state.nowPlaying.value = null
+            runCurrent()
+            assertNull(vm.uiState.value.markedPlayedElsewhere)
         }
 
     @Test fun creationDoesNotStartOrInheritAnotherScreensConsent() =

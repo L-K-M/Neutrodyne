@@ -3800,7 +3800,7 @@
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion {
-  public static ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory create$default(ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
+  public static ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory create$default(ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
 }
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion Companion;
@@ -4543,6 +4543,26 @@
 -keep class ch.lkmc.neutrodyne.sync.impl.LinkedRestoreCoordinatorImplContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.LinkedRestoreCoordinatorImplContributions {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope$ProvideIntoSetMarkedPlayedElsewhereInitializerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetMarkedPlayedElsewhereInitializer(ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope$ProvideIntoSetMarkedPlayedElsewhereInitializerMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope$ProvideIntoSetMarkedPlayedElsewhereInitializerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereInitializerContributions {
+}
+-keep interface ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker$MetroContributionToDevzacsweersmetroappScopeocf15 {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker$MetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.MarkedPlayedElsewhereTracker {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SessionAdoptionInitializerContributions$ToAppScope$ProvideIntoSetSessionAdoptionInitializerMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSessionAdoptionInitializer(dev.zacsweers.metro.Provider);

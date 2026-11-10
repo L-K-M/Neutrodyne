@@ -78,6 +78,7 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.UpNextList
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
+import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhere
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import kotlinx.coroutines.CoroutineScope
@@ -744,6 +745,42 @@ class PlayerSheetTest {
             onNodeWithText("29 min").performClick()
             assertEquals(listOf<androidx.navigation3.runtime.NavKey>(SleepTimerKey), fixture.navigated)
         }
+
+    @Test fun fullPlayerShowsTheElsewhereMarkLineUnderTheTitle() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            fixture.markedPlayedElsewhere = MarkedPlayedElsewhere(1, "Work PC", 1)
+            setContent { fixture.Content() }
+            onNodeWithTag("full_player").assertIsDisplayed()
+            onNodeWithText("Marked played on Work PC").assertIsDisplayed()
+        }
+
+    @Test fun sidePanelShowsTheElsewhereMarkLineUnderTheTitle() =
+        runComposeUiTest {
+            val fixture = SheetFixture()
+            fixture.markedPlayedElsewhere = MarkedPlayedElsewhere(1, "Work PC", 1)
+            setContent { fixture.Content(playerPanel = true, windowWidthDp = 400) }
+            onNodeWithTag("player_side_panel").assertIsDisplayed()
+            onNodeWithText("Marked played on Work PC").assertIsDisplayed()
+        }
+
+    @Test fun germanPlayerShowsTheElsewhereMarkLine() =
+        runComposeUiTest {
+            Locale.setDefault(Locale.GERMAN)
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            fixture.markedPlayedElsewhere = MarkedPlayedElsewhere(1, "Work PC", 1)
+            setContent { fixture.Content() }
+            onNodeWithTag("full_player").assertIsDisplayed()
+            onNodeWithText("Auf Work PC als gehört markiert").assertIsDisplayed()
+        }
+
+    @Test fun noElsewhereMarkLineWithoutARetainedNotice() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            setContent { fixture.Content() }
+            onNodeWithTag("full_player").assertIsDisplayed()
+            onNodeWithText("Marked played on Work PC").assertDoesNotExist()
+        }
 }
 
 private class SheetFixture(
@@ -751,6 +788,7 @@ private class SheetFixture(
 ) {
     val state = PlayerSheetState(initial)
     var now by mutableStateOf<NowPlaying?>(sampleNow())
+    var markedPlayedElsewhere by mutableStateOf<MarkedPlayedElsewhere?>(null)
     var chapters by mutableStateOf<List<EpisodeChapter>>(emptyList())
     var currentChapter by mutableStateOf<CurrentChapter?>(null)
     var sleepTimer by mutableStateOf<SleepTimerState>(SleepTimerState.Off)
@@ -783,14 +821,22 @@ private class SheetFixture(
         nextEpisode: () -> Unit = { calls += "next" },
         previousEpisode: () -> Unit = { calls += "previous" },
         windowWidthDp: Int = 360,
+        playerPanel: Boolean = false,
     ) {
         NeutrodyneTheme(AppearancePrefs(), systemUi) {
             BoxWithConstraints {
-                val paneLayout = PaneLayout(1, false, maxWidth.value.toInt())
+                val paneLayout =
+                    PaneLayout(
+                        if (playerPanel) 2 else 1,
+                        playerPanel,
+                        maxWidth.value.toInt(),
+                        if (playerPanel) maxWidth.value.toInt() else 0,
+                    )
                 PlayerSheet(
                     ui =
                         PlayerUiState(
                             now = now,
+                            markedPlayedElsewhere = markedPlayedElsewhere,
                             consent =
                                 pending?.let {
                                     ch.lkmc.neutrodyne.core.ui

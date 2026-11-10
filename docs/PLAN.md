@@ -665,7 +665,7 @@ flowchart TB
   pc --> pa & dom
   di --> da & dom & ya & art & db & dsx & net
   yi --> ya & net
-  si --> sa & sp & dom & db & dsx & net & feeds
+  si --> sa & sp & pa & dom & db & dsx & net & feeds
   art --> db & net & ya
   art -.-> nok
   pi --> pc & da & ya & art & db & dsx & nok
