@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
                 rememberSyncRootPresentation(
                     syncController = { graph.syncController },
                     playbackController = { graph.playbackController },
+                    reconnectDismissals = { graph.reconnectDismissals },
                     enabled = openState is DatabaseOpenState.Opened,
                     isPlaying = nowPlaying?.isPlaying == true,
                 )
@@ -159,7 +160,9 @@ class MainActivity : AppCompatActivity() {
                             playerPanelHidden = panelHidden,
                             settingsBadge = updates.badge,
                             notice = updates.notice,
+                            heldChanges = syncRoot.heldChanges,
                             remoteSession = syncRoot.remoteSession,
+                            reconnect = syncRoot.reconnect,
                         ),
                     actions =
                         RootActions(
@@ -176,6 +179,8 @@ class MainActivity : AppCompatActivity() {
                             disableUpdateChecks = updates.disable,
                             continueHere = syncRoot.continueHere,
                             dismissRemoteSession = syncRoot.dismissRemoteSession,
+                            dismissReconnect = syncRoot.dismissReconnect,
+                            isReconnectTargetLive = syncRoot.isReconnectTargetLive,
                             playbackKey = { key ->
                                 dispatchPlaybackKey(
                                     key,

@@ -174,6 +174,7 @@ class AndroidAppGraphTest {
 
     @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
+        assertThat(graph.reconnectDismissals).isSameInstanceAs(graph.reconnectDismissals)
         assertThat(graph.appUpdateChecker::class.simpleName).isEqualTo("AppUpdateCheckerImpl")
         assertThat(graph.appUpdateChecker).isSameInstanceAs(graph.appUpdateChecker)
         assertThat(graph.updateNotices::class.simpleName).isEqualTo("UpdateNoticesImpl")
@@ -735,6 +736,11 @@ class AndroidAppGraphTest {
                 // at 220 beside the refresh observer.
                 "SyncSchedulingInitializer" to 200..299,
                 "SyncForegroundObserverInitializer" to 200..299,
+                // 10 Scheduling on Android's held-batch notice: the channel sits at 10 beside
+                // the other channel initializers; the collector arms at 230, after the sync
+                // scheduling arms, because resolving the controller reaches the database.
+                "SyncHeldChannelsInitializer" to 10..10,
+                "SyncHeldNotifier" to 200..299,
                 // 10 Durable apply effects: the start drain sits at 160, after the database
                 // open and before every scheduling arm.
                 "SyncStartupDrainInitializer" to 101..199,
