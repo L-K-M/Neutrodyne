@@ -394,6 +394,7 @@ class DesktopYouTubeJourneyTest {
         }
 
         suspend fun close(graph: YouTubeJourneyGraph) {
+            graph.osSurfaces.close()
             graph.scope.cancel()
             graph.scope.coroutineContext[Job]?.join()
             graph.db.close()
@@ -491,6 +492,8 @@ class DesktopYouTubeJourneyTest {
     excludes = [DesktopNetworkMonitorBindings::class, DesktopYouTubeBindingsModule::class],
 )
 internal interface YouTubeJourneyGraph {
+    val osSurfaces: ch.lkmc.neutrodyne.desktop.os.DesktopOsSurfaces
+
     val controller: DownloadController
     val planner: AutoDownloadPlanner
     val resolver: EffectiveSettingsResolver

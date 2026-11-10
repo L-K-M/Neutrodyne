@@ -194,6 +194,7 @@ class DesktopDownloadRestartTest {
     }
 
     private suspend fun close(graph: DownloadJourneyGraph) {
+        graph.osSurfaces.close()
         graph.scope.cancel()
         graph.scope.coroutineContext[Job]?.join()
         graph.db.close()
@@ -219,6 +220,8 @@ class DesktopDownloadRestartTest {
     excludes = [DesktopNetworkMonitorBindings::class],
 )
 internal interface DownloadJourneyGraph {
+    val osSurfaces: ch.lkmc.neutrodyne.desktop.os.DesktopOsSurfaces
+
     val controller: DownloadController
     val index: LocalMediaIndex
     val runner: DesktopJobRunner

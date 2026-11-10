@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.desktop.smoke
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogSink
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeEngineUpdatePolicy
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
@@ -18,7 +19,8 @@ import ch.lkmc.neutrodyne.desktop.os.withoutOsRegistrations
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -276,7 +278,16 @@ class ShellJourneyTest {
                 .containsNoneIn(marked.map { it::class })
             assertThat(selected).hasSize(all.size - marked.size)
         } finally {
-            graph.appScope.cancel()
+            runBlocking {
+                try {
+                    graph.osSurfaces.close()
+                } finally {
+                    graph.appScope.coroutineContext[Job]?.cancelAndJoin()
+                    if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+                        graph.databaseOpener.requireDatabase().close()
+                    }
+                }
+            }
         }
     }
 

@@ -102,10 +102,13 @@ class DesktopAppGraphTest {
         // on CI's single session bus, so a leaked graph blocks :desktop:system's MPRIS tests.
         // No runCatching: a failing close must fail the teardown. Every surface's close is
         // idempotent, so a second call is safe.
-        graph.osSurfaces.close()
-        graph.appScope.coroutineContext[Job]?.cancelAndJoin()
-        if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
-            graph.databaseOpener.requireDatabase().close()
+        try {
+            graph.osSurfaces.close()
+        } finally {
+            graph.appScope.coroutineContext[Job]?.cancelAndJoin()
+            if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+                graph.databaseOpener.requireDatabase().close()
+            }
         }
     }
 
