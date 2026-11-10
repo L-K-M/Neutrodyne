@@ -23,6 +23,12 @@ internal fun selectSupportedDeviceTests(
                     "runs only under scripts/ci/playback-reboot.py",
                 )
             }
+            if (arguments.getString("crossDevice") != "true") {
+                put(
+                    "ch.lkmc.neutrodyne.CrossDeviceSyncAndroidTest",
+                    "runs only under the host cross-device driver (crossDevice=true)",
+                )
+            }
             if (sdk < Build.VERSION_CODES.TIRAMISU) {
                 put(
                     "ch.lkmc.neutrodyne.UpdateNotificationDeviceTest#deniedPermissionDoesNotPostOrRequestPermission",
