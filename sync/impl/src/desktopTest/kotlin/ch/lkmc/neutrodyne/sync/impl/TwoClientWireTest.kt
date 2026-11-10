@@ -466,6 +466,7 @@ class TwoClientWireTest {
                     db = db,
                     client = client,
                     applier = applier,
+                    playback = NoPlaybackSync,
                     clock = WallClock,
                     secrets = secrets,
                     sharePasswords = { false },

@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
@@ -14,6 +16,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
+import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
 import ch.lkmc.neutrodyne.core.ui.root.RemoteSessionCard
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.sync_marked_played_elsewhere
@@ -24,6 +27,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -458,26 +462,165 @@ class SyncRootPresentationTest {
             }
         }
 
+    @Test
+    fun onlyReconnectPublishesTheReconnectBanner() =
+        runComposeUiTest {
+            val status = SyncStatus.Reconnect("https://sync.example/private", "anna")
+            val sync = FakeSyncController(status = status)
+            val probe = setSyncContent(sync, FakePlaybackController())
+            for (other in listOf(
+                SyncStatus.NotConfigured,
+                SyncStatus.Revoked(status.serverUrl),
+                SyncStatus.LinkUnfinished(status.serverUrl),
+                linked,
+            )) {
+                runOnIdle { sync.status.value = status }
+                waitUntil("reconnect is published", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+                assertEquals(status.serverUrl, probe.presentation?.reconnect?.serverUrl)
+                runOnIdle { sync.status.value = other }
+                waitUntil("other states withdraw reconnect", TIMEOUT_MS) { probe.presentation?.reconnect == null }
+            }
+        }
+
+    @Test
+    fun notNowSurvivesCompositionRecreationButANewProcessStartsFresh() =
+        runComposeUiTest {
+            val status = SyncStatus.Reconnect("https://sync.example", "anna")
+            val sync = FakeSyncController(status = status)
+            var holder = ReconnectDismissals()
+            var generation by mutableIntStateOf(0)
+            val probe =
+                setSyncContent(
+                    sync,
+                    FakePlaybackController(),
+                    dismissals = { holder },
+                    generation = { generation },
+                )
+            waitUntil("reconnect is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val banner = probe.presentation!!.reconnect!!
+            runOnIdle { probe.presentation!!.dismissReconnect(banner) }
+            waitUntil("Not now hides this process profile", TIMEOUT_MS) {
+                holder.isDismissed(banner.profile) && probe.presentation?.reconnect == null
+            }
+            val before = probe.syncResolutions
+            runOnIdle { generation++ }
+            waitUntil("a recreated composition resolves its controller", TIMEOUT_MS) {
+                probe.syncResolutions > before
+            }
+            waitForIdle()
+            assertNull(probe.presentation?.reconnect)
+            runOnIdle {
+                holder = ReconnectDismissals()
+                generation++
+            }
+            waitUntil("a new process holder shows reconnect again", TIMEOUT_MS) {
+                probe.presentation?.reconnect?.profile == banner.profile
+            }
+        }
+
+    @Test
+    fun staleProfileActionsCannotDismissOrOpenAnotherProfile() =
+        runComposeUiTest {
+            val first = SyncStatus.Reconnect("https://sync.example/path", "anna")
+            val second = first.copy(username = "bob")
+            val sync = FakeSyncController(status = first)
+            val holder = ReconnectDismissals()
+            val probe = setSyncContent(sync, FakePlaybackController(), dismissals = { holder })
+            waitUntil("the first banner is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val old = probe.presentation!!
+            val banner = old.reconnect!!
+            runOnIdle { sync.status.value = second }
+            waitUntil("the second profile is shown", TIMEOUT_MS) {
+                probe.presentation?.reconnect?.username == "bob"
+            }
+            assertFalse(old.isReconnectTargetLive(banner))
+            runOnIdle { old.dismissReconnect(banner) }
+            waitForIdle()
+            assertFalse(holder.isDismissed(banner.profile))
+            assertFalse(holder.isDismissed(ReconnectProfile(second.serverUrl, second.username)))
+            assertEquals("bob", probe.presentation?.reconnect?.username)
+        }
+
+    @Test
+    fun aDismissedBannerCannotRunItsQueuedReconnectAction() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = SyncStatus.Reconnect("https://sync.example", "anna"))
+            val holder = ReconnectDismissals()
+            val probe = setSyncContent(sync, FakePlaybackController(), dismissals = { holder })
+            waitUntil("reconnect is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val old = probe.presentation!!
+            val banner = old.reconnect!!
+            assertTrue(old.isReconnectTargetLive(banner))
+            runOnIdle { old.dismissReconnect(banner) }
+            waitUntil("dismissal is recorded", TIMEOUT_MS) { holder.isDismissed(banner.profile) }
+            assertFalse(old.isReconnectTargetLive(banner))
+        }
+
+    @Test
+    fun reconnectWaitsForTheDatabaseAndClosedGateActionsResolveNothing() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = SyncStatus.Reconnect("https://sync.example", "anna"))
+            val holder = ReconnectDismissals()
+            var open by mutableStateOf(false)
+            val probe = setSyncContent(sync, FakePlaybackController(), enabled = { open }, dismissals = { holder })
+            waitForIdle()
+            assertEquals(0, probe.syncResolutions)
+            assertNull(probe.presentation?.reconnect)
+            runOnIdle { open = true }
+            waitUntil("opening the gate shows reconnect", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val old = probe.presentation!!
+            val banner = old.reconnect!!
+            runOnIdle { open = false }
+            waitUntil("closing the gate removes reconnect", TIMEOUT_MS) { probe.presentation?.reconnect == null }
+            val before = probe.syncResolutions
+            assertFalse(old.isReconnectTargetLive(banner))
+            runOnIdle { old.dismissReconnect(banner) }
+            waitForIdle()
+            assertEquals(before, probe.syncResolutions)
+            assertFalse(holder.isDismissed(banner.profile))
+        }
+
+    @Test
+    fun displayHostsNeverIncludeCredentialsPathsQueriesOrFragments() =
+        runComposeUiTest {
+            val serverUrl = "https://person:secret@sync.example:8443/private?q=hidden#fragment"
+            val sync = FakeSyncController(status = SyncStatus.Reconnect(serverUrl, "anna"))
+            val probe = setSyncContent(sync, FakePlaybackController())
+            waitUntil("the safe host is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            assertEquals("sync.example:8443", probe.presentation?.reconnect?.host)
+            runOnIdle {
+                sync.status.value = SyncStatus.Reconnect("https://person:secret@/private", "anna")
+            }
+            waitUntil("the malformed host uses a safe fallback", TIMEOUT_MS) {
+                probe.presentation?.reconnect?.host == "?"
+            }
+        }
+
     private fun ComposeUiTest.setSyncContent(
         sync: FakeSyncController,
         playback: FakePlaybackController,
         enabled: () -> Boolean = { true },
         isPlaying: () -> Boolean = { false },
+        dismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
+        generation: () -> Int = { 0 },
     ): Probe {
         val probe = Probe()
         setContent {
-            probe.presentation =
-                rememberSyncRootPresentation(
-                    syncController = {
-                        probe.syncResolutions++
-                        sync
-                    },
-                    playbackController = { playback },
-                    enabled = enabled(),
-                    isPlaying = isPlaying(),
-                )
-            LaunchedEffect(probe.presentation?.userMessages) {
-                probe.presentation?.userMessages?.collect { probe.messages += it }
+            key(generation()) {
+                probe.presentation =
+                    rememberSyncRootPresentation(
+                        syncController = {
+                            probe.syncResolutions++
+                            sync
+                        },
+                        playbackController = { playback },
+                        enabled = enabled(),
+                        isPlaying = isPlaying(),
+                        reconnectDismissals = dismissals,
+                    )
+                LaunchedEffect(probe.presentation?.userMessages) {
+                    probe.presentation?.userMessages?.collect { probe.messages += it }
+                }
             }
         }
         return probe

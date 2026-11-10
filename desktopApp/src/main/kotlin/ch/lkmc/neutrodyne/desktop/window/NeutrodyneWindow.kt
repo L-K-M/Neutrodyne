@@ -93,6 +93,7 @@ import ch.lkmc.neutrodyne.desktop.resources.window_title_playing
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.ReconnectDismissals
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
@@ -165,6 +166,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     crashOffer: DesktopCrashOffer? = null,
     syncController: (() -> SyncController)? = null,
     syncHeldNotifier: (() -> DesktopSyncHeldNotifier)? = null,
+    reconnectDismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -410,6 +412,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 playbackController = playbackController,
                 playbackState = playbackState,
                 syncController = syncController,
+                reconnectDismissals = reconnectDismissals,
                 portal = portal,
                 openHandler = openHandler,
                 failedDownloads = failedDownloads,
@@ -688,6 +691,7 @@ internal fun NeutrodyneWindowContent(
     volumeDown: () -> Unit = {},
     crashOffer: DesktopCrashOffer? = null,
     syncController: (() -> SyncController)? = null,
+    reconnectDismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
 ) {
     val panelScope = rememberCoroutineScope()
     val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
@@ -724,6 +728,7 @@ internal fun NeutrodyneWindowContent(
             rememberSyncRootPresentation(
                 syncController = resolve,
                 playbackController = { playbackController },
+                reconnectDismissals = reconnectDismissals,
                 enabled = startup == StartupGateState.Ready || startup is StartupGateState.Recovered,
                 isPlaying = nowPlaying?.isPlaying == true,
             )
@@ -746,6 +751,8 @@ internal fun NeutrodyneWindowContent(
             volumeDown,
             syncRoot?.continueHere,
             syncRoot?.dismissRemoteSession,
+            syncRoot?.dismissReconnect,
+            syncRoot?.isReconnectTargetLive,
         ) {
             RootActions(
                 retryStartup = onRetryStartup,
@@ -753,6 +760,8 @@ internal fun NeutrodyneWindowContent(
                 disableUpdateChecks = { currentUpdates?.disable?.invoke() },
                 continueHere = syncRoot?.continueHere ?: {},
                 dismissRemoteSession = syncRoot?.dismissRemoteSession ?: {},
+                dismissReconnect = syncRoot?.dismissReconnect ?: {},
+                isReconnectTargetLive = syncRoot?.isReconnectTargetLive ?: { false },
                 playbackKey = { key ->
                     when (key) {
                         // 11's volume chords are the desktop's in-app gain (08 Keyboard and
@@ -828,6 +837,7 @@ internal fun NeutrodyneWindowContent(
                     notice = updates?.notice,
                     heldChanges = syncRoot?.heldChanges,
                     remoteSession = syncRoot?.remoteSession,
+                    reconnect = syncRoot?.reconnect,
                 ),
             actions = actions,
             slots = slots,

@@ -1920,6 +1920,7 @@ class FirstLinkMergerTest {
             db = db,
             client = client,
             applier = applier(db),
+            playback = NoPlaybackSync,
             clock = TestClock(now),
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },

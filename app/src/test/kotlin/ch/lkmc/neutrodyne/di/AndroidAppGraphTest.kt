@@ -137,6 +137,7 @@ class AndroidAppGraphTest {
     @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
         try {
+            assertThat(graph.reconnectDismissals).isSameInstanceAs(graph.reconnectDismissals)
             assertThat(graph.appUpdateChecker::class.simpleName).isEqualTo("AppUpdateCheckerImpl")
             assertThat(graph.appUpdateChecker).isSameInstanceAs(graph.appUpdateChecker)
             assertThat(graph.updateNotices::class.simpleName).isEqualTo("UpdateNoticesImpl")

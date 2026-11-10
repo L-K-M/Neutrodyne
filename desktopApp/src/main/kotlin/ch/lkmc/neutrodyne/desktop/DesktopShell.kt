@@ -347,6 +347,7 @@ internal object DesktopShell {
                 // Deferred until the open gate: resolving builds the database-backed service.
                 syncController = { graph.syncController },
                 syncHeldNotifier = { graph.syncHeldNotifier },
+                reconnectDismissals = { graph.reconnectDismissals },
                 busySignal = busySignal,
                 clock = DesktopClock,
                 syncFocusPoke = graph.syncFocusPoke::poke,
