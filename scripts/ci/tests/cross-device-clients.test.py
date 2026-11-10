@@ -54,6 +54,55 @@ class ResultTests(unittest.TestCase):
         self.assertEqual('probe: command unavailable or timed out', str(caught.exception))
 
 
+class ApkSelectionTests(unittest.TestCase):
+    def metadata(self, root, abis):
+        elements = []
+        for abi in abis:
+            filename = f'app-{abi or "universal"}-debug.apk'
+            (root / filename).write_bytes(b'fixture APK')
+            elements.append({'outputFile': filename, 'filters': [] if abi is None else [
+                {'filterType': 'ABI', 'value': abi}]})
+        (root / 'output-metadata.json').write_text(json.dumps({
+            'version': 3, 'artifactType': {'type': 'APK', 'kind': 'Directory'},
+            'applicationId': clients.APP_ID, 'variantName': 'debug', 'elements': elements}))
+
+    def test_three_splits_select_exact_arm64_and_x86_64(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.metadata(root, ['armeabi-v7a', 'x86_64', 'arm64-v8a'])
+            for abi in ('arm64-v8a', 'x86_64'):
+                self.assertEqual(f'app-{abi}-debug.apk', clients.select_app_apk(root, abi).name)
+
+    def test_a_single_wrong_abi_is_refused_before_installing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.metadata(root, ['armeabi-v7a'])
+            with self.assertRaises(HarnessError):
+                clients.select_app_apk(root, 'arm64-v8a')
+
+    def test_universal_output_is_supported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.metadata(root, [None])
+            self.assertEqual('app-universal-debug.apk', clients.select_app_apk(root, 'x86_64').name)
+
+    def test_foreign_application_and_path_traversal_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.metadata(root, ['arm64-v8a'])
+            path = root / 'output-metadata.json'
+            metadata = json.loads(path.read_text())
+            metadata['applicationId'] = 'another.application'
+            path.write_text(json.dumps(metadata))
+            with self.assertRaises(HarnessError):
+                clients.select_app_apk(root, 'arm64-v8a')
+            metadata['applicationId'] = clients.APP_ID
+            metadata['elements'][0]['outputFile'] = '../foreign.apk'
+            path.write_text(json.dumps(metadata))
+            with self.assertRaises(HarnessError):
+                clients.select_app_apk(root, 'arm64-v8a')
+
+
 class OwnershipTests(unittest.TestCase):
     def test_wrong_avd_name_cannot_admit_a_serial_or_issue_an_app_command(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -118,7 +167,7 @@ class AndroidPhaseTests(unittest.TestCase):
         writes = [call for call in calls if 'data' in call.kwargs]
         self.assertEqual(1, len(writes))
         self.assertEqual('test-only-password', json.loads(writes[0].kwargs['data'])['password'])
-        logs = list(self.root.glob('android-sync-*.log'))
+        logs = [path for path in self.root.glob('android-sync-*.log') if 'private-logcat' not in path.name]
         self.assertEqual(1, len(logs))
         self.assertEqual(0o600, logs[0].stat().st_mode & 0o777)
 

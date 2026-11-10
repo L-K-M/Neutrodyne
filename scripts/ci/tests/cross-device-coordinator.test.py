@@ -52,6 +52,8 @@ class JourneyTests(unittest.TestCase):
                 if name == 'dump':
                     return {'counts': counts(self.podcasts), 'held': [{}],
                             'library': {'podcasts': [{'index': i, 'syncId': f'podcast-{i}'} for i in range(50)]}}
+                if name == 'edit':
+                    return {'counts': {**counts(self.podcasts), 'outbox': 5}}
                 return {}
 
         android, desktop = Client('android'), Client('desktop')
@@ -113,6 +115,22 @@ class JourneyTests(unittest.TestCase):
         self.assertEqual(5, sum(client == 'desktop' and name == 'dump'
                                 for client, name, _, _ in objects[4]))
         self.assertFalse(any(name in ('edit', 'apply-held') for _, name, _, _ in objects[4]))
+
+    def test_an_edit_phase_with_no_captured_changes_cannot_certify_convergence(self):
+        objects = self.make()
+        original = objects[0].phase
+
+        def no_capture(name, config):
+            result = original(name, config)
+            if name == 'edit':
+                return {'counts': {**counts(), 'outbox': 0}}
+            return result
+
+        objects[0].phase = no_capture
+        with self.assertRaises(HarnessError):
+            self.run_case(objects)
+        self.assertTrue(objects[2].online)
+        self.assertFalse(any(name == 'apply-held' for _, name, _, _ in objects[4]))
 
 
 class ReportTests(unittest.TestCase):

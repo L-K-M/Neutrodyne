@@ -2073,6 +2073,7 @@ jobs:
           python3 -W error::ResourceWarning scripts/ci/tests/cross-device-fixtures.test.py
           python3 -W error::ResourceWarning scripts/ci/tests/cross-device-clients.test.py
           python3 -W error::ResourceWarning scripts/ci/tests/cross-device-state.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-post-removal.test.py
           python3 -W error::ResourceWarning scripts/ci/tests/cross-device-coordinator.test.py
       - name: Real cross-device journey
         timeout-minutes: 160

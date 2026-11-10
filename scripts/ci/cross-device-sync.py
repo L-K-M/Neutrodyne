@@ -14,7 +14,7 @@ import sys
 import tempfile
 import uuid
 
-from cross_device_clients import AndroidDriver, DesktopDriver, OwnedAndroidEmulator, checked, logged_command
+from cross_device_clients import AndroidDriver, DesktopDriver, OwnedAndroidEmulator, checked, logged_command, select_app_apk
 from cross_device_fixtures import FixtureGateway, HarnessError, OwnedSyncServer, new_workspace, require_workspace
 
 
@@ -54,8 +54,11 @@ def run_journey(android, desktop, gateway, config, seed, state, progress=print):
     edits = state.random_edits(seed)
     gateway.set_online(False)
     try:
-        phase(android, 'edit', edits['android'])
-        phase(desktop, 'edit', edits['desktop'])
+        for client, changes in ((android, edits['android']), (desktop, edits['desktop'])):
+            edited = phase(client, 'edit', changes)
+            captured = edited.get('counts', {}).get('outbox')
+            if type(captured) is not int or captured <= 0:
+                raise HarnessError('offline edits: no captured changes were available to sync')
     finally:
         gateway.set_online(True)
     _, _, random_counts = converge()
@@ -151,6 +154,11 @@ def main():
         report['runId'] = run_id
         print('stage: build real app, drivers and server', flush=True)
         build(checkout, gradle, root)
+        app_apk = select_app_apk(checkout / 'app/build/outputs/apk/debug',
+                                 args.system_image.rsplit(';', 1)[1])
+        test_apk = checkout / 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
+        if not test_apk.is_file():
+            raise HarnessError('build: Android test APK is missing')
         # Read the producer's executable JAR, never a thin server.jar. Refuse
         # ambiguous stale versions rather than selecting a runtime by accident.
         candidates = list((checkout / 'sync/server/build/libs').glob('neutrodyne-server-*.jar'))
@@ -165,14 +173,9 @@ def main():
         print('stage: boot new owned headless API 36 emulator', flush=True)
         device = OwnedAndroidEmulator(root, run_id, args.sdk, args.system_image).start()
         device.command(['reverse', f'tcp:{gateway.port}', f'tcp:{gateway.port}'])
-        apk_dir = checkout / 'app/build/outputs/apk/debug'
-        app_apks = list(apk_dir.glob('*debug.apk'))
-        if len(app_apks) != 1:
-            raise HarnessError('build: expected one debug application APK')
-        android = AndroidDriver(device, run_id, app_apks[0],
-                                checkout / 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')
+        android = AndroidDriver(device, run_id, app_apk, test_apk)
         report['artifacts'] = {}
-        for name, path in (('android', app_apks[0]), ('server', jar),
+        for name, path in (('android', app_apk), ('server', jar),
                            ('androidTest', checkout / 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')):
             with path.open('rb') as artifact:
                 report['artifacts'][name] = hashlib.file_digest(artifact, 'sha256').hexdigest()

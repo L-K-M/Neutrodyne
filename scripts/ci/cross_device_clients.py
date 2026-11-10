@@ -19,6 +19,38 @@ DESKTOP_CLASS = 'ch.lkmc.neutrodyne.desktop.sync.CrossDeviceSyncDesktopTest'
 PHASES = {'seed', 'link', 'edit', 'sync', 'dump', 'apply-held'}
 
 
+def select_app_apk(directory, abi):
+    """Select the producer-declared split for our image, or one universal APK."""
+    directory = Path(directory)
+    try:
+        metadata = directory / 'output-metadata.json'
+        if abi not in {'arm64-v8a', 'x86_64'} or metadata.stat().st_size > 64 * 1024:
+            raise ValueError()
+        value = json.loads(metadata.read_bytes())
+        if (value.get('version') != 3 or value.get('artifactType', {}).get('type') != 'APK' or
+                value.get('applicationId') != APP_ID or value.get('variantName') != 'debug' or
+                not isinstance(value.get('elements'), list)):
+            raise ValueError()
+        exact, universal = [], []
+        for element in value['elements']:
+            name, filters = element['outputFile'], element['filters']
+            if (not isinstance(name, str) or not name.endswith('.apk') or
+                    '/' in name or '\\' in name or Path(name).name != name or not isinstance(filters, list)):
+                raise ValueError()
+            if len(filters) > 1 or any(item.get('filterType') != 'ABI' for item in filters):
+                raise ValueError()
+            if not filters:
+                universal.append(directory / name)
+            elif filters[0].get('value') == abi:
+                exact.append(directory / name)
+        candidates = exact if exact else universal
+        if len(candidates) != 1 or not candidates[0].is_file():
+            raise ValueError()
+        return candidates[0]
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        raise HarnessError('build: missing or ambiguous application APK metadata for the image') from None
+
+
 def checked(command, *, stage, cwd=None, environment=None, data=None, timeout=120):
     """Never copy a child error, output or command into a public failure message."""
     try:
@@ -235,6 +267,18 @@ class AndroidDriver:
                 raise HarnessError(f'{phase}: Android did not execute one successful test')
             value = self.device.command(['exec-out', 'run-as', APP_ID, 'cat', 'files/cross-device/result.json'])
             return read_result(value, self.run_id, phase)
+        except BaseException:
+            # Keep failure diagnostics only in the private owned workspace.
+            # They may contain sensitive transport detail and are never an
+            # artifact or part of the sanitized public result.
+            try:
+                data = self.device.command(['logcat', '-d', '-t', '3000'], timeout=15)
+                path = self.root / f'android-{phase}-{time.monotonic_ns()}-private-logcat.log'
+                with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as output:
+                    output.write(data[-1024 * 1024:])
+            except (HarnessError, OSError):
+                pass
+            raise
         finally:
             self.device.command(['shell', 'am', 'force-stop', APP_ID])
 
