@@ -402,13 +402,17 @@ class DesktopYouTubeJourneyTest {
             this.graph = null
         }
 
-        fun shutdown() {
+        suspend fun shutdown() {
             release.countDown()
-            server.stop(0)
-            executor.shutdownNow()
-            dirs.data.parent
-                .toFile()
-                .deleteRecursively()
+            try {
+                graph?.let { close(it) }
+            } finally {
+                server.stop(0)
+                executor.shutdownNow()
+                dirs.data.parent
+                    .toFile()
+                    .deleteRecursively()
+            }
         }
     }
 

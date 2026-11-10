@@ -100,8 +100,7 @@ class DesktopAppGraphTest {
         // Production shutdown closes the OS surfaces before the scope (DesktopShell's
         // stopServices). The graph's LinuxMprisSession owns org.mpris.MediaPlayer2.neutrodyne
         // on CI's single session bus, so a leaked graph blocks :desktop:system's MPRIS tests.
-        // No runCatching: a failing close must fail the teardown. Every surface's close is
-        // idempotent, so a second call is safe.
+        // Surface close is idempotent; scope and database cleanup still run afterward.
         try {
             graph.osSurfaces.close()
         } finally {
