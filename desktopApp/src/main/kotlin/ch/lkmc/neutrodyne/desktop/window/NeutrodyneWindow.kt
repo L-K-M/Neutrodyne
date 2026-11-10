@@ -78,6 +78,8 @@ import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOfferDialog
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
+import ch.lkmc.neutrodyne.desktop.notifications.DesktopSyncHeldNotifier
+import ch.lkmc.neutrodyne.desktop.notifications.observeSyncHeldNotifications
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_body
 import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_title
@@ -162,6 +164,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     repoUrl: String = "",
     crashOffer: DesktopCrashOffer? = null,
     syncController: (() -> SyncController)? = null,
+    syncHeldNotifier: (() -> DesktopSyncHeldNotifier)? = null,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -232,6 +235,21 @@ internal fun ApplicationScope.NeutrodyneWindow(
             behaviour = snapshotFlow { closeBehaviour },
             busy = busySignal.busy,
             onQuit = { quitRequest() },
+        )
+    }
+
+    // 10's held-batch desktop notification (08's "Sync is waiting for you"): hidden means
+    // the Compose-side hide or an iconified window — an unfocused but visible one is not.
+    // The collector lives and dies with this window and only touches the lazy thunks
+    // behind the database-open gate.
+    LaunchedEffect(syncController, syncHeldNotifier) {
+        val resolveController = syncController ?: return@LaunchedEffect
+        val resolveNotifier = syncHeldNotifier ?: return@LaunchedEffect
+        observeSyncHeldNotifications(
+            gate = snapshotFlow { openState is DatabaseOpenState.Opened },
+            hidden = snapshotFlow { hidden || state.isMinimized },
+            syncController = resolveController,
+            notifier = resolveNotifier,
         )
     }
 
