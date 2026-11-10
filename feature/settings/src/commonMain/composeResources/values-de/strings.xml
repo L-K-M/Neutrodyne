@@ -17,6 +17,21 @@
     <string name="settings_sync_linked_at">Verknüpft · synchronisiert %1$s</string>
     <string name="settings_sync_revoked">Dieses Gerät wurde getrennt</string>
     <string name="sync_marked_played_elsewhere">Auf %1$s als gespielt markiert. Die Wiedergabe läuft hier weiter.</string>
+    <string name="sync_resynced">Die Synchronisation wurde mit dem Server neu gestartet</string>
+    <string name="sync_resynced_added"> · %1$d Änderungen von diesem Gerät wurden erneut gesendet</string>
+    <string name="sync_password_set">Für dein Sync-Konto wurde am %1$s ein Passwort festgelegt</string>
+    <string name="sync_not_you">Nicht du?</string>
+    <string name="sync_show">Anzeigen</string>
+    <plurals name="sync_feed_password_needed">
+        <item quantity="one">%1$d Podcast von deinen anderen Geräten benötigt hier ein Passwort</item>
+        <item quantity="other">%1$d Podcasts von deinen anderen Geräten benötigen hier ein Passwort</item>
+    </plurals>
+    <string name="sync_account_help_title">Hilfe zum Sync-Konto</string>
+    <string name="sync_account_help_intro">Für dein Sync-Konto wurde ein Passwort festgelegt. Wenn du das nicht warst, sichere das Konto auf deinem Sync-Server.</string>
+    <string name="sync_account_help_open">Öffne die Adresse deines Sync-Servers im Browser. Du siehst sie in den Einstellungen › Sync auf diesem Gerät.</string>
+    <string name="sync_account_help_account">Melde dich an und öffne die Kontoseite.</string>
+    <string name="sync_account_help_sessions">Prüfe die aktiven Web-Sitzungen und widerrufe alle, die du nicht erkennst.</string>
+    <string name="sync_account_help_password">Ändere das Kontopasswort. Dabei werden alle anderen Web-Sitzungen abgemeldet.</string>
 
     <string name="appearance_theme">Design</string>
     <string name="appearance_theme_system">Systemstandard</string>

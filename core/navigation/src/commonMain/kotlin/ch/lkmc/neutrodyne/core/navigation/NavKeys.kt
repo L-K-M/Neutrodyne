@@ -209,6 +209,13 @@ public data class SyncHeldChangesKey(
 @Serializable
 public data object SyncDiagnosticsKey : NavKey
 
+/**
+ * The sync-account help page (08 Sync notices: "Not you?"): how to review web sessions and change
+ * the password on the server's account page.
+ */
+@Serializable
+public data object SyncAccountHelpKey : NavKey
+
 /** App diagnostics (crash reporting, logs, storage). */
 @Serializable
 public data object DiagnosticsKey : NavKey

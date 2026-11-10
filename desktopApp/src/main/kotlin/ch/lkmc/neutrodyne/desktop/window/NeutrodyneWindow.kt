@@ -753,6 +753,7 @@ internal fun NeutrodyneWindowContent(
             syncRoot?.dismissRemoteSession,
             syncRoot?.dismissReconnect,
             syncRoot?.isReconnectTargetLive,
+            syncRoot?.messageAction,
         ) {
             RootActions(
                 retryStartup = onRetryStartup,
@@ -785,9 +786,11 @@ internal fun NeutrodyneWindowContent(
                     dataDir?.let { dir ->
                         { platformActions.reveal?.reveal(dir.toString()) }
                     },
-                // A banner's "Open" reports here — the notifier maps it back to the
-                // notification's route (11 Notifications' in-app fallback).
-                userMessageAction = { id -> banners?.messageAction(id) },
+                // A snackbar action tap: sync notices dispatch their own (negative ids); a
+                // foreign id falls through to the banner notifier's route (positive ids).
+                userMessageAction = { id ->
+                    if (syncRoot?.messageAction(id) != true) banners?.messageAction(id)
+                },
                 hidePlayerPanel = { setPanelVisibility(PlayerPanelVisibility.HIDDEN) },
                 revealPlayerPanel = { setPanelVisibility(PlayerPanelVisibility.SHOWN) },
                 refresh = refresh,
@@ -799,6 +802,7 @@ internal fun NeutrodyneWindowContent(
             RootSlots(
                 // Keep menu and input hooks inside the root alongside the window-scoped player.
                 player = {
+                    syncRoot?.feedback?.invoke()
                     currentUpdates?.feedback?.invoke()
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
