@@ -11,10 +11,13 @@ import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.sync.api.SyncStreamState
 import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
 import ch.lkmc.neutrodyne.sync.protocol.dto.ProtocolRange
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -301,6 +304,67 @@ class SyncEventsClientTest {
 
     // --- plumbing --------------------------------------------------------------------------------
 
+    @Test
+    fun discoveryAndStreamStateReachTheLocalDiagnosticsWithoutAnotherRequest() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val profile =
+                deps.db
+                    .syncStateDao()
+                    .get()
+                    .diagnosticProfile("https://sync.example")
+            val snapshot = deps.runtime.snapshot(profile)
+            assertEquals("1.0", snapshot.serverVersion)
+            assertEquals(SyncStreamState.CONNECTED, snapshot.streamState)
+            assertEquals(0, snapshot.reconnectCount)
+            assertEquals(1, deps.transport.opens.size)
+            assertEquals(1, deps.discoveries)
+        }
+
+    @Test
+    fun reconnectsAndGateClosureHaveDistinctDiagnostics() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val profile =
+                deps.db
+                    .syncStateDao()
+                    .get()
+                    .diagnosticProfile("https://sync.example")
+            deps.transport.sessions
+                .single()
+                .end()
+            runCurrent()
+            assertEquals(SyncStreamState.WAITING, deps.runtime.snapshot(profile).streamState)
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertEquals(1, deps.runtime.snapshot(profile).reconnectCount)
+            assertEquals(SyncStreamState.CONNECTED, deps.runtime.snapshot(profile).streamState)
+            deps.allowed.value = false
+            runCurrent()
+            assertEquals(SyncStreamState.STOPPED, deps.runtime.snapshot(profile).streamState)
+        }
+
+    @Test
+    fun cancellationFromTheInitialPokeClosesTheOpenedSession() =
+        runTest {
+            val deps = deps()
+            deps.pokeFailure = CancellationException("cancel initial poke")
+            deps.start()
+            deps.link()
+            runCurrent()
+            val session = deps.transport.sessions.single()
+            val closed = backgroundScope.async { session.awaitClosed() }
+            runCurrent()
+            assertTrue(closed.isCompleted, "the session must close even when the initial callback cancels")
+            assertFalse(deps.client.connected.value)
+        }
+
     private class Deps(
         scope: TestScope,
         val db: NeutrodyneDatabase,
@@ -314,12 +378,16 @@ class SyncEventsClientTest {
         val allowed = MutableStateFlow(false)
         val pokes = mutableListOf<Unit>()
         var revoked = false
+        val runtime = SyncRuntimeDiagnostics()
+        var discoveries = 0
+        var pokeFailure: CancellationException? = null
 
         val client =
             SyncEventsClient(
                 db = db,
                 transport = transport.transport(),
                 discover = { _ ->
+                    discoveries++
                     DiscoveryDocument(
                         name = "test",
                         serverVersion = "1.0",
@@ -334,9 +402,13 @@ class SyncEventsClientTest {
                 tokens = tokens,
                 network = network,
                 scope = scope.backgroundScope,
-                onRemoteChanged = { pokes += Unit },
+                onRemoteChanged = {
+                    pokeFailure?.let { throw it }
+                    pokes += Unit
+                },
                 onRevoked = { revoked = true },
                 random = Random(1),
+                diagnosticsRuntime = runtime,
             )
 
         fun start(heartbeatSeconds: Int = 60) {
@@ -359,6 +431,7 @@ class SyncEventsClientTest {
                 )
             }
             tokens.save(hostOf("https://sync.example"), "tok")
+            runtime.activate(db.syncStateDao().get().diagnosticProfile("https://sync.example"))
             client.reevaluate()
         }
     }

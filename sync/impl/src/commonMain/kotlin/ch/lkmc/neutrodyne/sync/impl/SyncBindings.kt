@@ -139,6 +139,7 @@ object SyncBindings {
         adopter: SessionAdopter,
         merger: Provider<FirstLinkMerger>,
         identity: SyncIdentityLock,
+        diagnosticsRuntime: SyncRuntimeDiagnostics,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -161,6 +162,7 @@ object SyncBindings {
             refreshPreferences = { flags.refreshFromStore(address) },
             recoverExpiredCursor = { expected, scoped -> merger().resyncForRound(expected, scoped) },
             identity = identity,
+            diagnosticsRuntime = diagnosticsRuntime,
         )
 
     /**
@@ -220,6 +222,7 @@ object SyncBindings {
         network: NetworkMonitor,
         @ApplicationScope scope: CoroutineScope,
         scheduler: SyncScheduler,
+        diagnosticsRuntime: SyncRuntimeDiagnostics,
     ): SyncEventsClient =
         SyncEventsClient(
             db = db,
@@ -231,6 +234,7 @@ object SyncBindings {
             scope = scope,
             onRemoteChanged = { scheduler.onRemoteChanged() },
             onRevoked = { scheduler.onUnlinked() },
+            diagnosticsRuntime = diagnosticsRuntime,
         )
 
     /**

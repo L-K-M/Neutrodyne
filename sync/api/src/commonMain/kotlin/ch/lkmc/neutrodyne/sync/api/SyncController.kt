@@ -64,6 +64,9 @@ interface SyncController {
 
     fun syncNow()
 
+    /** Local diagnostics; no sync RPC or credential access. */
+    suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError>
+
     /** Approves nothing yet; returns the device the code names (10 Link methods). */
     suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem>
 

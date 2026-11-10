@@ -14,12 +14,15 @@ import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.protocol.ChangeStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -108,6 +111,7 @@ class SyncEngine(
     /** Lazy first-link merger edge; recovery stays inside the round mutex. */
     private val recoverExpiredCursor: (suspend (SyncStateEntity, SyncClient) -> SyncReport)? = null,
     private val identity: SyncIdentityLock = SyncIdentityLock(),
+    internal val diagnosticsRuntime: SyncRuntimeDiagnostics = SyncRuntimeDiagnostics(),
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -121,48 +125,82 @@ class SyncEngine(
     /** Marks the shared [SyncActivity] flag for the round's whole duration, including failures. */
     suspend fun round(reason: SyncRoundReason): SyncReport {
         activity.begin()
+        val observation = RoundObservation(diagnosticsRuntime.currentTicket())
         try {
-            // Snapshot before the round mutex: an identity writer may itself need a first-link
-            // round, so holding the round mutex while waiting for that writer would deadlock.
+            // Identity writers may need a first-link round themselves. Snapshot before the
+            // round mutex so another round never holds it while waiting for that writer.
             val snapshot = captureRound()
-            return roundMutex.withLock {
-                try {
-                    roundLocked(reason, snapshot)
-                } catch (failure: SyncTransportException) {
-                    val recover = recoverExpiredCursor
-                    val profile = snapshot.state
-                    if (failure.status != STATUS_CURSOR_EXPIRED || failure.code != SyncErrorCode.CURSOR_EXPIRED.wire ||
-                        recover == null || profile?.enabled != true || profile.linkedAt == null ||
-                        profile.lastError == SYNC_ERROR_REVOKED
-                    ) {
-                        throw failure
-                    }
-                    requireSyncProfile(profile, db.syncStateDao().get())
-                    check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
-                    val pull = markingRevocation(profile) { recover(profile, checkNotNull(snapshot.client)) }
-                    requireSyncProfile(profile, db.syncStateDao().get())
-                    check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
-                    // The mutex is already held: a nested public round would deadlock. The
-                    // resumed round pushes the durable replays using the newly adopted cursor.
-                    val push = roundLocked(reason, snapshot, RoundPurpose.RECOVERY_PUSH)
-                    requireSyncProfile(profile, db.syncStateDao().get())
-                    notices.post(
-                        ch.lkmc.neutrodyne.sync.api.SyncNotice
-                            .Resynced(push.pushed),
-                    )
-                    push.copy(
-                        applied = pull.applied + push.applied,
-                        stale = pull.stale + push.stale,
-                        pulled = pull.pulled + push.pulled,
-                        held = pull.held + push.held,
-                        durationMs = pull.durationMs + push.durationMs,
-                    )
-                }
+            val report = roundMutex.withLock { roundWithRecovery(reason, snapshot, observation) }
+            observation.ticket?.let {
+                diagnosticsRuntime.completed(it, SyncRoundSummary(reason, clock.now(), report))
             }
+            return report
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            observation.ticket?.let {
+                diagnosticsRuntime.completed(
+                    it,
+                    SyncRoundSummary(
+                        reason = reason,
+                        completedAtMs = clock.now(),
+                        report = null,
+                        failure = when (failure) {
+                            is SyncTransportException -> SyncRoundFailure.TRANSPORT
+                            is ProtocolException -> SyncRoundFailure.PROTOCOL
+                            else -> SyncRoundFailure.UNEXPECTED
+                        },
+                        httpStatus = (failure as? SyncTransportException)?.status?.takeIf { it in 100..599 },
+                        protocolCode = (failure as? ProtocolException)?.code?.wire,
+                    ),
+                )
+            }
+            throw failure
         } finally {
             activity.end()
         }
     }
+
+    private class RoundObservation(var ticket: SyncDiagnosticTicket?)
+
+    /** The round mutex stays held for both the full pull and its resumed push. */
+    private suspend fun roundWithRecovery(
+        reason: SyncRoundReason,
+        snapshot: RoundSnapshot,
+        observation: RoundObservation,
+    ): SyncReport =
+        try {
+            roundLocked(reason, snapshot, observation)
+        } catch (failure: SyncTransportException) {
+            val recover = recoverExpiredCursor
+            val profile = snapshot.state
+            if (failure.status != STATUS_CURSOR_EXPIRED || failure.code != SyncErrorCode.CURSOR_EXPIRED.wire ||
+                recover == null || profile?.enabled != true || profile.linkedAt == null ||
+                profile.lastError == SYNC_ERROR_REVOKED
+            ) {
+                throw failure
+            }
+            requireSyncProfile(profile, db.syncStateDao().get())
+            check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
+            val pull = markingRevocation(profile) { recover(profile, checkNotNull(snapshot.client)) }
+            requireSyncProfile(profile, db.syncStateDao().get())
+            check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
+            // The mutex is already held: a nested public round would deadlock. The
+            // resumed round pushes the durable replays using the newly adopted cursor.
+            val push = roundLocked(reason, snapshot, observation, RoundPurpose.RECOVERY_PUSH)
+            requireSyncProfile(profile, db.syncStateDao().get())
+            notices.post(
+                ch.lkmc.neutrodyne.sync.api.SyncNotice
+                    .Resynced(push.pushed),
+            )
+            push.copy(
+                applied = pull.applied + push.applied,
+                stale = pull.stale + push.stale,
+                pulled = pull.pulled + push.pulled,
+                held = pull.held + push.held,
+                durationMs = pull.durationMs + push.durationMs,
+            )
+        }
 
     private enum class RoundPurpose { NORMAL, RECOVERY_PUSH }
 
@@ -196,11 +234,14 @@ class SyncEngine(
     private suspend fun roundLocked(
         reason: SyncRoundReason,
         snapshot: RoundSnapshot,
+        observation: RoundObservation,
         purpose: RoundPurpose = RoundPurpose.NORMAL,
     ): SyncReport {
         gate.onPermissionResult(gate.hasPermission())
         val started = clock.now()
         val transport = snapshot.client ?: return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
+        // Reuse the captured state; diagnostics must not add a second address/token read.
+        observation.ticket = diagnosticsRuntime.activate(snapshot.state.diagnosticProfile(snapshot.serverUrl))
         if (snapshot.state?.lastError == SYNC_ERROR_REVOKED) return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         if (snapshot.state?.enabled == false && reason != SyncRoundReason.FIRST_LINK) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)

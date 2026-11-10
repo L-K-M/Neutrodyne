@@ -134,7 +134,15 @@ class SyncControllerImpl(
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
     private val identity: SyncIdentityLock = SyncIdentityLock(),
+    private val diagnosticsReader: SyncDiagnosticsReader =
+        SyncDiagnosticsReader(db, address, gate, engine.diagnosticsRuntime, io),
 ) : SyncController {
+    override suspend fun diagnostics(): Outcome<
+        ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot,
+        ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError,
+    > =
+        diagnosticsReader.read()
+
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.NotConfigured)
     override val status: StateFlow<SyncStatus> = _status.asStateFlow()
 
@@ -178,7 +186,7 @@ class SyncControllerImpl(
     /** A non-terminal round problem shown on the status card until the next good round. */
     private val lastRoundProblem = MutableStateFlow<SyncProblem?>(null)
 
-    private val discovery = ServerDiscovery(client)
+    private val discovery = ServerDiscovery(client, engine.diagnosticsRuntime)
 
     /**
      * Publications are serialized so a refresh that read an older `sync_state` can never
@@ -238,6 +246,7 @@ class SyncControllerImpl(
     private suspend fun refreshStatusLocked() {
         val url = address.serverUrl()
         val state = db.syncStateDao().get()
+        engine.diagnosticsRuntime.activate(state.diagnosticProfile(url))
         val token = url?.let { tokenStore.load(hostOf(it)) }
         _status.value =
             when {
