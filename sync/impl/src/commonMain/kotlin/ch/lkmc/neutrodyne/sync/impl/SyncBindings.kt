@@ -121,6 +121,7 @@ object SyncBindings {
             effects = effects,
             capture = capture,
             notices = notices,
+            refreshPreferences = { flags.refreshFromStore(address) },
         )
 
     /**
@@ -250,6 +251,8 @@ object SyncBindings {
         activity: SyncActivityState,
         secrets: SecretStore,
         coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+        flags: SyncFlags,
+        address: SyncServerAddress,
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -263,5 +266,6 @@ object SyncBindings {
             activity = activity,
             secrets = secrets,
             coordinator = coordinator,
+            beforeMerge = { flags.refreshFromStore(address) },
         )
 }
