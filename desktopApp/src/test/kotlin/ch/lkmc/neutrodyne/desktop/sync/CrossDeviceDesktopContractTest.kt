@@ -1,12 +1,24 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.sync
 
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.SyncClockEntity
+import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.testing.CrossDevice
+import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.sync.api.HeldResolution
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
+import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
+import ch.lkmc.neutrodyne.sync.api.SyncProblem
+import ch.lkmc.neutrodyne.sync.api.SyncReport
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.impl.RawSyncRecord
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -15,7 +27,10 @@ import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -135,6 +150,18 @@ class CrossDeviceDesktopContractTest {
         assertPhaseError(loopbackMessage("feedBaseUrl")) {
             validateConfig(CrossDeviceConfig("run", "http://127.0.0.1:1", "user", "pass", "http://localhost"))
         }
+        assertPhaseError("field 'expectedHeldPodcastCount' must be positive") {
+            validateConfig(
+                CrossDeviceConfig(
+                    "run",
+                    "http://127.0.0.1:1",
+                    "user",
+                    "pass",
+                    "http://127.0.0.1:1",
+                    expectedHeldPodcastCount = 0,
+                ),
+            )
+        }
         // The accepted spellings.
         validateConfig(
             CrossDeviceConfig("run", "http://127.0.0.1:8787", "user", "pass", "http://localhost:8787"),
@@ -157,6 +184,19 @@ class CrossDeviceDesktopContractTest {
         assertEquals("played", config.edits[0].op)
         assertEquals(1, config.edits[0].podcast)
         assertEquals(5L, config.edits[0].value)
+        assertNull(config.expectedHeldPodcastCount)
+    }
+
+    @Test
+    fun parseConfigReadsTheOptionalHeldPodcastCount() {
+        val config =
+            parseConfig(
+                """
+                {"runId":"run","serverUrl":"http://127.0.0.1:1","username":"u","password":"p",
+                 "feedBaseUrl":"http://localhost:2","expectedHeldPodcastCount":7}
+                """.trimIndent(),
+            )
+        assertEquals(7, config.expectedHeldPodcastCount)
     }
 
     @Test
@@ -192,12 +232,250 @@ class CrossDeviceDesktopContractTest {
     }
 
     @Test
-    fun syncBarrierAcceptsOnlyNewSyncNowRounds() {
-        val round = SyncRoundSummary(SyncRoundReason.SYNC_NOW, completedAtMs = 1_000, report = null)
-        assertTrue(isNewSyncNowRound(round, startMs = 1_000))
-        assertTrue(isNewSyncNowRound(round, startMs = 2_000))
-        assertFalse(isNewSyncNowRound(round, startMs = 10_000))
-        assertFalse(isNewSyncNowRound(round.copy(reason = SyncRoundReason.OUTBOX), startMs = 1_000))
+    fun deferredControllerObservesTheOriginalPasswordAfterTheDriverReturns() {
+        val controller = DeferredPasswordController()
+        val password = "correct horse battery staple".toCharArray()
+        val transfer = CrossDevicePasswordTransfer(password)
+
+        controller.submitPassword("alice", transfer.array)
+        transfer.launched()
+
+        assertThat(String(controller.received!!)).isEqualTo("correct horse battery staple")
+        assertThat(password.all { it == '\u0000' }).isTrue()
+    }
+
+    @Test
+    fun synchronousRejectionClearsTheTransfer() {
+        val password = "secret".toCharArray()
+        val transfer = CrossDevicePasswordTransfer(password)
+
+        transfer.close()
+
+        assertThat(transfer.array.all { it == '\u0000' }).isTrue()
+        assertThat(password.all { it == '\u0000' }).isTrue()
+    }
+
+    @Test
+    fun delayedLinkedStatusIsAccepted() =
+        runTest {
+            val status = MutableStateFlow<SyncStatus>(SyncStatus.NotConfigured)
+            val clock = FakeClock()
+            clock.schedule(200) { status.value = linkedStatus() }
+
+            val linked =
+                awaitLinkedStatus(
+                    status,
+                    timeoutMs = 5_000,
+                    pollMs = 10,
+                    nanoTime = clock::nanoTime,
+                    delay = clock::delay,
+                )
+
+            assertThat(linked).isTrue()
+        }
+
+    @Test
+    fun missingLinkedStatusTimesOut() =
+        runTest {
+            val status = MutableStateFlow<SyncStatus>(SyncStatus.NotConfigured)
+            val clock = FakeClock()
+
+            val linked =
+                awaitLinkedStatus(
+                    status,
+                    timeoutMs = 100,
+                    pollMs = 10,
+                    nanoTime = clock::nanoTime,
+                    delay = clock::delay,
+                )
+
+            assertThat(linked).isFalse()
+        }
+
+    @Test
+    fun staleSyncNowRoundIsNotAccepted() =
+        runTest {
+            val stale = summary(completedAtMs = 1_000)
+            val controller = ScriptedSyncController(listOf(stale))
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+            assertThat(barrier.arm()).isNull()
+
+            // A same-millisecond, equal-valued new object must still be accepted: identity is the
+            // baseline, not the timestamp or the values.
+            val fresh = summary(completedAtMs = 1_000)
+            controller.onSyncNow = { controller.rounds = controller.rounds + fresh }
+
+            assertThat(barrier.syncNowAndAwait()).isSameInstanceAs(fresh)
+        }
+
+    @Test
+    fun fullHistoryStillAcceptsTheFreshRound() =
+        runTest {
+            val initial = (0 until 20).map { summary(completedAtMs = it.toLong()) }
+            val controller = ScriptedSyncController(initial)
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+            assertThat(barrier.arm()).isNull()
+
+            val fresh = summary(completedAtMs = 20)
+            controller.onSyncNow = { controller.rounds = (controller.rounds + fresh).takeLast(20) }
+
+            assertThat(barrier.syncNowAndAwait()).isSameInstanceAs(fresh)
+        }
+
+    @Test
+    fun runningRoundIsNotAccepted() =
+        runTest {
+            val controller = ScriptedSyncController(emptyList())
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+            assertThat(barrier.arm()).isNull()
+
+            val fresh = summary(completedAtMs = 1)
+            controller.onSyncNow = {
+                controller.syncing.value = true
+                controller.rounds = controller.rounds + fresh
+                clock.schedule(50) { controller.syncing.value = false }
+            }
+
+            assertThat(barrier.syncNowAndAwait()).isSameInstanceAs(fresh)
+            assertThat(controller.syncing.value).isFalse()
+        }
+
+    @Test
+    fun armWaitsForThePriorRoundToFinish() =
+        runTest {
+            val controller = ScriptedSyncController(emptyList())
+            controller.syncing.value = true
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+            clock.schedule(50) { controller.syncing.value = false }
+
+            assertThat(barrier.arm()).isNull()
+            assertThat(clock.nowMs).isAtLeast(50)
+        }
+
+    @Test
+    fun armReportsABusyPriorRound() =
+        runTest {
+            val controller = ScriptedSyncController(emptyList())
+            controller.syncing.value = true
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+
+            assertThat(barrier.arm()).isNotNull()
+        }
+
+    @Test
+    fun armReportsUnavailableDiagnostics() =
+        runTest {
+            val controller = ScriptedSyncController(emptyList())
+            controller.diagnosticsFailure = true
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+
+            assertThat(barrier.arm()).isNotNull()
+        }
+
+    @Test
+    fun syncNowTimesOutWithoutAFreshRound() =
+        runTest {
+            val controller = ScriptedSyncController(emptyList())
+            val clock = FakeClock()
+            val barrier = barrier(controller, clock)
+            assertThat(barrier.arm()).isNull()
+
+            assertThat(barrier.syncNowAndAwait()).isNull()
+        }
+
+    @Test
+    fun defaultSyncStateIsClean() {
+        assertThat(SyncStateEntity().hasLinkOrSyncResidue()).isFalse()
+        assertThat(null.hasLinkOrSyncResidue()).isFalse()
+    }
+
+    @Test
+    fun linkClockCursorProtocolErrorAndApplyingResidueIsRejected() {
+        assertThat(SyncStateEntity(enabled = true).hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(applying = true).hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(serverUrl = "http://127.0.0.1:8787").hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(accountId = "account").hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(deviceId = "device").hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(cursor = "cursor").hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(hlc = 1).hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(nodeId = "node").hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(clockOffsetMs = 1).hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(protocol = 1).hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(lastSyncAt = 1).hasLinkOrSyncResidue()).isTrue()
+        assertThat(SyncStateEntity(lastError = "Revoked").hasLinkOrSyncResidue()).isTrue()
+    }
+
+    @Test
+    fun rejectedRecordsFailTheRound() {
+        val round = summary(report = report(rejected = 1))
+
+        assertThat(syncRoundFailure(round, linkedStatus(), null)).isNotNull()
+    }
+
+    @Test
+    fun failedRoundAndMissingReportFail() {
+        assertThat(syncRoundFailure(summary(failure = SyncRoundFailure.PROTOCOL), linkedStatus(), null))
+            .isNotNull()
+        assertThat(syncRoundFailure(summary(report = null), linkedStatus(), null)).isNotNull()
+    }
+
+    @Test
+    fun revokedStatusFailsTheRound() {
+        val round = summary()
+
+        assertThat(syncRoundFailure(round, SyncStatus.Revoked("http://127.0.0.1:8787"), null)).isNotNull()
+    }
+
+    @Test
+    fun clockSkewProblemFailsTheRound() {
+        val round = summary()
+
+        assertThat(syncRoundFailure(round, linkedStatus(problem = SyncProblem.ClockSkew), null)).isNotNull()
+    }
+
+    @Test
+    fun persistedClockAndRevocationMarkersFailTheRound() {
+        val round = summary()
+
+        assertThat(syncRoundFailure(round, linkedStatus(), "ClockSkew")).isNotNull()
+        assertThat(syncRoundFailure(round, linkedStatus(), "clock_skew")).isNotNull()
+        assertThat(syncRoundFailure(round, linkedStatus(), "Revoked")).isNotNull()
+    }
+
+    @Test
+    fun cleanRoundPasses() {
+        val round = summary()
+
+        assertThat(syncRoundFailure(round, linkedStatus(), null)).isNull()
+    }
+
+    @Test
+    fun blockingPersistedErrorsAreRecognized() {
+        assertThat(isBlockingPersistedError(null)).isFalse()
+        assertThat(isBlockingPersistedError("SomeOtherError")).isFalse()
+        assertThat(isBlockingPersistedError("Revoked")).isTrue()
+        assertThat(isBlockingPersistedError("ClockSkew")).isTrue()
+        assertThat(isBlockingPersistedError("clock_skew")).isTrue()
+    }
+
+    @Test
+    fun malformedClockRowsFailTheDump() {
+        assertThat(skippedClockRowsFailure(0)).isNull()
+        assertThat(skippedClockRowsFailure(1)).isNotNull()
+    }
+
+    @Test
+    fun fixtureNextRefreshAtIsAFutureBound() {
+        val now = System.currentTimeMillis()
+
+        assertThat(fixtureNextRefreshAt(now)).isGreaterThan(now)
+        assertThat(fixtureNextRefreshAt(now)).isEqualTo(now + REFRESH_FAR_FUTURE_MS)
     }
 
     @Test
@@ -226,6 +504,35 @@ class CrossDeviceDesktopContractTest {
                         runBlocking { writer.checkFresh() }
                     }
                 assertEquals("seed: existing non-fixture library or sync state", failure.safeMessage)
+                // `T_BASE + one year` is in the past for any run after 2025-10-27; the fixture
+                // must not arm the refresh scheduler against the feed during the test.
+                val now = System.currentTimeMillis()
+                assertThat(
+                    db.podcastDao().allForExport().all {
+                        val next = it.nextRefreshAt
+                        next != null && next > now
+                    },
+                ).isTrue()
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun seedWriterRefusesLinkClockCursorProtocolErrorAndApplyingResidue() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-seed-residue", "http://127.0.0.1:1234")
+                val writer = CrossDeviceSeedWriter(db, fixture)
+                db.syncStateDao().upsert(
+                    SyncStateEntity(cursor = "cursor", hlc = 1, protocol = 1, lastError = "Revoked", applying = true),
+                )
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking { writer.checkFresh() }
+                    }
+                assertEquals("seed: existing non-fixture link or sync state", failure.safeMessage)
             } finally {
                 db.close()
             }
@@ -333,6 +640,256 @@ class CrossDeviceDesktopContractTest {
             }
         }
 
+    @Test
+    fun dumperFailsOnAMalformedClockRowInsteadOfPartialOk() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-dump-bad", "http://127.0.0.1:1234")
+                db.syncClockDao().upsert(
+                    SyncClockEntity(
+                        coll = SyncCollection.PODCAST.wire,
+                        rid = "not-a-record-id",
+                        clocks = "not json",
+                    ),
+                )
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking { CrossDeviceDumper(db, fixture).dump() }
+                    }
+                assertEquals("dump: malformed sync_clock rows: 1", failure.safeMessage)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun applyHeldApprovesTheExpectedBatchThroughThePublicController() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-held", "http://127.0.0.1:1234")
+                CrossDeviceSeedWriter(db, fixture).write()
+                val expected = 11
+                val rids = fixture.podcasts.take(expected).map { it.syncId }
+                val titles = fixture.podcasts.take(expected).map { it.title }
+                val id =
+                    db.syncHeldDao().insert(
+                        SyncHeldEntity(
+                            batch = heldBatchJson(rids),
+                            summary = heldSummaryJson(titles),
+                            heldAt = T_BASE,
+                        ),
+                    )
+                val controller = HeldSyncController(db, linkedStatus())
+                val clock = FakeClock()
+                val result =
+                    CrossDeviceHeldApplier(
+                        controller = controller,
+                        db = db,
+                        fixture = fixture,
+                        expectedPodcastCount = expected,
+                        timeoutMs = 1_000,
+                        pollMs = 10,
+                        nanoTime = clock::nanoTime,
+                        delay = clock::delay,
+                    ).apply()
+
+                assertEquals(id, controller.resolvedId)
+                assertEquals(HeldResolution.APPLY, controller.resolution)
+                assertNull(db.syncHeldDao().byId(id))
+                assertTrue(result.getValue("applied").jsonPrimitive.boolean)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun applyHeldRefusesAWrongPodcastCount() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-held-count", "http://127.0.0.1:1234")
+                CrossDeviceSeedWriter(db, fixture).write()
+                val rids = fixture.podcasts.take(10).map { it.syncId }
+                val titles = fixture.podcasts.take(10).map { it.title }
+                db.syncHeldDao().insert(
+                    SyncHeldEntity(
+                        batch = heldBatchJson(rids),
+                        summary = heldSummaryJson(titles),
+                        heldAt = T_BASE,
+                    ),
+                )
+                val clock = FakeClock()
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking {
+                            CrossDeviceHeldApplier(
+                                controller = FakeSyncController(status = linkedStatus()),
+                                db = db,
+                                fixture = fixture,
+                                expectedPodcastCount = 11,
+                                timeoutMs = 1_000,
+                                pollMs = 10,
+                                nanoTime = clock::nanoTime,
+                                delay = clock::delay,
+                            ).apply()
+                        }
+                    }
+                assertEquals("apply-held: expected 11 held podcasts, found 10", failure.safeMessage)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun applyHeldRefusesAMalformedSummary() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-held-summary", "http://127.0.0.1:1234")
+                CrossDeviceSeedWriter(db, fixture).write()
+                val rids = fixture.podcasts.take(11).map { it.syncId }
+                db.syncHeldDao().insert(
+                    SyncHeldEntity(
+                        batch = heldBatchJson(rids),
+                        summary = "{}",
+                        heldAt = T_BASE,
+                    ),
+                )
+                val clock = FakeClock()
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking {
+                            CrossDeviceHeldApplier(
+                                controller = FakeSyncController(status = linkedStatus()),
+                                db = db,
+                                fixture = fixture,
+                                expectedPodcastCount = 11,
+                                timeoutMs = 1_000,
+                                pollMs = 10,
+                                nanoTime = clock::nanoTime,
+                                delay = clock::delay,
+                            ).apply()
+                        }
+                    }
+                assertEquals("apply-held: held summary is malformed", failure.safeMessage)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun applyHeldRefusesASummaryThatDoesNotMatchTheBatch() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-held-titles", "http://127.0.0.1:1234")
+                CrossDeviceSeedWriter(db, fixture).write()
+                val rids = fixture.podcasts.take(11).map { it.syncId }
+                db.syncHeldDao().insert(
+                    SyncHeldEntity(
+                        batch = heldBatchJson(rids),
+                        summary = heldSummaryJson(List(11) { "Wrong title" }),
+                        heldAt = T_BASE,
+                    ),
+                )
+                val clock = FakeClock()
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking {
+                            CrossDeviceHeldApplier(
+                                controller = FakeSyncController(status = linkedStatus()),
+                                db = db,
+                                fixture = fixture,
+                                expectedPodcastCount = 11,
+                                timeoutMs = 1_000,
+                                pollMs = 10,
+                                nanoTime = clock::nanoTime,
+                                delay = clock::delay,
+                            ).apply()
+                        }
+                    }
+                assertEquals("apply-held: held summary does not match the held podcasts", failure.safeMessage)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun applyHeldRefusesANonHeldBatch() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-held-state", "http://127.0.0.1:1234")
+                CrossDeviceSeedWriter(db, fixture).write()
+                val rids = fixture.podcasts.take(11).map { it.syncId }
+                db.syncHeldDao().insert(
+                    SyncHeldEntity(
+                        batch = heldBatchJson(rids).replace("\"HELD\"", "\"STAGED\""),
+                        summary = heldSummaryJson(fixture.podcasts.take(11).map { it.title }),
+                        heldAt = T_BASE,
+                    ),
+                )
+                val clock = FakeClock()
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking {
+                            CrossDeviceHeldApplier(
+                                controller = FakeSyncController(status = linkedStatus()),
+                                db = db,
+                                fixture = fixture,
+                                expectedPodcastCount = 11,
+                                timeoutMs = 1_000,
+                                pollMs = 10,
+                                nanoTime = clock::nanoTime,
+                                delay = clock::delay,
+                            ).apply()
+                        }
+                    }
+                assertEquals("apply-held: held batch is malformed or not HELD", failure.safeMessage)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun applyHeldRequiresALinkedIdleController() =
+        runBlocking {
+            val db = TestDb.inMemory()
+            try {
+                val fixture = crossDeviceFixture("run-held-link", "http://127.0.0.1:1234")
+                CrossDeviceSeedWriter(db, fixture).write()
+                val rids = fixture.podcasts.take(11).map { it.syncId }
+                db.syncHeldDao().insert(
+                    SyncHeldEntity(
+                        batch = heldBatchJson(rids),
+                        summary = heldSummaryJson(fixture.podcasts.take(11).map { it.title }),
+                        heldAt = T_BASE,
+                    ),
+                )
+                val clock = FakeClock()
+                val failure =
+                    assertFailsWith<PhaseError> {
+                        runBlocking {
+                            CrossDeviceHeldApplier(
+                                controller = FakeSyncController(status = SyncStatus.NotConfigured),
+                                db = db,
+                                fixture = fixture,
+                                expectedPodcastCount = 11,
+                                timeoutMs = 100,
+                                pollMs = 10,
+                                nanoTime = clock::nanoTime,
+                                delay = clock::delay,
+                            ).apply()
+                        }
+                    }
+                assertEquals("apply-held: device is not linked", failure.safeMessage)
+            } finally {
+                db.close()
+            }
+        }
+
     private inline fun assertPhaseError(
         expected: String,
         block: () -> Unit,
@@ -349,5 +906,147 @@ class CrossDeviceDesktopContractTest {
         fun loopbackMessage(field: String): String =
             "field '$field' must be http://127.0.0.1:<port> or http://localhost:<port> " +
                 "with no credentials, query or fragment"
+    }
+
+    private fun barrier(
+        controller: ScriptedSyncController,
+        clock: FakeClock,
+        timeoutMs: Long = 1_000,
+        pollMs: Long = 10,
+    ): CrossDeviceSyncBarrier = CrossDeviceSyncBarrier(controller, timeoutMs, pollMs, clock::nanoTime, clock::delay)
+
+    private fun summary(
+        reason: SyncRoundReason = SyncRoundReason.SYNC_NOW,
+        completedAtMs: Long = 0L,
+        report: SyncReport? = report(),
+        failure: SyncRoundFailure? = null,
+    ): SyncRoundSummary = SyncRoundSummary(reason, completedAtMs, report, failure)
+
+    private fun report(
+        pushed: Int = 0,
+        applied: Int = 0,
+        stale: Int = 0,
+        rejected: Int = 0,
+        pulled: Int = 0,
+        held: Int = 0,
+        durationMs: Long = 1,
+    ): SyncReport = SyncReport(pushed, applied, stale, rejected, pulled, held, durationMs)
+
+    private fun linkedStatus(problem: SyncProblem? = null): SyncStatus.Linked =
+        SyncStatus.Linked(
+            serverUrl = "http://127.0.0.1:8787",
+            accountId = "account",
+            deviceId = "device",
+            username = "alice",
+            nodeId = "node",
+            lastSyncAtMs = null,
+            activity = SyncActivity.IDLE,
+            problem = problem,
+        )
+
+    private fun heldBatchJson(rids: List<String>): String =
+        buildJsonObject {
+            put("state", "HELD")
+            put(
+                "podcasts",
+                buildJsonArray {
+                    rids.forEach { rid ->
+                        add(
+                            buildJsonObject {
+                                put("rid", rid)
+                                put("clock", "1000")
+                            },
+                        )
+                    }
+                },
+            )
+            put("groups", buildJsonArray { })
+        }.toString()
+
+    private fun heldSummaryJson(titles: List<String>): String =
+        buildJsonObject {
+            put(
+                "podcasts",
+                buildJsonArray {
+                    titles.forEach { add(JsonPrimitive(it)) }
+                },
+            )
+            put("groups", buildJsonArray { })
+        }.toString()
+
+    /** Holds the submitted array and reads it only after the driver has returned. */
+    private class DeferredPasswordController {
+        var received: CharArray? = null
+
+        fun submitPassword(
+            username: String,
+            password: CharArray,
+        ) {
+            received = password
+        }
+    }
+
+    /** A [FakeSyncController] whose diagnostics and `syncNow` effects are scripted. */
+    private class ScriptedSyncController(
+        initialRounds: List<SyncRoundSummary>,
+    ) : SyncController by FakeSyncController() {
+        var rounds: List<SyncRoundSummary> = initialRounds
+        var diagnosticsFailure = false
+        var onSyncNow: () -> Unit = {}
+
+        override val syncing: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+        override fun syncNow() {
+            onSyncNow()
+        }
+
+        override suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> =
+            if (diagnosticsFailure) {
+                Outcome.Failure(SyncDiagnosticsError.UNAVAILABLE)
+            } else {
+                Outcome.Success(SyncDiagnosticsSnapshot(rounds = rounds))
+            }
+    }
+
+    /** Deletes the held row on approval, as the production controller's APPLY path does. */
+    private class HeldSyncController(
+        private val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        status: SyncStatus,
+    ) : SyncController by FakeSyncController(status = status) {
+        override val syncing: MutableStateFlow<Boolean> = MutableStateFlow(false)
+        var resolvedId: Long? = null
+        var resolution: HeldResolution? = null
+
+        override fun resolveHeld(
+            id: Long,
+            resolution: HeldResolution,
+        ) {
+            resolvedId = id
+            this.resolution = resolution
+            runBlocking { db.syncHeldDao().delete(id) }
+        }
+    }
+
+    /** A deterministic clock: [delay] advances it and runs the actions that came due. */
+    private class FakeClock {
+        var nowMs: Long = 0
+            private set
+        private val scheduled = mutableListOf<Pair<Long, () -> Unit>>()
+
+        fun schedule(
+            delayMs: Long,
+            action: () -> Unit,
+        ) {
+            scheduled += (nowMs + delayMs) to action
+        }
+
+        fun nanoTime(): Long = nowMs * 1_000_000
+
+        suspend fun delay(ms: Long) {
+            nowMs += ms
+            scheduled.filter { it.first <= nowMs }.forEach { it.second() }
+            scheduled.removeAll { it.first <= nowMs }
+            yield()
+        }
     }
 }

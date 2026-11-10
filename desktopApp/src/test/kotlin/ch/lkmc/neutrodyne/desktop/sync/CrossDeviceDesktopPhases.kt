@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.desktop.sync
 
 import androidx.room3.withWriteTransaction
-import ch.lkmc.neutrodyne.core.common.getOrNull
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -19,16 +18,12 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.sync.SyncAddress
 import ch.lkmc.neutrodyne.core.testing.sync.canonicalSyncSnapshot
-import ch.lkmc.neutrodyne.sync.api.SyncController
-import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
-import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.impl.RawSyncRecord
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
-import kotlinx.coroutines.delay
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -78,13 +73,8 @@ internal class CrossDeviceSeedWriter(
         ) {
             throw PhaseError("seed", "existing non-fixture library or sync state")
         }
-        if (syncState != null &&
-            (
-                syncState.enabled || syncState.linkedAt != null || syncState.serverUrl != null ||
-                    syncState.deviceId != null
-            )
-        ) {
-            throw PhaseError("seed", "existing non-fixture link state")
+        if (syncState.hasLinkOrSyncResidue()) {
+            throw PhaseError("seed", "existing non-fixture link or sync state")
         }
     }
 
@@ -106,7 +96,7 @@ internal class CrossDeviceSeedWriter(
                             initialFetch = false,
                             subscribedAt = T_BASE,
                             guidCoverageSince = T_BASE,
-                            nextRefreshAt = T_BASE + REFRESH_FAR_FUTURE_MS,
+                            nextRefreshAt = fixtureNextRefreshAt(System.currentTimeMillis()),
                         ),
                     )
                 }
@@ -445,6 +435,12 @@ internal class CrossDeviceDumper(
                 skippedClockRows++
             }
         }
+        // A malformed row silently removes a record from the canonical wire state the host
+        // compares, so the phase must fail rather than report a partial dump.
+        val dumpFailure = skippedClockRowsFailure(skippedClockRows)
+        if (dumpFailure != null) {
+            throw PhaseError("dump", dumpFailure)
+        }
         val snapshot =
             try {
                 canonicalSyncSnapshot(records)
@@ -593,37 +589,3 @@ internal suspend fun counts(db: NeutrodyneDatabase): JsonObject =
         put("held", db.syncHeldDao().count())
         put("parked", db.syncParkedDao().count())
     }
-
-/** A round qualifies only when it is a `SYNC_NOW` round completed after the baseline was armed. */
-internal fun isNewSyncNowRound(
-    round: SyncRoundSummary,
-    startMs: Long,
-): Boolean = round.reason == SyncRoundReason.SYNC_NOW && round.completedAtMs >= startMs - CLOCK_TOLERANCE_MS
-
-/**
- * The sync completion barrier: a new `SYNC_NOW` round summary in the local diagnostics. A round
- * that never ran leaves no summary, so an empty outbox cannot pass without an RPC.
- */
-internal suspend fun awaitSyncNowRound(
-    controller: SyncController,
-    startMs: Long,
-): SyncRoundSummary {
-    val deadline = System.nanoTime() + SYNC_TIMEOUT_MS * 1_000_000
-    var observed = 0
-    while (true) {
-        val snapshot = controller.diagnostics().getOrNull()
-        if (snapshot != null) {
-            observed = snapshot.rounds.size
-            val candidate =
-                snapshot.rounds.lastOrNull { isNewSyncNowRound(it, startMs) }
-            if (candidate != null) return candidate
-        }
-        if (System.nanoTime() >= deadline) {
-            throw PhaseError(
-                "sync",
-                "no SYNC_NOW round completed within ${SYNC_TIMEOUT_MS}ms (rounds=$observed)",
-            )
-        }
-        delay(POLL_MS)
-    }
-}

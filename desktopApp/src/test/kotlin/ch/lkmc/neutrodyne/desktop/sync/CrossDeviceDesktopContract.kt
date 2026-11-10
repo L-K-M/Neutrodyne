@@ -36,6 +36,12 @@ internal data class CrossDeviceConfig(
     val password: String,
     val feedBaseUrl: String,
     val edits: List<CrossDeviceEdit> = emptyList(),
+    /**
+     * The `apply-held` phase's narrow contract: the exact number of podcast removals the held
+     * batch must carry. Absent means [DEFAULT_EXPECTED_HELD_PODCAST_COUNT] (the E12 11-podcast
+     * delete). Other phases ignore it.
+     */
+    val expectedHeldPodcastCount: Int? = null,
 )
 
 internal data class CrossDeviceEdit(
@@ -115,6 +121,7 @@ internal fun parseConfig(text: String): CrossDeviceConfig {
         password = obj.string("password").orEmpty(),
         feedBaseUrl = obj.string("feedBaseUrl").orEmpty(),
         edits = parseEdits(obj),
+        expectedHeldPodcastCount = obj.int("expectedHeldPodcastCount"),
     )
 }
 
@@ -149,6 +156,9 @@ internal fun validateConfig(config: CrossDeviceConfig) {
     if (config.username.isBlank()) throw PhaseError("config", "field 'username' is required")
     if (config.password.isEmpty()) throw PhaseError("config", "field 'password' is required")
     requireLoopbackHttp(config.feedBaseUrl, "feedBaseUrl")
+    config.expectedHeldPodcastCount?.let {
+        if (it <= 0) throw PhaseError("config", "field 'expectedHeldPodcastCount' must be positive")
+    }
 }
 
 private fun requireLoopbackHttp(
@@ -318,6 +328,7 @@ internal const val REFRESH_FAR_FUTURE_MS = 365L * 24 * 60 * 60 * 1000
 internal const val POLL_MS = 50L
 internal const val LINK_TIMEOUT_MS = 60_000L
 internal const val SYNC_TIMEOUT_MS = 60_000L
+internal const val HELD_TIMEOUT_MS = 30_000L
 internal const val STATUS_TIMEOUT_MS = 5_000L
-internal const val CLOCK_TOLERANCE_MS = 5_000L
-internal const val SYNC_ERROR_REVOKED = "Revoked"
+internal const val SUBMISSION_GRACE_MS = 1_000L
+internal const val DEFAULT_EXPECTED_HELD_PODCAST_COUNT = 11

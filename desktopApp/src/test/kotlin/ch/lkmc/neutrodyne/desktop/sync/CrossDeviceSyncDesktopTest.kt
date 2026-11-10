@@ -14,10 +14,12 @@ import java.nio.file.Paths
  * driver over the real `DesktopAppGraph`, Room and `SyncController`/`KtorSyncClient`.
  *
  * The host passes the caller-owned isolated root through `-PcrossDeviceRoot=<dir>` (or
- * `NEUTRODYNE_CROSS_DEVICE_ROOT`) and the phase through `-PcrossDevicePhase=seed|link|edit|sync|dump`.
- * The class carries the `CrossDevice` category, so `:desktopApp`'s test tasks exclude it before
- * discovery unless the `crossDevice` Gradle property is present; an opted-in run without a root
- * fails clearly instead of assuming a default or skipping.
+ * `NEUTRODYNE_CROSS_DEVICE_ROOT`) and the phase through
+ * `-PcrossDevicePhase=seed|link|edit|sync|dump|apply-held`. `apply-held` is host-invoked only,
+ * after the host has proved the exact held batch; the default phase sequence is
+ * `seed, link, edit, sync, dump`. The class carries the `CrossDevice` category, so `:desktopApp`'s
+ * test tasks exclude it before discovery unless the `crossDevice` Gradle property is present; an
+ * opted-in run without a root fails clearly instead of assuming a default or skipping.
  */
 @Category(CrossDevice::class)
 class CrossDeviceSyncDesktopTest {

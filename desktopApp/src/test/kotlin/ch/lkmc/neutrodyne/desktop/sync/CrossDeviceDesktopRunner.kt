@@ -19,8 +19,6 @@ import ch.lkmc.neutrodyne.desktop.smoke.configureControlledJourneySettings
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
-import ch.lkmc.neutrodyne.sync.api.SyncStatus
-import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -76,7 +74,8 @@ internal class CrossDeviceDesktopRunner(
         } catch (failure: PhaseError) {
             writeResult(result(runId, phase, ok = false, error = failure.safeMessage, payload = safeCounts(graph)))
             Log.i(TAG) { "phase=$phase ok=false error=${failure.safeMessage}" }
-            throw AssertionError(failure.safeMessage, failure)
+            // No cause: test runners print causes, and a raw failure can carry payloads.
+            throw AssertionError(failure.safeMessage)
         } catch (failure: Throwable) {
             // The original cause is deliberately not attached: its message can carry unsafe detail.
             val safe = PhaseError("phase", failure::class.simpleName ?: "failure")
@@ -212,6 +211,7 @@ internal class CrossDeviceDesktopRunner(
             "edit" -> edit(db, config, fixture)
             "sync" -> sync(graph, db, config)
             "dump" -> dump(db, config, fixture)
+            "apply-held" -> applyHeld(graph, db, config, fixture)
             else -> throw PhaseError("phase", "unknown crossDevicePhase")
         }
     }
@@ -251,9 +251,7 @@ internal class CrossDeviceDesktopRunner(
         requireOwnership(config.runId, "link")
         val controller = graph.syncController
         val state = db.syncStateDao().get()
-        if (state != null &&
-            (state.enabled || state.linkedAt != null || state.serverUrl != null || state.deviceId != null)
-        ) {
+        if (state.hasLinkOrSyncResidue()) {
             throw PhaseError("link", "device is already configured or linked")
         }
         if (controller.link?.state?.value != LinkState.Address) {
@@ -261,7 +259,9 @@ internal class CrossDeviceDesktopRunner(
         }
 
         val password = config.password.toCharArray()
+        var transfer: CrossDevicePasswordTransfer? = null
         var passwordSubmitted = false
+        var submittedAtMs = 0L
         var mergeChosen = false
         try {
             controller.startLink(config.serverUrl, LinkMethod.PASSWORD)
@@ -281,13 +281,27 @@ internal class CrossDeviceDesktopRunner(
 
                     is LinkState.AwaitingInput -> {
                         if (passwordSubmitted) {
-                            throw PhaseError("link", "link returned to AwaitingInput after submitPassword")
-                        }
-                        passwordSubmitted = true
-                        try {
-                            controller.submitPassword(config.username, password)
-                        } finally {
-                            password.fill('\u0000')
+                            // The controller launches its login asynchronously; give a slow
+                            // dispatch the grace period to leave AwaitingInput before treating
+                            // the state as a synchronous rejection.
+                            if (System.currentTimeMillis() - submittedAtMs >= SUBMISSION_GRACE_MS) {
+                                transfer?.close()
+                                throw PhaseError("link", "link returned to AwaitingInput after submitPassword")
+                            }
+                        } else {
+                            passwordSubmitted = true
+                            submittedAtMs = System.currentTimeMillis()
+                            val submission = CrossDevicePasswordTransfer(password)
+                            transfer = submission
+                            try {
+                                controller.submitPassword(config.username, submission.array)
+                            } catch (failure: Throwable) {
+                                submission.close()
+                                throw failure
+                            }
+                            // The controller owns the transfer from here; it clears the copy in
+                            // its login coroutine. Only the driver-owned original is cleared.
+                            submission.launched()
                         }
                     }
 
@@ -318,8 +332,9 @@ internal class CrossDeviceDesktopRunner(
             password.fill('\u0000')
         }
 
-        val status = controller.status.value
-        if (status !is SyncStatus.Linked) {
+        // `beginMerge` publishes `LinkState.Linked` before the asynchronous status refresh;
+        // wait boundedly for the linked status instead of failing in that window.
+        if (!awaitLinkedStatus(controller.status, STATUS_TIMEOUT_MS, POLL_MS, System::nanoTime) { delay(it) }) {
             throw PhaseError("link", "link did not reach the linked status")
         }
         return buildJsonObject {
@@ -365,29 +380,26 @@ internal class CrossDeviceDesktopRunner(
         }
         // The controller publishes its status from an async refresh on creation; give a linked
         // install the bounded time it needs before declaring the device not linked.
-        val statusDeadline = System.nanoTime() + STATUS_TIMEOUT_MS * 1_000_000
-        while (controller.status.value !is SyncStatus.Linked) {
-            if (System.nanoTime() >= statusDeadline) {
-                throw PhaseError("sync", "device is not linked")
-            }
-            delay(POLL_MS)
+        if (!awaitLinkedStatus(controller.status, STATUS_TIMEOUT_MS, POLL_MS, System::nanoTime) { delay(it) }) {
+            throw PhaseError("sync", "device is not linked")
         }
 
-        val startMs = System.currentTimeMillis()
-        controller.syncNow()
-        val round = awaitSyncNowRound(controller, startMs)
-        if (round.failure != null) {
-            throw PhaseError(
-                "sync",
-                "round failed: ${round.failure} (${round.protocolCode ?: "no code"})",
-            )
+        // Arm the identity baseline before `syncNow`, after any prior round is idle, so a
+        // preexisting `SYNC_NOW` summary cannot certify the round that is about to run.
+        val barrier = CrossDeviceSyncBarrier(controller, SYNC_TIMEOUT_MS, POLL_MS, System::nanoTime) { delay(it) }
+        val armFailure = barrier.arm()
+        if (armFailure != null) {
+            throw PhaseError("sync", armFailure)
         }
+        val round =
+            barrier.syncNowAndAwait()
+                ?: throw PhaseError("sync", "no SYNC_NOW round completed within ${SYNC_TIMEOUT_MS}ms")
         val report =
             round.report
                 ?: throw PhaseError("sync", "round finished without a report")
-        val lastError = db.syncStateDao().get()?.lastError
-        if (lastError == SYNC_ERROR_REVOKED || lastError == SyncErrorCode.CLOCK_SKEW.wire) {
-            throw PhaseError("sync", "link is revoked or clock-skewed")
+        val failure = syncRoundFailure(round, controller.status.value, db.syncStateDao().get()?.lastError)
+        if (failure != null) {
+            throw PhaseError("sync", failure)
         }
         return buildJsonObject {
             put(
@@ -414,6 +426,33 @@ internal class CrossDeviceDesktopRunner(
     ): JsonObject {
         requireOwnership(config.runId, "dump")
         return CrossDeviceDumper(db, fixture).dump()
+    }
+
+    /**
+     * The held-approval phase: the host has proved an exact batch is HELD and every subscription
+     * remains. Approve it through the public `SyncController.resolveHeld` APPLY path and wait for
+     * the row to resolve. The batch contract (one HELD row, the expected podcast count, a matching
+     * summary, fixture podcasts that are still subscribed) is checked before the call; a foreign
+     * or malformed batch is refused.
+     */
+    private suspend fun applyHeld(
+        graph: DesktopAppGraph,
+        db: NeutrodyneDatabase,
+        config: CrossDeviceConfig,
+        fixture: CrossDeviceFixture,
+    ): JsonObject {
+        requireOwnership(config.runId, "apply-held")
+        val expected = config.expectedHeldPodcastCount ?: DEFAULT_EXPECTED_HELD_PODCAST_COUNT
+        return CrossDeviceHeldApplier(
+            controller = graph.syncController,
+            db = db,
+            fixture = fixture,
+            expectedPodcastCount = expected,
+            timeoutMs = HELD_TIMEOUT_MS,
+            pollMs = POLL_MS,
+            nanoTime = System::nanoTime,
+            delay = { delay(it) },
+        ).apply()
     }
 
     // --- result ---------------------------------------------------------------------------------
@@ -451,7 +490,9 @@ internal class CrossDeviceDesktopRunner(
         const val CROSS_DEVICE_DIR = "cross-device"
         const val APP_DIR = "app"
         val DEFAULT_PHASES = listOf("seed", "link", "edit", "sync", "dump")
-        val PHASES = DEFAULT_PHASES.toSet()
+
+        // `apply-held` is host-invoked only: the default sequence has no held batch to approve.
+        val PHASES = (DEFAULT_PHASES + "apply-held").toSet()
         val RUNNER_GRACE = 3.seconds
     }
 }
