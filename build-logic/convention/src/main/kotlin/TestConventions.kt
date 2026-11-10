@@ -11,6 +11,10 @@ import org.gradle.kotlin.dsl.withType
  * awkward time zone so locale and offset bugs surface on every machine.
  */
 internal fun Project.configureNeutrodyneTestTasks() {
+    // Inside `configureEach` the unqualified `path` is the Test task's path (`:desktopApp:test`),
+    // not the project's: capture the project path here, where it still means `:desktopApp`.
+    val projectPath = path
+    val crossDevicePresent = providers.gradleProperty("crossDevice").isPresent
     tasks.withType<Test>().configureEach {
         systemProperty("user.language", "de")
         systemProperty("user.country", "DE")
@@ -35,8 +39,7 @@ internal fun Project.configureNeutrodyneTestTasks() {
         )
         systemProperty("neutrodyne.syncSeeds", providers.gradleProperty("syncSeeds").getOrElse("1000"))
         if (updateGoldens) outputs.upToDateWhen { false }
-        // E12's host test lives in :desktopApp; only there is the category class on the test classpath (09)
-        if (path in CROSS_DEVICE_HOSTS && !providers.gradleProperty("crossDevice").isPresent) {
+        if (crossDeviceCategoryExcluded(projectPath, crossDevicePresent)) {
             (options as? JUnitOptions)?.excludeCategories(CROSS_DEVICE_CATEGORY)
         }
         testLogging {
@@ -92,6 +95,16 @@ internal fun Project.configureNeutrodyneTestTasks() {
     }
     registerMutationTest()
 }
+
+/**
+ * E12's host test lives in `:desktopApp`; only there is the category class on the test classpath
+ * (09). The project path is the argument because the task path never matched and silently
+ * disabled the exclusion.
+ */
+internal fun crossDeviceCategoryExcluded(
+    projectPath: String,
+    crossDevicePresent: Boolean,
+): Boolean = projectPath in CROSS_DEVICE_HOSTS && !crossDevicePresent
 
 private const val MUTATION_TASK = "mutationTest"
 private const val MUTATION_HEAP = "128m"

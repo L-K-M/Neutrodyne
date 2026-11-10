@@ -72,6 +72,21 @@ val youtubeEngine =
         .get()
         .toBoolean()
 
+// E12's desktop driver (09): the opted-in run receives its caller-owned isolated root and the
+// phase selector through the test JVM. The driver fails clearly when they are absent; they are
+// never assumed to a default. The CrossDevice category itself is excluded before discovery by
+// the shared test configuration unless the crossDevice property is present.
+providers.gradleProperty("crossDeviceRoot").orNull?.let { root ->
+    tasks.withType<Test>().configureEach {
+        systemProperty("neutrodyne.crossDevice.root", root)
+    }
+}
+providers.gradleProperty("crossDevicePhase").orNull?.let { phase ->
+    tasks.withType<Test>().configureEach {
+        systemProperty("neutrodyne.crossDevice.phase", phase)
+    }
+}
+
 // Real graph fixtures claim the same MPRIS name on this task's session bus. They must
 // finish their native teardown before another test class creates a graph.
 tasks.named<Test>("test") {
