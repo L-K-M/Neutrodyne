@@ -26,6 +26,12 @@ interface SyncServerAddress {
 
     suspend fun setUsername(username: String?)
 
+    /**
+     * "Forget server" (08 Settings › Sync): clears the portable address and username in one
+     * atomic commit — a failed write leaves both stored values intact.
+     */
+    suspend fun clearServerIdentity(): Outcome<Unit, SettingsError>
+
     /** The device-local switches: a failed write preserves the stored value. */
     suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SettingsError>
 

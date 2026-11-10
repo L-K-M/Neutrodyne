@@ -2565,6 +2565,7 @@
   public kotlinx.coroutines.flow.Flow observe(ch.lkmc.neutrodyne.core.model.settings.SettingKey);
   public kotlinx.coroutines.flow.Flow observePortableSnapshot();
   public java.lang.Object reset(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
+  public java.lang.Object resetAll(java.util.List, kotlin.coroutines.Continuation);
   public java.lang.Object set(ch.lkmc.neutrodyne.core.model.settings.SettingKey, java.lang.Object, kotlin.coroutines.Continuation);
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.SettingsSyncPort {
@@ -5468,6 +5469,7 @@
 -keep class kotlin.collections.MapsKt__MapsKt {
   public static java.util.Map emptyMap();
   public static java.lang.Object getValue(java.util.Map, java.lang.Object);
+  public static java.util.Map minus(java.util.Map, java.lang.Iterable);
   public static java.util.Map minus(java.util.Map, java.lang.Object);
   public static java.util.Map mutableMapOf(kotlin.Pair[]);
   public static java.util.Map plus(java.util.Map, kotlin.Pair);

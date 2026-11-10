@@ -70,6 +70,21 @@ class FakeSettingsRepository : SettingsRepository {
         }
     }
 
+    override suspend fun resetAll(keys: List<SettingKey<*>>): Outcome<Unit, SettingsError> {
+        loggedCalls.update { it.add("resetAll(${keys.joinToString(",") { key -> key.name }})") }
+        val file = keys.firstOrNull()?.file ?: return Outcome.Success(Unit)
+        require(keys.all { it.file == file }) { "a batched reset is atomic within one settings file only" }
+        failNextSet?.let {
+            failNextSet = null
+            return Outcome.Failure(it)
+        }
+        val names = keys.mapTo(HashSet(keys.size)) { it.name }
+        values.update { current ->
+            current + (file to (current[file].orEmpty() - names))
+        }
+        return Outcome.Success(Unit)
+    }
+
     override fun observePortableSnapshot(): Flow<Map<String, Any>> {
         val portableKeys = AllSettingKeys.list.filter { it.file == SettingsFile.PORTABLE }
         if (portableKeys.isEmpty()) return flowOf(emptyMap())

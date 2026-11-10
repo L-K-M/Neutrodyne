@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -60,7 +61,7 @@ class PrePlaySyncImplTest {
     ) = PrePlaySyncImpl(database, round, network, clock, this)
 
     private fun TestScope.inMemoryDb(): NeutrodyneDatabase =
-        TestDb.inMemory(app, queryContext = StandardTestDispatcher(testScheduler)).also { db = it }
+        TestDb.inMemory(app, queryContext = UnconfinedTestDispatcher(testScheduler)).also { db = it }
 
     private suspend fun link(
         lastSyncAt: Long? = null,

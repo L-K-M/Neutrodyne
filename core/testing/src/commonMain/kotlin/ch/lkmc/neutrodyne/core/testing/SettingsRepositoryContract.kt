@@ -159,6 +159,38 @@ abstract class SettingsRepositoryContract {
         }
 
     @Test
+    fun resetAllClearsEveryListedKeyAndKeepsTheRest() =
+        runTest {
+            val repository = createRepository()
+            repository.set(portableText, "https://sync.example.org")
+            repository.set(portableBool, true)
+            repository.set(deviceText, "ungrouped")
+
+            assertEquals(
+                Outcome.Success(Unit),
+                repository.resetAll(listOf(portableText, portableBool)),
+            )
+
+            assertEquals("", repository.get(portableText))
+            assertEquals(false, repository.get(portableBool))
+            assertEquals("ungrouped", repository.get(deviceText))
+        }
+
+    @Test
+    fun resetAllRejectsACrossFileBatch() =
+        runTest {
+            val repository = createRepository()
+            repository.set(portableText, "https://sync.example.org")
+            repository.set(deviceText, "ungrouped")
+
+            val rejected = runCatching { repository.resetAll(listOf(portableText, deviceText)) }
+
+            assertTrue(rejected.exceptionOrNull() is IllegalArgumentException)
+            assertEquals("https://sync.example.org", repository.get(portableText))
+            assertEquals("ungrouped", repository.get(deviceText))
+        }
+
+    @Test
     fun setRejectsAChoiceValueOutsideItsValues() =
         runTest {
             val repository = createRepository()
