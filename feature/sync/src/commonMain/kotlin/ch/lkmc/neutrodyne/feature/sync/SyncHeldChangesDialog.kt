@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -54,11 +55,13 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
  * own. The nav host draws it in the `Dialog` overlay, whose scrim tap, back and Esc pop the
  * entry unanswered — the same outcome as Decide later, which keeps the batch and its banner.
  *
- * The dialog belongs to the (server, account, device) identity and to its row's id, never its
- * position: a resolution on any path or an unlink removes the row and the open dialog follows
- * it; a content update to the same id repaints in place. `resolveHeld` is a fire-and-forget
- * command, so a click only requests the answer and pops — the row and the banner leave when the
- * backend's atomic resolution commits, which is also why the answer re-checks identity and row
+ * The dialog belongs to the (server, account, device) identity it was opened under and to its
+ * row's id, never its position: a resolution on any path or an unlink removes the row and the
+ * open dialog follows it; a content update to the same id repaints in place; and any identity
+ * change — a direct swap to another linked profile included — pops it rather than rebinding
+ * its actions to the new account. `resolveHeld` is a fire-and-forget command, so a click only
+ * requests the answer and pops — the row and the banner leave when the backend's atomic
+ * resolution commits, which is also why the answer re-checks the opening identity and row
  * presence first: a stale click can never resolve a different account's batch.
  */
 @Composable
@@ -70,17 +73,23 @@ fun SyncHeldChangesDialog(
     val navigator = LocalAppNavigator.current
     val status by controller.status.collectAsStateWithLifecycle()
     val held by controller.heldChanges.collectAsStateWithLifecycle()
+    // The identity the dialog opened under, captured once for this route; the actions and the
+    // close-on-change guard compare against it, never against a live value that may already
+    // belong to another profile.
+    val openingIdentity = remember(key) { controller.status.value.identity() }
     val identity = status.identity()
     val prompt = held.firstOrNull { it.id == key.id }
     LaunchedEffect(identity, prompt != null) {
-        if (identity == null || prompt == null) navigator.pop(key)
+        if (openingIdentity == null || identity != openingIdentity || prompt == null) {
+            navigator.pop(key)
+        }
     }
-    if (identity != null && prompt != null) {
+    if (prompt != null && openingIdentity != null && identity == openingIdentity) {
         HeldChangesDialogContent(
             prompt = prompt,
             onResolve = { resolution ->
                 if (
-                    controller.status.value.identity() == identity &&
+                    controller.status.value.identity() == openingIdentity &&
                     controller.heldChanges.value.any { it.id == key.id }
                 ) {
                     controller.resolveHeld(key.id, resolution)

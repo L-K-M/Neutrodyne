@@ -221,6 +221,61 @@ class SyncHeldChangesDialogTest {
         }
 
     @Test
+    fun aDirectLinkedSwapToAnotherAccountPopsWithoutResolving() =
+        runComposeUiTest {
+            val harness = Harness()
+            setDialog(harness)
+
+            onNodeWithText("Apply").assertIsDisplayed()
+            // Linked A -> Linked B with the same held id still present: the dialog belongs to
+            // the identity it opened under — it must close, never rebind its actions to B.
+            harness.controller.status.value = OTHER_ACCOUNT
+            waitForIdle()
+
+            assertTrue(harness.controller.heldResolutions.isEmpty())
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(SyncHeldChangesKey(ID))),
+                harness.navigator.calls,
+            )
+        }
+
+    @Test
+    fun aSwapKeepingServerAndDevicePopsWithoutResolving() =
+        runComposeUiTest {
+            val harness = Harness()
+            setDialog(harness)
+
+            onNodeWithText("Apply").assertIsDisplayed()
+            // Same server and device, a different account: still a different identity.
+            harness.controller.status.value = LINKED.copy(accountId = "other-acc")
+            waitForIdle()
+
+            assertTrue(harness.controller.heldResolutions.isEmpty())
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(SyncHeldChangesKey(ID))),
+                harness.navigator.calls,
+            )
+        }
+
+    @Test
+    fun aNodeChangeAloneKeepsTheDialogOpen() =
+        runComposeUiTest {
+            val harness = Harness()
+            setDialog(harness)
+
+            // The (server, account, device) identity is unchanged — a new nodeId is a session
+            // detail, not an account change, so the dialog must not pop.
+            harness.controller.status.value = LINKED.copy(nodeId = "other-node", lastSyncAtMs = 5L)
+            waitForIdle()
+
+            onNodeWithText("Apply").assertIsDisplayed()
+            assertTrue(harness.navigator.calls.isEmpty())
+            onNodeWithText("Apply").performClick()
+            waitForIdle()
+            assertEquals(listOf(ID to HeldResolution.APPLY), harness.controller.heldResolutions)
+        }
+
+    @Test
     fun notLinkedExposesNoPrompt() =
         runComposeUiTest {
             val harness = Harness(status = SyncStatus.NotConfigured)
@@ -333,6 +388,9 @@ class SyncHeldChangesDialogTest {
                 activity = SyncActivity.IDLE,
                 problem = null,
             )
+
+        val OTHER_ACCOUNT =
+            LINKED.copy(serverUrl = "https://other.example.org", accountId = "other-acc", deviceId = "other-dev")
 
         val PROMPT =
             MassChangePrompt(
