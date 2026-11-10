@@ -15,7 +15,11 @@
 #     so the build died with "command not found" on the first runner);
 #   - the lock's configure line and library list stay in step with the design
 #     document, so a flag that would enable GPL, version3 or nonfree code fails
-#     here instead of in checkNativeLicences on four runners.
+#     here instead of in checkNativeLicences on four runners;
+#   - the bounded package-manager bootstrap (package-bootstrap.sh) installs with
+#     the first working manager, bounds a hung manager inside its budget, retains
+#     every manager's log, and fails a required tool instead of disabling x86
+#     assembly silently.
 #
 # Run: bash scripts/ci/tests/native-ffmpeg-build.test.sh
 # Exit 0 = all cases behave; 1 = at least one regression.
@@ -180,6 +184,184 @@ for library in avcodec avformat avutil swresample; do
         t_fail "the lock does not record $library"
     fi
 done
+
+# --- bounded package-manager bootstrap ------------------------------------------
+#
+# The Linux build installs NASM (required on x64) and patchelf (optional) with
+# the container's package manager. These cases drive the actual bootstrap_package
+# and bounded helpers from package-bootstrap.sh with fake managers, so a stall,
+# a fallback and a required-tool failure are exercised without a container.
+
+BOOTSTRAP_LIB="$REPO_ROOT/playback/native/ffmpeg/package-bootstrap.sh"
+if [ -f "$BOOTSTRAP_LIB" ]; then
+    t_ok "package-bootstrap.sh is present"
+else
+    t_fail "package-bootstrap.sh is missing"
+fi
+if bash -n "$BOOTSTRAP_LIB" 2>/dev/null; then
+    t_ok "package-bootstrap.sh parses"
+else
+    t_fail "package-bootstrap.sh does not parse: $(bash -n "$BOOTSTRAP_LIB" 2>&1 | head -1)"
+fi
+
+if [ -f "$BOOTSTRAP_LIB" ]; then
+    # shellcheck source=/dev/null
+    source "$BOOTSTRAP_LIB"
+
+    bootstrap_fixture() {
+        local dir manager
+        dir="$(mktemp -d)"
+        mkdir -p "$dir/bin" "$dir/logs"
+        for manager in microdnf dnf yum; do
+            cat > "$dir/bin/$manager" <<'FAKE'
+#!/usr/bin/env bash
+name="$(basename "$0")"
+var="FAKE_MODE_$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
+mode="${!var:-ok}"
+case "$mode" in
+    ok|fail-created)
+        cat > "$(dirname "$0")/$FAKE_TOOL" <<'TOOL'
+#!/usr/bin/env bash
+echo fake
+TOOL
+        chmod +x "$(dirname "$0")/$FAKE_TOOL"
+        echo "$name: $mode $FAKE_TOOL"
+        [ "$mode" = ok ] || exit 1
+        ;;
+    fail)
+        echo "$name: package not found" >&2
+        exit 1
+        ;;
+    hang)
+        echo $$ > "$FAKE_PID_FILE"
+        echo "$name: starting"
+        sleep 300 &
+        echo $! > "$FAKE_CHILD_FILE"
+        wait
+        ;;
+esac
+FAKE
+            chmod +x "$dir/bin/$manager"
+        done
+        echo "$dir"
+    }
+
+    run_bootstrap() {
+        (
+            export PATH="$FIXTURE/bin:$PATH"
+            export FAKE_TOOL=nasm FAKE_PID_FILE="$FIXTURE/pid" FAKE_CHILD_FILE="$FIXTURE/child"
+            export FAKE_MODE_MICRODNF FAKE_MODE_DNF FAKE_MODE_YUM
+            bootstrap_package "$@"
+        )
+    }
+
+    # shellcheck disable=SC2329 # runs as the EXIT/INT/TERM trap
+    bootstrap_cleanup() {
+        if [ -n "${FIXTURE:-}" ]; then
+            [ -f "$FIXTURE/pid" ] && kill "$(cat "$FIXTURE/pid")" 2>/dev/null || true
+            [ -f "$FIXTURE/child" ] && kill "$(cat "$FIXTURE/child")" 2>/dev/null || true
+            rm -rf "$FIXTURE"
+        fi
+    }
+    trap bootstrap_cleanup EXIT INT TERM
+
+    # The first working manager installs the tool and retains its output.
+    FIXTURE="$(bootstrap_fixture)"
+    FAKE_MODE_MICRODNF=ok FAKE_MODE_DNF=ok FAKE_MODE_YUM=ok
+    rm -f "$FIXTURE/bin/dnf" "$FIXTURE/bin/yum"
+    out="$(run_bootstrap optional 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -x "$FIXTURE/bin/nasm" ] &&
+        [ -f "$FIXTURE/logs/nasm-microdnf.log" ] &&
+        grep -q 'microdnf: ok nasm' "$FIXTURE/logs/nasm-microdnf.log" &&
+        printf '%s' "$out" | grep -q 'installed nasm with microdnf' &&
+        [ ! -f "$FIXTURE/logs/nasm-dnf.log" ]; then
+        t_ok "the first working manager installs the tool and retains its log"
+    else
+        t_fail "first working manager: rc=$rc out=$out"
+    fi
+    rm -rf "$FIXTURE"
+
+    # A failing manager falls through to the next one, keeping both logs.
+    FIXTURE="$(bootstrap_fixture)"
+    FAKE_MODE_MICRODNF=ok FAKE_MODE_DNF=fail FAKE_MODE_YUM=ok
+    rm -f "$FIXTURE/bin/microdnf"
+    out="$(run_bootstrap optional 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -x "$FIXTURE/bin/nasm" ] &&
+        [ -f "$FIXTURE/logs/nasm-dnf.log" ] && grep -q 'package not found' "$FIXTURE/logs/nasm-dnf.log" &&
+        [ -f "$FIXTURE/logs/nasm-yum.log" ] && grep -q 'yum: ok nasm' "$FIXTURE/logs/nasm-yum.log" &&
+        printf '%s' "$out" | grep -q 'installed nasm with yum'; then
+        t_ok "a failing manager falls through to the next one"
+    else
+        t_fail "fallback: rc=$rc out=$out"
+    fi
+    rm -rf "$FIXTURE"
+
+    # A required tool no manager provides fails with the retained log tails.
+    FIXTURE="$(bootstrap_fixture)"
+    FAKE_MODE_MICRODNF=fail FAKE_MODE_DNF=fail FAKE_MODE_YUM=fail
+    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 1 ] && [ ! -x "$FIXTURE/bin/nasm" ] &&
+        printf '%s' "$out" | grep -q 'could not install nasm' &&
+        printf '%s' "$out" | grep -q 'nasm-microdnf.log' &&
+        printf '%s' "$out" | grep -q 'package not found'; then
+        t_ok "a required tool no manager provides fails with the log tails"
+    else
+        t_fail "required failure: rc=$rc out=$out"
+    fi
+    rm -rf "$FIXTURE"
+
+    # A hung manager is killed inside the budget, which is then exhausted so the
+    # next manager is never attempted.
+    FIXTURE="$(bootstrap_fixture)"
+    FAKE_MODE_MICRODNF=hang FAKE_MODE_DNF=ok FAKE_MODE_YUM=ok
+    start="$(date +%s)"
+    out="$(run_bootstrap optional 1 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    elapsed=$(( $(date +%s) - start ))
+    if [ "$rc" -eq 1 ] && [ "$elapsed" -lt 5 ] && [ ! -x "$FIXTURE/bin/nasm" ] &&
+        [ -f "$FIXTURE/logs/nasm-microdnf.log" ] && [ ! -f "$FIXTURE/logs/nasm-dnf.log" ]; then
+        t_ok "a hung manager is bounded by the budget (elapsed ${elapsed}s)"
+    else
+        t_fail "hung manager: rc=$rc elapsed=${elapsed}s out=$out"
+    fi
+    sleep 0.2
+    if [ -f "$FIXTURE/pid" ] && [ -f "$FIXTURE/child" ]; then
+        mgr_pid="$(cat "$FIXTURE/pid")"; child_pid="$(cat "$FIXTURE/child")"
+        if kill -0 "$mgr_pid" 2>/dev/null || kill -0 "$child_pid" 2>/dev/null; then
+            t_fail "the timed-out manager left an orphan (mgr=$mgr_pid child=$child_pid)"
+            kill "$mgr_pid" "$child_pid" 2>/dev/null || true
+        else
+            t_ok "the timed-out manager left no orphan child"
+        fi
+    else
+        t_fail "the hung manager wrote no pid files"
+    fi
+    rm -rf "$FIXTURE"
+
+    # A manager that exits non-zero is not success even when it leaves the tool.
+    FIXTURE="$(bootstrap_fixture)"
+    FAKE_MODE_MICRODNF=fail-created FAKE_MODE_DNF=ok FAKE_MODE_YUM=ok
+    rm -f "$FIXTURE/bin/dnf" "$FIXTURE/bin/yum"
+    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 1 ] && [ -x "$FIXTURE/bin/nasm" ] &&
+        printf '%s' "$out" | grep -q 'could not install nasm'; then
+        t_ok "a manager that errors is not treated as success even when it leaves the tool"
+    else
+        t_fail "command error: rc=$rc out=$out"
+    fi
+    rm -rf "$FIXTURE"
+
+    # An already-present tool is not reinstalled.
+    FIXTURE="$(bootstrap_fixture)"
+    printf '#!/usr/bin/env bash\n' > "$FIXTURE/bin/nasm"; chmod +x "$FIXTURE/bin/nasm"
+    rm -f "$FIXTURE/bin/microdnf" "$FIXTURE/bin/dnf" "$FIXTURE/bin/yum"
+    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+        t_ok "an already-present tool is not reinstalled"
+    else
+        t_fail "already present: rc=$rc out=$out"
+    fi
+    rm -rf "$FIXTURE"
+fi
 
 if [ "$FAILED" -eq 0 ]; then
     echo "native-ffmpeg-build: all cases behave"
