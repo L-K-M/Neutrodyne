@@ -82,9 +82,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_choice_server_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_choice_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_code_lead
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_connect_anyway
-import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_disclosure_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_disclosure_title
-import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_get_code
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_identity_read_failed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_insecure_body
@@ -100,9 +98,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_merging_uploading
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_code
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_invite
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_password
-import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_not_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_password_label
-import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_private_feeds
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_device_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_device_confirm
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_device_title
@@ -582,36 +578,12 @@ private fun IdentityReadFailure(onRetry: () -> Unit) {
 
 @Composable
 private fun DisclosureCard(disclosure: SyncDisclosure) {
-    val privateFeeds =
-        if (disclosure.privateFeedLinks > 0) {
-            stringResource(Res.string.sync_setup_private_feeds, disclosure.privateFeedLinks)
-        } else {
-            ""
-        }
     Card {
-        Column(
+        DisclosureText(
+            title = stringResource(Res.string.sync_setup_disclosure_title, disclosure.host),
+            disclosure = disclosure,
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                stringResource(Res.string.sync_setup_disclosure_title, disclosure.host),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                stringResource(Res.string.sync_setup_disclosure_body, privateFeeds),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                stringResource(
-                    if (disclosure.encrypted) {
-                        Res.string.sync_setup_encrypted
-                    } else {
-                        Res.string.sync_setup_not_encrypted
-                    },
-                ),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+        )
     }
 }
 

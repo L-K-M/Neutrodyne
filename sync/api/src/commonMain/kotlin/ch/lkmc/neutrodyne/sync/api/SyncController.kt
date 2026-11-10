@@ -64,6 +64,9 @@ interface SyncController {
 
     fun syncNow()
 
+    /** Local diagnostics; no sync RPC or credential access. */
+    suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError>
+
     /** Approves nothing yet; returns the device the code names (10 Link methods). */
     suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem>
 
@@ -75,6 +78,14 @@ interface SyncController {
 
     /** The account's devices, for the Devices screen and rename/revoke (10 Authentication). */
     suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem>
+
+    /**
+     * The linked server's disclosure for "What the server stores" (08 "Rows while linked"), the
+     * same wording the pre-link card carries (R1.9, N3). Computed locally — never a request.
+     * `null` while the device is not linked, or when the link changed mid-read: answering with
+     * the first read's identity would describe the wrong server.
+     */
+    suspend fun disclosure(): SyncDisclosure?
 
     suspend fun unlink(): Outcome<Unit, SyncProblem>
 

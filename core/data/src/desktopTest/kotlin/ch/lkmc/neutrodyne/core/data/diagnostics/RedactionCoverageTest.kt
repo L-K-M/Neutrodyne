@@ -209,14 +209,17 @@ class RedactionCoverageTest {
                     { awaitCancellation() },
                 )
             val report = repository.snapshot()
-            assertEquals(2, report.sections.size)
+            val section = report.sections.single()
+            assertEquals(DiagnosticsSectionId.APP, section.id)
+            assertEquals(2, section.lines.size)
             assertTrue(
-                report.sections.all { it.lines.single().key == "unavailable" },
+                section.lines.all { it.key == "unavailable" },
                 "throw and timeout both degrade to lines: ${report.sections}",
             )
 
             val plain = repository.toPlainText(report)
             assertTrue(plain.contains("unavailable"))
+            assertTrue(plain.contains("IllegalStateException"), "the failing contributor remains visible: $plain")
             assertTrue(plain.contains("timeout"), "the hanging contributor times out: $plain")
         }
 
