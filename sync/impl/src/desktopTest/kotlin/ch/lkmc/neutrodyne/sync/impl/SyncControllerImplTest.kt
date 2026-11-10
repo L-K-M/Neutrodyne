@@ -18,11 +18,13 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
@@ -59,6 +61,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -1703,6 +1706,216 @@ class SyncControllerImplTest {
             }
         }
 
+    /**
+     * 10 Mass-change guard step 4: an explicit Apply is not an exception — the loaded, playing
+     * item's podcast survives while the rest of the batch applies and the remainder becomes a
+     * DEFERRED row, which the local settle runs once playback stops, without another round.
+     */
+    @Test
+    fun aHeldApplyNeverRemovesThePlayingPodcast() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val rids = (0 until 4).map { "00000000-0000-4000-8000-00000000000$it" }
+                h.db.withWriteTransaction {
+                    rids.forEach { rid ->
+                        h.db
+                            .podcastDao()
+                            .insertPodcast(
+                                podcastEntity(
+                                    syncId = rid,
+                                    feedUrl = "https://e.example/$rid",
+                                    feedKey = "https://e.example/$rid",
+                                ),
+                            )
+                    }
+                }
+                val playingPodcast = h.db.podcastDao().bySyncId(rids[0])!!
+                val episodeId =
+                    h.db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(podcastId = playingPodcast.id, identityKey = "g:playing"),
+                            ),
+                        ).single()
+                h.playback.setActive(episodeId, isPlaying = true)
+
+                val removalClock = Hlc.of(now, 5, NodeId("0000000000000002")).toString()
+                val heldId =
+                    h.db
+                        .syncHeldDao()
+                        .insert(
+                            SyncHeldEntity(
+                                batch =
+                                    buildJsonObject {
+                                        put("state", JsonPrimitive(HeldState.HELD.name))
+                                        put(
+                                            "podcasts",
+                                            JsonArray(
+                                                rids.map { rid ->
+                                                    buildJsonObject {
+                                                        put("rid", JsonPrimitive(rid))
+                                                        put("clock", JsonPrimitive(removalClock))
+                                                    }
+                                                },
+                                            ),
+                                        )
+                                        put("groups", JsonArray(emptyList()))
+                                    }.toString(),
+                                summary = "{}",
+                                heldAt = 7,
+                            ),
+                        )
+
+                h.controller.resolveHeld(heldId, HeldResolution.APPLY)
+                await(h) {
+                    runBlocking {
+                        h.db
+                            .podcastDao()
+                            .allForExport()
+                            .size < 4
+                    }
+                }
+                assertEquals(
+                    HeldState.DEFERRED,
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .single()
+                        .let { MassChangeGuard.stateOf(it.batch) },
+                    "the playing remainder stays as a DEFERRED row, not a prompt",
+                )
+                assertNotNull(
+                    h.db.podcastDao().bySyncId(rids[0]),
+                    "the loaded, playing item's podcast is never applied while it plays",
+                )
+                (1 until 4).forEach { i ->
+                    assertNull(h.db.podcastDao().bySyncId(rids[i]), "the non-playing removal applies")
+                }
+
+                // Once playback stops, the local settle runs the remainder — no round, no RPC.
+                // A real stop unloads the item; a pause would keep the deferred row.
+                h.playback.setActive(null, isPlaying = false)
+                DeferredRemovalSettler(h.db, h.playback, h.clock, h.address, h.tokens).settle()
+                assertNull(h.db.podcastDao().bySyncId(rids[0]), "the stop settles the deferred removal")
+                assertTrue(
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                )
+                assertTrue(h.client.calls.isEmpty(), "the settle never touches the server")
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * A different account is a different profile: linking it drops every staged, held and
+     * deferred row the old profile left, while the local library itself is untouched.
+     */
+    @Test
+    fun aDifferentAccountDropsTheOldProfilesHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.addGroup()
+                seedHeldRows(h)
+                h.client.invite = {
+                    TokenResponse("nds_other", OTHER_ACCOUNT_ID, "0000000000000009", "bob")
+                }
+
+                h.controller.startLink(serverUrl, LinkMethod.INVITE)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitInvite("abcd-efgh")
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+
+                assertTrue(
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                    "the new account never inherits the old profile's held rows",
+                )
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID), "the library stays")
+                assertNotNull(h.db.groupDao().groupByUuid(GROUP_UUID), "the library stays")
+            } finally {
+                h.close()
+            }
+        }
+
+    /** A different server is a different profile too, even when the account id matches. */
+    @Test
+    fun aDifferentServerDropsTheOldProfilesHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.addGroup()
+                seedHeldRows(h)
+
+                h.controller.startLink("https://other.example", LinkMethod.INVITE)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitInvite("abcd-efgh")
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+
+                assertTrue(
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                    "the new server never inherits the old profile's held rows",
+                )
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID), "the library stays")
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * The same server and account reauthenticating — new device id, node id and token — keeps
+     * its pending held rows: those belong to this profile's own session.
+     */
+    @Test
+    fun aSameProfileReauthKeepsTheHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.addGroup()
+                seedHeldRows(h)
+
+                h.controller.startLink(serverUrl, LinkMethod.INVITE)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitInvite("abcd-efgh")
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+
+                assertEquals(
+                    3,
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .size,
+                    "a same-profile reauth keeps STAGED, HELD and DEFERRED rows",
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    /** One `sync_held` row per state — the payloads only need their state marker. */
+    private suspend fun seedHeldRows(h: Harness) {
+        insertHeld(h, state = HeldState.STAGED.name, heldAt = 1, podcasts = listOf("rid-staged"))
+        insertHeld(h, state = HeldState.HELD.name, heldAt = 2, podcasts = listOf("rid-held"))
+        insertHeld(h, state = HeldState.DEFERRED.name, heldAt = 3, podcasts = listOf("rid-deferred"))
+    }
+
     /** Inserts one `sync_held` row and returns its id; [batch] overrides the generated payload. */
     private suspend fun insertHeld(
         h: Harness,
@@ -1732,7 +1945,9 @@ class SyncControllerImplTest {
     private fun removalJson(rid: String) =
         buildJsonObject {
             put("rid", JsonPrimitive(rid))
-            put("clock", JsonPrimitive("c"))
+            // The guard re-checks each staged clock against the stored state and the pending
+            // outbox: the fixture needs a real, winning HLC, not a placeholder.
+            put("clock", JsonPrimitive(Hlc.of(now, 5, NodeId("0000000000000002")).toString()))
         }
 
     private fun summaryJson(
@@ -1786,6 +2001,7 @@ class SyncControllerImplTest {
         const val OTHER_GROUP_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
         const val DEVICE_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         const val ACCOUNT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const val OTHER_ACCOUNT_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
     }
 }
 
@@ -1812,6 +2028,7 @@ internal class Harness(
     val client = ScriptedSyncClient()
     val gate = FakeLocalNetworkGate()
     val classifier = FakeNetErrorClassifier()
+    val playback = FakePlaybackSyncPort()
     val linkFlow = LinkFlowImpl()
     val tokens = SyncTokenStore(secrets)
     val credentials = FakeCredentialCommitCoordinator()
@@ -1835,7 +2052,7 @@ internal class Harness(
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
             notices = SyncNoticeBus(),
-            deviceNames = DeviceNames { emptyList() },
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { flags.sharePasswords },
             coordinator = credentials,
         )
@@ -1861,6 +2078,7 @@ internal class Harness(
             db = db,
             client = client,
             applier = applier,
+            playback = NoPlaybackSync,
             clock = clock,
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },
@@ -1907,6 +2125,17 @@ internal class Harness(
         )
     }
 
+    val adopter =
+        SessionAdopter(
+            db = db,
+            playback = NoPlaybackSync,
+            names = DeviceNames { null },
+            clock = clock,
+            secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
+            scope = controllerScope,
+        )
+
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()
     val scheduler: SyncScheduler =
@@ -1933,7 +2162,10 @@ internal class Harness(
                         schedulerCalls += "unlinked"
                     }
                 },
-            linkStateChanged = { events.reevaluate() },
+            linkStateChanged = {
+                events.reevaluate()
+                adopter.linkStateChanged()
+            },
         )
 
     /**
@@ -1992,6 +2224,7 @@ internal class Harness(
             db = db,
             client = client,
             engine = engine,
+            playback = playback,
             linkFlow = linkFlow,
             tokenStore = tokens,
             clock = clock,
@@ -2005,6 +2238,7 @@ internal class Harness(
             errors = classifier,
             scheduler = scheduler,
             events = events,
+            adopter = adopter,
             activity = activity,
             noticeBus = noticeBus,
             secrets = secrets,

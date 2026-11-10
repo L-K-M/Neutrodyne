@@ -101,6 +101,7 @@ class SyncControllerImpl(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
     private val engine: SyncEngine,
+    private val playback: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort,
     private val linkFlow: LinkFlowImpl,
     private val tokenStore: SyncTokenStore,
     private val clock: Clock,
@@ -114,6 +115,7 @@ class SyncControllerImpl(
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
     private val events: SyncEventsClient,
+    private val adopter: SessionAdopter,
     private val activity: SyncActivityState,
     private val noticeBus: SyncNoticeBus,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
@@ -141,7 +143,7 @@ class SyncControllerImpl(
     private val _heldChanges = MutableStateFlow<List<MassChangePrompt>>(emptyList())
     override val heldChanges: StateFlow<List<MassChangePrompt>> = _heldChanges.asStateFlow()
 
-    override val remoteSession = MutableStateFlow<RemoteSessionOffer?>(null)
+    override val remoteSession: StateFlow<RemoteSessionOffer?> = adopter.offer
     private val _syncing = MutableStateFlow(false)
     override val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
@@ -601,20 +603,43 @@ class SyncControllerImpl(
             db.withWriteTransaction<Unit> {
                 val row = db.syncHeldDao().byId(id) ?: return@withWriteTransaction
                 val batch = MassChangeGuard.heldBatch(row.batch) ?: return@withWriteTransaction
+                var keepRow = false
                 db.syncStateDao().withApplying<Unit> {
                     when (resolution) {
-                        HeldResolution.APPLY -> MassChangeGuard.apply(db, batch, clock.now())
-                        HeldResolution.KEEP_MINE -> MassChangeGuard.keepMine(db, batch, clock)
-                        HeldResolution.DECIDE_LATER -> Unit
+                        // 10 Mass-change guard 4: an explicit Apply is no exception — the
+                        // loaded, playing item's removal never runs while it plays; the
+                        // remainder becomes a DEFERRED row for the local settle.
+                        HeldResolution.APPLY -> {
+                            val deferred =
+                                MassChangeGuard.apply(db, batch, clock.now()) { syncId ->
+                                    MassChangeGuard.playingRemovalDeferred(
+                                        db,
+                                        playback.active.value,
+                                        syncId,
+                                    )
+                                }
+                            if (deferred.isNotEmpty()) {
+                                MassChangeGuard.defer(db, row.id, deferred)
+                                keepRow = true
+                            }
+                        }
+
+                        HeldResolution.KEEP_MINE -> {
+                            MassChangeGuard.keepMine(db, batch, clock)
+                        }
+
+                        HeldResolution.DECIDE_LATER -> {
+                            Unit
+                        }
                     }
                 }
-                db.syncHeldDao().delete(id)
+                if (!keepRow) db.syncHeldDao().delete(id)
             }
         }
     }
 
     override fun dismissRemoteSession() {
-        remoteSession.value = null
+        adopter.dismiss()
     }
 
     override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
@@ -779,6 +804,15 @@ class SyncControllerImpl(
             token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
             db.withWriteTransaction {
                 val existing = db.syncStateDao().get()
+                // A different server or account is a different profile: the old profile's
+                // staged, held and deferred removals must never run against this library.
+                // A same-profile reauth — new device id, node id or token — keeps them.
+                if (existing == null ||
+                    existing.serverUrl != server.serverUrl ||
+                    existing.accountId != token.accountId
+                ) {
+                    db.syncHeldDao().deleteAll()
+                }
                 db.syncStateDao().upsert(
                     (existing ?: SyncStateEntity()).copy(
                         enabled = false,
