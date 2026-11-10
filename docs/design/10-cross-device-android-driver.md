@@ -107,7 +107,7 @@ persisted marker, or a still-running round fails the phase.
 | `counts` | safe Row counts (podcasts, episodes, groups, members, upNext, outbox, clock, held, parked) |
 | `wire` | canonical accepted wire state (`canonicalSyncSnapshot().canonicalRaw()`), `auth` fields stripped |
 | `library` | materialized fixture podcasts, episodes (played/position/favourite/Up next), groups (order + members), Up next |
-| `held` | held batch summary (id, heldAt, podcast/group titles) |
+| `held` | one entry per `sync_held` row: `id`, `heldAt`, the payload `state`, the payload's `{rid, clock}` podcast/group removals, and the summary's separate podcast/group titles. A malformed payload or summary, a blank/duplicate rid, a missing/non-string clock, a non-string title or a count mismatch fails the phase |
 | `skippedClockRows` | malformed `sync_clock` rows skipped; the dump phase fails when this is non-zero |
 
 The wire and library objects are canonicalized with sorted object keys; array order is preserved.

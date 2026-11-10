@@ -2,14 +2,17 @@
 package ch.lkmc.neutrodyne
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.crossdevice.CrossDevicePasswordTransfer
 import ch.lkmc.neutrodyne.crossdevice.CrossDeviceSyncBarrier
+import ch.lkmc.neutrodyne.crossdevice.HeldDumpException
 import ch.lkmc.neutrodyne.crossdevice.REFRESH_FAR_FUTURE_MS
 import ch.lkmc.neutrodyne.crossdevice.awaitLinkedStatus
 import ch.lkmc.neutrodyne.crossdevice.fixtureNextRefreshAt
 import ch.lkmc.neutrodyne.crossdevice.hasLinkOrSyncResidue
+import ch.lkmc.neutrodyne.crossdevice.heldDumpEntry
 import ch.lkmc.neutrodyne.crossdevice.isBlockingPersistedError
 import ch.lkmc.neutrodyne.crossdevice.skippedClockRowsFailure
 import ch.lkmc.neutrodyne.crossdevice.syncRoundFailure
@@ -27,7 +30,17 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
+import kotlinx.serialization.json.put
 import org.junit.Test
+import kotlin.test.assertFailsWith
 
 /**
  * Host regressions for the exact helpers the Android driver calls. The driver's link, sync and
@@ -293,6 +306,234 @@ class CrossDeviceDriverHelpersTest {
         assertThat(fixtureNextRefreshAt(now)).isGreaterThan(now)
         assertThat(fixtureNextRefreshAt(now)).isEqualTo(now + REFRESH_FAR_FUTURE_MS)
     }
+
+    @Test
+    fun heldDumpEntryEmitsExactIdentitiesFromThePayload() {
+        val row =
+            heldRow(
+                batch =
+                    payloadJson(
+                        state = "HELD",
+                        podcasts = listOf("rid-a" to "1000", "rid-b" to ""),
+                        groups = listOf("group-a" to "2000"),
+                    ),
+                summary =
+                    summaryJson(
+                        podcasts = listOf("Same title", "Same title"),
+                        groups = listOf("Group A"),
+                    ),
+            )
+
+        val entry = heldDumpEntry(row)
+
+        assertThat(entry.string("state")).isEqualTo("HELD")
+        assertThat(entry.long("id")).isEqualTo(7L)
+        assertThat(entry.long("heldAt")).isEqualTo(123L)
+        assertThat(entry.objects("podcasts").map { it.string("rid") })
+            .containsExactly("rid-a", "rid-b")
+            .inOrder()
+        assertThat(entry.objects("podcasts").map { it.string("clock") })
+            .containsExactly("1000", "")
+            .inOrder()
+        assertThat(entry.objects("groups").map { it.string("rid") }).containsExactly("group-a")
+        assertThat(entry.objects("groups").map { it.string("clock") }).containsExactly("2000")
+        assertThat(entry.strings("podcastTitles"))
+            .containsExactly("Same title", "Same title")
+            .inOrder()
+        assertThat(entry.strings("groupTitles")).containsExactly("Group A")
+    }
+
+    @Test
+    fun heldDumpEntryEmitsCanonicalPayloadStateRidAndClock() {
+        val row =
+            heldRow(
+                batch =
+                    payloadJson(
+                        state = "DEFERRED",
+                        podcasts = listOf("CaseSensitive-RID" to "clock value"),
+                        groups = emptyList(),
+                    ),
+                summary = summaryJson(podcasts = listOf("Title"), groups = emptyList()),
+            )
+
+        val entry = heldDumpEntry(row)
+
+        assertThat(entry.string("state")).isEqualTo("DEFERRED")
+        assertThat(entry.objects("podcasts").single().string("rid")).isEqualTo("CaseSensitive-RID")
+        assertThat(entry.objects("podcasts").single().string("clock")).isEqualTo("clock value")
+    }
+
+    @Test
+    fun heldDumpEntryAcceptsEveryCurrentPayloadState() {
+        for (state in listOf("STAGED", "HELD", "DEFERRED")) {
+            val row =
+                heldRow(
+                    batch = payloadJson(state, listOf("rid" to "1"), emptyList()),
+                    summary = summaryJson(listOf("Title"), emptyList()),
+                )
+
+            assertThat(heldDumpEntry(row).string("state")).isEqualTo(state)
+        }
+    }
+
+    @Test
+    fun heldDumpEntryRejectsMalformedPayloads() {
+        val summary = summaryJson(listOf("Title"), emptyList())
+        val malformed =
+            listOf(
+                "[]",
+                "not json",
+                "{}",
+                """{"state":""}""",
+                """{"state":"BOGUS"}""",
+                """{"state":123}""",
+                """{"state":"HELD"}""",
+                """{"state":"HELD","podcasts":{},"groups":[]}""",
+                """{"state":"HELD","podcasts":[1],"groups":[]}""",
+                """{"state":"HELD","podcasts":[{"clock":"1"}],"groups":[]}""",
+                """{"state":"HELD","podcasts":[{"rid":"  ","clock":"1"}],"groups":[]}""",
+                """{"state":"HELD","podcasts":[{"rid":1,"clock":"1"}],"groups":[]}""",
+                """{"state":"HELD","podcasts":[{"rid":"a"}],"groups":[]}""",
+                """{"state":"HELD","podcasts":[{"rid":"a","clock":1}],"groups":[]}""",
+                """{"state":"HELD","podcasts":[{"rid":"a","clock":"1"},{"rid":"a","clock":"2"}],"groups":[]}""",
+            )
+        for (batch in malformed) {
+            assertFailsWith<HeldDumpException> { heldDumpEntry(heldRow(batch, summary)) }
+        }
+    }
+
+    @Test
+    fun heldDumpEntryRejectsMalformedSummaries() {
+        val batch = payloadJson("HELD", listOf("rid" to "1"), emptyList())
+        val malformed =
+            listOf(
+                "[]",
+                "not json",
+                "{}",
+                """{"podcasts":{},"groups":[]}""",
+                """{"podcasts":[1],"groups":[]}""",
+                """{"podcasts":[],"groups":{}}""",
+                """{"podcasts":[],"groups":[1]}""",
+            )
+        for (summary in malformed) {
+            assertFailsWith<HeldDumpException> { heldDumpEntry(heldRow(batch, summary)) }
+        }
+    }
+
+    @Test
+    fun heldDumpEntryRejectsSummaryCountMismatch() {
+        val twoPodcasts =
+            payloadJson("HELD", listOf("rid-a" to "1", "rid-b" to "2"), emptyList())
+        assertFailsWith<HeldDumpException> {
+            heldDumpEntry(heldRow(twoPodcasts, summaryJson(listOf("Only one"), emptyList())))
+        }
+        val oneGroup = payloadJson("HELD", emptyList(), listOf("group-a" to "1"))
+        assertFailsWith<HeldDumpException> {
+            heldDumpEntry(heldRow(oneGroup, summaryJson(emptyList(), emptyList())))
+        }
+    }
+
+    @Test
+    fun heldDumpEntryAllowsTitleDuplicatesButNotIdentityDuplicates() {
+        val duplicateTitles =
+            heldRow(
+                batch = payloadJson("HELD", listOf("rid-a" to "1", "rid-b" to "2"), emptyList()),
+                summary = summaryJson(listOf("Same", "Same"), emptyList()),
+            )
+        assertThat(heldDumpEntry(duplicateTitles).strings("podcastTitles"))
+            .containsExactly("Same", "Same")
+            .inOrder()
+
+        val duplicateIdentity =
+            heldRow(
+                batch =
+                    payloadJson(
+                        "HELD",
+                        listOf("rid-a" to "1", "rid-a" to "2"),
+                        emptyList(),
+                    ),
+                summary = summaryJson(listOf("A", "B"), emptyList()),
+            )
+        assertFailsWith<HeldDumpException> { heldDumpEntry(duplicateIdentity) }
+    }
+
+    @Test
+    fun heldDumpEntryDoesNotLeakRawJsonOrExceptionDetail() {
+        val sentinel = "SENTINEL-RAW-JSON"
+        val row =
+            heldRow(
+                batch =
+                    """{"state":"HELD","podcasts":[{"rid":"$sentinel","clock":1}],""" +
+                        """"groups":[]}""",
+                summary = "{}",
+            )
+
+        val failure = assertFailsWith<HeldDumpException> { heldDumpEntry(row) }
+
+        assertThat(failure.message).doesNotContain(sentinel)
+        assertThat(failure.message).doesNotContain("{")
+        assertThat(failure.message).doesNotContain("}")
+        assertThat(failure.cause).isNull()
+    }
+
+    private fun heldRow(
+        batch: String,
+        summary: String,
+    ): SyncHeldEntity = SyncHeldEntity(id = 7, batch = batch, summary = summary, heldAt = 123L)
+
+    private fun payloadJson(
+        state: String,
+        podcasts: List<Pair<String, String>>,
+        groups: List<Pair<String, String>>,
+    ): String =
+        buildJsonObject {
+            put("state", state)
+            put(
+                "podcasts",
+                buildJsonArray {
+                    podcasts.forEach { (rid, clock) ->
+                        add(
+                            buildJsonObject {
+                                put("rid", rid)
+                                put("clock", clock)
+                            },
+                        )
+                    }
+                },
+            )
+            put(
+                "groups",
+                buildJsonArray {
+                    groups.forEach { (rid, clock) ->
+                        add(
+                            buildJsonObject {
+                                put("rid", rid)
+                                put("clock", clock)
+                            },
+                        )
+                    }
+                },
+            )
+        }.toString()
+
+    private fun summaryJson(
+        podcasts: List<String>,
+        groups: List<String>,
+    ): String =
+        buildJsonObject {
+            put("podcasts", buildJsonArray { podcasts.forEach { add(JsonPrimitive(it)) } })
+            put("groups", buildJsonArray { groups.forEach { add(JsonPrimitive(it)) } })
+        }.toString()
+
+    private fun JsonObject.string(field: String): String? = (this[field] as? JsonPrimitive)?.content
+
+    private fun JsonObject.long(field: String): Long? = (this[field] as? JsonPrimitive)?.long
+
+    private fun JsonObject.strings(field: String): List<String> =
+        (this[field] as? JsonArray)?.map { it.jsonPrimitive.content } ?: emptyList()
+
+    private fun JsonObject.objects(field: String): List<JsonObject> =
+        (this[field] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()
 
     private fun barrier(
         controller: ScriptedSyncController,
