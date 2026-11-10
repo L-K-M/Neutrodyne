@@ -47,6 +47,10 @@ esac
 log() { echo "build.sh[$TARGET]: $*"; }
 die() { echo "build.sh[$TARGET]: $*" >&2; exit 1; }
 
+# The bounded package-manager bootstrap is shared with its boundary tests.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/package-bootstrap.sh"
+
 # ---------------------------------------------------------------- lock reading
 
 lock_value() { # lock_value <section> <key>
@@ -81,6 +85,11 @@ SOURCE_DIR="$CACHE/ffmpeg-$FFMPEG_VERSION"
 OUT="$NATIVE_DIR/build/ffmpeg/$TARGET"
 BUILD="$CACHE/build-$TARGET"
 mkdir -p "$CACHE"
+# Created before the toolchain bootstrap so its retained manager logs survive
+# the build section's own use of the directory and land in the CI artifact's
+# build-*.log glob.
+rm -rf "$BUILD"
+mkdir -p "$BUILD"
 
 # ------------------------------------------------------------------- downloads
 
@@ -99,19 +108,6 @@ verify_checksum() { # verify_checksum <file> <expected>
     actual="$(sha256_of "$1")"
     [ "$actual" = "$2" ] || die "checksum mismatch for $1: expected $2, got $actual"
 }
-
-# bounded <seconds> <command...> — a hard bound on every network and gpg call
-# so a stalling download or a hanging gpg fails the build with a message
-# instead of sitting silent until the job's timeout. Both Windows legs that
-# died in silence (runs 41479793169 and 41500707088) produced no output for
-# the rest of the job somewhere in the download → gpg window. GNU timeout
-# (coreutils on MSYS2 and manylinux); macOS uses Perl's alarm before exec,
-# avoiding a watchdog child that keeps Gradle's output pipe open after failure.
-if command -v timeout >/dev/null 2>&1 && timeout --version >/dev/null 2>&1; then
-    bounded() { timeout --kill-after=5 "$1" "${@:2}"; }
-else
-    bounded() { perl -e 'alarm shift; exec @ARGV or die $!;' "$@"; }
-fi
 
 download() { # download <file> <url> [fallback-url]
     if [ -s "$1" ]; then
@@ -327,10 +323,14 @@ case "$TARGET" in
         # The build runs inside the manylinux_2_28 container (glibc 2.28, below
         # D88's 2.31 floor). build.sh re-execs itself in the container when it is
         # not already inside one, so `buildFfmpeg` needs no container knowledge.
-        if ! command -v nasm >/dev/null 2>&1; then
-            log "installing NASM into the container"
-            (microdnf install -y nasm || dnf install -y nasm || yum install -y nasm) >/dev/null 2>&1 ||
-                log "warning: could not install NASM; x86 assembly is disabled"
+        # NASM carries the x86-64 build's assembly; a silent disable would
+        # produce slower libraries with no word in the log. On aarch64 NASM is
+        # x86-only, so the attempt stays best-effort there.
+        if [ "$TARGET" = linux-x64 ]; then
+            bootstrap_package required 120 nasm "$BUILD" nasm microdnf dnf yum ||
+                die "NASM is required for the x86-64 FFmpeg build; no package manager could install it"
+        else
+            bootstrap_package optional 120 nasm "$BUILD" nasm microdnf dnf yum || true
         fi
         TARGET_FLAGS=(
             --cc=gcc
@@ -355,8 +355,6 @@ log "configure: $CONFIGURE_LINE"
 
 # ---------------------------------------------------------------------- build
 
-rm -rf "$BUILD"
-mkdir -p "$BUILD"
 cd "$SOURCE_DIR"
 make distclean >/dev/null 2>&1 || true
 
@@ -375,10 +373,9 @@ log "building (this takes a few minutes)"
 # recorded is verified here and repaired with patchelf when it is wrong.
 case "$TARGET" in
     linux-x64 | linux-arm64)
-        if ! command -v patchelf >/dev/null 2>&1; then
-            log "installing patchelf for the RUNPATH check"
-            (microdnf install -y patchelf || dnf install -y patchelf || yum install -y patchelf) >/dev/null 2>&1 || true
-        fi
+        # patchelf is optional: without it the RUNPATH check below still logs
+        # what the linker recorded, but cannot repair it.
+        bootstrap_package optional 120 patchelf "$BUILD" patchelf microdnf dnf yum || true
         for lib in "$LIBDIR"/*.so.*; do
             [ -f "$lib" ] || continue
             if command -v patchelf >/dev/null 2>&1; then
