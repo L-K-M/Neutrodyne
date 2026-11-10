@@ -84,6 +84,11 @@ internal class QueueProjector(
     private val afterTransition: (Long) -> Unit = {},
     /** Runs after the end-of-session transaction commits (10's Stopped boundary). */
     private val afterSessionEnd: () -> Unit = {},
+    /**
+     * Runs once per window install or external-start commit — the [NowPlaying.loadId] boundary
+     * (08 Sync notices): every committed (re)load is a new occurrence, pause/play is not.
+     */
+    private val onLoadBoundary: () -> Unit = {},
     private val localChanges: LocalMediaChanges? = null,
 ) : Player.Listener {
     private var player: Player? = null
@@ -261,6 +266,7 @@ internal class QueueProjector(
             applier.prepareWindow(desired.mapNotNull { it.media }, input.groupId)
             index.putAll(desired.mapNotNull { it.media })
             applier.refreshFor(desired.firstOrNull()?.item?.episodeId)
+            onLoadBoundary()
             expectExternalApply(snapshot.sessionRevision(), built.map { it.mediaId }, desired)
             built
         }
@@ -473,6 +479,7 @@ internal class QueueProjector(
         try {
             if (playback == WindowPlayback.LOAD_PAUSED) live.pause()
             index.putAll(window.mapNotNull { it.media })
+            onLoadBoundary()
             tracker.coreSeek { live.setMediaItems(built, 0, startMs) }
             window.firstOrNull()?.let {
                 tracker.load(
@@ -572,6 +579,10 @@ internal class QueueProjector(
         }
         if (!changed && reason == Player.DISCONTINUITY_REASON_SEEK) replayCompletedBoundary()
         if (applying || external != null || !changed) return
+        // A real current-item transition inside the window: new occurrence, stamped before the
+        // bridge's onEvents publishes it (08 Sync notices). Installs and external commits mint
+        // separately above.
+        onLoadBoundary()
         val live = player ?: return
         val arrivalId = live.episodeIdOrNull() ?: return
         val arrival = entries.firstOrNull { it.item.episodeId == arrivalId } ?: return
