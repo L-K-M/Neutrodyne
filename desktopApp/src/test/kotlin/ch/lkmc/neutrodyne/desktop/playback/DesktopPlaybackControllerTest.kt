@@ -1063,7 +1063,15 @@ internal class PlaybackFixture(
 
     suspend fun awaitPlaying() {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            withTimeout(10_000) { controller.nowPlaying.filter { it?.isPlaying == true }.first() }
+            try {
+                withTimeout(10_000) { controller.nowPlaying.filter { it?.isPlaying == true }.first() }
+            } catch (failure: Exception) {
+                throw AssertionError(
+                    "Expected playing; now=${controller.nowPlaying.value}; " +
+                        "engine=${engine.state.value}; session=${graph.playSessionStore().virtualQueue(20)}",
+                    failure,
+                )
+            }
         }
     }
 
