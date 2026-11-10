@@ -64,7 +64,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -102,6 +101,7 @@ class SyncControllerImpl(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
     private val engine: SyncEngine,
+    private val playback: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort,
     private val linkFlow: LinkFlowImpl,
     private val tokenStore: SyncTokenStore,
     private val clock: Clock,
@@ -198,6 +198,14 @@ class SyncControllerImpl(
             combine(activity.count, events.connected) { _, _ -> currentActivity() }
                 .distinctUntilChanged()
                 .collect { refreshStatus() }
+        }
+        // 10 Mass-change guard: the prompts follow `sync_held`, so a batch the guard holds, a
+        // resolution, or any other writer republishes without a manual refresh. STAGED and
+        // DEFERRED rows are the engine's bookkeeping and never surface as user prompts.
+        scope.launch {
+            db.syncHeldDao().observeAll().collect { rows ->
+                _heldChanges.value = rows.mapNotNull(::heldPrompt)
+            }
         }
     }
 
@@ -585,32 +593,48 @@ class SyncControllerImpl(
         id: Long,
         resolution: HeldResolution,
     ) {
+        // Decide later changes nothing: the HELD row and its banner stay.
+        if (resolution == HeldResolution.DECIDE_LATER) return
         scope.launch {
-            val row = db.syncHeldDao().byId(id) ?: return@launch
-            val batch = runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull() ?: return@launch
-            when (resolution) {
-                HeldResolution.APPLY -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.apply(db, batch, clock.now())
+            // The row is read and gated inside the write transaction: an answer can only apply a
+            // batch that is still HELD — a row another path resolved, deleted or returned to
+            // STAGED/DEFERRED meanwhile is a no-op — and the apply commits or rolls back together
+            // with the row's delete (10 Mass-change guard step 3).
+            db.withWriteTransaction<Unit> {
+                val row = db.syncHeldDao().byId(id) ?: return@withWriteTransaction
+                val batch = MassChangeGuard.heldBatch(row.batch) ?: return@withWriteTransaction
+                var keepRow = false
+                db.syncStateDao().withApplying<Unit> {
+                    when (resolution) {
+                        // 10 Mass-change guard 4: an explicit Apply is no exception — the
+                        // loaded, playing item's removal never runs while it plays; the
+                        // remainder becomes a DEFERRED row for the local settle.
+                        HeldResolution.APPLY -> {
+                            val deferred =
+                                MassChangeGuard.apply(db, batch, clock.now()) { syncId ->
+                                    MassChangeGuard.playingRemovalDeferred(
+                                        db,
+                                        playback.active.value,
+                                        syncId,
+                                    )
+                                }
+                            if (deferred.isNotEmpty()) {
+                                MassChangeGuard.defer(db, row.id, deferred)
+                                keepRow = true
+                            }
                         }
-                    }
-                }
 
-                HeldResolution.KEEP_MINE -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
+                        HeldResolution.KEEP_MINE -> {
                             MassChangeGuard.keepMine(db, batch, clock)
                         }
+
+                        HeldResolution.DECIDE_LATER -> {
+                            Unit
+                        }
                     }
                 }
-
-                HeldResolution.DECIDE_LATER -> {
-                    return@launch
-                }
+                if (!keepRow) db.syncHeldDao().delete(id)
             }
-            db.syncHeldDao().delete(id)
-            refreshHeld()
         }
     }
 
@@ -780,6 +804,15 @@ class SyncControllerImpl(
             token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
             db.withWriteTransaction {
                 val existing = db.syncStateDao().get()
+                // A different server or account is a different profile: the old profile's
+                // staged, held and deferred removals must never run against this library.
+                // A same-profile reauth — new device id, node id or token — keeps them.
+                if (existing == null ||
+                    existing.serverUrl != server.serverUrl ||
+                    existing.accountId != token.accountId
+                ) {
+                    db.syncHeldDao().deleteAll()
+                }
                 db.syncStateDao().upsert(
                     (existing ?: SyncStateEntity()).copy(
                         enabled = false,
@@ -1055,23 +1088,33 @@ class SyncControllerImpl(
         return classify(failure)
     }
 
-    private suspend fun refreshHeld() {
-        _heldChanges.value =
-            db.syncHeldDao().all().mapNotNull { row ->
-                val batch =
-                    runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull()
-                        ?: return@mapNotNull null
-                val summary =
-                    runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
-                MassChangePrompt(
-                    id = row.id,
-                    deviceName = null,
-                    podcastTitles =
-                        summary?.get("podcasts")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    groupNames = summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                )
-            }
-    }
+    /**
+     * One `sync_held` row as a [MassChangePrompt], or `null` when the row is not a user prompt:
+     * STAGED/DEFERRED rows are the guard's bookkeeping, and a malformed row must never kill the
+     * observer or starve the valid rows behind it. The summary carries only title and name lists
+     * (complete — the UI truncates later); the guard records no device name yet.
+     */
+    private fun heldPrompt(row: SyncHeldEntity): MassChangePrompt? =
+        runCatching {
+            MassChangeGuard.heldBatch(row.batch) ?: return null
+            val summary =
+                runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
+            MassChangePrompt(
+                id = row.id,
+                deviceName = null,
+                podcastTitles = summaryList(summary, "podcasts"),
+                groupNames = summaryList(summary, "groups"),
+            )
+        }.getOrNull()
+
+    /** One summary string list; a malformed member reads as absent rather than failing the row. */
+    private fun summaryList(
+        summary: kotlinx.serialization.json.JsonObject?,
+        key: String,
+    ): List<String> =
+        runCatching { summary?.get(key)?.jsonArray?.map { it.jsonPrimitive.content } }
+            .getOrNull()
+            ?: emptyList()
 }
 
 /** `spaces and hyphens ignored, case-insensitive`, as the server normalises codes (10 Link methods). */

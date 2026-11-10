@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.sync.impl
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -69,6 +70,7 @@ class SyncEngine(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
     private val applier: SyncApplier,
+    private val playback: PlaybackSyncPort,
     private val clock: Clock,
     private val secrets: SecretStore,
     private val sharePasswords: () -> Boolean,
@@ -132,6 +134,9 @@ class SyncEngine(
         capture.reconcile()
         effects.drainSettings()
         effects.drainPasswords()
+        // 10 Mass-change guard 1: the share threshold's denominator is the local library as the
+        // round starts — before this pull's adds and dedupes can dilute the removals' share.
+        val localPodcastsAtStart = localPodcastCount()
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -166,8 +171,8 @@ class SyncEngine(
             effects.drainSettings()
             effects.drainPasswords()
             stale += page.stale
-            held += page.held
             sessionApplied = sessionApplied || page.sessionApplied
+            // Staged removals count as held only after the verdict below.
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
             raiseHlc(response.records)
@@ -194,12 +199,40 @@ class SyncEngine(
             if (db.syncOutboxDao().count() == 0) break
         }
 
-        val batch = MassChangeGuard.evaluate(db, roundId, localPodcastCount())
-        if (batch != null) {
-            held += batch.podcasts.size + batch.groups.size
-        } else {
-            // Below the thresholds the guard deleted its provisional row; the removals were staged
-            // in `sync_held` only when held, so nothing else to apply here.
+        // 10 Mass-change guard 2: the staged removals settle in one writer. Below the
+        // thresholds the batch applies here; above it became the held prompt row. The
+        // provisional row is retained until that outcome commits with it, and `applying = 1`
+        // keeps the cascaded deletes from echoing back through the outbox.
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                for (verdict in MassChangeGuard.evaluate(db, roundId, localPodcastsAtStart)) {
+                    when (verdict) {
+                        is MassChangeGuard.Verdict.Held -> {
+                            held += verdict.batch.podcasts.size + verdict.batch.groups.size
+                        }
+
+                        is MassChangeGuard.Verdict.Approved -> {
+                            // 10 step 4: an already-DEFERRED batch holds while the item stays
+                            // loaded (stop or item change releases it — a pause-scheduled
+                            // round like this one does not); a fresh batch defers only while
+                            // the loaded item actually plays.
+                            val deferred =
+                                MassChangeGuard.apply(db, verdict.batch, clock.now()) { syncId ->
+                                    if (verdict.alreadyDeferred) {
+                                        MassChangeGuard.loadedRemovalDeferred(db, playback.active.value, syncId)
+                                    } else {
+                                        MassChangeGuard.playingRemovalDeferred(db, playback.active.value, syncId)
+                                    }
+                                }
+                            if (deferred.isEmpty()) {
+                                db.syncHeldDao().delete(verdict.rowId)
+                            } else {
+                                MassChangeGuard.defer(db, verdict.rowId, deferred)
+                            }
+                        }
+                    }
+                }
+            }
         }
         // 10 Now playing: a committed session record re-evaluates once per round — the raw
         // record already holds every page's winner, so one check covers multi-page pulls.

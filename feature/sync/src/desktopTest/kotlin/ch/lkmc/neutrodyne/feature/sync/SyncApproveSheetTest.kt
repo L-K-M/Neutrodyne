@@ -411,6 +411,8 @@ internal class GatedSyncController(
     var devicesGate: CompletableDeferred<Unit>? = null
     var renameGate: CompletableDeferred<Unit>? = null
     var revokeGate: CompletableDeferred<Unit>? = null
+    var unlinkGate: CompletableDeferred<Unit>? = null
+    var deleteServerDataGate: CompletableDeferred<Unit>? = null
     var playbackSettingsGate: CompletableDeferred<Unit>? = null
     var sharePasswordsGate: CompletableDeferred<Unit>? = null
 
@@ -449,6 +451,16 @@ internal class GatedSyncController(
     override suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem> {
         revokeGate?.await()
         return fake.revokeDevice(deviceId)
+    }
+
+    override suspend fun unlink(): Outcome<Unit, SyncProblem> {
+        unlinkGate?.await()
+        return fake.unlink()
+    }
+
+    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
+        deleteServerDataGate?.await()
+        return fake.deleteServerData(confirm)
     }
 
     override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> {
