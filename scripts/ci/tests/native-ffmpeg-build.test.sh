@@ -236,7 +236,11 @@ TOOL
         echo $$ > "$FAKE_PID_FILE"
         echo "$name: starting"
         sleep 300 &
-        echo $! > "$FAKE_CHILD_FILE"
+        child=$!
+        echo $child > "$FAKE_CHILD_FILE"
+        # GNU timeout signals the process group; the Perl fallback signals only
+        # this shell, so the child must be reaped here on every path.
+        trap 'kill "$child" 2>/dev/null || true; exit 143' EXIT TERM ALRM HUP
         wait
         ;;
 esac
@@ -246,14 +250,27 @@ FAKE
         echo "$dir"
     }
 
+    # A unique tool name keeps an ambient nasm on the host from satisfying the
+    # bootstrap pre-check; the package is still nasm, the tool is the probe.
+    FAKE_TOOL=nasm-bootstrap-probe
+
     run_bootstrap() {
         (
             export PATH="$FIXTURE/bin:$PATH"
-            export FAKE_TOOL=nasm FAKE_PID_FILE="$FIXTURE/pid" FAKE_CHILD_FILE="$FIXTURE/child"
+            export FAKE_TOOL FAKE_PID_FILE="$FIXTURE/pid" FAKE_CHILD_FILE="$FIXTURE/child"
             export FAKE_MODE_MICRODNF FAKE_MODE_DNF FAKE_MODE_YUM
             bootstrap_package "$@"
         )
     }
+
+    # GNU timeout kills the manager's process group; the Perl fallback signals
+    # only the exec'd manager. The orphan assertion is meaningful only on the
+    # GNU path, so it is guarded rather than assumed.
+    if command -v timeout >/dev/null 2>&1 && timeout --version >/dev/null 2>&1; then
+        BOOTSTRAP_GNU_TIMEOUT=1
+    else
+        BOOTSTRAP_GNU_TIMEOUT=0
+    fi
 
     # shellcheck disable=SC2329 # runs as the EXIT/INT/TERM trap
     bootstrap_cleanup() {
@@ -269,12 +286,12 @@ FAKE
     FIXTURE="$(bootstrap_fixture)"
     FAKE_MODE_MICRODNF=ok FAKE_MODE_DNF=ok FAKE_MODE_YUM=ok
     rm -f "$FIXTURE/bin/dnf" "$FIXTURE/bin/yum"
-    out="$(run_bootstrap optional 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
-    if [ "$rc" -eq 0 ] && [ -x "$FIXTURE/bin/nasm" ] &&
-        [ -f "$FIXTURE/logs/nasm-microdnf.log" ] &&
-        grep -q 'microdnf: ok nasm' "$FIXTURE/logs/nasm-microdnf.log" &&
+    out="$(run_bootstrap optional 5 nasm "$FIXTURE/logs" "$FAKE_TOOL" microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -x "$FIXTURE/bin/$FAKE_TOOL" ] &&
+        [ -f "$FIXTURE/logs/$FAKE_TOOL-microdnf.log" ] &&
+        grep -q "microdnf: ok $FAKE_TOOL" "$FIXTURE/logs/$FAKE_TOOL-microdnf.log" &&
         printf '%s' "$out" | grep -q 'installed nasm with microdnf' &&
-        [ ! -f "$FIXTURE/logs/nasm-dnf.log" ]; then
+        [ ! -f "$FIXTURE/logs/$FAKE_TOOL-dnf.log" ]; then
         t_ok "the first working manager installs the tool and retains its log"
     else
         t_fail "first working manager: rc=$rc out=$out"
@@ -285,10 +302,10 @@ FAKE
     FIXTURE="$(bootstrap_fixture)"
     FAKE_MODE_MICRODNF=ok FAKE_MODE_DNF=fail FAKE_MODE_YUM=ok
     rm -f "$FIXTURE/bin/microdnf"
-    out="$(run_bootstrap optional 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
-    if [ "$rc" -eq 0 ] && [ -x "$FIXTURE/bin/nasm" ] &&
-        [ -f "$FIXTURE/logs/nasm-dnf.log" ] && grep -q 'package not found' "$FIXTURE/logs/nasm-dnf.log" &&
-        [ -f "$FIXTURE/logs/nasm-yum.log" ] && grep -q 'yum: ok nasm' "$FIXTURE/logs/nasm-yum.log" &&
+    out="$(run_bootstrap optional 5 nasm "$FIXTURE/logs" "$FAKE_TOOL" microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -x "$FIXTURE/bin/$FAKE_TOOL" ] &&
+        [ -f "$FIXTURE/logs/$FAKE_TOOL-dnf.log" ] && grep -q 'package not found' "$FIXTURE/logs/$FAKE_TOOL-dnf.log" &&
+        [ -f "$FIXTURE/logs/$FAKE_TOOL-yum.log" ] && grep -q "yum: ok $FAKE_TOOL" "$FIXTURE/logs/$FAKE_TOOL-yum.log" &&
         printf '%s' "$out" | grep -q 'installed nasm with yum'; then
         t_ok "a failing manager falls through to the next one"
     else
@@ -299,10 +316,10 @@ FAKE
     # A required tool no manager provides fails with the retained log tails.
     FIXTURE="$(bootstrap_fixture)"
     FAKE_MODE_MICRODNF=fail FAKE_MODE_DNF=fail FAKE_MODE_YUM=fail
-    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
-    if [ "$rc" -eq 1 ] && [ ! -x "$FIXTURE/bin/nasm" ] &&
+    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" "$FAKE_TOOL" microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 1 ] && [ ! -x "$FIXTURE/bin/$FAKE_TOOL" ] &&
         printf '%s' "$out" | grep -q 'could not install nasm' &&
-        printf '%s' "$out" | grep -q 'nasm-microdnf.log' &&
+        printf '%s' "$out" | grep -q "$FAKE_TOOL-microdnf.log" &&
         printf '%s' "$out" | grep -q 'package not found'; then
         t_ok "a required tool no manager provides fails with the log tails"
     else
@@ -315,10 +332,10 @@ FAKE
     FIXTURE="$(bootstrap_fixture)"
     FAKE_MODE_MICRODNF=hang FAKE_MODE_DNF=ok FAKE_MODE_YUM=ok
     start="$(date +%s)"
-    out="$(run_bootstrap optional 1 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    out="$(run_bootstrap optional 2 nasm "$FIXTURE/logs" "$FAKE_TOOL" microdnf dnf yum 2>&1)"; rc=$?
     elapsed=$(( $(date +%s) - start ))
-    if [ "$rc" -eq 1 ] && [ "$elapsed" -lt 5 ] && [ ! -x "$FIXTURE/bin/nasm" ] &&
-        [ -f "$FIXTURE/logs/nasm-microdnf.log" ] && [ ! -f "$FIXTURE/logs/nasm-dnf.log" ]; then
+    if [ "$rc" -eq 1 ] && [ "$elapsed" -lt 5 ] && [ ! -x "$FIXTURE/bin/$FAKE_TOOL" ] &&
+        [ -f "$FIXTURE/logs/$FAKE_TOOL-microdnf.log" ] && [ ! -f "$FIXTURE/logs/$FAKE_TOOL-dnf.log" ]; then
         t_ok "a hung manager is bounded by the budget (elapsed ${elapsed}s)"
     else
         t_fail "hung manager: rc=$rc elapsed=${elapsed}s out=$out"
@@ -326,11 +343,20 @@ FAKE
     sleep 0.2
     if [ -f "$FIXTURE/pid" ] && [ -f "$FIXTURE/child" ]; then
         mgr_pid="$(cat "$FIXTURE/pid")"; child_pid="$(cat "$FIXTURE/child")"
-        if kill -0 "$mgr_pid" 2>/dev/null || kill -0 "$child_pid" 2>/dev/null; then
-            t_fail "the timed-out manager left an orphan (mgr=$mgr_pid child=$child_pid)"
-            kill "$mgr_pid" "$child_pid" 2>/dev/null || true
+        # The child fixture must be reaped on every path, including the Perl
+        # fallback where only the manager was signalled.
+        if kill -0 "$child_pid" 2>/dev/null; then
+            kill "$child_pid" 2>/dev/null || true
+        fi
+        if [ "$BOOTSTRAP_GNU_TIMEOUT" -eq 1 ]; then
+            if kill -0 "$mgr_pid" 2>/dev/null || kill -0 "$child_pid" 2>/dev/null; then
+                t_fail "the timed-out manager left an orphan (mgr=$mgr_pid child=$child_pid)"
+                kill "$mgr_pid" "$child_pid" 2>/dev/null || true
+            else
+                t_ok "the timed-out manager left no orphan child"
+            fi
         else
-            t_ok "the timed-out manager left no orphan child"
+            t_ok "the child fixture was reaped after the timeout (Perl path)"
         fi
     else
         t_fail "the hung manager wrote no pid files"
@@ -341,8 +367,8 @@ FAKE
     FIXTURE="$(bootstrap_fixture)"
     FAKE_MODE_MICRODNF=fail-created FAKE_MODE_DNF=ok FAKE_MODE_YUM=ok
     rm -f "$FIXTURE/bin/dnf" "$FIXTURE/bin/yum"
-    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
-    if [ "$rc" -eq 1 ] && [ -x "$FIXTURE/bin/nasm" ] &&
+    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" "$FAKE_TOOL" microdnf dnf yum 2>&1)"; rc=$?
+    if [ "$rc" -eq 1 ] && [ -x "$FIXTURE/bin/$FAKE_TOOL" ] &&
         printf '%s' "$out" | grep -q 'could not install nasm'; then
         t_ok "a manager that errors is not treated as success even when it leaves the tool"
     else
@@ -352,9 +378,9 @@ FAKE
 
     # An already-present tool is not reinstalled.
     FIXTURE="$(bootstrap_fixture)"
-    printf '#!/usr/bin/env bash\n' > "$FIXTURE/bin/nasm"; chmod +x "$FIXTURE/bin/nasm"
+    printf '#!/usr/bin/env bash\n' > "$FIXTURE/bin/$FAKE_TOOL"; chmod +x "$FIXTURE/bin/$FAKE_TOOL"
     rm -f "$FIXTURE/bin/microdnf" "$FIXTURE/bin/dnf" "$FIXTURE/bin/yum"
-    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" nasm microdnf dnf yum 2>&1)"; rc=$?
+    out="$(run_bootstrap required 5 nasm "$FIXTURE/logs" "$FAKE_TOOL" microdnf dnf yum 2>&1)"; rc=$?
     if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
         t_ok "an already-present tool is not reinstalled"
     else
