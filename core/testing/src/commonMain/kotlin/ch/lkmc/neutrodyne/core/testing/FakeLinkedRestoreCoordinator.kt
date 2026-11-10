@@ -21,6 +21,14 @@ class FakeLinkedRestoreCoordinator : LinkedRestoreCoordinator {
     var previewResult: Outcome<AllDevicesReachEffect, BackupError> =
         Outcome.Success(AllDevicesReachEffect(podcastsToRemove = 0, groupsToRemove = 0))
 
+    /** The eligibility answer; null is the fail-closed default (no live link). */
+    var linkedHost: String? = null
+
+    var linkReadError: BackupError? = null
+
+    override suspend fun actualLinkedHost(): Outcome<String?, BackupError> =
+        linkReadError?.let { Outcome.Failure(it) } ?: Outcome.Success(linkedHost)
+
     override suspend fun unlinkForRestore(): Outcome<Unit, BackupError> {
         unlinks += Unit
         return unlinkResult

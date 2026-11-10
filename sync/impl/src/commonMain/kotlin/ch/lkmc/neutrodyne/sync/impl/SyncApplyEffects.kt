@@ -331,7 +331,9 @@ class SyncApplyEffects(
     ) {
         if (changes.isEmpty() || results.isEmpty()) return
         credentials.withCredentialCommit {
-            val account = db.syncStateDao().get()?.accountId ?: "local"
+            val state = db.syncStateDao().get()
+            val account = state?.accountId ?: "local"
+            val deviceId = state?.deviceId
             changes.forEachIndexed { index, change ->
                 if (change.coll != SyncCollection.PODCAST.wire) return@forEachIndexed
                 val result = results.getOrNull(index) ?: return@forEachIndexed
@@ -374,6 +376,7 @@ class SyncApplyEffects(
                         .minOrNull()
                         ?.let { db.syncOutboxDao().deleteAcked(coll, rid, "*", it.packed, it.nodeId.value) }
                     if (coll == SyncCollection.SETTING.wire) mergeAckedSetting(rid, change)
+                    if (coll == SyncCollection.SESSION.wire) mergeAckedSession(rid, change, deviceId)
                 }
             }
         }
@@ -444,6 +447,55 @@ class SyncApplyEffects(
                                     settings.canonicalJson(key, value.toString()) ?: return,
                                 ),
                         pendingSetting = materializeWinner,
+                        pendingAuth = stored?.pendingAuth,
+                        settingIntent = stored?.settingIntent,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    /**
+     * 10 Now playing and handoff: an acknowledged session merges its sent literals into
+     * `sync_clock` raw state under the normal field rules, in the same transaction that deletes
+     * the outbox rows. Without it the gap between the deletes and the server's echo would leave
+     * only an older remote winner on record, and the adopter's played-since fence — which reads
+     * raw plus pending — could offer back a session this device already superseded. When the
+     * acknowledged fields win, this device becomes the recorded writer (`by`); a newer stored
+     * session keeps its writer untouched.
+     */
+    private suspend fun mergeAckedSession(
+        rid: String,
+        change: ChangeDto,
+        deviceId: String?,
+    ) {
+        val sent =
+            change.fields.mapNotNull { (field, value) ->
+                val v = value.v ?: return@mapNotNull null
+                val c = value.c?.let { runCatching { Hlc.parse(it) }.getOrNull() } ?: return@mapNotNull null
+                field to FieldState(v, c)
+            }
+        if (sent.isEmpty()) return
+        val stored = db.syncClockDao().get(SyncCollection.SESSION.wire, rid)?.let { decode(it.clocks) }
+        val incoming = RecordState(SyncCollection.SESSION, fields = sent.toMap())
+        val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
+        val oursWon =
+            sent.any { (field, state) ->
+                merged.record.fields[field]?.let { it.v == state.v && it.c == state.c } == true
+            }
+        db.syncClockDao().upsert(
+            SyncClockEntity(
+                SyncCollection.SESSION.wire,
+                rid,
+                encode(
+                    RawSyncRecord(
+                        state = merged.record,
+                        by = if (oursWon) deviceId ?: stored?.by else stored?.by,
+                        authReference = stored?.authReference,
+                        redirect = stored?.redirect,
+                        alias = stored?.alias,
+                        settingHash = stored?.settingHash,
+                        pendingSetting = stored?.pendingSetting,
                         pendingAuth = stored?.pendingAuth,
                         settingIntent = stored?.settingIntent,
                     ),

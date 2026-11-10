@@ -29,6 +29,33 @@ import okio.Path.Companion.toPath
 @ContributesTo(AppScope::class)
 @BindingContainer
 object SyncBindings {
+    /** 10 Now playing and handoff: the card's writer-name lookup rides the account client. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun deviceNames(client: Provider<SyncClient>): DeviceNames = ClientDeviceNames { client().devices() }
+
+    /** 10 Now playing and handoff: the durable-session adopter behind `remoteSession`. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun sessionAdopter(
+        db: NeutrodyneDatabase,
+        playback: PlaybackSyncPort,
+        names: DeviceNames,
+        clock: Clock,
+        secrets: SecretStore,
+        flags: SyncFlags,
+        @ApplicationScope scope: CoroutineScope,
+    ): SessionAdopter =
+        SessionAdopter(
+            db = db,
+            playback = playback,
+            names = names,
+            clock = clock,
+            secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
+            scope = scope,
+        )
+
     @Provides
     @SingleIn(AppScope::class)
     fun syncTokenStore(secrets: SecretStore): SyncTokenStore = SyncTokenStore(secrets)
@@ -71,7 +98,7 @@ object SyncBindings {
         channelSync: GroupChannelSync,
         flags: SyncFlags,
         notices: SyncNoticeBus,
-        client: SyncClient,
+        deviceNames: DeviceNames,
         coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     ): SyncApplier =
         SyncApplier(
@@ -84,7 +111,7 @@ object SyncBindings {
             channelSync = channelSync,
             sharePasswords = { flags.sharePasswords },
             notices = notices,
-            deviceNames = DeviceNames { client.devices() },
+            deviceNames = deviceNames,
             coordinator = coordinator,
         )
 
@@ -94,6 +121,7 @@ object SyncBindings {
         db: NeutrodyneDatabase,
         client: SyncClient,
         applier: SyncApplier,
+        playback: PlaybackSyncPort,
         clock: Clock,
         secrets: SecretStore,
         flags: SyncFlags,
@@ -104,11 +132,13 @@ object SyncBindings {
         effects: SyncApplyEffects,
         capture: SettingsCapture,
         notices: SyncNoticeBus,
+        adopter: SessionAdopter,
     ): SyncEngine =
         SyncEngine(
             db = db,
             client = client,
             applier = applier,
+            playback = playback,
             clock = clock,
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },
@@ -119,6 +149,9 @@ object SyncBindings {
             effects = effects,
             capture = capture,
             notices = notices,
+            // A committed session record re-evaluates the durable offer after the page's
+            // commit — the adopter never runs inside the apply transaction.
+            onSessionApplied = { adopter.evaluate() },
             refreshPreferences = { flags.refreshFromStore(address) },
         )
 
@@ -138,6 +171,7 @@ object SyncBindings {
         @ApplicationScope scope: CoroutineScope,
         hooks: SyncScheduleHooks,
         events: Provider<SyncEventsClient>,
+        adopter: Provider<SessionAdopter>,
     ): SyncScheduler =
         SyncScheduler(
             db = db,
@@ -149,8 +183,12 @@ object SyncBindings {
             hooks = hooks,
             // Lazy: the events client needs this scheduler for its remote-changed poke, so a
             // direct constructor edge would cycle. The scheduler only calls the callback on
-            // link/unlink/revoke — long after construction.
-            linkStateChanged = { events().reevaluate() },
+            // link/unlink/revoke — long after construction. The adopter shares the edge: a
+            // (re)link re-evaluates the seeded session, an unlink or revoke invalidates.
+            linkStateChanged = {
+                events().reevaluate()
+                adopter().linkStateChanged()
+            },
         )
 
     /** 10 Live updates: the SSE transport rides the `SYNC_STREAM` client inside. */

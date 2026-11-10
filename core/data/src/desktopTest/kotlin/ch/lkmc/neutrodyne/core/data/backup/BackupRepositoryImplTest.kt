@@ -137,6 +137,7 @@ class BackupRepositoryImplTest {
                     )
             }
             link()
+            linkedSync.linkedHost = "sync.example.com"
             val sessionId = backupSession()
 
             val claimed =
@@ -165,6 +166,36 @@ class BackupRepositoryImplTest {
                 LinkedRestoreReach.THIS_DEVICE,
                 ImportOptionsJson.decode(checkNotNull(db.importDao().sessionById(other)?.optionsJson)).linkedReach,
             )
+        }
+
+    /** A stale `linkedAt` row (copied database) must not claim ALL_DEVICES: the eligibility
+     *  read runs before the durable intent and the `linkedAt` clear. */
+    @Test
+    fun anAllDevicesReplaceOnAStaleLinkIsRejectedWithoutClaiming() =
+        runTest {
+            db.syncStateDao().upsert(
+                ch.lkmc.neutrodyne.core.database.SyncStateEntity(
+                    serverUrl = "https://sync.example.com",
+                    enabled = true,
+                    nodeId = "0000000000000001",
+                    hlc = 1L shl 16,
+                    linkedAt = 1L,
+                ),
+            )
+            val sessionId = backupSession()
+
+            val result =
+                repository.restore(
+                    sessionId,
+                    RestoreRequest(RestoreMode.REPLACE, emptySet(), LinkedRestoreReach.ALL_DEVICES),
+                )
+
+            assertEquals(Outcome.Failure(BackupError.Unsupported), result)
+            assertEquals(1L, db.syncStateDao().get()?.linkedAt, "the stale link is not cleared")
+            val options =
+                ImportOptionsJson.decode(checkNotNull(db.importDao().sessionById(sessionId)?.optionsJson))
+            assertNull(options.restoreRequestedAt, "no durable intent is written")
+            assertNull(options.linkedReach)
         }
 
     @Test
@@ -200,6 +231,9 @@ class BackupRepositoryImplTest {
     private val secrets = FakeSecretStore()
     private val workScheduler = FakeImportWorkScheduler()
     private val snapshots = FakeSnapshotScheduler()
+    private val linkedSync =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeLinkedRestoreCoordinator()
     private val fileSystem = FileSystem.SYSTEM
     private val root = createTempDirectory("nd-backup-repo").toFile()
     private val storagePaths = storagePathsFor(root)
@@ -264,7 +298,7 @@ class BackupRepositoryImplTest {
             orderKeys = TestOrderKeys,
             clock = clock,
         )
-    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
+    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO, linkedSync)
     private val runner =
         RestoreRunner(
             db = db,
@@ -285,7 +319,7 @@ class BackupRepositoryImplTest {
             refresh = refresh,
             channels = channels,
             snapshots = snapshots,
-            linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+            linkedSync = linkedSync,
             clock = clock,
             io = Dispatchers.IO,
         )
@@ -338,6 +372,7 @@ class BackupRepositoryImplTest {
         storagePaths = storagePaths,
         fileSystem = repositoryFileSystem,
         io = Dispatchers.IO,
+        linkedSync = linkedSync,
     )
 
     /** Android producer by default — the desktop lane swaps it via [repositoryOf]. */
@@ -798,6 +833,7 @@ class BackupRepositoryImplTest {
                     storagePaths = storagePaths,
                     fileSystem = fileSystem,
                     io = Dispatchers.IO,
+                    linkedSync = linkedSync,
                 )
             seedCredentialPodcast()
 
