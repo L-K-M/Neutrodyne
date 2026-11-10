@@ -261,7 +261,8 @@ class PlaybackSyncBridgeTest {
     @Test
     fun theFreezeLiftsWhenTheEpisodeBecomesUnplayedHereAgain() =
         runTest {
-            val f = AdapterFixture(this)
+            val marks = MarksProbe()
+            val f = AdapterFixture(this, positionStore = marks::wrap)
             try {
                 val id = f.seed(1).single()
                 f.attach()
@@ -276,6 +277,11 @@ class PlaybackSyncBridgeTest {
                     f.db.episodeStateDao().markPlayed(listOf(id), playedAt)
                 }
                 awaitAdapter { f.remoteGuard.isFrozen(id) }
+
+                // The lift needs the watch to observe the played mark once: an unplayed commit
+                // landing before the Room read is indistinguishable from the mark never having
+                // committed, so the write must wait for the observation.
+                awaitAdapter { marks.sawEffectivelyPlayed(id) }
 
                 // The user's "Mark unplayed": the watch lifts the freeze, the next save writes.
                 f.db.withWriteTransaction { f.db.episodeStateDao().markUnplayed(listOf(id), f.clock.now()) }
@@ -332,6 +338,23 @@ class PlaybackSyncBridgeTest {
             positions.positions.value = mapOf(1L to StoredPosition(1, 30_000, 101, null, null))
             runCurrent()
             assertFalse(guard.isFrozen(1), "unplayed must lift the surviving mark's freeze")
+        }
+
+    @Test
+    fun aPlayedMarkNeverObservedByTheWatchKeepsTheFreeze() =
+        runTest {
+            val positions = FakePositionStore()
+            positions.positions.value = mapOf(1L to StoredPosition(1, 30_000, 100, 100, null))
+            val guard = RemotePlayedGuard()
+            val bridge = PlaybackSyncBridge(guard, Provider { positions }, backgroundScope)
+            bridge.updateActive(1, isPlaying = true)
+            bridge.onRemoteMarkedPlayed(1, "Pixel")
+            // The unplayed write lands before the watch's first read: the observed marks go
+            // straight to unplayed, so nothing can arm the lift. The freeze is kept rather
+            // than released on a mark state it never saw played.
+            positions.positions.value = mapOf(1L to StoredPosition(1, 30_000, 101, null, null))
+            runCurrent()
+            assertTrue(guard.isFrozen(1), "an unobserved played mark must not arm the lift")
         }
 
     @Test

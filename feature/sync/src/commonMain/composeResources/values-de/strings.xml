@@ -9,7 +9,7 @@
   <string name="sync_activity_idle">Live-Updates inaktiv</string>
   <string name="sync_activity_syncing">Synchronisierung läuft…</string>
   <string name="sync_activity_live">Live-Updates verbunden</string>
-  <string name="sync_what_syncs">Synchronisiert: Abos, Gruppen, Wiedergabestatus, Positionen, Favoriten, Warteschlange und synchronisierte Einstellungen. Nie synchronisiert: Downloads, Bilder und Feed-Inhalte.</string>
+  <string name="sync_what_syncs">Synchronisiert: Abos (einschließlich privater Feed-Links), Gruppen und ihre Reihenfolge, Wiedergabestatus, Positionen, Favoriten, Warteschlange, die aktuelle Wiedergabe, Podcast- und Gruppen-Wiedergabeeinstellungen sowie (mit „Wiedergabeeinstellungen synchronisieren“) deine Wiedergabe-Vorgaben. Nicht synchronisiert: Downloads und Audiodateien, Bilder, automatische Downloads, Speicher, Benachrichtigungen, Aktualisierungszeitplan, Darstellung, die YouTube-Engine und Update-Einstellungen.</string>
   <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
   <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
@@ -99,6 +99,8 @@
     <item quantity="other">%1$d verknüpft</item>
   </plurals>
   <string name="sync_header_what_syncs">Was synchronisiert wird</string>
+  <string name="sync_expanded">Erweitert</string>
+  <string name="sync_collapsed">Eingeklappt</string>
   <string name="sync_playback_settings">Wiedergabeeinstellungen synchronisieren</string>
   <string name="sync_playback_settings_hint">Tempo, Stille überspringen, Sprungintervalle und ähnliche Vorgaben folgen dir zwischen deinen Geräten</string>
   <string name="sync_share_passwords">Feed-Passwörter teilen</string>
