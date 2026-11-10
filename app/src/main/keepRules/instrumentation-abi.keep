@@ -4117,6 +4117,26 @@
 }
 -keep class ch.lkmc.neutrodyne.notifications.NewEpisodeChannelsInitializerContributions {
 }
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldChannelsInitializerContributions$ToAppScope$ProvideIntoSetSyncHeldChannelsInitializerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSyncHeldChannelsInitializer(android.app.Application);
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldChannelsInitializerContributions$ToAppScope$ProvideIntoSetSyncHeldChannelsInitializerMetroFactory {
+  ch.lkmc.neutrodyne.notifications.SyncHeldChannelsInitializerContributions$ToAppScope$ProvideIntoSetSyncHeldChannelsInitializerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldChannelsInitializerContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldChannelsInitializerContributions {
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldNotifierContributions$ToAppScope$ProvideIntoSetSyncHeldNotifierMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSyncHeldNotifier(android.app.Application, kotlin.jvm.functions.Function0, kotlinx.coroutines.CoroutineScope, kotlinx.coroutines.CoroutineDispatcher);
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldNotifierContributions$ToAppScope$ProvideIntoSetSyncHeldNotifierMetroFactory {
+  ch.lkmc.neutrodyne.notifications.SyncHeldNotifierContributions$ToAppScope$ProvideIntoSetSyncHeldNotifierMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldNotifierContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.notifications.SyncHeldNotifierContributions {
+}
 -keep class ch.lkmc.neutrodyne.notifications.UpdateChannelsInitializerContributions$ToAppScope$ProvideIntoSetUpdateChannelsInitializerMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetUpdateChannelsInitializer(android.app.Application);
 }

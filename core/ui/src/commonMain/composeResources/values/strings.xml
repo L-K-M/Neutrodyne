@@ -64,6 +64,7 @@
     <string name="group_tab_desc">%1$s, %2$s, %3$s</string>
     <string name="held_changes_message">%1$s removed %2$s and %3$s. Apply here too?</string>
     <string name="held_changes_unknown_device">Another device</string>
+    <string name="notification_sync_held_title">Sync is waiting for you</string>
     <string name="review">Review</string>
     <string name="sync_reconnect_message">Reconnect to %1$s to keep syncing</string>
     <string name="sync_reconnect_action">Reconnect</string>
