@@ -42,6 +42,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
 import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
@@ -58,6 +59,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_name_label
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_renamed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices_linked
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_diagnostics_row
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_what_syncs
@@ -165,6 +167,7 @@ fun SyncSettingsScreen(
                                 host = hostOf(current.serverUrl),
                                 onDevices = { navigator.push(SyncDevicesKey) },
                                 onApprove = { navigator.push(SyncApproveKey()) },
+                                onDiagnostics = { navigator.push(SyncDiagnosticsKey) },
                             )
                         }
                     }
@@ -256,6 +259,7 @@ private fun ColumnScope.LinkedSection(
     host: String,
     onDevices: () -> Unit,
     onApprove: () -> Unit,
+    onDiagnostics: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHost.current
@@ -434,6 +438,11 @@ private fun ColumnScope.LinkedSection(
     }
 
     DisconnectActions(controller, identity, host)
+
+    ListItem(
+        headlineContent = { Text(stringResource(Res.string.sync_diagnostics_row)) },
+        modifier = Modifier.clickable(onClick = onDiagnostics),
+    )
 
     when (dialog) {
         LinkedDialog.RenameSelf -> {

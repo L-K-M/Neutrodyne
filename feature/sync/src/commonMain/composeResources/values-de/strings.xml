@@ -149,4 +149,39 @@
   <string name="sync_devices_empty">Keine Geräte verknüpft.</string>
   <string name="sync_devices_manage_link">Du kannst Geräte auch auf %1$s verwalten</string>
   <string name="sync_device_menu">Geräteaktionen</string>
+
+  <!-- Sync diagnostics (08 Sync diagnostics, 10 Diagnostics). -->
+  <string name="sync_diagnostics_row">Diagnose</string>
+  <string name="sync_diag_title">Sync-Diagnose</string>
+  <string name="sync_diag_refresh">Aktualisieren</string>
+  <string name="sync_diag_copied">Diagnose kopiert</string>
+  <string name="sync_diag_unavailable">Die Sync-Diagnose konnte nicht geladen werden. Versuche es erneut.</string>
+  <string name="sync_diag_unknown">Unbekannt</string>
+  <string name="sync_diag_section_server">Server</string>
+  <string name="sync_diag_section_sync">Sync</string>
+  <string name="sync_diag_section_rounds">Runden</string>
+  <string name="sync_diag_server_version">Serverversion</string>
+  <string name="sync_diag_protocol">Protokoll</string>
+  <string name="sync_diag_account">Konto</string>
+  <string name="sync_diag_device">Dieses Gerät</string>
+  <string name="sync_diag_lan">Lokales Netzwerk</string>
+  <string name="sync_diag_last_sync">Letzte Synchronisierung</string>
+  <string name="sync_diag_clock_offset">Uhrenversatz</string>
+  <string name="sync_diag_stream">Live-Verbindung</string>
+  <string name="sync_diag_reconnects">Neuverbindungen</string>
+  <string name="sync_diag_last_error">Letzter Fehler</string>
+  <string name="sync_diag_cursor">Cursor</string>
+  <string name="sync_diag_parked">Zurückgestellte Änderungen</string>
+  <string name="sync_diag_held">Zurückgehaltene Änderungen</string>
+  <string name="sync_diag_pending">Ausstehende Änderungen</string>
+  <string name="sync_diag_last_round">Letzte Runde</string>
+  <string name="sync_diag_rounds_empty">Noch keine Runden aufgezeichnet</string>
+  <string name="sync_diag_collection_podcast">Podcasts</string>
+  <string name="sync_diag_collection_group">Gruppen</string>
+  <string name="sync_diag_collection_member">Mitglieder</string>
+  <string name="sync_diag_collection_episode">Episoden</string>
+  <string name="sync_diag_collection_upnext">Als Nächstes</string>
+  <string name="sync_diag_collection_session">Sitzung</string>
+  <string name="sync_diag_collection_setting">Einstellungen</string>
+  <string name="sync_diag_collection_other">Andere</string>
 </resources>
