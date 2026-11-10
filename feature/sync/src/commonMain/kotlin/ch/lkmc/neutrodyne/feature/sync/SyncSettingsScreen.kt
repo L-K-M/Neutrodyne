@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -28,16 +30,22 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
@@ -52,12 +60,14 @@ import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_idle
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_live
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_syncing
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_collapsed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_name_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_name_label
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_renamed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices_linked
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_expanded
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_what_syncs
@@ -385,14 +395,7 @@ private fun ColumnScope.LinkedSection(
         supportingContent = count?.let { n -> { Text(pluralStringResource(Res.plurals.sync_devices_linked, n, n)) } },
         modifier = Modifier.clickable(onClick = onDevices),
     )
-    Text(
-        stringResource(Res.string.sync_header_what_syncs),
-        style = MaterialTheme.typography.titleSmall,
-    )
-    Text(
-        stringResource(Res.string.sync_what_syncs),
-        style = MaterialTheme.typography.bodySmall,
-    )
+    WhatSyncsRow()
     if (loaded) {
         SyncSwitchRow(
             title = stringResource(Res.string.sync_playback_settings),
@@ -481,6 +484,49 @@ private fun ColumnScope.LinkedSection(
         }
 
         null -> {}
+    }
+}
+
+/**
+ * The expandable "What syncs" row (08 "Rows while linked", 10 What syncs): the section header is
+ * the toggle, announced as a Button with the expanded/collapsed state description, and expanding
+ * it reveals the static scope text. It sits in the keyed linked section, so an `activity` update
+ * keeps the expansion while a relink resets it.
+ */
+@Composable
+private fun WhatSyncsRow() {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val expandedLabel = stringResource(Res.string.sync_expanded)
+    val collapsedLabel = stringResource(Res.string.sync_collapsed)
+    Column {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .semantics {
+                        role = Role.Button
+                        stateDescription = if (expanded) expandedLabel else collapsedLabel
+                    },
+        ) {
+            Text(
+                stringResource(Res.string.sync_header_what_syncs),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                NdIcons.ArrowForwardIos,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp).rotate(if (expanded) 90f else 0f),
+            )
+        }
+        if (expanded) {
+            Text(
+                stringResource(Res.string.sync_what_syncs),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 
