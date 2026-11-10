@@ -137,6 +137,8 @@ object SyncBindings {
         capture: SettingsCapture,
         notices: SyncNoticeBus,
         adopter: SessionAdopter,
+        merger: Provider<FirstLinkMerger>,
+        identity: SyncIdentityLock,
         diagnosticsRuntime: SyncRuntimeDiagnostics,
     ): SyncEngine =
         SyncEngine(
@@ -158,6 +160,8 @@ object SyncBindings {
             // commit — the adopter never runs inside the apply transaction.
             onSessionApplied = { adopter.evaluate() },
             refreshPreferences = { flags.refreshFromStore(address) },
+            recoverExpiredCursor = { expected, scoped -> merger().resyncForRound(expected, scoped) },
+            identity = identity,
             diagnosticsRuntime = diagnosticsRuntime,
         )
 
@@ -219,6 +223,7 @@ object SyncBindings {
         @ApplicationScope scope: CoroutineScope,
         scheduler: SyncScheduler,
         diagnosticsRuntime: SyncRuntimeDiagnostics,
+        identityMutex: SyncIdentityLock,
     ): SyncEventsClient =
         SyncEventsClient(
             db = db,
@@ -231,6 +236,7 @@ object SyncBindings {
             onRemoteChanged = { scheduler.onRemoteChanged() },
             onRevoked = { scheduler.onUnlinked() },
             diagnosticsRuntime = diagnosticsRuntime,
+            identityMutex = identityMutex,
         )
 
     /**
@@ -311,5 +317,6 @@ object SyncBindings {
             secrets = secrets,
             coordinator = coordinator,
             beforeMerge = { flags.refreshFromStore(address) },
+            address = address,
         )
 }
