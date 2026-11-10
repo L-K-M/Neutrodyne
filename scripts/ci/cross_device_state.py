@@ -282,6 +282,8 @@ def _validate_held(held, counts):
             raise HarnessStateError('dump: malformed held batch')
         if not _is_int(entry.get('id')) or not _is_int(entry.get('heldAt')) or entry['heldAt'] < 0:
             raise HarnessStateError('dump: malformed held batch')
+        if entry.get('state') not in ('STAGED', 'HELD', 'DEFERRED'):
+            raise HarnessStateError('dump: malformed held batch state')
         for key in ('podcasts', 'groups'):
             removals = entry.get(key)
             if type(removals) is not list:
@@ -488,6 +490,8 @@ def require_held(dump, run_id, expected_podcast_ids):
     if len(held) != 1:
         raise HarnessStateError('held: expected one batch')
     batch = held[0]
+    if batch['state'] != 'HELD':
+        raise HarnessStateError('held: batch is not awaiting approval')
     removal_ids = [_removal_id(removal) for removal in batch['podcasts']]
     if len(removal_ids) != 11 or set(removal_ids) != set(expected):
         raise HarnessStateError('held: podcast removal mismatch')

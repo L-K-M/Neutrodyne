@@ -87,6 +87,7 @@ def make_held(dump, removal_ids, group_removals=(), held_id=1, held_at=123):
     dump['held'] = [{
         'id': held_id,
         'heldAt': held_at,
+        'state': 'HELD',
         'podcasts': [{'id': removal_id, 'clock': 'clock'} for removal_id in removal_ids],
         'groups': [{'id': removal_id, 'clock': 'clock'} for removal_id in group_removals],
     }]
@@ -604,6 +605,17 @@ class RequireHeldTests(unittest.TestCase):
         self.assertEqual(1, counts['held'])
         self.assertEqual(11, counts['podcastRemovals'])
         self.assertEqual(0, counts['groupRemovals'])
+
+    def test_only_an_actual_held_state_may_authorize_approval(self):
+        for marker in (None, 'STAGED', 'DEFERRED', 'unknown'):
+            dump = base_dump()
+            make_held(dump, self.expected)
+            if marker is None:
+                del dump['held'][0]['state']
+            else:
+                dump['held'][0]['state'] = marker
+            with self.subTest(marker=marker), self.assertRaises(state.HarnessStateError):
+                state.require_held(dump, 'run-1', self.expected)
 
     def test_wrong_identities_fail(self):
         dump = base_dump()
