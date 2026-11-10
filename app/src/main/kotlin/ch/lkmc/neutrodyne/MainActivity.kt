@@ -55,10 +55,10 @@ import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
+import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
@@ -120,14 +120,23 @@ class MainActivity : AppCompatActivity() {
                     platformActions.notifications,
                 )
             val feedback by rememberUpdatedState(updates.feedback)
+            // MS3's sync bridge: the thunks keep `graph.syncController`'s database-backed
+            // resolution behind the open gate; nothing sync-side exists on the first frame.
+            val syncRoot =
+                rememberSyncRootPresentation(
+                    syncController = { graph.syncController },
+                    playbackController = { graph.playbackController },
+                    enabled = openState is DatabaseOpenState.Opened,
+                    isPlaying = nowPlaying?.isPlaying == true,
+                )
             val slots =
-                remember {
+                remember(syncRoot.userMessages) {
                     RootSlots(
                         player = { slot ->
                             feedback()
                             PlayerRoute(slot, upNext = { PlayerUpNextRoute(slot.navigate) })
                         },
-                        userMessages = emptyFlow(),
+                        userMessages = syncRoot.userMessages,
                         importResume = { available, open -> importResumeBanner(available, open) },
                     )
                 }
@@ -150,6 +159,7 @@ class MainActivity : AppCompatActivity() {
                             playerPanelHidden = panelHidden,
                             settingsBadge = updates.badge,
                             notice = updates.notice,
+                            remoteSession = syncRoot.remoteSession,
                         ),
                     actions =
                         RootActions(
@@ -164,8 +174,8 @@ class MainActivity : AppCompatActivity() {
                             retryStartup = { graph.appScope.launch { suspendRunCatching { opener.awaitOpen() } } },
                             dismissNotice = updates.dismiss,
                             disableUpdateChecks = updates.disable,
-                            continueHere = {},
-                            dismissRemoteSession = {},
+                            continueHere = syncRoot.continueHere,
+                            dismissRemoteSession = syncRoot.dismissRemoteSession,
                             playbackKey = { key ->
                                 dispatchPlaybackKey(
                                     key,

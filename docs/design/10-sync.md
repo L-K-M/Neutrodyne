@@ -820,6 +820,14 @@ stateDiagram-v2
 - While this device **plays**, the complete merged remote session (episode, context, hints and clocks, plus the envelope's `by` device metadata) stays in `sync_clock.raw`, without changing the player. When the player pauses, stops or changes items, `SessionAdopter` compares that saved session with pending local session writes and evaluates the newest eligible offer. Clocks alone cannot recover an unadopted session after its cursor has passed. A restart performs the same evaluation once the local player is restored paused.
 - The card is offered while the adopted session's writer is another device, this device has not played since, the user has not dismissed it in this process run, and the session is less than 7 days old. A paused, loaded item on the adopting device is replaced (it stays in progress in its feeds; 06 loads the adopted item paused, [06 QueueProjector](06-playback.md#queueprojector)).
 
+**Implementation note (2026-11-09, MS3).** Adoption rechecks the linked
+server/account/device/node identity and the raw-plus-outbox winner inside the
+same Room writer that updates the session. A local start committed after the
+initial eligibility reads keeps its session and its live-valued outbox literal;
+the remote candidate cannot replace that literal under the local clock. The
+player must still be idle at the write. Device-name lookup stays outside the
+writer, and its delayed offer must retain the same link identity.
+
 ### Conformance vectors
 
 `sync/protocol/vectors/*.json` are language-neutral test cases run by `ConformanceVectorTest` in `:sync:protocol` (`commonTest`, on the desktop JVM), by the server suite against `RecordWriter`, and by any future implementation (a gpodder bridge, an Open Podcast API adapter).

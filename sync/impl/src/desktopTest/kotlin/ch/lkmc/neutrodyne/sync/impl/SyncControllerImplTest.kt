@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkLocation
@@ -17,14 +18,17 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.LinkState
@@ -57,10 +61,13 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -127,6 +134,102 @@ class SyncControllerImplTest {
                 assertTrue(h.client.calls.contains("discover"))
             } finally {
                 h.close()
+            }
+        }
+
+    @Test
+    fun plainHttpWithAnUppercaseSchemeToAPublicAddressIsRefusedBeforeAnyRequest() =
+        runTest {
+            for (scheme in listOf("HTTP://", "HtTp://")) {
+                val h = harness(this)
+                try {
+                    h.controller.startLink("${scheme}sync.example")
+                    await(h) { h.linkFlow.state.value is LinkState.Failed || h.client.calls.isNotEmpty() }
+                    val state = h.linkFlow.state.value
+                    assertTrue(
+                        state is LinkState.Failed,
+                        "$scheme reached ${state::class.simpleName} instead of the refusal",
+                    )
+                    assertEquals(SyncProblem.InsecureTransport, state.error)
+                    assertTrue(h.client.calls.isEmpty(), "$scheme made a request before the refusal")
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
+    fun plainHttpWithAnUppercaseSchemeToLocalAsksForConfirmationFirst() =
+        runTest {
+            for (scheme in listOf("HTTP://", "HtTp://")) {
+                val h = harness(this)
+                try {
+                    h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                    h.controller.discover("${scheme}192.168.1.50")
+                    await(h) {
+                        h.linkFlow.state.value is LinkState.InsecureConnection ||
+                            h.linkFlow.state.value is LinkState.Failed ||
+                            h.client.calls.isNotEmpty()
+                    }
+                    val state = h.linkFlow.state.value
+                    assertTrue(
+                        state is LinkState.InsecureConnection,
+                        "$scheme reached ${state::class.simpleName} instead of the confirmation",
+                    )
+                    assertTrue(h.client.calls.isEmpty(), "$scheme made a request before the confirmation")
+                    h.controller.confirmInsecure()
+                    await(h) {
+                        h.linkFlow.state.value is LinkState.AwaitingInput ||
+                            h.linkFlow.state.value is LinkState.Failed
+                    }
+                    val awaiting = h.linkFlow.state.value as LinkState.AwaitingInput
+                    assertEquals("http://192.168.1.50", awaiting.server.serverUrl)
+                    assertEquals(listOf("discover"), h.client.calls)
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
+    fun anUppercasePersistedUrlReconnectsInsteadOfMigratingALegacyTokenOrigin() =
+        runTest {
+            for (scheme in listOf("HTTP://", "HtTp://")) {
+                val h = harness(this)
+                try {
+                    h.address.updateServerUrl("${scheme}sync.example")
+                    h.address.updateUsername("alice")
+                    h.db.withWriteTransaction {
+                        h.db.syncStateDao().upsert(
+                            SyncStateEntity(
+                                enabled = true,
+                                serverUrl = "${scheme}sync.example",
+                                accountId = ACCOUNT_ID,
+                                deviceId = DEVICE_ID,
+                                nodeId = "0000000000000001",
+                                linkedAt = now,
+                                lastSyncAt = now,
+                            ),
+                        )
+                    }
+                    // The pre-fix link stored the token under the mangled origin the old hostOf
+                    // produced for an uppercase URL (`HTTP:`), not the bare host.
+                    val legacyOrigin =
+                        "${scheme}sync.example"
+                            .removePrefix("https://")
+                            .removePrefix("http://")
+                            .substringBefore('/')
+                    h.tokens.save(legacyOrigin, "nds_test")
+                    h.controller.refreshStatus()
+                    // No credential migration: the origin is now the bare host, so the legacy
+                    // token is invisible and the app asks for a reconnect rather than reusing it.
+                    assertTrue(
+                        h.controller.status.value is SyncStatus.Reconnect,
+                        "$scheme kept a legacy token origin instead of reconnecting",
+                    )
+                } finally {
+                    h.close()
+                }
             }
         }
 
@@ -889,7 +992,7 @@ class SyncControllerImplTest {
             try {
                 h.seedLinked()
                 h.client.syncHandler = { _, _ -> throw java.io.IOException("offline") }
-                h.client.logout = { throw java.io.IOException("offline") }
+                h.client.logoutHandler = { throw java.io.IOException("offline") }
                 val result = h.controller.unlink()
                 assertTrue(result is Outcome.Success)
                 assertFalse(h.tokenStoreContains(host))
@@ -1428,6 +1531,530 @@ class SyncControllerImplTest {
             }
         }
 
+    @Test
+    fun anExistingHeldRowPublishesOnConstruction() =
+        runTest {
+            val h = harness(this)
+            try {
+                val titles = (1..12).map { "Podcast $it" }
+                insertHeld(
+                    h,
+                    heldAt = 7,
+                    podcasts = listOf(PODCAST_SYNC_ID),
+                    summary = summaryJson(podcasts = titles),
+                )
+                // Constructed after the row exists: the observer must still publish it, and the
+                // prompt carries the complete list — the UI truncates, the controller does not.
+                await(h) {
+                    h.controller.heldChanges.value
+                        .isNotEmpty()
+                }
+                val prompt =
+                    h.controller.heldChanges.value
+                        .single()
+                assertEquals(titles, prompt.podcastTitles)
+                assertEquals(emptyList(), prompt.groupNames)
+                assertNull(prompt.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun heldRowWritesRepublishWithoutARoundOrResolution() =
+        runTest {
+            val h = harness(this)
+            try {
+                assertTrue(
+                    h.controller.heldChanges.value
+                        .isEmpty(),
+                )
+                val id =
+                    insertHeld(
+                        h,
+                        heldAt = 7,
+                        podcasts = listOf(PODCAST_SYNC_ID),
+                        summary = summaryJson(podcasts = listOf("Example")),
+                    )
+                await(h) {
+                    h.controller.heldChanges.value
+                        .map { it.id } == listOf(id)
+                }
+                assertEquals(
+                    listOf("Example"),
+                    h.controller.heldChanges.value
+                        .single()
+                        .podcastTitles,
+                )
+
+                val row = h.db.syncHeldDao().byId(id)!!
+                h.db
+                    .syncHeldDao()
+                    .upsert(
+                        row.copy(
+                            summary = summaryJson(podcasts = listOf("Renamed"), groups = listOf("News")),
+                        ),
+                    )
+                await(h) {
+                    h.controller.heldChanges.value
+                        .singleOrNull()
+                        ?.podcastTitles == listOf("Renamed")
+                }
+                assertEquals(
+                    listOf("News"),
+                    h.controller.heldChanges.value
+                        .single()
+                        .groupNames,
+                )
+
+                h.db.syncHeldDao().delete(id)
+                await(h) {
+                    h.controller.heldChanges.value
+                        .isEmpty()
+                }
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun heldPromptsPublishOldestFirstAndOnlyForHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                insertHeld(h, "STAGED", heldAt = 1, podcasts = listOf(PODCAST_SYNC_ID))
+                insertHeld(h, "DEFERRED", heldAt = 2, podcasts = listOf(PODCAST_SYNC_ID))
+                val first = insertHeld(h, heldAt = 3, podcasts = listOf(PODCAST_SYNC_ID))
+                val second = insertHeld(h, heldAt = 3, podcasts = listOf(OTHER_PODCAST_SYNC_ID))
+                val oldest = insertHeld(h, heldAt = 0, groups = listOf(GROUP_UUID))
+                await(h) { h.controller.heldChanges.value.size == 3 }
+                assertEquals(
+                    listOf(oldest, first, second),
+                    h.controller.heldChanges.value
+                        .map { it.id },
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun malformedHeldRowsNeverBlockTheObserverOrTheValidRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                insertHeld(h, heldAt = 1, batch = "not json")
+                val badSummary =
+                    insertHeld(
+                        h,
+                        heldAt = 2,
+                        podcasts = listOf(PODCAST_SYNC_ID),
+                        summary = "also not json",
+                    )
+                val valid =
+                    insertHeld(
+                        h,
+                        heldAt = 3,
+                        podcasts = listOf(PODCAST_SYNC_ID),
+                        summary = summaryJson(podcasts = listOf("Example")),
+                    )
+                await(h) { h.controller.heldChanges.value.size == 2 }
+                val prompts = h.controller.heldChanges.value
+                assertEquals(listOf(badSummary, valid), prompts.map { it.id })
+                assertEquals(emptyList(), prompts[0].podcastTitles)
+                assertEquals(listOf("Example"), prompts[1].podcastTitles)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun applyingAHeldRowAppliesItsRemovalsAndDeletesOnlyItsRow() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.addGroup()
+                val resolved =
+                    insertHeld(
+                        h,
+                        heldAt = 1,
+                        podcasts = listOf(PODCAST_SYNC_ID),
+                        groups = listOf(GROUP_UUID),
+                        summary = summaryJson(podcasts = listOf("Example"), groups = listOf("News")),
+                    )
+                val other = insertHeld(h, heldAt = 2, podcasts = listOf(OTHER_PODCAST_SYNC_ID))
+                await(h) { h.controller.heldChanges.value.size == 2 }
+                h.controller.resolveHeld(resolved, HeldResolution.APPLY)
+                await(h) {
+                    h.controller.heldChanges.value
+                        .map { it.id } == listOf(other)
+                }
+                assertNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                assertNull(h.db.groupDao().groupByUuid(GROUP_UUID))
+                assertNull(h.db.syncHeldDao().byId(resolved))
+                assertNotNull(h.db.syncHeldDao().byId(other))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun keepMineRecapturesTheLocalStateAndClearsOnlyItsRow() =
+        runTest {
+            val h = harness(this)
+            try {
+                // The recapture writes outbox rows only while the link is enabled.
+                h.seedLinked()
+                h.addLocalPodcast()
+                val resolved = insertHeld(h, heldAt = 1, podcasts = listOf(PODCAST_SYNC_ID))
+                val other = insertHeld(h, heldAt = 2, podcasts = listOf(OTHER_PODCAST_SYNC_ID))
+                await(h) { h.controller.heldChanges.value.size == 2 }
+                h.controller.resolveHeld(resolved, HeldResolution.KEEP_MINE)
+                await(h) {
+                    h.controller.heldChanges.value
+                        .map { it.id } == listOf(other)
+                }
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                assertNull(h.db.syncHeldDao().byId(resolved))
+                assertTrue(
+                    h.db
+                        .syncOutboxDao()
+                        .rows()
+                        .any { it.coll == "podcast" && it.rid == PODCAST_SYNC_ID },
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun decideLaterLeavesTheRowAndItsPrompt() =
+        runTest {
+            val h = harness(this)
+            try {
+                val id = insertHeld(h, heldAt = 1, podcasts = listOf(PODCAST_SYNC_ID))
+                await(h) { h.controller.heldChanges.value.size == 1 }
+                h.controller.resolveHeld(id, HeldResolution.DECIDE_LATER)
+                h.tick()
+                assertEquals(
+                    listOf(id),
+                    h.controller.heldChanges.value
+                        .map { it.id },
+                )
+                assertNotNull(h.db.syncHeldDao().byId(id))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun resolvingStagedOrDeferredRowsAppliesAndDeletesNothing() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.addGroup()
+                val staged = insertHeld(h, "STAGED", heldAt = 1, podcasts = listOf(PODCAST_SYNC_ID))
+                val deferred = insertHeld(h, "DEFERRED", heldAt = 2, groups = listOf(GROUP_UUID))
+                h.controller.resolveHeld(staged, HeldResolution.APPLY)
+                h.controller.resolveHeld(deferred, HeldResolution.APPLY)
+                h.controller.resolveHeld(deferred, HeldResolution.KEEP_MINE)
+                // The resolutions are asynchronous no-ops; give the transactions real time to run.
+                Thread.sleep(100)
+                h.tick()
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                assertNotNull(h.db.groupDao().groupByUuid(GROUP_UUID))
+                assertNotNull(h.db.syncHeldDao().byId(staged))
+                assertNotNull(h.db.syncHeldDao().byId(deferred))
+                assertTrue(
+                    h.controller.heldChanges.value
+                        .isEmpty(),
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun resolvingAMissingMalformedOrDeletedRowIsANoOp() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.controller.resolveHeld(9_999, HeldResolution.APPLY)
+                val malformed = insertHeld(h, heldAt = 1, batch = "not json")
+                h.controller.resolveHeld(malformed, HeldResolution.APPLY)
+                val gone = insertHeld(h, heldAt = 2, podcasts = listOf(PODCAST_SYNC_ID))
+                // The prompt was seen, another path removed the row, the answer arrives late.
+                h.db.syncHeldDao().delete(gone)
+                h.controller.resolveHeld(gone, HeldResolution.APPLY)
+                Thread.sleep(100)
+                h.tick()
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                assertNotNull(h.db.syncHeldDao().byId(malformed))
+                assertTrue(
+                    h.controller.heldChanges.value
+                        .isEmpty(),
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * 10 Mass-change guard step 4: an explicit Apply is not an exception — the loaded, playing
+     * item's podcast survives while the rest of the batch applies and the remainder becomes a
+     * DEFERRED row, which the local settle runs once playback stops, without another round.
+     */
+    @Test
+    fun aHeldApplyNeverRemovesThePlayingPodcast() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val rids = (0 until 4).map { "00000000-0000-4000-8000-00000000000$it" }
+                h.db.withWriteTransaction {
+                    rids.forEach { rid ->
+                        h.db
+                            .podcastDao()
+                            .insertPodcast(
+                                podcastEntity(
+                                    syncId = rid,
+                                    feedUrl = "https://e.example/$rid",
+                                    feedKey = "https://e.example/$rid",
+                                ),
+                            )
+                    }
+                }
+                val playingPodcast = h.db.podcastDao().bySyncId(rids[0])!!
+                val episodeId =
+                    h.db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(podcastId = playingPodcast.id, identityKey = "g:playing"),
+                            ),
+                        ).single()
+                h.playback.setActive(episodeId, isPlaying = true)
+
+                val removalClock = Hlc.of(now, 5, NodeId("0000000000000002")).toString()
+                val heldId =
+                    h.db
+                        .syncHeldDao()
+                        .insert(
+                            SyncHeldEntity(
+                                batch =
+                                    buildJsonObject {
+                                        put("state", JsonPrimitive(HeldState.HELD.name))
+                                        put(
+                                            "podcasts",
+                                            JsonArray(
+                                                rids.map { rid ->
+                                                    buildJsonObject {
+                                                        put("rid", JsonPrimitive(rid))
+                                                        put("clock", JsonPrimitive(removalClock))
+                                                    }
+                                                },
+                                            ),
+                                        )
+                                        put("groups", JsonArray(emptyList()))
+                                    }.toString(),
+                                summary = "{}",
+                                heldAt = 7,
+                            ),
+                        )
+
+                h.controller.resolveHeld(heldId, HeldResolution.APPLY)
+                await(h) {
+                    runBlocking {
+                        h.db
+                            .podcastDao()
+                            .allForExport()
+                            .size < 4
+                    }
+                }
+                assertEquals(
+                    HeldState.DEFERRED,
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .single()
+                        .let { MassChangeGuard.stateOf(it.batch) },
+                    "the playing remainder stays as a DEFERRED row, not a prompt",
+                )
+                assertNotNull(
+                    h.db.podcastDao().bySyncId(rids[0]),
+                    "the loaded, playing item's podcast is never applied while it plays",
+                )
+                (1 until 4).forEach { i ->
+                    assertNull(h.db.podcastDao().bySyncId(rids[i]), "the non-playing removal applies")
+                }
+
+                // Once playback stops, the local settle runs the remainder — no round, no RPC.
+                // A real stop unloads the item; a pause would keep the deferred row.
+                h.playback.setActive(null, isPlaying = false)
+                DeferredRemovalSettler(h.db, h.playback, h.clock, h.address, h.tokens).settle()
+                assertNull(h.db.podcastDao().bySyncId(rids[0]), "the stop settles the deferred removal")
+                assertTrue(
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                )
+                assertTrue(h.client.calls.isEmpty(), "the settle never touches the server")
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * A different account is a different profile: linking it drops every staged, held and
+     * deferred row the old profile left, while the local library itself is untouched.
+     */
+    @Test
+    fun aDifferentAccountDropsTheOldProfilesHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.addGroup()
+                seedHeldRows(h)
+                h.client.invite = {
+                    TokenResponse("nds_other", OTHER_ACCOUNT_ID, "0000000000000009", "bob")
+                }
+
+                h.controller.startLink(serverUrl, LinkMethod.INVITE)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitInvite("abcd-efgh")
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+
+                assertTrue(
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                    "the new account never inherits the old profile's held rows",
+                )
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID), "the library stays")
+                assertNotNull(h.db.groupDao().groupByUuid(GROUP_UUID), "the library stays")
+            } finally {
+                h.close()
+            }
+        }
+
+    /** A different server is a different profile too, even when the account id matches. */
+    @Test
+    fun aDifferentServerDropsTheOldProfilesHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.addGroup()
+                seedHeldRows(h)
+
+                h.controller.startLink("https://other.example", LinkMethod.INVITE)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitInvite("abcd-efgh")
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+
+                assertTrue(
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                    "the new server never inherits the old profile's held rows",
+                )
+                assertNotNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID), "the library stays")
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * The same server and account reauthenticating — new device id, node id and token — keeps
+     * its pending held rows: those belong to this profile's own session.
+     */
+    @Test
+    fun aSameProfileReauthKeepsTheHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.addGroup()
+                seedHeldRows(h)
+
+                h.controller.startLink(serverUrl, LinkMethod.INVITE)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitInvite("abcd-efgh")
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+
+                assertEquals(
+                    3,
+                    h.db
+                        .syncHeldDao()
+                        .all()
+                        .size,
+                    "a same-profile reauth keeps STAGED, HELD and DEFERRED rows",
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    /** One `sync_held` row per state — the payloads only need their state marker. */
+    private suspend fun seedHeldRows(h: Harness) {
+        insertHeld(h, state = HeldState.STAGED.name, heldAt = 1, podcasts = listOf("rid-staged"))
+        insertHeld(h, state = HeldState.HELD.name, heldAt = 2, podcasts = listOf("rid-held"))
+        insertHeld(h, state = HeldState.DEFERRED.name, heldAt = 3, podcasts = listOf("rid-deferred"))
+    }
+
+    /** Inserts one `sync_held` row and returns its id; [batch] overrides the generated payload. */
+    private suspend fun insertHeld(
+        h: Harness,
+        state: String = "HELD",
+        heldAt: Long,
+        podcasts: List<String> = emptyList(),
+        groups: List<String> = emptyList(),
+        summary: String = "{}",
+        batch: String = batchJson(state, podcasts, groups),
+    ): Long =
+        h.db
+            .syncHeldDao()
+            .insert(SyncHeldEntity(batch = batch, summary = summary, heldAt = heldAt))
+
+    /** A `sync_held` batch payload in the guard's envelope: state plus removals with clocks. */
+    private fun batchJson(
+        state: String,
+        podcasts: List<String> = emptyList(),
+        groups: List<String> = emptyList(),
+    ): String =
+        buildJsonObject {
+            put("state", JsonPrimitive(state))
+            put("podcasts", JsonArray(podcasts.map(::removalJson)))
+            put("groups", JsonArray(groups.map(::removalJson)))
+        }.toString()
+
+    private fun removalJson(rid: String) =
+        buildJsonObject {
+            put("rid", JsonPrimitive(rid))
+            // The guard re-checks each staged clock against the stored state and the pending
+            // outbox: the fixture needs a real, winning HLC, not a placeholder.
+            put("clock", JsonPrimitive(Hlc.of(now, 5, NodeId("0000000000000002")).toString()))
+        }
+
+    private fun summaryJson(
+        podcasts: List<String> = emptyList(),
+        groups: List<String> = emptyList(),
+    ): String =
+        buildJsonObject {
+            put("podcasts", JsonArray(podcasts.map(::JsonPrimitive)))
+            put("groups", JsonArray(groups.map(::JsonPrimitive)))
+        }.toString()
+
     private fun harness(
         scope: TestScope,
         secrets: SecretStore = FakeSecretStore(),
@@ -1470,14 +2097,16 @@ class SyncControllerImplTest {
         const val OTHER_GROUP_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
         const val DEVICE_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         const val ACCOUNT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const val OTHER_ACCOUNT_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
     }
 }
 
 /** The controller, its collaborators and the scripted client for one test. */
-private class Harness(
+internal class Harness(
     private val scope: TestScope,
     private val now: Long,
     val secrets: SecretStore = FakeSecretStore(),
+    controllerDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
 ) {
     /**
      * The controller's own scope, cancelled before the database closes. A supervisor like the
@@ -1485,7 +2114,7 @@ private class Harness(
      */
     private val controllerJob = kotlinx.coroutines.SupervisorJob()
     private val controllerScope =
-        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob)
+        kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob + controllerDispatcher)
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
@@ -1495,6 +2124,7 @@ private class Harness(
     val client = ScriptedSyncClient()
     val gate = FakeLocalNetworkGate()
     val classifier = FakeNetErrorClassifier()
+    val playback = FakePlaybackSyncPort()
     val linkFlow = LinkFlowImpl()
     val tokens = SyncTokenStore(secrets)
     val credentials = FakeCredentialCommitCoordinator()
@@ -1518,7 +2148,7 @@ private class Harness(
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
             notices = SyncNoticeBus(),
-            deviceNames = DeviceNames { emptyList() },
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { flags.sharePasswords },
             coordinator = credentials,
         )
@@ -1544,6 +2174,7 @@ private class Harness(
             db = db,
             client = client,
             applier = applier,
+            playback = NoPlaybackSync,
             clock = clock,
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },
@@ -1590,6 +2221,17 @@ private class Harness(
         )
     }
 
+    val adopter =
+        SessionAdopter(
+            db = db,
+            playback = NoPlaybackSync,
+            names = DeviceNames { null },
+            clock = clock,
+            secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
+            scope = controllerScope,
+        )
+
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()
     val scheduler: SyncScheduler =
@@ -1616,7 +2258,10 @@ private class Harness(
                         schedulerCalls += "unlinked"
                     }
                 },
-            linkStateChanged = { events.reevaluate() },
+            linkStateChanged = {
+                events.reevaluate()
+                adopter.linkStateChanged()
+            },
         )
 
     /**
@@ -1668,11 +2313,14 @@ private class Harness(
             podcastIndexKey = "",
             podcastIndexSecret = "",
         )
-    val controller =
+
+    /** Lazily constructed so held-publication tests can seed `sync_held` before the observer starts. */
+    val controller: SyncControllerImpl by lazy {
         SyncControllerImpl(
             db = db,
             client = client,
             engine = engine,
+            playback = playback,
             linkFlow = linkFlow,
             tokenStore = tokens,
             clock = clock,
@@ -1686,6 +2334,7 @@ private class Harness(
             errors = classifier,
             scheduler = scheduler,
             events = events,
+            adopter = adopter,
             activity = activity,
             noticeBus = noticeBus,
             secrets = secrets,
@@ -1693,6 +2342,7 @@ private class Harness(
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,
         )
+    }
 
     /** Runs queued continuations and advances the poll delays by one second. */
     fun tick(ms: Long = 1_000) {
@@ -1824,7 +2474,7 @@ private class Harness(
 }
 
 /** A [SyncClient] whose every call is scripted and recorded. */
-private class ScriptedSyncClient : SyncClient {
+internal class ScriptedSyncClient : SyncClient {
     val calls = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
     val revokes = mutableListOf<String>()
@@ -1850,7 +2500,7 @@ private class ScriptedSyncClient : SyncClient {
         DeviceDto(id, name, "android", "1.0.0", null, false, false)
     }
     var revoke: suspend (String) -> Unit = {}
-    var logout: suspend () -> Unit = {}
+    var logoutHandler: suspend () -> Unit = {}
     var summary: AccountSummary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
     var changesHandler: suspend (String?) -> ChangesPage = { emptyPage() }
     var syncHandler: suspend (String?, List<ChangeDto>) -> SyncResponse = { _, changes -> defaultSyncResponse(changes) }
@@ -1919,7 +2569,7 @@ private class ScriptedSyncClient : SyncClient {
 
     override suspend fun logout() {
         calls += "logout"
-        logout()
+        logoutHandler()
     }
 
     override suspend fun devices(): List<DeviceDto> {
@@ -1979,7 +2629,7 @@ private class ScriptedSyncClient : SyncClient {
     }
 }
 
-private class FakeNetErrorClassifier(
+internal class FakeNetErrorClassifier(
     var result: NetError = NetError.Offline,
 ) : NetErrorClassifier {
     override fun classify(e: Throwable): NetError = result
