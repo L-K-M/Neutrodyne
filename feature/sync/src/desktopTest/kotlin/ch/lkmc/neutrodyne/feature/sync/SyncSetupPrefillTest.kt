@@ -13,6 +13,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -50,6 +51,7 @@ import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -57,7 +59,8 @@ import kotlin.test.assertTrue
  * only for the same server URL, path included, and only until the user chooses a method or a
  * username. A late read never overwrites either; leaving the screen cancels it. An unknown
  * username and a different server leave the manual methods untouched, and a failed settings read
- * keeps the form usable with an actionable Retry.
+ * keeps the form usable with an actionable Retry. Editing the address to another server drops
+ * only the auto-filled identity, never a method or username the user chose.
  */
 @OptIn(ExperimentalTestApi::class)
 class SyncSetupPrefillTest {
@@ -125,6 +128,54 @@ class SyncSetupPrefillTest {
 
             onNodeWithText("Get a code").assertIsDisplayed()
             onNodeWithText("Username").assertDoesNotExist()
+        }
+
+    @Test
+    fun editingTheAddressClearsTheAutoFilledIdentity() =
+        runComposeUiTest {
+            val harness = Harness(initialState = LinkState.Address)
+            harness.gate.complete(Unit)
+            setPage(harness)
+            waitUntil(timeoutMillis = 5_000) { harness.address.readStarted }
+            waitForIdle()
+
+            onNode(hasSetTextAction()).performTextReplacement("https://other.example")
+            waitForIdle()
+            onNodeWithText("Continue").performClick()
+            waitForIdle()
+            harness.link.setState(awaitingInput("https://other.example"))
+            waitForIdle()
+
+            onNodeWithText("Get a code").assertIsDisplayed()
+            onNodeWithText("Username").assertDoesNotExist()
+            assertEquals(listOf("https://other.example"), harness.controller.discoveries)
+        }
+
+    @Test
+    fun editingTheAddressKeepsExplicitManualInputs() =
+        runComposeUiTest {
+            val harness = Harness()
+            setPage(harness)
+            waitUntil(timeoutMillis = 5_000) { harness.address.readStarted }
+
+            onNodeWithText("Password").performClick()
+            waitForIdle()
+            onAllNodes(hasSetTextAction())[0].performTextReplacement("bob")
+            waitForIdle()
+            harness.gate.complete(Unit)
+            waitForIdle()
+
+            harness.link.setState(LinkState.Address)
+            waitForIdle()
+            onNode(hasSetTextAction()).performTextReplacement("https://other.example")
+            waitForIdle()
+            onNodeWithText("Continue").performClick()
+            waitForIdle()
+            harness.link.setState(awaitingInput("https://other.example"))
+            waitForIdle()
+
+            onNodeWithText("Username").assertIsDisplayed()
+            onNodeWithText("bob").assertIsDisplayed()
         }
 
     @Test
@@ -262,8 +313,9 @@ class SyncSetupPrefillTest {
         username: String? = "anna",
         val gate: CompletableDeferred<Unit> = CompletableDeferred(),
         failFirstRead: Boolean = false,
+        initialState: LinkState = awaitingInput(),
     ) {
-        val link = FakeLinkFlow(awaitingInput())
+        val link = FakeLinkFlow(initialState)
         val controller = FakeSyncController(link = link)
         val backup = FakeBackupRepository()
         val address =
@@ -311,20 +363,20 @@ class SyncSetupPrefillTest {
     private companion object {
         const val ROUTE = "https://sync.example.org"
 
-        fun awaitingInput(): LinkState.AwaitingInput =
+        fun awaitingInput(serverUrl: String = ROUTE): LinkState.AwaitingInput =
             LinkState.AwaitingInput(
                 method = LinkMethod.CODE,
                 server =
                     DiscoveredServer(
                         name = "Sync",
                         serverVersion = "1",
-                        serverUrl = ROUTE,
+                        serverUrl = serverUrl,
                         features = emptyList(),
                         maxBatch = 10,
                         maxSkewMs = 0,
                     ),
                 disclosure =
-                    SyncDisclosure(host = "sync.example.org", privateFeedLinks = 0, encrypted = true),
+                    SyncDisclosure(host = hostOf(serverUrl), privateFeedLinks = 0, encrypted = true),
             )
 
         fun testBuildInfo(): BuildInfo =

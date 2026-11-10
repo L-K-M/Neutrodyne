@@ -280,7 +280,17 @@ internal fun SyncSetupScreen(
             is LinkState.Address -> {
                 AddressStep(
                     address = address,
-                    onAddress = { address = it },
+                    onAddress = {
+                        // The stored identity belongs to the route's server: editing the address
+                        // to another server drops only the auto-filled values, never a choice
+                        // the user made. Returning to the route URL leaves the read's answer
+                        // gone, but a late read still cannot clobber a touched field.
+                        if (it.trim() != serverUrl.trim()) {
+                            if (!methodTouched) method = LinkMethod.CODE
+                            if (!usernameTouched) username = ""
+                        }
+                        address = it
+                    },
                     onContinue = { controller.discover(address) },
                 )
             }
