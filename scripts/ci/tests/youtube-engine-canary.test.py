@@ -301,6 +301,56 @@ class ScriptedChildTests(unittest.TestCase):
         script.write_text('\n'.join(lines) + '\n')
         return script
 
+    def ready_child(self, directory, result, compiling=False):
+        lines = ['import json, os, sys, time']
+        if compiling:
+            lines += [
+                "for _ in range(8):",
+                "    print(json.dumps({'t': 'hello', 'state': 'compiling'}), flush=True)",
+                "    time.sleep(0.25)",
+            ]
+        lines += [
+            "print(json.dumps({'t': 'hello', 'state': 'ready', 'shimApi': 1,",
+            "                  'host': 'stdio', 'pid': os.getpid()}), flush=True)",
+            "for line in sys.stdin:",
+            "    frame = json.loads(line)",
+            "    value = {'host': 'stdio', 'shimApi': 1, 'ytDlp': 'v'} if frame['m'] == 'version' else " + result,
+            "    print(json.dumps({'t': 'ok', 'id': frame['id'], 'r': value}), flush=True)",
+        ]
+        return self.write_child(directory, lines)
+
+    def test_child_does_not_inherit_unrelated_parent_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = self.ready_child(Path(directory), "os.environ.get('NEUTRODYNE_CANARY_TEST_SECRET')")
+            with mock.patch.dict(canary.os.environ, {'NEUTRODYNE_CANARY_TEST_SECRET': 'test-only-sentinel'}):
+                with canary.StdioHost(script, canary.PACKAGE, canary.BUNDLE, 'v') as host:
+                    value = host.call('environment', '{}', time.monotonic() + 5, 1)
+                    self.assertIsNone(json.loads(value))
+
+    def test_compiling_messages_share_one_handshake_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = self.ready_child(Path(directory), 'None', compiling=True)
+            host = canary.StdioHost(script, canary.PACKAGE, canary.BUNDLE, 'v', start_timeout=1.0)
+            try:
+                with self.assertRaises(canary.StdioError):
+                    host.start()
+            finally:
+                host.close()
+            self.assertIsNotNone(host.returncode)
+
+    def test_invalid_unicode_result_is_a_protocol_violation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = self.ready_child(Path(directory), 'chr(0xD800)')
+            host = canary.StdioHost(script, canary.PACKAGE, canary.BUNDLE, 'v', hang_grace=0.1)
+            try:
+                host.start()
+                with self.assertRaises(canary.StdioError) as caught:
+                    host.call('unicode', '{}', time.monotonic() + 1, 1)
+                self.assertEqual(canary.UNEXPECTED_CODE, caught.exception.code)
+            finally:
+                host.close()
+            self.assertIsNotNone(host.returncode)
+
     def test_wrong_shim_api_is_rejected_and_child_reaped(self):
         with tempfile.TemporaryDirectory() as directory:
             script = self.write_child(Path(directory), [

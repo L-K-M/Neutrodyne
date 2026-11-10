@@ -170,8 +170,15 @@ class StdioHost:
             argv += ['--replay', self.replay]
         if self.debug_hooks:
             argv.append('--debug-hooks')
+        # The extractor needs runtime paths and certificate lookup, never the
+        # parent's unrelated CI/developer credentials or proxy configuration.
+        child_env = {key: value for key, value in os.environ.items()
+                     if key in {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP',
+                                'SYSTEMROOT', 'SystemRoot', 'WINDIR', 'COMSPEC',
+                                'SSL_CERT_FILE', 'SSL_CERT_DIR'}}
         self._proc = subprocess.Popen(
-            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=child_env)
         try:
             threading.Thread(target=self._drain_stderr, daemon=True).start()
             threading.Thread(target=self._read_loop, daemon=True).start()
@@ -186,10 +193,11 @@ class StdioHost:
 
     def _await_handshake(self):
         """Enforce hello, then the version call and the pinned engine/API identity."""
-        hello = self._next_hello()
+        deadline = time.monotonic() + self.start_timeout
+        hello = self._next_hello(deadline)
         while isinstance(hello, dict) and hello.get('state') == 'compiling':
             # A source tree announces compiling, then ready; the pinned zip does not.
-            hello = self._next_hello()
+            hello = self._next_hello(deadline)
         if (not isinstance(hello, dict) or hello.get('t') != 'hello'
                 or hello.get('state') != 'ready' or hello.get('host') != 'stdio'
                 or hello.get('shimApi') != SHIM_API
@@ -207,9 +215,12 @@ class StdioHost:
             raise StdioError(UNEXPECTED_CODE)
         self.hello = hello
 
-    def _next_hello(self):
+    def _next_hello(self, deadline):
         try:
-            hello = self._hello_queue.get(timeout=self.start_timeout)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise StdioError(UNEXPECTED_CODE)
+            hello = self._hello_queue.get(timeout=remaining)
         except queue.Empty:
             raise StdioError(UNEXPECTED_CODE) from None
         if hello is None:
@@ -308,8 +319,13 @@ class StdioHost:
             if type(call_id) is not int or 'r' not in message:
                 self._violation()
                 return
-            result = json.dumps(message['r'], ensure_ascii=False, separators=(',', ':'))
-            if len(result.encode('utf-8')) > RESULT_BYTES:
+            try:
+                result = json.dumps(message['r'], ensure_ascii=False, separators=(',', ':'))
+                result_bytes = len(result.encode('utf-8'))
+            except (ValueError, UnicodeEncodeError):
+                self._violation()
+                return
+            if result_bytes > RESULT_BYTES:
                 self._violation()
                 return
             with self._lock:
