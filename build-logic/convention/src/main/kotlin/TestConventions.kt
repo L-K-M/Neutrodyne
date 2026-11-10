@@ -42,6 +42,10 @@ internal fun Project.configureNeutrodyneTestTasks() {
         if (crossDeviceCategoryExcluded(projectPath, crossDevicePresent)) {
             (options as? JUnitOptions)?.excludeCategories(CROSS_DEVICE_CATEGORY)
         }
+        if (projectPath in CROSS_DEVICE_HOSTS && crossDevicePresent) {
+            // A repeated phase reads and mutates caller-owned runtime state outside Gradle's outputs.
+            doNotTrackState("Cross-device phases must execute against the current external runtime state")
+        }
         testLogging {
             events("failed")
             exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
