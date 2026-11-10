@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
 import ch.lkmc.neutrodyne.playback.api.StreamKind
 import ch.lkmc.neutrodyne.playback.api.nextNowPlayingLoadId
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -29,6 +30,27 @@ import kotlin.test.assertNull
 class MarkedPlayedElsewhereTrackerTest {
     private val state = FakePlaybackStateSource()
     private val bus = SyncNoticeBus()
+
+    @Test
+    fun theStartupGateDefersObservationButArmsThePostTimeStamper() =
+        runTest {
+            state.nowPlaying.value = now(7)
+            val ready = CompletableDeferred<Unit>()
+            val tracker = MarkedPlayedElsewhereTracker(state, bus, backgroundScope)
+            tracker.start { ready.await() }
+            runCurrent()
+            assertEquals(
+                0,
+                state.nowPlaying.subscriptionCount.value,
+                "no playback observation before the database gate",
+            )
+            bus.post(notice(7, "Laptop"))
+            assertNull(tracker.markedPlayedElsewhere.value)
+            ready.complete(Unit)
+            runCurrent()
+            tracker.assertLine(7, "Laptop")
+            assertEquals(1, state.nowPlaying.subscriptionCount.value)
+        }
 
     /** Each call mints a fresh [NowPlaying.loadId], like a real producer loading the item. */
     private fun now(
