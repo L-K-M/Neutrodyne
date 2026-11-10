@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Instant
 
 /** The host of a server URL, for the token origin (`sync:<host>`). */
 fun hostOf(url: String): String = withoutScheme(url).substringBefore('/')
@@ -213,6 +214,23 @@ class SyncEngine(
         val client: SyncClient?,
     )
 
+    /** Samples network time before local apply work; only the captured profile may store it. */
+    internal suspend fun observeServerTime(
+        profile: SyncStateEntity?,
+        serverTime: String,
+        sentAtMs: Long,
+        receivedAtMs: Long,
+    ): SyncClockOffset? {
+        if (profile == null) return null
+        val serverMs = runCatching { Instant.parse(serverTime).toEpochMilliseconds() }.getOrNull() ?: return null
+        val correction = estimateSyncClockOffset(serverMs, sentAtMs, receivedAtMs) ?: return null
+        db.withWriteTransaction {
+            requireSyncProfile(profile, db.syncStateDao().get())
+            db.syncStateDao().setClockOffset(correction.offsetMs)
+        }
+        return correction
+    }
+
     private suspend fun captureRound(): RoundSnapshot =
         identity.withLock {
             val serverUrl = address.serverUrl() ?: return@withLock RoundSnapshot(null, null, null)
@@ -283,7 +301,9 @@ class SyncEngine(
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
             verifyRound(snapshot)
+            val sentAt = clock.now()
             val response = markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
+            val receivedAt = clock.now()
             verifyRound(snapshot)
             pushed += changes.size
             // 10 Passwords: the acknowledgement commits under the credential coordinator —
@@ -304,12 +324,15 @@ class SyncEngine(
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
             commitProgress(response.records, response.cursor, snapshot.state)
+            observeServerTime(snapshot.state, response.serverTime, sentAt, receivedAt)
             var cursor = response.cursor
             var hasMore = response.hasMore
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
+                val pageSentAt = clock.now()
                 val next = markingRevocation(snapshot.state) { transport.changes(cursor, ProtocolLimits.MAX_RECORDS) }
+                val pageReceivedAt = clock.now()
                 verifyRound(snapshot)
                 applied += next.records.size
                 pulled += next.records.size
@@ -320,6 +343,7 @@ class SyncEngine(
                 effects.drainSettings()
                 effects.drainPasswords()
                 commitProgress(next.records, next.cursor, snapshot.state)
+                observeServerTime(snapshot.state, next.serverTime, pageSentAt, pageReceivedAt)
                 cursor = next.cursor
                 hasMore = next.hasMore
             }
