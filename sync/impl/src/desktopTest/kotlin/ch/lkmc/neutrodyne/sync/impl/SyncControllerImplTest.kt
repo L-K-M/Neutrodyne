@@ -1796,7 +1796,8 @@ class SyncControllerImplTest {
                 }
 
                 // Once playback stops, the local settle runs the remainder — no round, no RPC.
-                h.playback.setPlaying(false)
+                // A real stop unloads the item; a pause would keep the deferred row.
+                h.playback.setActive(null, isPlaying = false)
                 DeferredRemovalSettler(h.db, h.playback, h.clock, h.address, h.tokens).settle()
                 assertNull(h.db.podcastDao().bySyncId(rids[0]), "the stop settles the deferred removal")
                 assertTrue(

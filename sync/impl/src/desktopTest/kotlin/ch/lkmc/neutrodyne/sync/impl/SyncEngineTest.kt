@@ -324,6 +324,77 @@ class SyncEngineTest {
         }
 
     @Test
+    fun aPausedLoadedPodcastKeepsItsDeferredRemovalAcrossRounds() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val playback = FakePlaybackSyncPort()
+            val b = device("b", server, playback)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                a.round()
+                b.round()
+
+                // The removal defers while B plays the podcast's loaded episode.
+                val bPodcast = b.db.podcastDao().bySyncId(syncId("0a"))!!
+                val bEpisode = b.addEpisode(bPodcast.id, "g:playing")
+                playback.setActive(episodeId = bEpisode, isPlaying = true)
+
+                a.db.withWriteTransaction {
+                    a.db.podcastDao().deleteCascade(
+                        a.db
+                            .podcastDao()
+                            .bySyncId(syncId("0a"))!!
+                            .id,
+                        NOW,
+                    )
+                }
+                a.round()
+                b.round()
+                assertNotNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the playing podcast's removal defers",
+                )
+
+                // 10 Scheduling runs an ordinary round on the pause boundary: the item is
+                // still loaded, so an already-deferred removal of its podcast must not
+                // release just because `isPlaying` dropped.
+                playback.setPlaying(false)
+                b.round()
+
+                assertNotNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the paused, still-loaded podcast keeps its deferred removal",
+                )
+                val row =
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .single()
+                assertEquals(HeldState.DEFERRED, MassChangeGuard.stateOf(row.batch))
+
+                // A real stop unloads the item — the next ordinary round applies the
+                // still-winning removal.
+                playback.setActive(null, isPlaying = false)
+                b.round()
+
+                assertNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "after the stop's unload the removal applies",
+                )
+                assertTrue(
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
     fun aBelowThresholdGroupDeleteClearsThePlayContext() =
         runTest {
             val server = InMemorySyncServer { NOW }
@@ -436,7 +507,8 @@ class SyncEngineTest {
                     "the deferred remainder is retained",
                 )
 
-                playback.setPlaying(false)
+                // A real stop unloads the item — the boundary the deferred row waits for.
+                playback.setActive(null, isPlaying = false)
                 b.round()
                 assertNull(
                     b.db.podcastDao().bySyncId(syncId("0a")),

@@ -183,6 +183,44 @@ class DeferredRemovalSettlerTest {
         }
 
     @Test
+    fun anInitialPausedSnapshotKeepsItsDeferredRemoval() =
+        runTest {
+            val db = TestDb.inMemory()
+            var job: kotlinx.coroutines.Job? = null
+            try {
+                val playback = FakePlaybackSyncPort()
+                val settler = linkedSettler(db, playback)
+                seedPodcast(db, podcastSyncId)
+                val episodeId = episodeOf(db, podcastSyncId, "g:paused")
+                stageDeferred(db, podcastSyncId)
+
+                // An app restart lands the collector's first emission mid-pause — a loaded,
+                // paused item. No unload or item change happened, so nothing may apply.
+                playback.setActive(episodeId, isPlaying = false)
+                job = settler.start(backgroundScope)
+                runCurrent()
+                // The would-be settle runs on Room's real executor; give it a real window to
+                // prove it never happened before the real boundary check below.
+                Thread.sleep(400)
+                assertNotNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "a paused snapshot is no release — the loaded item keeps its removal",
+                )
+                assertTrue(db.syncHeldDao().all().isNotEmpty())
+
+                // The actual unload is a real boundary and applies the removal.
+                playback.setActive(null, isPlaying = false)
+                runCurrent()
+                waitFor("the unload settles the deferred removal") {
+                    db.podcastDao().bySyncId(podcastSyncId) == null
+                }
+            } finally {
+                job?.cancelAndJoin()
+                db.close()
+            }
+        }
+
+    @Test
     fun heldAndStagedRowsNeverAutoApply() =
         runTest {
             val db = TestDb.inMemory()

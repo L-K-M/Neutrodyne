@@ -210,9 +210,17 @@ class SyncEngine(
                         }
 
                         is MassChangeGuard.Verdict.Approved -> {
+                            // 10 step 4: an already-DEFERRED batch holds while the item stays
+                            // loaded (stop or item change releases it — a pause-scheduled
+                            // round like this one does not); a fresh batch defers only while
+                            // the loaded item actually plays.
                             val deferred =
                                 MassChangeGuard.apply(db, verdict.batch, clock.now()) { syncId ->
-                                    MassChangeGuard.playingRemovalDeferred(db, playback.active.value, syncId)
+                                    if (verdict.alreadyDeferred) {
+                                        MassChangeGuard.loadedRemovalDeferred(db, playback.active.value, syncId)
+                                    } else {
+                                        MassChangeGuard.playingRemovalDeferred(db, playback.active.value, syncId)
+                                    }
                                 }
                             if (deferred.isEmpty()) {
                                 db.syncHeldDao().delete(verdict.rowId)

@@ -93,8 +93,10 @@ class DeferredRemovalSettler
                     return@withWriteTransaction
                 }
                 db.syncStateDao().withApplying {
+                    // Every row here is already DEFERRED: its removals hold while the item
+                    // stays loaded, so a settle that runs during a pause declines too.
                     MassChangeGuard.settleDeferred(db, clock.now()) { syncId ->
-                        MassChangeGuard.playingRemovalDeferred(db, playback.active.value, syncId)
+                        MassChangeGuard.loadedRemovalDeferred(db, playback.active.value, syncId)
                     }
                 }
             }
