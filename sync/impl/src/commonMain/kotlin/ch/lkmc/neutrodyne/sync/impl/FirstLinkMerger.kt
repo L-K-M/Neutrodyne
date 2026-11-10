@@ -29,11 +29,13 @@ import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CancellationException
@@ -400,7 +402,7 @@ class FirstLinkMerger(
                     by = dto.by,
                     authReference = auth?.first,
                     pendingAuth = auth?.second,
-                ),
+                ).withConfirmed(null.confirm(incoming)),
             )
         }
         adoptPulledState(pull.cursor, pull.maxClockPacked)
@@ -465,7 +467,11 @@ class FirstLinkMerger(
         fileSystem.sink(file).buffer().use { sink ->
             while (pages < MAX_PAGES) {
                 pages++
+                val profile = db.syncStateDao().get()
+                val sentAt = clock.now()
                 val page = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
+                val receivedAt = clock.now()
+                engine.observeServerTime(profile, page.serverTime, sentAt, receivedAt)
                 // 10 Passwords: each auth is staged in the protected store before its staging
                 // line is written; the file carries only the snapshot's reference and clock.
                 val stagedAuths = stageAuthCandidates(db, secrets, coordinator, page.records)
@@ -957,34 +963,47 @@ class FirstLinkMerger(
     // --- Seeding and captures (10 Merge steps 4–5) --------------------------------------------------
 
     /**
-     * Stamps this device's current rows into `sync_clock` at their own timestamps (counter 0,
-     * this node), so the record merge decides each field by clock and the capture pass knows
+     * Stamps current rows at their historical times, capped at corrected now (counter 0,
+     * this node), so an unaccepted local seed cannot poison the accepted-clock frontier.
+     * The record merge decides each field by clock and the capture pass knows
      * which fields the local side owns. Groups, members and Up next are seeded too: the
      * design's capture list covers the whole library, not only podcasts and episodes.
      */
     private suspend fun seedLocalRows() {
         val nodeId = nodeId()
         db.withWriteTransaction {
+            val offset = checkNotNull(db.syncStateDao().get()).clockOffsetMs
+            val correctedNow =
+                adjustedSyncWallMs(clock.now(), offset)
+                    ?: throw ProtocolException(
+                        SyncErrorCode.CLOCK_SKEW,
+                        "Corrected device time cannot seed local sync clocks",
+                    )
+
+            fun localTime(at: Long): Long = at.coerceIn(SYNC_MIN_CLOCK_MS, maxOf(SYNC_MIN_CLOCK_MS, correctedNow))
+
             db.syncStateDao().withApplying {
                 for (podcast in db.podcastDao().allForExport()) {
+                    val at = localTime(podcast.subscribedAt)
                     val fields =
                         mapOf(
-                            "feedUrl" to fieldString(podcast.feedUrl, podcast.subscribedAt, nodeId),
-                            "subscribed" to fieldBool(true, podcast.subscribedAt, nodeId),
-                            "title" to fieldString(podcast.title, podcast.subscribedAt, nodeId),
+                            "feedUrl" to fieldString(podcast.feedUrl, at, nodeId),
+                            "subscribed" to fieldBool(true, at, nodeId),
+                            "title" to fieldString(podcast.title, at, nodeId),
                         )
                     writeSeed(SyncCollection.PODCAST, podcast.syncId, fields)
                 }
                 for (group in db.groupDao().groupsInOrder()) {
+                    val at = localTime(group.updatedAt)
                     val fields =
                         mapOf(
-                            "name" to fieldString(group.name, group.updatedAt, nodeId),
-                            "deleted" to fieldBool(false, group.updatedAt, nodeId),
+                            "name" to fieldString(group.name, at, nodeId),
+                            "deleted" to fieldBool(false, at, nodeId),
                         )
                     writeSeed(SyncCollection.GROUP, group.uuid, fields)
                     for (member in db.groupDao().membersOf(group.id)) {
                         val podcast = db.podcastDao().byId(member.podcastId) ?: continue
-                        val at = member.addedAt
+                        val at = localTime(member.addedAt)
                         writeSeed(
                             SyncCollection.MEMBER,
                             group.uuid + podcast.syncId,
@@ -998,7 +1017,7 @@ class FirstLinkMerger(
                     writeSeed(
                         SyncCollection.UPNEXT,
                         podcast.syncId + episode.identityKey,
-                        mapOf("in" to fieldBool(true, entry.addedAt, nodeId)),
+                        mapOf("in" to fieldBool(true, localTime(entry.addedAt), nodeId)),
                     )
                 }
                 for (episode in db.episodeDao().all()) {
@@ -1007,7 +1026,7 @@ class FirstLinkMerger(
                     val position = db.positionDao().byEpisode(episode.id)
                     val fields = mutableMapOf<String, FieldState>()
                     if (state != null) {
-                        val at = maxOf(state.updatedAt, position?.updatedAt ?: 0L)
+                        val at = localTime(maxOf(state.updatedAt, position?.updatedAt ?: 0L))
                         fields["played"] = fieldBool(state.playedAt != null, at, nodeId)
                         fields["playedAt"] =
                             FieldState(state.playedAt?.let(::JsonPrimitive) ?: JsonNull, stamp(at, nodeId))
@@ -1019,7 +1038,7 @@ class FirstLinkMerger(
                         fields["pos"] =
                             FieldState(
                                 JsonObject(buildMap { put("ms", JsonPrimitive(position.positionMs)) }),
-                                stamp(position.updatedAt, nodeId),
+                                stamp(localTime(position.updatedAt), nodeId),
                             )
                     }
                     if (fields.isNotEmpty()) {
@@ -1084,12 +1103,13 @@ class FirstLinkMerger(
                     clockStore.put(
                         coll.wire,
                         rid,
-                        (stored ?: RawSyncRecord(state)).copy(
-                            state = state,
-                            by = dto.by ?: stored?.by,
-                            authReference = auth?.reference ?: stored?.authReference,
-                            pendingAuth = auth?.pending ?: stored?.pendingAuth,
-                        ),
+                        (stored ?: RawSyncRecord(state))
+                            .copy(
+                                state = state,
+                                by = dto.by ?: stored?.by,
+                                authReference = auth?.reference ?: stored?.authReference,
+                                pendingAuth = auth?.pending ?: stored?.pendingAuth,
+                            ).withConfirmed(stored.confirm(incoming)),
                     )
                 }
             }
@@ -1153,10 +1173,11 @@ class FirstLinkMerger(
                     clockStore.put(
                         SyncCollection.SETTING.wire,
                         key.name,
-                        (stored ?: RawSyncRecord(record)).copy(
-                            state = record,
-                            pendingSetting = PendingSetting(value.toString(), record.maxClock?.toString() ?: ""),
-                        ),
+                        (stored ?: RawSyncRecord(record))
+                            .copy(
+                                state = record,
+                                pendingSetting = PendingSetting(value.toString(), record.maxClock?.toString() ?: ""),
+                            ).withConfirmed(stored.confirm(record)),
                     )
                     if (stored?.pendingSetting != null && stored.pendingSetting?.value != value.toString()) {
                         // keep the newer pending marker: the fresh write above is authoritative
@@ -1202,6 +1223,7 @@ class FirstLinkMerger(
             for (key in keys) {
                 val row = db.syncClockDao().get(key.coll, key.rid) ?: continue
                 val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: continue
+                val confirmed = raw.confirmed().state
                 db.withWriteTransaction {
                     requireSyncProfile(profile, db.syncStateDao().get())
                     db.syncStateDao().withApplying {
@@ -1210,7 +1232,7 @@ class FirstLinkMerger(
                         // capture carries both played and playedAt, so an older separate replay
                         // must not overwrite its paired timestamp during change construction.
                         if (pending.any { it.field == "*" }) return@withApplying
-                        for ((name, field) in raw.state.fields) {
+                        for ((name, field) in confirmed.fields) {
                             val stampClock = field.c ?: continue
                             if (name == "playedAt" &&
                                 pending.any {
@@ -1232,8 +1254,8 @@ class FirstLinkMerger(
                                     field.v.toString(),
                                 )
                         }
-                        raw.state.growSets.forEach { (name, values) ->
-                            val stampClock = raw.state.maxClock ?: return@forEach
+                        confirmed.growSets.forEach { (name, values) ->
+                            val stampClock = confirmed.maxClock ?: return@forEach
                             db
                                 .syncOutboxDao()
                                 .captureStored(
@@ -1295,8 +1317,18 @@ class FirstLinkMerger(
         var rounds = 0
         while (db.syncOutboxDao().count() > 0 && rounds < MAX_PUSH_ROUNDS) {
             rounds++
-            engine.round(SyncRoundReason.FIRST_LINK)
+            val report = engine.round(SyncRoundReason.FIRST_LINK)
+            val error = db.syncStateDao().get()?.lastError
+            if (error == SYNC_ERROR_CLOCK_BLOCKED) {
+                throw ProtocolException(SyncErrorCode.CLOCK_SKEW, "The server rejected the corrected device clock")
+            }
+            if (report.rejected > 0 && error != SYNC_ERROR_CLOCK_RETRY) {
+                throw ProtocolException(SyncErrorCode.INVALID, "The server rejected first-link writes")
+            }
             onProgress(LinkPhase.UPLOADING, rounds, total.coerceAtLeast(1))
+        }
+        if (db.syncOutboxDao().count() > 0) {
+            throw ProtocolException(SyncErrorCode.INVALID, "First-link writes did not finish uploading")
         }
     }
 
@@ -1307,11 +1339,14 @@ class FirstLinkMerger(
     ) {
         db.withWriteTransaction {
             db.syncStateDao().get()?.let { state ->
+                val corrected =
+                    adjustedSyncWallMs(clock.now(), state.clockOffsetMs)
+                        ?: throw ProtocolException(SyncErrorCode.CLOCK_SKEW, "Corrected device time cannot fit an HLC")
                 db.syncStateDao().upsert(
                     state.copy(
                         enabled = true,
                         cursor = cursor,
-                        hlc = maxOf(state.hlc, maxClockPacked, clock.now() shl HLC_COUNTER_BITS),
+                        hlc = maxOf(state.hlc, maxClockPacked, corrected shl HLC_COUNTER_BITS),
                     ),
                 )
             }
@@ -1349,7 +1384,9 @@ class FirstLinkMerger(
         while (true) {
             check(pages++ < MAX_PAGES) { "Full sync exceeded its page limit" }
             verifyProfile(profile)
+            val sentAt = clock.now()
             val page = scopedClient.changes(cursor, ProtocolLimits.MAX_RECORDS)
+            val receivedAt = clock.now()
             verifyProfile(profile)
             check(!page.hasMore || page.cursor != cursor) { "Full sync cursor did not advance" }
             val result = applier.applyPage(page.records, roundId, expectedProfile = profile)
@@ -1360,6 +1397,7 @@ class FirstLinkMerger(
             maxClock = maxOf(maxClock, page.records.maxOfOrNull(::maxClockOf) ?: 0)
             effects.drainSettings()
             effects.drainPasswords()
+            engine.observeServerTime(profile, page.serverTime, sentAt, receivedAt)
             cursor = page.cursor
             if (!page.hasMore) break
         }
@@ -1380,7 +1418,11 @@ class FirstLinkMerger(
     ) {
         // A seed never overwrites a fuller raw record an earlier step already stored.
         if (clockStore.get(coll.wire, rid) != null) return
-        clockStore.put(coll.wire, rid, RawSyncRecord(RecordState(coll, fields)))
+        clockStore.put(
+            coll.wire,
+            rid,
+            RawSyncRecord(RecordState(coll, fields), accepted = AcceptedSyncRecord(RecordState(coll), 0L)),
+        )
     }
 
     private fun stamp(

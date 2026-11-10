@@ -249,9 +249,12 @@ class SyncApplier(
         val pending = pendingState(coll, resolved.rid)
         // The merge runs on the field-stripped record: the winner's `auth` is decided below
         // against the stored reference and the pending local intent, never carried in state.
+        val accepted = stored.confirm(incoming)
         val authField = incoming.fields["auth"]
         val merge = SyncRecordMerger.merge(stored?.state, pending, incoming.withoutField("auth"))
         if (merge.advanced.isEmpty() && merge.lost.isEmpty() && merge.record == stored?.state) {
+            // A lost ACK can make an equal echo the first durable proof of acceptance.
+            clockStore.put(coll.wire, resolved.rid, checkNotNull(stored).withConfirmed(accepted))
             return RecordOutcome.Stale
         }
         val auth =
@@ -318,7 +321,7 @@ class SyncApplier(
                     pendingSetting = pendingSetting ?: stored?.pendingSetting,
                     pendingAuth = auth?.pending ?: stored?.pendingAuth,
                     settingIntent = stored?.settingIntent,
-                ),
+                ).withConfirmed(accepted),
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)
         }
