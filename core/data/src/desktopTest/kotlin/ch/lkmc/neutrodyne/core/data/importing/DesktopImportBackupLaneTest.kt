@@ -168,7 +168,15 @@ class DesktopImportBackupLaneTest {
             orderKeys = TestOrderKeys,
             clock = clock,
         )
-    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
+    private val stager =
+        BackupStager(
+            db,
+            ZipGuard(),
+            merger,
+            fileSystem,
+            Dispatchers.IO,
+            ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+        )
     private val restores =
         RestoreRunner(
             db = db,

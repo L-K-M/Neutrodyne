@@ -163,7 +163,15 @@ class BackupCrossPlatformTest {
                         FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
                     },
             )
-        val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
+        val stager =
+            BackupStager(
+                db,
+                ZipGuard(),
+                merger,
+                fileSystem,
+                Dispatchers.IO,
+                ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+            )
         val runner =
             RestoreRunner(
                 db = db,

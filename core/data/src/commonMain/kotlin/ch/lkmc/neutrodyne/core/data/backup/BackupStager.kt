@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.importing.MAX_IMPORT_PAYLOAD_BYTES
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.ImportWarning
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -74,7 +75,8 @@ import kotlin.uuid.Uuid
  * `includesCredentials` are informational claims a forged file could lie about — plus one
  * read transaction: the Replace dry run reuses `RestoreMerger`'s match ladders through
  * [RestoreMerger.matchedLocalIds] (no copy of the ladder, no writes), and the linked-server
- * host comes from `sync_state`. No Room, settings or secret write happens here.
+ * host comes from the coordinator's live eligibility check outside that transaction.
+ * No Room, settings or secret write happens here.
  *
  * `stagingRoot` is a caller-owned private directory (the import/restore cache lane); the
  * owned staging child is created inside it and the source archive is never modified or
@@ -87,6 +89,7 @@ internal class BackupStager(
     private val merger: RestoreMerger,
     private val fileSystem: FileSystem,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
+    private val linkedSync: LinkedRestoreCoordinator,
 ) {
     private val codec = BackupCodec()
 
@@ -99,6 +102,7 @@ internal class BackupStager(
     suspend fun inspect(
         archive: Path,
         stagingRoot: Path,
+        resolvedLinkHost: ResolvedLinkHost? = null,
     ): Outcome<StagedBackup, BackupError> {
         val size =
             withContext(io) { fileSystem.metadataOrNull(archive)?.size }
@@ -124,10 +128,13 @@ internal class BackupStager(
                 throw unexpected
             }
         try {
-            staged.preview = buildPreview(staged)
+            staged.preview = buildPreview(staged, resolvedLinkHost)
         } catch (cancel: CancellationException) {
             staged.close()
             throw cancel
+        } catch (rejected: StagerFailure) {
+            staged.close()
+            return Outcome.Failure(rejected.error)
         } catch (ioFail: IOException) {
             staged.close()
             return Outcome.Failure(BackupError.Io)
@@ -341,7 +348,10 @@ internal class BackupStager(
         }
 
     /** 05 step 5: content-derived preview counts plus the Replace dry run in one read snapshot. */
-    private suspend fun buildPreview(staged: StagedBackup): BackupPreview {
+    private suspend fun buildPreview(
+        staged: StagedBackup,
+        resolvedLinkHost: ResolvedLinkHost?,
+    ): BackupPreview {
         var played = 0
         var inProgress = 0
         staged.forEachEpisodeLine { line ->
@@ -352,6 +362,19 @@ internal class BackupStager(
             }
         }
 
+        // 05/08: the actual link answer comes from the coordinator, outside the Room read
+        // transaction (it reads settings and the secret store). A stale `linkedAt` (copied
+        // database, revoked token, disabled switch or missing token) yields null, so the
+        // preview never offers the linked Replace question.
+        val linkedServerHost =
+            if (resolvedLinkHost != null) {
+                resolvedLinkHost.host
+            } else {
+                when (val link = linkedSync.actualLinkedHost()) {
+                    is Outcome.Success -> link.value
+                    is Outcome.Failure -> throw StagerFailure(link.error)
+                }
+            }
         val snapshot =
             db.withReadTransaction {
                 val matched = merger.matchedLocalIds(staged.library())
@@ -360,13 +383,6 @@ internal class BackupStager(
                         db.podcastDao().allForExport().count { it.id !in matched.podcastIds },
                     groupsNotInBackup =
                         db.groupDao().groupsInOrder().count { it.id !in matched.groupIds },
-                    linkedServerHost =
-                        db
-                            .syncStateDao()
-                            .get()
-                            ?.takeIf { it.linkedAt != null }
-                            ?.serverUrl
-                            ?.let { UrlNormalizer.origin(it)?.substringAfter("://") },
                 )
             }
 
@@ -388,7 +404,7 @@ internal class BackupStager(
             localPodcastsNotInBackup = snapshot.podcastsNotInBackup,
             localGroupsNotInBackup = snapshot.groupsNotInBackup,
             warnings = warnings,
-            linkedServerHost = snapshot.linkedServerHost,
+            linkedServerHost = linkedServerHost,
             writtenOn = staged.manifest.app.platform,
             podcastKeys = staged.library().podcasts.mapTo(HashSet()) { it.key },
             groupNames = staged.library().groups.map { it.name },
@@ -428,7 +444,6 @@ internal class BackupStager(
     private class LocalFacts(
         val podcastsNotInBackup: Int,
         val groupsNotInBackup: Int,
-        val linkedServerHost: String?,
     )
 
     /** One validation failure's mapped [BackupError] inside the staging pass. */
@@ -456,6 +471,11 @@ internal class BackupStager(
         const val WARNING_SKIPPED_LINES = "SKIPPED_LINES"
     }
 }
+
+/** A link read already resolved for this restore run, including a known-unlinked null. */
+internal data class ResolvedLinkHost(
+    val host: String?,
+)
 
 /**
  * One verified, materialised backup (05 Validation): the `StagedLibrary` the mergers run
