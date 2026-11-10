@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.AllDevicesReachEffect
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
+import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
@@ -29,7 +31,26 @@ class LinkedRestoreCoordinatorImpl(
     private val db: NeutrodyneDatabase,
     private val controller: SyncController,
     private val merger: FirstLinkMerger,
+    private val address: SyncServerAddress,
+    private val tokenStore: SyncTokenStore,
 ) : LinkedRestoreCoordinator {
+    override suspend fun actualLinkedHost(): Outcome<String?, BackupError> =
+        try {
+            val state = db.syncStateDao().get()
+            // An inactive row already proves this device is not linked. A locked secret
+            // store must not prevent an ordinary local restore that needs no sync token.
+            if (!state.isActuallyLinked(hasToken = true)) return Outcome.Success(null)
+            val url = address.serverUrl() ?: return Outcome.Success(null)
+            if (tokenStore.load(hostOf(url)) == null) return Outcome.Success(null)
+            val origin = UrlNormalizer.origin(url) ?: return Outcome.Failure(BackupError.Io)
+            Outcome.Success(origin.substringAfter("://"))
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            // Do not turn an unreadable live link into permission for a plain local Replace.
+            Outcome.Failure(BackupError.Io)
+        }
+
     override suspend fun unlinkForRestore(): Outcome<Unit, BackupError> =
         try {
             when (controller.unlink()) {
