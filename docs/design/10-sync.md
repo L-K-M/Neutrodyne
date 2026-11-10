@@ -2458,6 +2458,18 @@ S14 plus MS2, in `desktopTest` with the bundled SQLite driver and a subset as An
 
 ### Cross-device journey
 
+**Implementation note (2026-11-09, MS3 wire coverage).** `TwoClientWireTest`
+runs the server fat JAR on loopback with two independent file-backed Room
+clients and the production HTTP/SSE transport, capture, engine, scheduler
+and desktop job routing. Seven writes cover played state, a group rename,
+two Up next inserts, and reverse-direction reordering, removal and played
+state. Each write and its peer observation must finish within ten seconds;
+there are no manual sync calls during these timed edits. Bootstrap seeds
+known podcast and episode identities on both clients. Settings, credentials,
+network availability, power and playback remain test substitutes. This
+synthetic loopback test does not replace E12's Android/desktop journey,
+physical-device checks, session handoff or real-network PB31 measurements.
+
 E12 / `CrossDeviceSyncTest` (09 owns the journey; nightly and in M11b): an Android emulator (API 36) and a desktop JVM (headless app graph) against a server from the release JAR; random offline edits to subscriptions, groups, order, played state, positions, favourites and Up next converge (MS2 acceptance 2); a desktop pause resumes on Android within 1 s of the next sync through "Continue on this device" (R8.5); unsubscribing 11 of 50 podcasts is held (MS2 acceptance 4); propagation with both apps in the foreground ≤ 10 s (PB31, MS3 acceptance 1). M11b acceptance 14 adds the manual checklist with a phone, a desktop on each OS and a server.
 
 ### Data-loss scenarios

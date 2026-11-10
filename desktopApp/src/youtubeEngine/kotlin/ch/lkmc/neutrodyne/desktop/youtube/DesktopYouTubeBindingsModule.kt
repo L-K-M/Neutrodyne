@@ -6,6 +6,9 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.JobLane
+import ch.lkmc.neutrodyne.core.common.JobLanePoker
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.UserAgentProvider
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
@@ -13,6 +16,7 @@ import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
+import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.desktop.smoke.EngineSmokeProof
 import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
 import ch.lkmc.neutrodyne.download.api.DownloadController
@@ -32,11 +36,20 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
 import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
+import ch.lkmc.neutrodyne.youtube.engine.Ed25519Verifier
+import ch.lkmc.neutrodyne.youtube.engine.EngineCompiler
+import ch.lkmc.neutrodyne.youtube.engine.EngineHttp
+import ch.lkmc.neutrodyne.youtube.engine.EngineKeys
 import ch.lkmc.neutrodyne.youtube.engine.EnginePlatformPreflight
+import ch.lkmc.neutrodyne.youtube.engine.EngineRollbackMonitor
 import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.EngineStore
 import ch.lkmc.neutrodyne.youtube.engine.EngineUpdateHooks
+import ch.lkmc.neutrodyne.youtube.engine.EngineUpdateScheduler
+import ch.lkmc.neutrodyne.youtube.engine.EngineUpdater
 import ch.lkmc.neutrodyne.youtube.engine.IpFamilyHints
+import ch.lkmc.neutrodyne.youtube.engine.JdkEd25519Verifier
+import ch.lkmc.neutrodyne.youtube.engine.OkHttpEngineHttp
 import ch.lkmc.neutrodyne.youtube.engine.ResolvedUrlCache
 import ch.lkmc.neutrodyne.youtube.engine.YtDlpChannelLookup
 import ch.lkmc.neutrodyne.youtube.engine.YtDlpChannelSearch
@@ -50,13 +63,16 @@ import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxTransport
 import ch.lkmc.neutrodyne.youtube.impl.DefaultYouTubeChannelResolver
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DataStoreEngineSettings
+import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineCompiler
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEnginePreparationObserver
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineStatusInitializer
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineStorePaths
+import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineUpdateInitializer
+import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineUpdateLane
+import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineUpdateScheduler
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopIpFamilyHints
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopPythonRuntimeLocator
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.EngineResources
-import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.NoLaneEngineUpdateHooks
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.PythonRuntimeLocator
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.StdioReplayArming
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.StdioYtxTransport
@@ -71,9 +87,10 @@ import java.util.Locale
 
 /**
  * The desktop's engine-backed YouTube bindings, selected by the `neutrodyne.youtubeEngine`
- * build property like the Android `youtubeEngine` source set (11). This is MD3's first slice:
- * the stdio host plus the bundled-engine store/settings/context; the update lane arrives with
- * its own slice, so [EngineUpdateHooks] is the no-lane implementation until then.
+ * build property like the Android `youtubeEngine` source set (11). The update wiring is the
+ * shared `:youtube:engine` `EngineUpdater` over the desktop's store, stdio host, packaged
+ * interpreter compiler and `engine-update` JobLane — the same trust chain and policy as
+ * Android, with `DesktopJobRunner` in WorkManager's place (11 Engine updates on the desktop).
  */
 @BindingContainer
 object DesktopYouTubeBindingsModule {
@@ -197,10 +214,124 @@ object DesktopYouTubeBindingsModule {
         @ApplicationScope scope: CoroutineScope,
     ): YtDlpEngine = YtDlpEngine(transport, store, settings, preflight, identity, health, clock, scope, updateHooks)
 
-    /** No update lane this slice: checks answer ENGINE_UNAVAILABLE, reset still resets the record. */
+    /** The lane's poker arrives lazily: `JobLanePoker` resolves the `Set<JobLane>` the lane joins. */
     @Provides
     @SingleIn(AppScope::class)
-    fun updateHooks(store: EngineStore): EngineUpdateHooks = NoLaneEngineUpdateHooks(store)
+    fun updateScheduler(poker: () -> JobLanePoker): DesktopEngineUpdateScheduler = DesktopEngineUpdateScheduler(poker)
+
+    @Provides fun updateSchedulerPort(scheduler: DesktopEngineUpdateScheduler): EngineUpdateScheduler = scheduler
+
+    // JDK 25's `Signature("Ed25519")` is the desktop's manifest verifier (04's verifier port).
+    @Provides
+    @SingleIn(AppScope::class)
+    fun manifestVerifier(): Ed25519Verifier = JdkEd25519Verifier
+
+    // Update traffic rides the approved client family (01 network island): no raw OkHttp
+    // construction here; OkHttpEngineHttp re-derives the no-follow shapes it needs.
+    @Provides
+    @SingleIn(AppScope::class)
+    fun updateHttp(clients: NetworkClients): EngineHttp = OkHttpEngineHttp(clients.api, clients.download)
+
+    // The pinned keys ship as packaged assets (04); parsing is pure and fails fast on corruption.
+    @Provides
+    @SingleIn(AppScope::class)
+    fun engineKeys(paths: DesktopEngineStorePaths): EngineKeys =
+        EngineKeys.parse(paths.manifestKeysText(), paths.upstreamKeyText())
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun engineCompiler(
+        runtime: PythonRuntimeLocator,
+        paths: DesktopEngineStorePaths,
+        identity: CompileMarker,
+        clock: Clock,
+    ): EngineCompiler = DesktopEngineCompiler(runtime, paths, identity.appVersionCode, clock)
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun rollbackMonitor(
+        store: EngineStore,
+        transport: YtxTransport,
+        health: YouTubeHealth,
+        clock: Clock,
+        @ApplicationScope scope: CoroutineScope,
+    ): EngineRollbackMonitor = EngineRollbackMonitor(store, transport, health, clock, scope)
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun updateHooks(
+        store: EngineStore,
+        settings: EngineSettings,
+        http: EngineHttp,
+        keys: EngineKeys,
+        verifier: Ed25519Verifier,
+        scheduler: EngineUpdateScheduler,
+        transport: YtxTransport,
+        client: YtDlpClient,
+        compiler: EngineCompiler,
+        preflight: EnginePlatformPreflight,
+        health: YouTubeHealth,
+        monitor: EngineRollbackMonitor,
+        clock: Clock,
+        build: BuildInfo,
+        context: () -> YtxContext,
+    ): EngineUpdateHooks =
+        EngineUpdater(
+            store = store,
+            settings = settings,
+            http = http,
+            keys = keys,
+            verifier = verifier,
+            scheduler = scheduler,
+            transport = transport,
+            client = client,
+            compiler = compiler,
+            preflight = preflight,
+            health = health,
+            monitor = monitor,
+            clock = clock,
+            indexUrl = build.engineManifestUrl,
+            control = { YtxControlRequest(context()) },
+        )
+
+    @Provides
+    @IntoSet
+    fun engineUpdateLane(
+        store: EngineStore,
+        transport: YtxTransport,
+        settings: EngineSettings,
+        preflight: EnginePlatformPreflight,
+        scheduler: DesktopEngineUpdateScheduler,
+        hooks: EngineUpdateHooks,
+        network: NetworkMonitor,
+        paths: DesktopEngineStorePaths,
+        context: () -> YtxContext,
+        clock: Clock,
+    ): JobLane =
+        DesktopEngineUpdateLane(
+            store,
+            transport,
+            settings,
+            preflight,
+            scheduler,
+            hooks,
+            network,
+            clock,
+            { YtxControlRequest(context()) },
+            paths.root
+                .toString()
+                .hashCode()
+                .toLong(),
+        )
+
+    @Provides
+    @IntoSet
+    fun updateInitializer(
+        settings: EngineSettings,
+        engine: YouTubeEngine,
+        scheduler: EngineUpdateScheduler,
+        @ApplicationScope scope: CoroutineScope,
+    ): AppInitializer = DesktopEngineUpdateInitializer(settings, engine, scheduler, scope)
 
     @Provides fun capabilities(engine: YtDlpEngine): YouTubeCapabilitiesSource = engine
 
