@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ListItem
@@ -116,6 +118,7 @@ fun SyncSettingsScreen(
         modifier =
             modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -233,7 +236,7 @@ private fun ColumnScope.NotConfiguredBody(
 
 /**
  * The rows shown while linked (08 "Rows while linked"), minus the pieces later slices own (the
- * server disclosure, Unlink, Delete my data, Diagnostics). This device offers its name as other
+ * server disclosure and Diagnostics). This device offers its name as other
  * devices see it — resolved from `SyncController.devices()`, with the local `sync.device_name`
  * as the provisional value — renamed through `renameDevice` (1–40 characters, trimmed). The two
  * device-local switches show only their persisted values: toggles call the setters, a failed
@@ -429,6 +432,8 @@ private fun ColumnScope.LinkedSection(
             }
         }
     }
+
+    DisconnectActions(controller, identity, host)
 
     when (dialog) {
         LinkedDialog.RenameSelf -> {
