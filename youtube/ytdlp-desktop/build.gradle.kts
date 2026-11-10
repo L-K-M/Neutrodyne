@@ -39,6 +39,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.okio)
+    testImplementation(libs.okhttp.mockwebserver3)
 }
 
 tasks.withType<Test>().configureEach {
