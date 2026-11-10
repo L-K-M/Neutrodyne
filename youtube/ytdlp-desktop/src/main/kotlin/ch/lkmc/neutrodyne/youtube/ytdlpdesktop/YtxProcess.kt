@@ -94,22 +94,7 @@ class YtxProcess(
         interpreter: PythonRuntime,
         home: File,
         tmp: File,
-    ): Map<String, String> =
-        buildMap {
-            // A cleared environment: nothing user-set (proxies, SSL overrides, PYTHON*) leaks in.
-            put("PATH", interpreter.executable.parentFile?.absolutePath ?: "")
-            put("TMP", tmp.absolutePath)
-            put("TEMP", tmp.absolutePath)
-            put("TMPDIR", tmp.absolutePath)
-            put("HOME", home.absolutePath)
-            if (isWindows()) {
-                put("USERPROFILE", home.absolutePath)
-                System.getenv("SYSTEMROOT")?.let { put("SYSTEMROOT", it) }
-            }
-            paths.cacertFile()?.let { put("SSL_CERT_FILE", it.absolutePath) }
-        }
-
-    private fun isWindows(): Boolean = System.getProperty("os.name").startsWith("Windows")
+    ): Map<String, String> = childProcessEnvironment(interpreter, paths, home, tmp)
 
     private companion object {
         const val TAG = "YtxProcess"
@@ -127,6 +112,33 @@ class YtxProcess(
         }
     }
 }
+
+/**
+ * The cleared environment every owned child gets (11 "Engine security"): PATH to the
+ * interpreter's directory only, HOME/TMP inside the app cache, SYSTEMROOT on Windows,
+ * SSL_CERT_FILE once the packaged cacert ships. Nothing user-set (proxies, SSL overrides,
+ * PYTHON*) leaks in; the update compiler uses the same environment as the serving host.
+ */
+internal fun childProcessEnvironment(
+    interpreter: PythonRuntime,
+    paths: DesktopEngineStorePaths,
+    home: File,
+    tmp: File,
+): Map<String, String> =
+    buildMap {
+        put("PATH", interpreter.executable.parentFile?.absolutePath ?: "")
+        put("TMP", tmp.absolutePath)
+        put("TEMP", tmp.absolutePath)
+        put("TMPDIR", tmp.absolutePath)
+        put("HOME", home.absolutePath)
+        if (isWindowsHost()) {
+            put("USERPROFILE", home.absolutePath)
+            System.getenv("SYSTEMROOT")?.let { put("SYSTEMROOT", it) }
+        }
+        paths.cacertFile()?.let { put("SSL_CERT_FILE", it.absolutePath) }
+    }
+
+internal fun isWindowsHost(): Boolean = System.getProperty("os.name").startsWith("Windows")
 
 /**
  * One live child generation: framed writes under a lock, bounded line reads on a daemon
