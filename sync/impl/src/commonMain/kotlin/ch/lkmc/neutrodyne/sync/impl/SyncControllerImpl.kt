@@ -1014,6 +1014,19 @@ class SyncControllerImpl(
         return problem
     }
 
+    /** A startup account check must not revoke a replacement link after an old response. */
+    internal suspend fun passwordNoticeTokenRejected(profile: SyncStateEntity) {
+        identityMutex.withLock {
+            val current = db.syncStateDao().get()
+            if (runCatching { requireSyncProfile(profile, current) }.isFailure ||
+                address.serverUrl() != profile.serverUrl
+            ) {
+                return@withLock
+            }
+            markRevoked()
+        }
+    }
+
     private suspend fun markRevoked() {
         db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
         settingsCapture.clear()
