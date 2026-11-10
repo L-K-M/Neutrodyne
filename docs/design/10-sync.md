@@ -964,6 +964,7 @@ Room, DataStore and `SecretStore` cannot commit atomically. `SyncApplyEffects` t
 
 - One row per `(coll, rid, field)`: repeated changes coalesce, so 5-s position saves for one episode keep one row whatever the push cadence.
 - Value at push time: `ChangeBuilder` reads the outbox rows and the current source rows in one read transaction, so a value always corresponds to the newest clock of its row. A row whose source row no longer exists and whose `value` is NULL is skipped (the deletion wrote its own literal row).
+  - For a missing group, membership or Up next source, the client retires an unchanged local row without a literal only after a confirmed removal with a complete clock at least as new. A confirmed deletion of the absent parent group also covers its memberships. This cleanup follows undo filtering and checks the linked profile in the same writer transaction. It preserves literals, replay rows, redirects, still-present sources and newer intents.
 - A `*` row and per-field rows of one record may coexist (an insert after a pending removal, such as a group re-created by undo); `ChangeBuilder` takes, per wire field, the row with the newest clock, so a newer `*` supersedes an older literal removal and vice versa. A `*` row is not deleted when a remote value beats it for one field; `ChangeBuilder` instead omits every field whose `sync_clock` entry is newer than the row's clock (that field now holds the remote value).
 - **Undo window.** `OutboxReader` skips a group's `deleted = true` row, and the `member` `in = false` rows with that group's `uuid` prefix, until 10 s after the deletion was captured (05's undo, R2.1). `SyncScheduler` notes the capture time of each new group-deletion row in memory when the outbox changes; after a process restart the rows are eligible at once, matching 05's rule that process death inside the window makes the delete final. The scheduler pokes a round when the oldest skipped row comes of age. Every other row is eligible at once.
 - After acknowledgement, delete only rows whose complete `(hlc, nodeId)` clock is at most the sent clock, and merge the exact sent fields into `sync_clock.raw` without lowering a known field clock. A change made during the round stays for the next one; replays never borrow this device's node ID. `SyncApplyEffects.acknowledge` owns this whole step: it stages each sent `auth` pair under the credential coordinator before the Room write, then one transaction deletes the acknowledged outbox rows, binds each winning auth's staged reference, and merges every acknowledged change's sent state — a failed stage or failed merge leaves all of the push's rows intact for a retry.
@@ -1194,6 +1195,34 @@ while the gate has set `LocalNetworkAccess.syncAllowed`.
 | Malformed response (not JSON, wrong envelope, response cap exceeded) | decoding | the page is discarded, the round fails (`Server(200)` in diagnostics); a page is never partially applied. A single invalid record inside a well-formed page is skipped and counted instead ([Pull and apply](#pull-and-apply) step 4) |
 | Process death mid-round | — | outbox rows remain until acknowledged; pages re-apply idempotently; staged removals live in `sync_held` |
 | Database full | `SQLITE_FULL` | the page transaction rolls back; retried next round; 02's error handling surfaces storage-full |
+
+**Implementation note (2026-11-10, clock correction).** Each sync and changes
+request samples local time around the RPC. The owning profile stores the offset
+and repairs its unaccepted local clock groups in one writer transaction, seeded
+after the accepted field and match clocks. Raw state may include pending local
+values, so its envelope retains a separate confirmed snapshot while those values
+differ. Pulls and acknowledgements advance that snapshot without secret bytes;
+its frontier includes stripped credential clocks and parked wire records. Repair
+removes invalid unaccepted raw overlays while preserving their materialized values
+and queued literals. Legacy envelopes without provenance keep their clocks
+conservatively. Accepted state and replay clocks stay unchanged. Settings keep
+their original physical receipt while the pending wire
+clock and matching materialization baseline advance together, including a late
+post-write callback or recovery that started before correction.
+
+**Implementation note (2026-11-10, oversized pushes).** HTTP 413 halves the
+next outbox batch without acknowledging the failed request. If one change still
+cannot fit, only its unchanged rows that were actually sent are retired and
+reported as rejected. Newer edits and withheld credentials remain pending. A
+rejected setting receipt is remembered separately from confirmed state so the
+same physical write is not captured again; a later explicit write can retry.
+Recovery replay reports the rejection instead of announcing a completed resync.
+
+The first clock rejection persists until its pending writes are acknowledged;
+an empty successful pull does not clear it. A second rejection pauses pushes
+across restarts while empty sync requests continue pulling and sampling time.
+A successful correction permits pushes again. First-link uploads retain the
+unfinished link on rejection or an undrained upload limit.
 
 ```mermaid
 stateDiagram-v2

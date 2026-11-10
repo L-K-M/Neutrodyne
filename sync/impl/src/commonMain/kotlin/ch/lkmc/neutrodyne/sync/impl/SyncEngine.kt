@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.sync.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
@@ -20,11 +21,15 @@ import ch.lkmc.neutrodyne.sync.protocol.ChangeStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
+import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Instant
 
 /** The host of a server URL, for the token origin (`sync:<host>`). */
 fun hostOf(url: String): String = withoutScheme(url).substringBefore('/')
@@ -75,6 +80,10 @@ private fun withoutScheme(url: String): String =
 
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
+
+/** Durable retry history survives successful pull-only rounds and process restarts. */
+internal val SYNC_ERROR_CLOCK_RETRY = SyncErrorCode.CLOCK_SKEW.wire
+internal const val SYNC_ERROR_CLOCK_BLOCKED = "ClockSkew"
 
 /** A server admission failure retains the replay's accepted clock for later repair. */
 internal class SyncReplayRejectedException(
@@ -213,6 +222,30 @@ class SyncEngine(
         val client: SyncClient?,
     )
 
+    /** Samples network time before local apply work; only the captured profile may store it. */
+    internal suspend fun observeServerTime(
+        profile: SyncStateEntity?,
+        serverTime: String,
+        sentAtMs: Long,
+        receivedAtMs: Long,
+    ): SyncClockOffset? {
+        if (profile == null) return null
+        val serverMs = runCatching { Instant.parse(serverTime).toEpochMilliseconds() }.getOrNull() ?: return null
+        val correction = estimateSyncClockOffset(serverMs, sentAtMs, receivedAtMs) ?: return null
+        db.withWriteTransaction {
+            val state = checkNotNull(db.syncStateDao().get())
+            requireSyncProfile(profile, state)
+            db.syncStateDao().setClockOffset(correction.offsetMs)
+            val repaired = repairSyncClock(db, state, correction.adjustedReceivedAtMs)
+            if (state.lastError == SYNC_ERROR_CLOCK_BLOCKED &&
+                (state.clockOffsetMs != correction.offsetMs || repaired)
+            ) {
+                db.syncStateDao().storeError(null)
+            }
+        }
+        return correction
+    }
+
     private suspend fun captureRound(): RoundSnapshot =
         identity.withLock {
             val serverUrl = address.serverUrl() ?: return@withLock RoundSnapshot(null, null, null)
@@ -275,17 +308,53 @@ class SyncEngine(
 
         // Reasons that never pull on their own: a round with nothing to push is a no-op.
         val noPullReasons = setOf(SyncRoundReason.OUTBOX, SyncRoundReason.PLAYBACK)
+        var pullPending = reason !in noPullReasons
+        var batchLimit = ProtocolLimits.MAX_CHANGES
         var rounds = 0
         while (rounds < MAX_ROUNDS) {
             rounds++
-            val rows = capture.prepareForPush(reader.next(), reason == SyncRoundReason.FIRST_LINK)
+            val pushBlocked = db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED
+            val capturedRows =
+                if (pushBlocked) {
+                    emptyList()
+                } else {
+                    capture.prepareForPush(
+                        reader.next(batchLimit),
+                        reason == SyncRoundReason.FIRST_LINK,
+                    )
+                }
+            val rows = effects.discardRemovedSourceFields(capturedRows, snapshot.state)
             val changes = builder.build(rows)
-            if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
+            if (changes.isEmpty() && !pullPending && !pushBlocked) break
             val state = db.syncStateDao().get()
             verifyRound(snapshot)
-            val response = markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
+            val sentAt = clock.now()
+            val response =
+                try {
+                    markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
+                } catch (failure: SyncTransportException) {
+                    if (failure.status != STATUS_PAYLOAD_TOO_LARGE || changes.isEmpty()) throw failure
+                    // A failed request accepted nothing. Rebuild a smaller batch from the live
+                    // outbox; do not acknowledge any field or advance the pull cursor.
+                    verifyRound(snapshot)
+                    if (changes.size > 1) {
+                        batchLimit = (changes.size / 2).coerceAtLeast(1)
+                    } else {
+                        discardOversizeChange(changes.single(), rows, snapshot.state)
+                        rejected++
+                        // A full resync must not announce success after dropping a replay.
+                        if (purpose == RoundPurpose.RECOVERY_PUSH) {
+                            throw SyncReplayRejectedException(SyncErrorCode.INVALID.wire)
+                        }
+                    }
+                    continue
+                }
+            val receivedAt = clock.now()
             verifyRound(snapshot)
+            pullPending = false
             pushed += changes.size
+            val rejectedResults = response.results.filter { it.status == ChangeStatus.REJECTED.wire }
+            rejected += rejectedResults.size
             // 10 Passwords: the acknowledgement commits under the credential coordinator —
             // the acknowledged auths' exact sent snapshots stage first (outside the writer),
             // then the outbox deletes and the immutable reference binds land in one Room
@@ -304,12 +373,15 @@ class SyncEngine(
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
             commitProgress(response.records, response.cursor, snapshot.state)
+            observeServerTime(snapshot.state, response.serverTime, sentAt, receivedAt)
             var cursor = response.cursor
             var hasMore = response.hasMore
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
+                val pageSentAt = clock.now()
                 val next = markingRevocation(snapshot.state) { transport.changes(cursor, ProtocolLimits.MAX_RECORDS) }
+                val pageReceivedAt = clock.now()
                 verifyRound(snapshot)
                 applied += next.records.size
                 pulled += next.records.size
@@ -320,6 +392,7 @@ class SyncEngine(
                 effects.drainSettings()
                 effects.drainPasswords()
                 commitProgress(next.records, next.cursor, snapshot.state)
+                observeServerTime(snapshot.state, next.serverTime, pageSentAt, pageReceivedAt)
                 cursor = next.cursor
                 hasMore = next.hasMore
             }
@@ -330,6 +403,33 @@ class SyncEngine(
                     throw SyncReplayRejectedException(it.code)
                 }
             }
+            if (rejectedResults.isNotEmpty()) {
+                if (rejectedResults.any { it.code == SyncErrorCode.CLOCK_SKEW.wire }) {
+                    db.withWriteTransaction {
+                        snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+                        val retrying = state?.lastError in setOf(SYNC_ERROR_CLOCK_RETRY, SYNC_ERROR_CLOCK_BLOCKED)
+                        db.syncStateDao().storeError(if (retrying) SYNC_ERROR_CLOCK_BLOCKED else SYNC_ERROR_CLOCK_RETRY)
+                    }
+                } else {
+                    db.withWriteTransaction {
+                        snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+                        if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_RETRY) {
+                            db.syncStateDao().storeError(null)
+                        }
+                    }
+                }
+                // Drain the pull and settle its guard below, then retry in the next public round.
+                break
+            }
+            db.withWriteTransaction {
+                snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+                if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_RETRY &&
+                    (changes.isNotEmpty() || db.syncOutboxDao().count() == 0)
+                ) {
+                    db.syncStateDao().storeError(null)
+                }
+            }
+            if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED) break
             if (db.syncOutboxDao().count() == 0) break
         }
 
@@ -339,6 +439,32 @@ class SyncEngine(
             db.syncStateDao().recordSyncAt(clock.now())
         }
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+    }
+
+    /** Retire only the immutable rows actually sent; a concurrent edit remains pending. */
+    private suspend fun discardOversizeChange(
+        change: ChangeDto,
+        rows: List<SyncOutboxEntity>,
+        profile: SyncStateEntity?,
+    ) {
+        val rid = RecordId.fromWire(SyncCollection.fromWire(change.coll), change.id).rid
+        db.withWriteTransaction {
+            if (profile != null) requireSyncProfile(profile, db.syncStateDao().get())
+            for (row in rows) {
+                if (row.coll != change.coll || row.rid != rid) continue
+                val clock = outboxClock(row)?.toString() ?: continue
+                val sent =
+                    when {
+                        change.op == "rekey" -> row.field == "~rekey"
+                        row.field == "*" -> change.fields.values.any { it.c == clock }
+                        else -> change.fields[row.field]?.let { it.c == null || it.c == clock } == true
+                    }
+                if (!sent || db.syncOutboxDao().get(row.coll, row.rid, row.field) != row) continue
+                capture.rejectOversizeSetting(row)
+                db.syncOutboxDao().deleteIfUnchanged(row.coll, row.rid, row.field, row.hlc, row.nodeId)
+            }
+            // In particular, do not merge a setting/auth snapshot into accepted raw state.
+        }
     }
 
     /** Settle full-pull removals through the same guard as an incremental round. */
@@ -455,5 +581,6 @@ class SyncEngine(
     private companion object {
         const val STATUS_REVOKED = 401
         const val STATUS_CURSOR_EXPIRED = 410
+        const val STATUS_PAYLOAD_TOO_LARGE = 413
     }
 }
