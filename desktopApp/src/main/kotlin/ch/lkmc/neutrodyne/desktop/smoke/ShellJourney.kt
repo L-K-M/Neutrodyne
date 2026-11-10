@@ -73,6 +73,9 @@ internal class ShellJourney(
         // The database open gets its own step ahead of the bands, so the timing is real;
         // band 100's `DatabaseOpenInitializer` then returns at once (11 Smoke mode, M1a).
         step("database") { runBlocking { startedGraph.databaseOpener.awaitOpen() } }
+        step("controlledSettings") {
+            runBlocking { configureControlledJourneySettings(startedGraph.settingsRepository) }
+        }
         step("initializers") {
             runBlocking {
                 // Metro materialises a new set of new contributions on every `initializers`

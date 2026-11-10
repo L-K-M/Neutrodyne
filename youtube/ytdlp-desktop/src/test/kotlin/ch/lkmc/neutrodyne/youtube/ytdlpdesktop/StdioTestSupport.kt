@@ -164,6 +164,9 @@ internal class SpySpawner(
     @Volatile var last: YtxChild? = null
     var starts = 0
 
+    /** Set to a spawn failure (e.g. `YtxSpawnException`) to force a START_FAILED transition. */
+    @Volatile var failStart: YtxSpawnException? = null
+
     override fun start(
         libDir: File,
         engineVersion: String,
@@ -172,6 +175,7 @@ internal class SpySpawner(
         listener: YtxChild.Listener,
     ): YtxChild {
         starts++
+        failStart?.let { throw it }
         return inner.start(libDir, engineVersion, replayDir, debugHooks, listener).also { last = it }
     }
 }
