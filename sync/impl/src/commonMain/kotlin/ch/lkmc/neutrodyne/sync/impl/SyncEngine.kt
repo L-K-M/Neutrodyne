@@ -13,11 +13,14 @@ import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -98,6 +101,7 @@ class SyncEngine(
      * outgoing changes carry auth. Bound by `SyncBindings`; bare test engines may omit it.
      */
     private val refreshPreferences: suspend () -> Unit = {},
+    internal val diagnosticsRuntime: SyncRuntimeDiagnostics = SyncRuntimeDiagnostics(),
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -112,13 +116,54 @@ class SyncEngine(
     suspend fun round(reason: SyncRoundReason): SyncReport {
         activity.begin()
         try {
-            return roundMutex.withLock { roundLocked(reason) }
+            return roundMutex.withLock {
+                val observation = RoundObservation(diagnosticsRuntime.currentTicket())
+                try {
+                    val report = roundLocked(reason, observation)
+                    observation.ticket?.let {
+                        diagnosticsRuntime.completed(it, SyncRoundSummary(reason, clock.now(), report))
+                    }
+                    report
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    observation.ticket?.let {
+                        diagnosticsRuntime.completed(
+                            it,
+                            SyncRoundSummary(
+                                reason = reason,
+                                completedAtMs = clock.now(),
+                                report = null,
+                                failure =
+                                    when (failure) {
+                                        is SyncTransportException -> SyncRoundFailure.TRANSPORT
+                                        is ProtocolException -> SyncRoundFailure.PROTOCOL
+                                        else -> SyncRoundFailure.UNEXPECTED
+                                    },
+                                httpStatus =
+                                    (failure as? SyncTransportException)?.status?.takeIf {
+                                        it in 100..599
+                                    },
+                                protocolCode = (failure as? ProtocolException)?.code?.wire,
+                            ),
+                        )
+                    }
+                    throw failure
+                }
+            }
         } finally {
             activity.end()
         }
     }
 
-    private suspend fun roundLocked(reason: SyncRoundReason): SyncReport {
+    private class RoundObservation(
+        var ticket: SyncDiagnosticTicket?,
+    )
+
+    private suspend fun roundLocked(
+        reason: SyncRoundReason,
+        observation: RoundObservation,
+    ): SyncReport {
         // The gate owns the SYNC bypass: apply its live verdict before the round's first request,
         // so a permission granted before the process started works after a restart and a
         // revocation blocks the round (10 Local-network gate 3-4). No prompt is shown here.
@@ -131,7 +176,11 @@ class SyncEngine(
         }
         // A revoked link stays dormant until a re-link clears the marker: no periodic round and
         // no "Sync now" reaches the server again (10 Errors: 401 → Revoked stops rounds).
-        if (db.syncStateDao().get()?.lastError == SYNC_ERROR_REVOKED) {
+        val linkState = db.syncStateDao().get()
+        // Reuse the round's existing reads; diagnostics must not add IO that could consume
+        // a one-shot failure or change the round's outcome.
+        observation.ticket = diagnosticsRuntime.activate(linkState.diagnosticProfile(serverUrl))
+        if (linkState?.lastError == SYNC_ERROR_REVOKED) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
         // The volatile share gate is only as fresh as its last hydration — a restart's cache
