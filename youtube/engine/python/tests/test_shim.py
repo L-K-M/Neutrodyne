@@ -161,6 +161,13 @@ def replay_case(scenario):
             result = invoke(bridge, request['method'], **{k: v for k, v in request['payload'].items() if k != 'ctx'})
             if scenario == 'version':
                 expected['python'] = result['python']
+                if os.environ.get('ND_REPLAY_MODE') == Mode.CONTRACT.value:
+                    # The canary stages a new hash-verified bundle. Check its
+                    # identity against that input, not the old replay recording.
+                    bundle = Path(__file__).resolve().parents[4] / 'youtube/ytdlp/engine/bundled.json'
+                    metadata = json.loads(bundle.read_text())
+                    expected['ytDlp'] = metadata['version']
+                    expected['ejs'] = metadata['ejsVersion']
             self.assertEqual(result, expected)
     return test
 

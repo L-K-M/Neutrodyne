@@ -131,6 +131,7 @@ tasks.register<Exec>("preparedShimTest") {
     description = "Probe the real prepared store and worker payload through the Python host adapter"
     dependsOn("testDebugUnitTest", "verifyBundledYtDlp")
     inputs.dir(preparedShimDirectory)
+    environment("ND_REPLAY_MODE", providers.gradleProperty("replay").getOrElse("strict"))
     workingDir(rootProject.projectDir)
     commandLine(
         "python3",
