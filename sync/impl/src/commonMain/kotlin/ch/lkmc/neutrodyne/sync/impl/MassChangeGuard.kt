@@ -56,6 +56,13 @@ object MassChangeGuard {
         data class Approved(
             val rowId: Long,
             val batch: HeldBatch,
+            /**
+             * `true` when the row was already DEFERRED: its removals hold while the item
+             * stays *loaded* (10 step 4's stop-or-item-change boundary), not merely while it
+             * plays — a pause-scheduled round must not release them. `false` for a fresh
+             * batch, which defers only while `isPlaying` reports.
+             */
+            val alreadyDeferred: Boolean = false,
         ) : Verdict
 
         /** Above the thresholds: the provisional row became the held prompt row of [batch]. */
@@ -146,7 +153,7 @@ object MassChangeGuard {
                 db.syncHeldDao().delete(row.id)
                 verdicts += Verdict.Held(batch)
             } else {
-                verdicts += Verdict.Approved(row.id, batch)
+                verdicts += Verdict.Approved(row.id, batch, alreadyDeferred = state == HeldState.DEFERRED)
             }
         }
         return verdicts
@@ -182,6 +189,9 @@ object MassChangeGuard {
                 continue
             }
             val group = db.groupDao().groupByUuid(removal.rid) ?: continue
+            // 05 Delete and undo step 2: the repository's delete pair — a GROUP play context
+            // clears inside the same transaction, and the current item keeps playing.
+            db.groupDao().clearGroupContext(group.id, now)
             db.groupDao().deleteGroup(group.id)
         }
         return deferred
@@ -211,25 +221,37 @@ object MassChangeGuard {
 
     /**
      * 10 Mass-change guard step 4's playing predicate: the removal of the podcast that owns
-     * the loaded episode never applies while the player reports `isPlaying`. Shared by the
-     * round's apply, `resolveHeld` and the deferred settle — no path gets an exception.
+     * the loaded episode never applies while the player reports `isPlaying`. Fresh approvals
+     * and `resolveHeld` use this — a removal that arrives while the player is merely paused
+     * still applies.
      */
     suspend fun playingRemovalDeferred(
         db: NeutrodyneDatabase,
         active: PlaybackSyncActive,
         podcastSyncId: String,
+    ): Boolean = active.isPlaying && loadedRemovalDeferred(db, active, podcastSyncId)
+
+    /**
+     * 10 step 4's loaded predicate: the removal of the podcast that owns the loaded episode
+     * holds while the item stays loaded — `isPlaying` does not matter. An already-DEFERRED
+     * removal waits for a stop or an item change, so a pause-scheduled round or an app
+     * restart's first snapshot must not release it.
+     */
+    suspend fun loadedRemovalDeferred(
+        db: NeutrodyneDatabase,
+        active: PlaybackSyncActive,
+        podcastSyncId: String,
     ): Boolean {
         val episodeId = active.episodeId ?: return false
-        if (!active.isPlaying) return false
         val episode = db.episodeDao().byId(episodeId) ?: return false
         return db.podcastDao().byId(episode.podcastId)?.syncId == podcastSyncId
     }
 
     /**
      * Settles every DEFERRED row's staged removals in the caller's transaction (10
-     * Mass-change guard step 4): each still-winning removal applies, the loaded, playing
-     * item's removal holds, and a remainder stays DEFERRED for the next boundary. HELD and
-     * STAGED rows are never touched.
+     * Mass-change guard step 4): each still-winning removal applies, the loaded item's
+     * removal holds (the caller's predicate decides playing vs loaded), and a remainder
+     * stays DEFERRED for the next boundary. HELD and STAGED rows are never touched.
      */
     suspend fun settleDeferred(
         db: NeutrodyneDatabase,

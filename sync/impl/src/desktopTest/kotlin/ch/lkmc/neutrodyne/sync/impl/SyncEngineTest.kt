@@ -4,11 +4,13 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.database.PlaySessionEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
@@ -203,8 +205,13 @@ class SyncEngineTest {
                 // The group deletion pushes once 05's 10-s undo window has passed.
                 a.clock.advanceBy(11.seconds)
                 a.round()
-                b.round()
+                val report = b.round()
 
+                assertEquals(
+                    0,
+                    report.held,
+                    "a below-threshold batch applies — nothing was held",
+                )
                 assertNull(
                     b.db.podcastDao().bySyncId(syncId("0a")),
                     "the below-threshold unsubscribe applies",
@@ -284,8 +291,13 @@ class SyncEngineTest {
                     a.addPodcast(syncId("e$i"), "https://e.example/$i", "E$i")
                 }
                 a.round()
-                b.round()
+                val report = b.round()
 
+                assertEquals(
+                    4,
+                    report.held,
+                    "the held batch reports its removals exactly once",
+                )
                 val held =
                     b.db
                         .syncHeldDao()
@@ -304,6 +316,145 @@ class SyncEngineTest {
                         .allForExport()
                         .size,
                     "the held four and the pulled ten all stay",
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
+    fun aPausedLoadedPodcastKeepsItsDeferredRemovalAcrossRounds() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val playback = FakePlaybackSyncPort()
+            val b = device("b", server, playback)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                a.round()
+                b.round()
+
+                // The removal defers while B plays the podcast's loaded episode.
+                val bPodcast = b.db.podcastDao().bySyncId(syncId("0a"))!!
+                val bEpisode = b.addEpisode(bPodcast.id, "g:playing")
+                playback.setActive(episodeId = bEpisode, isPlaying = true)
+
+                a.db.withWriteTransaction {
+                    a.db.podcastDao().deleteCascade(
+                        a.db
+                            .podcastDao()
+                            .bySyncId(syncId("0a"))!!
+                            .id,
+                        NOW,
+                    )
+                }
+                a.round()
+                b.round()
+                assertNotNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the playing podcast's removal defers",
+                )
+
+                // 10 Scheduling runs an ordinary round on the pause boundary: the item is
+                // still loaded, so an already-deferred removal of its podcast must not
+                // release just because `isPlaying` dropped.
+                playback.setPlaying(false)
+                b.round()
+
+                assertNotNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the paused, still-loaded podcast keeps its deferred removal",
+                )
+                val row =
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .single()
+                assertEquals(HeldState.DEFERRED, MassChangeGuard.stateOf(row.batch))
+
+                // A real stop unloads the item — the next ordinary round applies the
+                // still-winning removal.
+                playback.setActive(null, isPlaying = false)
+                b.round()
+
+                assertNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "after the stop's unload the removal applies",
+                )
+                assertTrue(
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
+    fun aBelowThresholdGroupDeleteClearsThePlayContext() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val b = device("b", server)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                a.addGroup(syncId("07"), "News")
+                a.addMember(syncId("07"), syncId("0a"))
+                a.round()
+                b.round()
+
+                // B is playing from inside that group's feed context (02 play_session).
+                val episode =
+                    b.addEpisode(
+                        b.db
+                            .podcastDao()
+                            .bySyncId(syncId("0a"))!!
+                            .id,
+                        "g:news",
+                    )
+                val group = b.db.groupDao().groupByUuid(syncId("07"))!!
+                b.db.withWriteTransaction {
+                    b.db
+                        .playSessionDao()
+                        .write(
+                            PlaySessionEntity(
+                                currentEpisodeId = episode,
+                                contextType = ContextType.GROUP,
+                                contextId = group.id,
+                                updatedAt = NOW,
+                            ),
+                        )
+                }
+
+                a.db.withWriteTransaction {
+                    a.db
+                        .groupDao()
+                        .deleteGroup(
+                            a.db
+                                .groupDao()
+                                .groupByUuid(syncId("07"))!!
+                                .id,
+                        )
+                }
+                a.clock.advanceBy(11.seconds)
+                a.round()
+                b.round()
+
+                assertNull(
+                    b.db.groupDao().groupByUuid(syncId("07")),
+                    "the below-threshold group delete applies",
+                )
+                val session = b.db.playSessionDao().get()!!
+                assertNull(session.contextType, "the deleted group's context clears")
+                assertNull(session.contextId)
+                assertEquals(
+                    episode,
+                    session.currentEpisodeId,
+                    "the current item keeps playing — the player is never stopped",
                 )
             } finally {
                 a.close()
@@ -356,7 +507,8 @@ class SyncEngineTest {
                     "the deferred remainder is retained",
                 )
 
-                playback.setPlaying(false)
+                // A real stop unloads the item — the boundary the deferred row waits for.
+                playback.setActive(null, isPlaying = false)
                 b.round()
                 assertNull(
                     b.db.podcastDao().bySyncId(syncId("0a")),
