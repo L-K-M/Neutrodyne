@@ -70,6 +70,31 @@ public data class RemoteSessionCard(
     val deviceName: String,
 )
 
+/**
+ * The exact sync profile a reconnect banner names: the server URL plus the stored username. A
+ * dismissal is keyed by this pair, so a previous profile's dismissal or a stale action can never
+ * hide or open another server's banner.
+ */
+@Immutable
+public data class ReconnectProfile(
+    val serverUrl: String,
+    val username: String?,
+)
+
+/**
+ * The Library reconnect banner (08 priority 4), mapped by the shell from
+ * `SyncStatus.Reconnect`. [host] is the display host (no credentials, userinfo or path).
+ */
+@Immutable
+public data class ReconnectBanner(
+    val serverUrl: String,
+    val username: String?,
+    val host: String,
+) {
+    public val profile: ReconnectProfile
+        get() = ReconnectProfile(serverUrl, username)
+}
+
 /** What the `player` slot needs: the current pane layout and how to navigate from the player. */
 @Immutable
 public data class PlayerSlotState(
@@ -175,6 +200,13 @@ public class RootActions(
     public val selectFeedSource: suspend (String?) -> Boolean = { false },
     public val hidePlayerPanel: () -> Unit = {},
     public val revealPlayerPanel: () -> Unit = {},
+    /** The reconnect banner's "Not now" — the shell hides that exact profile for this process. */
+    public val dismissReconnect: (ReconnectBanner) -> Unit = {},
+    /**
+     * Whether the rendered banner is still the live `SyncStatus.Reconnect`; the banner's "Reconnect" checks
+     * this before pushing `SyncSetupKey`, so a stale frame cannot open another profile's setup.
+     */
+    public val isReconnectTargetLive: (ReconnectBanner) -> Boolean = { false },
 )
 
 /**
@@ -205,6 +237,8 @@ public data class RootUiState(
     val hasNowPlaying: Boolean = false,
     /** `ui.player_panel_hidden` — the side panel's close button sets it (08 Desktop windows). */
     val playerPanelHidden: Boolean = false,
+    /** The Library reconnect banner (08 priority 4); null unless `SyncStatus.Reconnect`. */
+    val reconnect: ReconnectBanner? = null,
 ) {
     public companion object {
         /** A ready gate with no badge or notices; the M0a default and the tests' base. */
