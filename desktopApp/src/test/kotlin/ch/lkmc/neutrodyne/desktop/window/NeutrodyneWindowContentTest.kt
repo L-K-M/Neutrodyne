@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -38,6 +40,7 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder
+import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -50,6 +53,7 @@ import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -505,27 +509,76 @@ class NeutrodyneWindowContentTest {
             }
         }
 
-    private fun ComposeUiTest.setWindowContent(crashOffer: DesktopCrashOffer? = null) {
+    @Test
+    fun reconnectOpensTheRealSetupEntryWithTheSavedAddress() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
+            setWindowContent(sync = sync)
+            onNodeWithTag("nav_library").performClick()
+            waitUntil("the reconnect banner shows", TIMEOUT_MS) {
+                onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            onNodeWithText("Reconnect").performClick()
+            waitUntil("the real setup entry opens", TIMEOUT_MS) {
+                onAllNodesWithText("Link a device").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText(RECONNECT_URL).assertExists()
+            onNodeWithText(RECONNECT_MESSAGE).assertDoesNotExist()
+        }
+
+    @Test
+    fun notNowSurvivesWindowContentRecreationThroughTheAppScopedHolder() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
+            val generation = mutableIntStateOf(0)
+            setWindowContent(sync = sync, generation = { generation.intValue })
+            onNodeWithTag("nav_library").performClick()
+            waitUntil("the reconnect banner shows", TIMEOUT_MS) {
+                onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Not now").performClick()
+            assertThat(graph.reconnectDismissals.isDismissed(ReconnectProfile(RECONNECT_URL, "anna"))).isTrue()
+
+            runOnIdle { generation.intValue++ }
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText(RECONNECT_MESSAGE).assertDoesNotExist()
+            assertThat(sync.status.value).isEqualTo(SyncStatus.Reconnect(RECONNECT_URL, "anna"))
+        }
+
+    private fun ComposeUiTest.setWindowContent(
+        crashOffer: DesktopCrashOffer? = null,
+        sync: FakeSyncController? = null,
+        generation: () -> Int = { 0 },
+    ) {
         // The default (Feeds) tab is VM-backed: its repositories come from the graph's database
         // accessor, which gates on the open — idempotent, so per-test awaits stay harmless.
         runBlocking { graph.databaseOpener.awaitOpen() }
         setContent {
-            NeutrodyneWindowContent(
-                installers = graph.entryInstallers,
-                menuActions = DesktopMenuActions(),
-                viewModelFactory = graph.metroViewModelFactory,
-                playbackController = graph.playbackController,
-                playbackState = graph.playbackStateSource,
-                updateChecker = graph.appUpdateChecker,
-                updateNotices = graph.updateNotices,
-                settings = graph.settingsRepository,
-                crashOffer = crashOffer,
-            )
+            key(generation()) {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = graph.playbackController,
+                    playbackState = graph.playbackStateSource,
+                    updateChecker = graph.appUpdateChecker,
+                    updateNotices = graph.updateNotices,
+                    settings = graph.settingsRepository,
+                    crashOffer = crashOffer,
+                    syncController = sync?.let { { it } },
+                    reconnectDismissals = { graph.reconnectDismissals },
+                )
+            }
         }
     }
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+        const val RECONNECT_URL = "https://sync.example.org/personal"
+        const val RECONNECT_MESSAGE = "Reconnect to sync.example.org to keep syncing"
 
         val UPDATE_INFO =
             UpdateInfo(

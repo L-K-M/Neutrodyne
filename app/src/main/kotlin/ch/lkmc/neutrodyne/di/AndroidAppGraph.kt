@@ -64,6 +64,9 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     /** 10's sync application service (Settings › Sync, the shell banners). */
     val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
 
+    /** Process-local reconnect dismissal, independent of database startup. */
+    val reconnectDismissals: ch.lkmc.neutrodyne.feature.settings.ReconnectDismissals
+
     /** 06 Sync interplay: the engine's playback side — the service bridge, never a stub. */
     val playbackSyncPort: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 
