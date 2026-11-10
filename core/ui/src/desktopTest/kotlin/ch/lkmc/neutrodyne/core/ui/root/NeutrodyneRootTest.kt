@@ -857,6 +857,49 @@ class NeutrodyneRootTest {
             onNodeWithText("Turn off").assertExists()
         }
 
+    /**
+     * 08 Banners priority 3: the held-changes banner renders the device's counts on Feeds and
+     * Library only (Discover and the other tabs never show it), and Review pushes
+     * `SyncHeldChangesKey(held.id)` — the held batch this frame rendered — on the selected
+     * tab's stack.
+     */
+    @Test fun heldChangesReviewPushesItsOwnKeyOnFeedsAndLibraryOnly() =
+        runComposeUiTest {
+            var navigation: ch.lkmc.neutrodyne.core.ui.navigation.NavigationState? = null
+            val slots =
+                RootSlots(
+                    player = {
+                        navigation =
+                            LocalAppNavigator.current as ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
+                    },
+                    userMessages = emptyFlow(),
+                )
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(heldChanges = HeldChangesBanner(7, "Pixel 8", 2, 1)),
+                    slots = slots,
+                )
+            }
+            onNodeWithText("Pixel 8 removed 2 podcasts and 1 group. Apply here too?").assertExists()
+            onNodeWithText("Review").assertExists()
+
+            onNodeWithTag("nav_discover").performClick()
+            onNodeWithText("Review").assertDoesNotExist()
+
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText("Review").assertExists()
+            onNodeWithText("Review").performClick()
+            onNodeWithText("held-dialog-7").assertExists()
+            runOnIdle {
+                val stack = checkNotNull(navigation).stack(LibraryKey)
+                kotlin.test.assertEquals(
+                    ch.lkmc.neutrodyne.core.navigation
+                        .SyncHeldChangesKey(7),
+                    stack.last(),
+                )
+            }
+        }
+
     @Test fun firstRunDisclosureStaysOnFeedsAndLibraryAndBadgeIsLabelled() =
         runComposeUiTest {
             setContent {
@@ -1017,6 +1060,11 @@ private val TestInstallers: Set<EntryProviderInstaller> =
         add { entry<SpeedKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("speed-sheet") } }
         add { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("add-podcast-sheet") } }
         add { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { ExportDialogStub(it) } }
+        add {
+            entry<ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey>(metadata = NdSceneMetadata.dialog()) { key ->
+                Text("held-dialog-${key.id}")
+            }
+        }
     }
 
 /** Same root-dispatch registration as the player, without coupling core UI tests to a feature. */

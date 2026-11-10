@@ -468,6 +468,12 @@ private fun ReadyRoot(
                             onFeedsOrLibrary =
                                 navigation.selectedTab == FeedsKey ||
                                     navigation.selectedTab == LibraryKey,
+                            // The reconnect banner is Library-only and hides under a pushed detail
+                            // (08 priority 4); the import slot already uses the same top-of-stack
+                            // rule.
+                            onLibrary =
+                                navigation.selectedTab == LibraryKey &&
+                                    navigation.stack(LibraryKey).lastOrNull() == LibraryKey,
                             importResume = { available ->
                                 val top = navigation.stack(navigation.selectedTab).lastOrNull()
                                 slots.importResume(available && (top == FeedsKey || top == LibraryKey)) { id ->
