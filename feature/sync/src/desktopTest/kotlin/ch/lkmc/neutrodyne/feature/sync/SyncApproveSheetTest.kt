@@ -41,6 +41,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
+import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
@@ -420,6 +421,7 @@ internal class GatedSyncController(
     var deleteServerDataGate: CompletableDeferred<Unit>? = null
     var playbackSettingsGate: CompletableDeferred<Unit>? = null
     var sharePasswordsGate: CompletableDeferred<Unit>? = null
+    var disclosureGate: CompletableDeferred<Unit>? = null
 
     /**
      * Where successful switch writes land, mirroring `SyncControllerImpl`'s persistence through
@@ -443,6 +445,11 @@ internal class GatedSyncController(
     override suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem> {
         devicesGate?.await()
         return fake.devices()
+    }
+
+    override suspend fun disclosure(): SyncDisclosure? {
+        disclosureGate?.await()
+        return fake.disclosure()
     }
 
     override suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> {
