@@ -160,7 +160,7 @@ class SyncPasswordNotices(
     private suspend fun readJournal(): Journal {
         // A store read failure is not an empty journal: doing so would erase the
         // only daily-throttle evidence and permit an unthrottled request.
-        val stored = settings.get(SyncSettingKeys.ACCOUNT_NOTICE_STATE)
+        val stored = settings.getOrThrow(SyncSettingKeys.ACCOUNT_NOTICE_STATE)
         if (stored.isBlank()) return Journal()
         return try {
             SyncJson.decodeFromString<Journal>(stored)

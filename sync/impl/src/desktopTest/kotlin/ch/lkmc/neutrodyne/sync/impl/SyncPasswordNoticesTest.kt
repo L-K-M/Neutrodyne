@@ -272,7 +272,8 @@ class SyncPasswordNoticesTest {
             val backing = FakeSettingsRepository()
             val unavailable =
                 object : SettingsRepository by backing {
-                    override suspend fun <T : Any> get(key: SettingKey<T>): T = throw IOException("journal unavailable")
+                    override suspend fun <T : Any> getOrThrow(key: SettingKey<T>): T =
+                        throw IOException("journal unavailable")
                 }
             val fixture = Fixture(backgroundScope, unavailable)
             try {
