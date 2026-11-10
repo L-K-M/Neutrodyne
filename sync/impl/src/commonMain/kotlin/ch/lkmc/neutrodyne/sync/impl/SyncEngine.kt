@@ -21,7 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** The host of a server URL, for the token origin (`sync:<host>`). */
-fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
+fun hostOf(url: String): String = withoutScheme(url).substringBefore('/')
 
 /**
  * The bare host of a normalised server URL, for the local-network gate's classification: userinfo
@@ -31,9 +31,7 @@ fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("htt
  */
 internal fun bareHostOf(url: String): String? {
     val authority =
-        url
-            .removePrefix("https://")
-            .removePrefix("http://")
+        withoutScheme(url)
             .substringBefore('/')
             .substringAfterLast('@')
     val host =
@@ -56,6 +54,18 @@ internal fun bareHostOf(url: String): String? {
         }
     return host.ifEmpty { null }
 }
+
+/**
+ * Drops a leading `http://`/`https://` in any letter case, so a persisted address typed with an
+ * uppercase scheme still yields the same token origin and gate classification. Any other prefix is
+ * kept: only the two HTTP schemes exist.
+ */
+private fun withoutScheme(url: String): String =
+    when {
+        url.startsWith("https://", ignoreCase = true) -> url.substring("https://".length)
+        url.startsWith("http://", ignoreCase = true) -> url.substring("http://".length)
+        else -> url
+    }
 
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
