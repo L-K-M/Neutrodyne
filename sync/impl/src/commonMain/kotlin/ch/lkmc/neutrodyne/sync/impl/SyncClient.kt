@@ -255,7 +255,8 @@ class KtorSyncClient(
     ): ChangesPage {
         val ctx = authContext()
         val base = ctx.baseUrl.trimEnd('/')
-        return getJson("$base/api/v1/changes?since=${since?.encodeURLParameter() ?: ""}&limit=$limit", ctx.token)
+        val cursorQuery = since?.let { "since=${it.encodeURLParameter()}&" }.orEmpty()
+        return getJson("$base/api/v1/changes?${cursorQuery}limit=$limit", ctx.token)
     }
 
     override suspend fun reset(
