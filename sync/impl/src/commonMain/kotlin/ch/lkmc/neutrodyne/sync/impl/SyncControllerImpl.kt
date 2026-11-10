@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
@@ -268,7 +269,12 @@ class SyncControllerImpl(
                         nodeId = state.nodeId.orEmpty(),
                         lastSyncAtMs = state.lastSyncAt,
                         activity = currentActivity(),
-                        problem = lastRoundProblem.value,
+                        problem =
+                            if (state.lastError == SYNC_ERROR_CLOCK_BLOCKED) {
+                                SyncProblem.ClockSkew
+                            } else {
+                                lastRoundProblem.value
+                            },
                     )
                 }
 
@@ -1006,7 +1012,13 @@ class SyncControllerImpl(
                     }
 
                     is FirstLinkResult.Failed -> {
-                        linkFlow.failed(SyncProblem.MergeFailed)
+                        val problem =
+                            if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED) {
+                                SyncProblem.ClockSkew
+                            } else {
+                                SyncProblem.MergeFailed
+                            }
+                        linkFlow.failed(problem)
                         refreshStatus()
                     }
                 }
@@ -1165,11 +1177,14 @@ class SyncControllerImpl(
     }
 
     private suspend fun clearTransientError() {
-        db.syncStateDao().clearTransientError(SYNC_ERROR_REVOKED)
+        db.syncStateDao().clearTransientErrorsExcept(
+            listOf(SYNC_ERROR_REVOKED, SYNC_ERROR_CLOCK_RETRY, SYNC_ERROR_CLOCK_BLOCKED),
+        )
     }
 
     /** Transport failure → [SyncProblem]; expected failures never throw (10 Errors). */
     private fun classify(failure: Throwable): SyncProblem {
+        if (failure is ProtocolException && failure.code == SyncErrorCode.CLOCK_SKEW) return SyncProblem.ClockSkew
         if (failure is SyncReplayRejectedException) {
             return if (failure.code == SyncErrorCode.CLOCK_SKEW.wire) SyncProblem.ClockSkew else SyncProblem.Server(400)
         }

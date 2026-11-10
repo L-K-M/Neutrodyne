@@ -77,6 +77,10 @@ private fun withoutScheme(url: String): String =
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
 
+/** Durable retry history survives successful pull-only rounds and process restarts. */
+internal val SYNC_ERROR_CLOCK_RETRY = SyncErrorCode.CLOCK_SKEW.wire
+internal const val SYNC_ERROR_CLOCK_BLOCKED = "ClockSkew"
+
 /** A server admission failure retains the replay's accepted clock for later repair. */
 internal class SyncReplayRejectedException(
     val code: String?,
@@ -228,7 +232,12 @@ class SyncEngine(
             val state = checkNotNull(db.syncStateDao().get())
             requireSyncProfile(profile, state)
             db.syncStateDao().setClockOffset(correction.offsetMs)
-            repairSyncClock(db, state, correction.adjustedReceivedAtMs)
+            val repaired = repairSyncClock(db, state, correction.adjustedReceivedAtMs)
+            if (state.lastError == SYNC_ERROR_CLOCK_BLOCKED &&
+                (state.clockOffsetMs != correction.offsetMs || repaired)
+            ) {
+                db.syncStateDao().storeError(null)
+            }
         }
         return correction
     }
@@ -298,9 +307,18 @@ class SyncEngine(
         var rounds = 0
         while (rounds < MAX_ROUNDS) {
             rounds++
-            val rows = capture.prepareForPush(reader.next(), reason == SyncRoundReason.FIRST_LINK)
+            val pushBlocked = db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED
+            val rows =
+                if (pushBlocked) {
+                    emptyList()
+                } else {
+                    capture.prepareForPush(
+                        reader.next(),
+                        reason == SyncRoundReason.FIRST_LINK,
+                    )
+                }
             val changes = builder.build(rows)
-            if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
+            if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons) && !pushBlocked) break
             val state = db.syncStateDao().get()
             verifyRound(snapshot)
             val sentAt = clock.now()
@@ -308,6 +326,8 @@ class SyncEngine(
             val receivedAt = clock.now()
             verifyRound(snapshot)
             pushed += changes.size
+            val rejectedResults = response.results.filter { it.status == ChangeStatus.REJECTED.wire }
+            rejected += rejectedResults.size
             // 10 Passwords: the acknowledgement commits under the credential coordinator —
             // the acknowledged auths' exact sent snapshots stage first (outside the writer),
             // then the outbox deletes and the immutable reference binds land in one Room
@@ -356,6 +376,26 @@ class SyncEngine(
                     throw SyncReplayRejectedException(it.code)
                 }
             }
+            if (rejectedResults.isNotEmpty()) {
+                if (rejectedResults.any { it.code == SyncErrorCode.CLOCK_SKEW.wire }) {
+                    db.withWriteTransaction {
+                        snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+                        val retrying = state?.lastError in setOf(SYNC_ERROR_CLOCK_RETRY, SYNC_ERROR_CLOCK_BLOCKED)
+                        db.syncStateDao().storeError(if (retrying) SYNC_ERROR_CLOCK_BLOCKED else SYNC_ERROR_CLOCK_RETRY)
+                    }
+                }
+                // Drain the pull and settle its guard below, then retry in the next public round.
+                break
+            }
+            db.withWriteTransaction {
+                snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+                if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_RETRY &&
+                    (changes.isNotEmpty() || db.syncOutboxDao().count() == 0)
+                ) {
+                    db.syncStateDao().storeError(null)
+                }
+            }
+            if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED) break
             if (db.syncOutboxDao().count() == 0) break
         }
 

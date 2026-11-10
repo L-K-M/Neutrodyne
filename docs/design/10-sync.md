@@ -1195,6 +1195,20 @@ while the gate has set `LocalNetworkAccess.syncAllowed`.
 | Process death mid-round | — | outbox rows remain until acknowledged; pages re-apply idempotently; staged removals live in `sync_held` |
 | Database full | `SQLITE_FULL` | the page transaction rolls back; retried next round; 02's error handling surfaces storage-full |
 
+**Implementation note (2026-11-10, clock correction).** Each sync and changes
+request samples local time around the RPC. The owning profile stores the offset
+and repairs its unaccepted local clock groups in one writer transaction, seeded
+after the accepted field and match clocks. Accepted state and replay clocks stay
+unchanged. Settings keep their original physical receipt while the pending wire
+clock and matching materialization baseline advance together, including a late
+post-write callback or recovery that started before correction.
+
+The first clock rejection persists until its pending writes are acknowledged;
+an empty successful pull does not clear it. A second rejection pauses pushes
+across restarts while empty sync requests continue pulling and sampling time.
+A successful correction permits pushes again. First-link uploads retain the
+unfinished link on rejection or an undrained upload limit.
+
 ```mermaid
 stateDiagram-v2
   [*] --> NotConfigured

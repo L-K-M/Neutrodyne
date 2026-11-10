@@ -1301,8 +1301,18 @@ class FirstLinkMerger(
         var rounds = 0
         while (db.syncOutboxDao().count() > 0 && rounds < MAX_PUSH_ROUNDS) {
             rounds++
-            engine.round(SyncRoundReason.FIRST_LINK)
+            val report = engine.round(SyncRoundReason.FIRST_LINK)
+            val error = db.syncStateDao().get()?.lastError
+            if (error == SYNC_ERROR_CLOCK_BLOCKED) {
+                throw ProtocolException(SyncErrorCode.CLOCK_SKEW, "The server rejected the corrected device clock")
+            }
+            if (report.rejected > 0 && error != SYNC_ERROR_CLOCK_RETRY) {
+                throw ProtocolException(SyncErrorCode.INVALID, "The server rejected first-link writes")
+            }
             onProgress(LinkPhase.UPLOADING, rounds, total.coerceAtLeast(1))
+        }
+        if (db.syncOutboxDao().count() > 0) {
+            throw ProtocolException(SyncErrorCode.INVALID, "First-link writes did not finish uploading")
         }
     }
 

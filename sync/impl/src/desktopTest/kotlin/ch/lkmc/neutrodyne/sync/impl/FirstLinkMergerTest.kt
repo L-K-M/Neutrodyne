@@ -57,6 +57,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
@@ -689,15 +690,16 @@ class FirstLinkMergerTest {
                 val result = merger.merge(FirstLinkChoice.MERGE)
 
                 assertTrue(result is FirstLinkResult.Completed, "$result")
-                val rows = db.syncOutboxDao().rows()
-                val feedUrl = rows.first { it.coll == "podcast" && it.field == "feedUrl" }
-                assertTrue(feedUrl.hlc ushr 16 <= now)
-                assertTrue(rows.any { it.coll == "group" && it.rid.isNotEmpty() }, "groups upload too, rows=$rows")
-                assertTrue(rows.any { it.coll == "member" }, "members upload too, rows=$rows")
+                val sent = client.pushed
+                val feedUrl = sent.first { it.coll == "podcast" && "feedUrl" in it.fields }.fields.getValue("feedUrl")
+                assertTrue(Hlc.parse(checkNotNull(feedUrl.c)).millis <= now)
+                assertTrue(sent.any { it.coll == "group" }, "groups upload too")
+                assertTrue(sent.any { it.coll == "member" }, "members upload too")
                 assertTrue(
-                    rows.none { it.hlc ushr 16 > now + 1_000 },
-                    "bootstrap writes keep their row timestamps, rows=$rows",
+                    sent.flatMap { it.fields.values }.mapNotNull { it.c }.none { Hlc.parse(it).millis > now + 1_000 },
+                    "bootstrap writes keep their row timestamps",
                 )
+                assertEquals(0, db.syncOutboxDao().count(), "successful uploads acknowledge the queued writes")
             } finally {
                 db.close()
             }
@@ -756,13 +758,14 @@ class FirstLinkMergerTest {
                 assertEquals(JsonPrimitive(false), episode.fields.getValue("played").v)
                 assertEquals(JsonNull, episode.fields.getValue("playedAt").v)
                 // The capture pass skips the server-won fields (their origin node differs).
-                val rows = db.syncOutboxDao().rows()
+                val sent = client.pushed
                 assertTrue(
-                    rows.none { it.coll == "episode" && (it.field == "played" || it.field == "pos") },
-                    "server-won fields not echoed, rows=$rows",
+                    sent.none { it.coll == "episode" && ("played" in it.fields || "pos" in it.fields) },
+                    "server-won fields are not echoed",
                 )
-                // The local podcast's identity fields carried local stamps: captured.
-                assertTrue(rows.any { it.coll == "podcast" && it.field == "title" }, "rows=$rows")
+                // Inspect the frozen wire payload after its real acknowledgement drained the outbox.
+                assertTrue(sent.any { it.coll == "podcast" && "title" in it.fields })
+                assertEquals(0, db.syncOutboxDao().count())
             } finally {
                 db.close()
             }
@@ -954,6 +957,35 @@ class FirstLinkMergerTest {
                 val parked = db.syncParkedDao().forPodcast(podcastSyncId)
                 assertEquals(listOf("g:one"), parked.map { it.identityKey })
                 assertEquals("one", parked.single().guid, "the match hints ride along")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun rejectedFirstLinkWritesCannotCompleteTheLink() =
+        runTest {
+            val db = TestDb.inMemory()
+            var pushes = 0
+            try {
+                link(db)
+                db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId))
+                val client =
+                    ScriptedClient(emptyList(), syncHandler = { _, changes ->
+                        pushes++
+                        SyncResponse(
+                            changes.mapIndexed { index, _ -> ChangeResultDto(index, "rejected", code = "invalid") },
+                            emptyList(),
+                            "c:00000001:1",
+                            false,
+                            "",
+                        )
+                    })
+                val result = mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Failed, "rejected uploads cannot complete linking")
+                assertEquals(1, pushes, "a non-clock rejection cannot be repaired by resending unchanged data")
+                assertNull(db.syncStateDao().get()?.linkedAt)
+                assertTrue(db.syncOutboxDao().count() > 0, "rejected intents remain recoverable")
             } finally {
                 db.close()
             }
@@ -1699,12 +1731,14 @@ class FirstLinkMergerTest {
             try {
                 link(db, enabled = true)
                 val gate = CompletableDeferred<Unit>()
+                val entered = CompletableDeferred<Unit>()
                 val client =
                     object : SyncClient by ScriptedClient(emptyList()) {
                         override suspend fun changes(
                             since: String?,
                             limit: Int,
                         ): ChangesPage {
+                            entered.complete(Unit)
                             gate.await()
                             return ChangesPage(emptyList(), "c:00000001:1", false, "")
                         }
@@ -1725,11 +1759,17 @@ class FirstLinkMergerTest {
                         secrets = FakeSecretStore(),
                         coordinator = FakeCredentialCommitCoordinator(),
                     )
-                val job = launch { merger.resync() }
-                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
-                assertTrue(activity.active, "the resync must mark sync active while it runs")
-                gate.complete(Unit)
-                job.join()
+                val job = async { merger.resync() }
+                try {
+                    select<Unit> {
+                        entered.onAwait { }
+                        job.onAwait { error("Resync returned before entering its pull: $it") }
+                    }
+                    assertTrue(activity.active, "the resync must mark sync active while its pull waits")
+                } finally {
+                    gate.complete(Unit)
+                }
+                assertTrue(job.await() is FirstLinkResult.Completed)
                 assertEquals(0, activity.count.value, "a completed resync clears the activity flag")
                 assertFalse(activity.active)
             } finally {
@@ -3066,6 +3106,7 @@ private class CountingClient(
     private val records: List<RecordDto>,
     private val hasMore: Boolean = false,
 ) : SyncClient {
+    val pushed = mutableListOf<ChangeDto>()
     var changesCalls = 0
         private set
 
@@ -3123,14 +3164,16 @@ private class CountingClient(
     override suspend fun sync(
         since: String?,
         changes: List<ChangeDto>,
-    ): SyncResponse =
-        SyncResponse(
-            results = emptyList(),
+    ): SyncResponse {
+        pushed += changes
+        return SyncResponse(
+            results = changes.mapIndexed { index, _ -> ChangeResultDto(index, "applied") },
             records = emptyList(),
             cursor = "c:00000001:1",
             hasMore = false,
             serverTime = "",
         )
+    }
 
     override suspend fun changes(
         since: String?,

@@ -14,16 +14,17 @@ internal suspend fun repairSyncClock(
     db: NeutrodyneDatabase,
     state: SyncStateEntity,
     adjustedNowMs: Long,
-) {
-    val node = state.nodeId ?: return
+): Boolean {
+    val node = state.nodeId ?: return false
     val min = ProtocolLimits.MIN_CLOCK_MS shl Hlc.COUNTER_BITS
     val latestMs = (adjustedNowMs + CLOCK_ADMISSION_MS).coerceAtMost(Hlc.MAX_MILLIS)
     val max = (latestMs shl Hlc.COUNTER_BITS) or Hlc.COUNTER_MASK
     var old = db.syncOutboxDao().nextLocalClockOutside(min, max, node, -1)
-    if (state.hlc in min..max && old == null) return
+    if (state.hlc in min..max && old == null) return false
     val seed = maxOf(maxOf(adjustedNowMs, ProtocolLimits.MIN_CLOCK_MS) shl Hlc.COUNTER_BITS, greatestAcceptedClock(db))
     // A server-accepted future clock cannot be rewritten as an unaccepted local edit.
-    if (seed > max) return
+    if (seed > max) return false
+    val hadInvalidIntents = old != null
     if (state.hlc !in min..max) db.syncStateDao().clampHlc(seed)
     db.syncStateDao().raiseHlc(seed)
     while (old != null) {
@@ -35,6 +36,7 @@ internal suspend fun repairSyncClock(
         db.syncOutboxDao().restampLocalClock(old, next, node)
         old = db.syncOutboxDao().nextLocalClockOutside(min, max, node, old)
     }
+    return hadInvalidIntents || db.syncStateDao().get()?.hlc != state.hlc
 }
 
 /** Remap only a matching unaccepted intent; accepted fields and remote effects stay intact. */

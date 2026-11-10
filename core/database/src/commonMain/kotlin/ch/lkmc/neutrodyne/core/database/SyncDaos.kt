@@ -44,6 +44,13 @@ abstract class SyncStateDao(
     @Query("UPDATE sync_state SET lastError = NULL WHERE id = 0 AND lastError <> :keep")
     abstract suspend fun clearTransientError(keep: String)
 
+    /** Successful pulls preserve errors that explicitly pause writes. */
+    @Query("UPDATE sync_state SET lastError = NULL WHERE id = 0 AND lastError NOT IN (:keep)")
+    abstract suspend fun clearTransientErrorsExcept(keep: List<String>)
+
+    @Query("UPDATE sync_state SET lastError = :error WHERE id = 0")
+    abstract suspend fun storeError(error: String?)
+
     @Query("UPDATE sync_state SET cursor = :cursor WHERE id = 0")
     abstract suspend fun storeCursor(cursor: String)
 
