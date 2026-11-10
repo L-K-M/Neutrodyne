@@ -1059,7 +1059,7 @@ R7.4's background sync is "requested every 60 min" (amended 2026-10-05, [PO-47](
 | `PowerMonitor` `Suspending` / `Resumed` (the `:core:common` port) | close SSE / reconnect and run a round |
 | Live updates | SSE whenever the app runs and the server offers `sse` |
 
-On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the outbox is not empty ([11 Desktop shell](11-desktop.md#desktop-shell)); whatever is left stays in the outbox for the next start. Nothing runs while the app is quit. Only the instance holding the single-instance lock syncs (risk T26). When the window is hidden, a held batch of the [Mass-change guard](#mass-change-guard) also posts a desktop notification (`NotificationKind.SYNC_HELD`, [11 OS integration](11-desktop.md#os-integration)); on Android it posts one notification on the channel 08 assigns.
+On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the outbox is not empty ([11 Desktop shell](11-desktop.md#desktop-shell)); whatever is left stays in the outbox for the next start. Nothing runs while the app is quit. Only the instance holding the single-instance lock syncs (risk T26). When the window is hidden, a held batch of the [Mass-change guard](#mass-change-guard) also posts a desktop notification (`NotificationKind.SYNC_HELD`, [11 OS integration](11-desktop.md#os-integration)); on Android the app-scoped `SyncHeldNotifier` (band 230, after the open gate) posts one notification on the `sync_held` channel 08 assigns while the link lives and cancels it when the batch resolves or the link ends.
 
 **Implementation note (2026-11-04, MS2, scheduling).** The shared
 `SyncScheduler` (`commonMain`) owns the outbox debounce, the playback
