@@ -89,6 +89,16 @@ private const val RESET_MODE_PURGE = "purge"
 internal const val SYNC_ERROR_REVOKED = "Revoked"
 
 /**
+ * The one "actually linked" predicate (05 Restore while linked, 08 Restore-while-linked
+ * prompts): the status's `Linked` branch, the controller's own linked context and the restore
+ * coordinator's eligibility read share it, so a stale `linkedAt` (copied database, revoked
+ * token, disabled switch or missing token) can never be mistaken for a live link. The caller
+ * supplies the token presence and the configured server URL.
+ */
+internal fun SyncStateEntity?.isActuallyLinked(hasToken: Boolean): Boolean =
+    this != null && enabled && linkedAt != null && lastError != SYNC_ERROR_REVOKED && hasToken
+
+/**
  * The [SyncController] application service (10 Client sync engine, 08 Sync screens). The status is
  * derived from `sync_state` and the secret store; the engine runs the rounds; the link flow is the
  * state machine the setup screen follows, driven here with the real client calls.
@@ -213,7 +223,7 @@ class SyncControllerImpl(
                     SyncStatus.Revoked(url)
                 }
 
-                state.enabled && state.linkedAt != null && token != null -> {
+                state.isActuallyLinked(token != null) -> {
                     SyncStatus.Linked(
                         serverUrl = url,
                         accountId = state.accountId.orEmpty(),
@@ -896,7 +906,7 @@ class SyncControllerImpl(
         val url = address.serverUrl() ?: return null
         val state = db.syncStateDao().get()
         val token = tokenStore.load(hostOf(url))
-        return if (state?.enabled == true && state.linkedAt != null && token != null) url to token else null
+        return if (token != null && state.isActuallyLinked(hasToken = true)) url to token else null
     }
 
     /** Maps a transport failure and remembers a revocation. */

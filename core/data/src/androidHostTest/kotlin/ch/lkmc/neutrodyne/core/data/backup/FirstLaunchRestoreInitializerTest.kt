@@ -312,7 +312,15 @@ class FirstLaunchRestoreInitializerTest {
         return BackupRepositoryImpl(
             db = db,
             writer = writer(db),
-            stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO),
+            stager =
+                BackupStager(
+                    db,
+                    ZipGuard(),
+                    merger,
+                    fileSystem,
+                    Dispatchers.IO,
+                    ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+                ),
             runner = restoreRunner(db, merger, payloads, scheduler),
             sessions =
                 ImportSessions(
@@ -335,6 +343,7 @@ class FirstLaunchRestoreInitializerTest {
             storagePaths = storagePaths,
             fileSystem = fileSystem,
             io = Dispatchers.IO,
+            linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
         )
     }
 
@@ -404,7 +413,15 @@ class FirstLaunchRestoreInitializerTest {
         scheduler: FakeImportWorkScheduler,
     ) = RestoreRunner(
         db = db,
-        stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO),
+        stager =
+            BackupStager(
+                db,
+                ZipGuard(),
+                merger,
+                fileSystem,
+                Dispatchers.IO,
+                ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+            ),
         merger = merger,
         episodes =
             RestoreEpisodeMerger(

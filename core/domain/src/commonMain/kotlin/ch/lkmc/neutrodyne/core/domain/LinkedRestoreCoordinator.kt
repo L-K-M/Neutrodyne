@@ -13,6 +13,17 @@ import ch.lkmc.neutrodyne.core.common.Outcome
  */
 interface LinkedRestoreCoordinator {
     /**
+     * The server host this device is actually linked to (05 Restore while linked, 08
+     * Restore-while-linked prompts): non-null only when the sync state is enabled,
+     * `linkedAt` is set, a token is present, the link is not revoked and a server URL is
+     * configured. Null means "not linked" — a stale `linkedAt` (copied database, revoked
+     * token, disabled switch or missing token) must never offer the linked Replace question
+     * or unlink. A failed settings/secret read returns a failure, so restore never guesses that a
+     * live link is absent.
+     */
+    suspend fun actualLinkedHost(): Outcome<String?, BackupError>
+
+    /**
      * Replace with reach THIS_DEVICE: 10's unlink runs first — one best-effort push round,
      * logout, token deleted, sync tables cleared, `sync.server_url` kept (05). The local
      * Replace then runs on an unlinked device and pushes nothing.
@@ -46,6 +57,8 @@ data class AllDevicesReachEffect(
 
 /** The fail-closed default: linked restores cannot run without the sync layer. */
 object NoLinkedRestoreCoordinator : LinkedRestoreCoordinator {
+    override suspend fun actualLinkedHost(): Outcome<String?, BackupError> = Outcome.Success(null)
+
     override suspend fun unlinkForRestore(): Outcome<Unit, BackupError> = Outcome.Failure(BackupError.Unsupported)
 
     override suspend fun completeAllDevicesRestore(): Outcome<Unit, BackupError> =
