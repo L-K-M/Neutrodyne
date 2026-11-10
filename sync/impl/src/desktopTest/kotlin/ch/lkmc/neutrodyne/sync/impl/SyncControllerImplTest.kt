@@ -138,6 +138,102 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun plainHttpWithAnUppercaseSchemeToAPublicAddressIsRefusedBeforeAnyRequest() =
+        runTest {
+            for (scheme in listOf("HTTP://", "HtTp://")) {
+                val h = harness(this)
+                try {
+                    h.controller.startLink("${scheme}sync.example")
+                    await(h) { h.linkFlow.state.value is LinkState.Failed || h.client.calls.isNotEmpty() }
+                    val state = h.linkFlow.state.value
+                    assertTrue(
+                        state is LinkState.Failed,
+                        "$scheme reached ${state::class.simpleName} instead of the refusal",
+                    )
+                    assertEquals(SyncProblem.InsecureTransport, state.error)
+                    assertTrue(h.client.calls.isEmpty(), "$scheme made a request before the refusal")
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
+    fun plainHttpWithAnUppercaseSchemeToLocalAsksForConfirmationFirst() =
+        runTest {
+            for (scheme in listOf("HTTP://", "HtTp://")) {
+                val h = harness(this)
+                try {
+                    h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                    h.controller.discover("${scheme}192.168.1.50")
+                    await(h) {
+                        h.linkFlow.state.value is LinkState.InsecureConnection ||
+                            h.linkFlow.state.value is LinkState.Failed ||
+                            h.client.calls.isNotEmpty()
+                    }
+                    val state = h.linkFlow.state.value
+                    assertTrue(
+                        state is LinkState.InsecureConnection,
+                        "$scheme reached ${state::class.simpleName} instead of the confirmation",
+                    )
+                    assertTrue(h.client.calls.isEmpty(), "$scheme made a request before the confirmation")
+                    h.controller.confirmInsecure()
+                    await(h) {
+                        h.linkFlow.state.value is LinkState.AwaitingInput ||
+                            h.linkFlow.state.value is LinkState.Failed
+                    }
+                    val awaiting = h.linkFlow.state.value as LinkState.AwaitingInput
+                    assertEquals("http://192.168.1.50", awaiting.server.serverUrl)
+                    assertEquals(listOf("discover"), h.client.calls)
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
+    fun anUppercasePersistedUrlReconnectsInsteadOfMigratingALegacyTokenOrigin() =
+        runTest {
+            for (scheme in listOf("HTTP://", "HtTp://")) {
+                val h = harness(this)
+                try {
+                    h.address.updateServerUrl("${scheme}sync.example")
+                    h.address.updateUsername("alice")
+                    h.db.withWriteTransaction {
+                        h.db.syncStateDao().upsert(
+                            SyncStateEntity(
+                                enabled = true,
+                                serverUrl = "${scheme}sync.example",
+                                accountId = ACCOUNT_ID,
+                                deviceId = DEVICE_ID,
+                                nodeId = "0000000000000001",
+                                linkedAt = now,
+                                lastSyncAt = now,
+                            ),
+                        )
+                    }
+                    // The pre-fix link stored the token under the mangled origin the old hostOf
+                    // produced for an uppercase URL (`HTTP:`), not the bare host.
+                    val legacyOrigin =
+                        "${scheme}sync.example"
+                            .removePrefix("https://")
+                            .removePrefix("http://")
+                            .substringBefore('/')
+                    h.tokens.save(legacyOrigin, "nds_test")
+                    h.controller.refreshStatus()
+                    // No credential migration: the origin is now the bare host, so the legacy
+                    // token is invisible and the app asks for a reconnect rather than reusing it.
+                    assertTrue(
+                        h.controller.status.value is SyncStatus.Reconnect,
+                        "$scheme kept a legacy token origin instead of reconnecting",
+                    )
+                } finally {
+                    h.close()
+                }
+            }
+        }
+
+    @Test
     fun aLocalServerAsksForPermissionBeforeTheDiscoveryRequest() =
         runTest {
             val h = harness(this)

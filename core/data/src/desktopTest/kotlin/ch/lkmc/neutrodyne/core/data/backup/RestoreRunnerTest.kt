@@ -188,7 +188,7 @@ class RestoreRunnerTest {
                 current[key.name] = encode(key, key.default)!!
             }
         }
-    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
+    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO, linkedSync)
     private val runner = newRunner(settingsSync)
 
     /** A runner over [settingsSyncPort], for tests that drive a specific port. */
@@ -397,7 +397,8 @@ class RestoreRunnerTest {
 
     // --- Restore while linked (05, MS2 acceptance 6) ------------------------------------------------
 
-    /** A linked fixture: capture enabled, a node, a clock, `linkedAt` set. */
+    /** A linked fixture: capture enabled, a node, a clock, `linkedAt` set, and an active
+     *  coordinator answer (a stale row alone is not a link). */
     private suspend fun link() {
         db.syncStateDao().upsert(
             SyncStateEntity(
@@ -408,6 +409,21 @@ class RestoreRunnerTest {
                 linkedAt = 1L,
             ),
         )
+        linkedSync.delegate.linkedHost = "sync.example.com"
+    }
+
+    /** The stale `linkedAt` row without the active coordinator answer (copied database). */
+    private suspend fun linkRowOnly() {
+        db.syncStateDao().upsert(
+            SyncStateEntity(
+                serverUrl = "https://sync.example.com",
+                enabled = true,
+                nodeId = "0000000000000001",
+                hlc = 1L shl 16,
+                linkedAt = 1L,
+            ),
+        )
+        linkedSync.delegate.linkedHost = null
     }
 
     /**
@@ -807,6 +823,69 @@ class RestoreRunnerTest {
         }
 
     /**
+     * A stale `linkedAt` row (copied database) with a not-linked coordinator answer: a
+     * THIS_DEVICE Replace must run plain — no unlink, no logout, no sync-table clear, and the
+     * remembered profile stays.
+     */
+    @Test
+    fun aClaimedRestoreDoesNotRepeatThePreviewEligibilityRead() =
+        runTest {
+            link()
+            linkedSync.afterLinkRead = { linkedSync.delegate.linkReadError = BackupError.Io }
+            val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE)
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+            assertEquals(ImportState.COMMITTED, db.importDao().sessionById(sessionId)?.state)
+            assertEquals(1, linkedSync.delegate.unlinks.size)
+        }
+
+    @Test
+    fun aClaimedAllDevicesRestoreKeepsItsResolvedUnlinkedAnswer() =
+        runTest {
+            link()
+            val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE, reach = LinkedRestoreReach.ALL_DEVICES)
+            db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(linkedAt = null))
+            linkedSync.delegate.linkedHost = null
+            linkedSync.afterLinkRead = { linkedSync.delegate.linkReadError = BackupError.Io }
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+            assertEquals(ImportState.COMMITTED, db.importDao().sessionById(sessionId)?.state)
+            assertEquals(1, linkedSync.delegate.completions.size)
+            assertTrue(linkedSync.delegate.unlinks.isEmpty())
+        }
+
+    @Test
+    fun anUnreadableLinkRetriesBeforeRestoreWritesOrUnlink() =
+        runTest {
+            link()
+            linkedSync.delegate.linkReadError = BackupError.Io
+            val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE)
+
+            assertEquals(RestoreRunResult.Retry(sessionId, BackupError.Io), runner.run(sessionId))
+            assertTrue(linkedSync.delegate.unlinks.isEmpty())
+            assertEquals(1L, db.syncStateDao().get()?.linkedAt)
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+        }
+
+    @Test
+    fun aStaleLinkedAtRowRunsAPlainReplaceWithoutUnlinking() =
+        runTest {
+            linkRowOnly()
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = 111L, updatedAt = 112L))
+            val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE)
+
+            val result = runner.run(sessionId)
+
+            assertIs<RestoreRunResult.Completed>(result)
+            assertTrue(linkedSync.delegate.unlinks.isEmpty(), "a stale link must not unlink")
+            assertEquals(1L, db.syncStateDao().get()?.linkedAt, "the remembered profile stays")
+            assertEquals("https://sync.example.com", db.syncStateDao().get()?.serverUrl)
+            assertEquals("0000000000000001", db.syncStateDao().get()?.nodeId)
+        }
+
+    /**
      * Replace ALL_DEVICES: the claim cleared `linkedAt`, the Replace runs suppressed, and
      * the finish runs 10's upload/prune steps before the session commits; a failure there
      * leaves the durable request for a replay.
@@ -821,8 +900,11 @@ class RestoreRunnerTest {
             )
             val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE, reach = LinkedRestoreReach.ALL_DEVICES)
             // The claim's durable marker (BackupRepositoryImpl clears it): the device is
-            // LinkUnfinished while the restore runs.
+            // LinkUnfinished while the restore runs. The coordinator now reports not linked,
+            // but the stored ALL_DEVICES reach keeps the claim-cleared restore on the linked
+            // path — a false eligibility answer must not cancel a valid completion.
             db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(linkedAt = null))
+            linkedSync.delegate.linkedHost = null
             assertNull(db.syncStateDao().get()?.linkedAt)
 
             val result = runner.run(sessionId)
@@ -836,6 +918,7 @@ class RestoreRunnerTest {
             val sp2 = seedSourcePodcast(FEED_B)
             val sessionId2 = session(writeArchive(), mode = RestoreMode.REPLACE, reach = LinkedRestoreReach.ALL_DEVICES)
             db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(linkedAt = null))
+            linkedSync.delegate.linkedHost = null
             assertIs<RestoreRunResult.Retry>(runner.run(sessionId2))
             assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId2)?.state)
         }
@@ -1466,6 +1549,14 @@ private class TestLinkedRestoreCoordinator(
     val delegate =
         ch.lkmc.neutrodyne.core.testing
             .FakeLinkedRestoreCoordinator()
+
+    var afterLinkRead: () -> Unit = {}
+
+    override suspend fun actualLinkedHost(): Outcome<String?, BackupError> {
+        val answer = delegate.actualLinkedHost()
+        afterLinkRead()
+        return answer
+    }
 
     override suspend fun unlinkForRestore(): ch.lkmc.neutrodyne.core.common.Outcome<Unit, BackupError> {
         db.syncStateDao().unlink()
