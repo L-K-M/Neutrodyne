@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
@@ -132,6 +133,7 @@ class SyncControllerImpl(
     private val credentials: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
+    private val identity: SyncIdentityLock = SyncIdentityLock(),
 ) : SyncController {
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.NotConfigured)
     override val status: StateFlow<SyncStatus> = _status.asStateFlow()
@@ -188,7 +190,7 @@ class SyncControllerImpl(
     private val statusMutex = Mutex()
 
     // Authorization and an admitted disconnect must not replace each other's account or token.
-    private val identityMutex = Mutex()
+    private val identityMutex = identity
 
     private data class DisconnectIdentity(
         val serverUrl: String?,
@@ -809,9 +811,8 @@ class SyncControllerImpl(
             // The identity is the session the submit belongs to: a superseded or cancelled job must
             // never write it into a newer session's state.
             coroutineContext.ensureActive()
-            tokenStore.save(hostOf(server.serverUrl), token.token)
-            address.setServerUrl(server.serverUrl)
-            token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
+            // Disable capture durably before replacing credentials: a partial secret/address
+            // write must never leave the previous account active with the replacement token.
             db.withWriteTransaction {
                 val existing = db.syncStateDao().get()
                 // A different server or account is a different profile: the old profile's
@@ -840,6 +841,9 @@ class SyncControllerImpl(
                     ),
                 )
             }
+            tokenStore.save(hostOf(server.serverUrl), token.token)
+            address.setServerUrl(server.serverUrl)
+            token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
             lastRoundProblem.value = null
             accountName = token.username
             refreshStatus()
@@ -1024,6 +1028,9 @@ class SyncControllerImpl(
 
     /** Transport failure → [SyncProblem]; expected failures never throw (10 Errors). */
     private fun classify(failure: Throwable): SyncProblem {
+        if (failure is SyncReplayRejectedException) {
+            return if (failure.code == SyncErrorCode.CLOCK_SKEW.wire) SyncProblem.ClockSkew else SyncProblem.Server(400)
+        }
         if (failure is SyncTransportException) {
             return when (failure.status) {
                 401 -> SyncProblem.Revoked

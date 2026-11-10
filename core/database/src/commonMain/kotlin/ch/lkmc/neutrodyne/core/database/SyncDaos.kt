@@ -436,6 +436,16 @@ abstract class SyncClockDao(
     @Query("SELECT * FROM sync_clock")
     abstract suspend fun all(): List<SyncClockEntity>
 
+    @Query(
+        "SELECT coll, rid FROM sync_clock WHERE coll > :coll OR (coll = :coll AND rid > :rid)" +
+            " ORDER BY coll, rid LIMIT :limit",
+    )
+    abstract suspend fun keysAfter(
+        coll: String,
+        rid: String,
+        limit: Int,
+    ): List<SyncClockKey>
+
     @Query("SELECT COUNT(*) FROM sync_clock")
     abstract suspend fun count(): Int
 

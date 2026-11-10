@@ -14,9 +14,11 @@ import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.protocol.ChangeStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -71,6 +73,11 @@ private fun withoutScheme(url: String): String =
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
 
+/** A server admission failure retains the replay's accepted clock for later repair. */
+internal class SyncReplayRejectedException(
+    val code: String?,
+) : Exception("The server rejected a full sync replay")
+
 /**
  * 10 Sync round: push the outbox, apply the returned page, drain `hasMore`, then evaluate the
  * mass-change guard. The engine owns no scheduling; `SyncScheduler` (Android) and
@@ -98,6 +105,9 @@ class SyncEngine(
      * outgoing changes carry auth. Bound by `SyncBindings`; bare test engines may omit it.
      */
     private val refreshPreferences: suspend () -> Unit = {},
+    /** Lazy first-link merger edge; recovery stays inside the round mutex. */
+    private val recoverExpiredCursor: (suspend (SyncStateEntity, SyncClient) -> SyncReport)? = null,
+    private val identity: SyncIdentityLock = SyncIdentityLock(),
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -112,28 +122,90 @@ class SyncEngine(
     suspend fun round(reason: SyncRoundReason): SyncReport {
         activity.begin()
         try {
-            return roundMutex.withLock { roundLocked(reason) }
+            // Snapshot before the round mutex: an identity writer may itself need a first-link
+            // round, so holding the round mutex while waiting for that writer would deadlock.
+            val snapshot = captureRound()
+            return roundMutex.withLock {
+                try {
+                    roundLocked(reason, snapshot)
+                } catch (failure: SyncTransportException) {
+                    val recover = recoverExpiredCursor
+                    val profile = snapshot.state
+                    if (failure.status != STATUS_CURSOR_EXPIRED || failure.code != SyncErrorCode.CURSOR_EXPIRED.wire ||
+                        recover == null || profile?.enabled != true || profile.linkedAt == null ||
+                        profile.lastError == SYNC_ERROR_REVOKED
+                    ) {
+                        throw failure
+                    }
+                    requireSyncProfile(profile, db.syncStateDao().get())
+                    check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
+                    val pull = markingRevocation(profile) { recover(profile, checkNotNull(snapshot.client)) }
+                    requireSyncProfile(profile, db.syncStateDao().get())
+                    check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
+                    // The mutex is already held: a nested public round would deadlock. The
+                    // resumed round pushes the durable replays using the newly adopted cursor.
+                    val push = roundLocked(reason, snapshot, RoundPurpose.RECOVERY_PUSH)
+                    requireSyncProfile(profile, db.syncStateDao().get())
+                    notices.post(
+                        ch.lkmc.neutrodyne.sync.api.SyncNotice
+                            .Resynced(push.pushed),
+                    )
+                    push.copy(
+                        applied = pull.applied + push.applied,
+                        stale = pull.stale + push.stale,
+                        pulled = pull.pulled + push.pulled,
+                        held = pull.held + push.held,
+                        durationMs = pull.durationMs + push.durationMs,
+                    )
+                }
+            }
         } finally {
             activity.end()
         }
     }
 
-    private suspend fun roundLocked(reason: SyncRoundReason): SyncReport {
-        // The gate owns the SYNC bypass: apply its live verdict before the round's first request,
-        // so a permission granted before the process started works after a restart and a
-        // revocation blocks the round (10 Local-network gate 3-4). No prompt is shown here.
+    private enum class RoundPurpose { NORMAL, RECOVERY_PUSH }
+
+    private class RoundSnapshot(
+        val serverUrl: String?,
+        val state: SyncStateEntity?,
+        val client: SyncClient?,
+    )
+
+    private suspend fun captureRound(): RoundSnapshot =
+        identity.withLock {
+            val serverUrl = address.serverUrl() ?: return@withLock RoundSnapshot(null, null, null)
+            val token = tokens.load(hostOf(serverUrl)) ?: return@withLock RoundSnapshot(null, null, null)
+            val state = db.syncStateDao().get()
+            if (state?.serverUrl != null) {
+                check(state.serverUrl == serverUrl) { "Saved server does not match the linked profile" }
+            }
+            RoundSnapshot(serverUrl, state, client.withCredentials(serverUrl, token) ?: client)
+        }
+
+    private suspend fun verifyRound(snapshot: RoundSnapshot) {
+        val profile = snapshot.state ?: return
+        requireSyncProfile(profile, db.syncStateDao().get())
+        if (profile.serverUrl !=
+            null
+        ) {
+            check(address.serverUrl() == snapshot.serverUrl) { "Sync profile changed during round" }
+        }
+    }
+
+    private suspend fun roundLocked(
+        reason: SyncRoundReason,
+        snapshot: RoundSnapshot,
+        purpose: RoundPurpose = RoundPurpose.NORMAL,
+    ): SyncReport {
         gate.onPermissionResult(gate.hasPermission())
         val started = clock.now()
-        val serverUrl = address.serverUrl()
-        val token = serverUrl?.let { tokens.load(hostOf(it)) }
-        if (serverUrl == null || token == null) {
+        val transport = snapshot.client ?: return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
+        if (snapshot.state?.lastError == SYNC_ERROR_REVOKED) return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
+        if (snapshot.state?.enabled == false && reason != SyncRoundReason.FIRST_LINK) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
-        // A revoked link stays dormant until a re-link clears the marker: no periodic round and
-        // no "Sync now" reaches the server again (10 Errors: 401 → Revoked stops rounds).
-        if (db.syncStateDao().get()?.lastError == SYNC_ERROR_REVOKED) {
-            return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
-        }
+        verifyRound(snapshot)
         // The volatile share gate is only as fresh as its last hydration — a restart's cache
         // would withhold auth until a retoggle, so every round re-reads the persisted switches
         // before the first effect or push consults them (10 Settings capture).
@@ -166,15 +238,17 @@ class SyncEngine(
             val changes = builder.build(rows)
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
-            val response = markingRevocation { client.sync(state?.cursor, changes) }
+            verifyRound(snapshot)
+            val response = markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
+            verifyRound(snapshot)
             pushed += changes.size
             // 10 Passwords: the acknowledgement commits under the credential coordinator —
             // the acknowledged auths' exact sent snapshots stage first (outside the writer),
             // then the outbox deletes and the immutable reference binds land in one Room
             // transaction, so a replayed push reasserts accepted bytes, not live ones.
-            effects.acknowledge(changes, response.results)
+            effects.acknowledge(changes, response.results, snapshot.state)
             applied += response.records.size
-            val page = applier.applyPage(response.records, roundId)
+            val page = applier.applyPage(response.records, roundId, expectedProfile = snapshot.state)
             // 10 Pull and apply step 5: the committed page's settings effects drain right after
             // the commit, under the same per-key lock a local set takes — and the page's durable
             // credential effects under the credential-commit coordinator.
@@ -185,35 +259,59 @@ class SyncEngine(
             // Staged removals count as held only after the verdict below.
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
-            raiseHlc(response.records)
-            storeCursor(response.cursor)
+            commitProgress(response.records, response.cursor, snapshot.state)
             var cursor = response.cursor
             var hasMore = response.hasMore
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
-                val next = markingRevocation { client.changes(cursor, ProtocolLimits.MAX_RECORDS) }
+                val next = markingRevocation(snapshot.state) { transport.changes(cursor, ProtocolLimits.MAX_RECORDS) }
+                verifyRound(snapshot)
                 applied += next.records.size
                 pulled += next.records.size
-                val later = applier.applyPage(next.records, roundId)
+                val later = applier.applyPage(next.records, roundId, expectedProfile = snapshot.state)
                 sessionApplied = sessionApplied || later.sessionApplied
                 feedsNeedingCredentials += later.feedsNeedingCredentials
                 // Each later page's effects drain with its own commit, not only at the round's end.
                 effects.drainSettings()
                 effects.drainPasswords()
-                raiseHlc(next.records)
-                storeCursor(next.cursor)
+                commitProgress(next.records, next.cursor, snapshot.state)
                 cursor = next.cursor
                 hasMore = next.hasMore
+            }
+            if (purpose == RoundPurpose.RECOVERY_PUSH) {
+                // A rejected original replay must neither loop unchanged nor announce
+                // success. Accepted entries above are ACKed; the rejection keeps its clock.
+                response.results.firstOrNull { it.status == ChangeStatus.REJECTED.wire }?.let {
+                    throw SyncReplayRejectedException(it.code)
+                }
             }
             if (db.syncOutboxDao().count() == 0) break
         }
 
+        held += completePull(roundId, localPodcastsAtStart, sessionApplied, feedsNeedingCredentials, snapshot.state)
+        db.withWriteTransaction {
+            snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+            db.syncStateDao().recordSyncAt(clock.now())
+        }
+        return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+    }
+
+    /** Settle full-pull removals through the same guard as an incremental round. */
+    internal suspend fun completePull(
+        roundId: Long,
+        localPodcastsAtStart: Int,
+        sessionApplied: Boolean,
+        feedsNeedingCredentials: Set<Long>,
+        expectedProfile: SyncStateEntity? = null,
+    ): Int {
+        var held = 0
         // 10 Mass-change guard 2: the staged removals settle in one writer. Below the
         // thresholds the batch applies here; above it became the held prompt row. The
         // provisional row is retained until that outcome commits with it, and `applying = 1`
         // keeps the cascaded deletes from echoing back through the outbox.
         db.withWriteTransaction {
+            if (expectedProfile != null) requireSyncProfile(expectedProfile, db.syncStateDao().get())
             db.syncStateDao().withApplying {
                 for (verdict in MassChangeGuard.evaluate(db, roundId, localPodcastsAtStart)) {
                     when (verdict) {
@@ -254,8 +352,19 @@ class SyncEngine(
                     .FeedPasswordNeeded(feedsNeedingCredentials.toList()),
             )
         }
-        db.syncStateDao().recordSyncAt(clock.now())
-        return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+        return held
+    }
+
+    private suspend fun commitProgress(
+        records: List<RecordDto>,
+        cursor: String,
+        profile: SyncStateEntity?,
+    ) {
+        db.withWriteTransaction {
+            if (profile != null) requireSyncProfile(profile, db.syncStateDao().get())
+            raiseHlc(records)
+            storeCursor(cursor)
+        }
     }
 
     private suspend fun raiseHlc(records: List<RecordDto>) {
@@ -278,11 +387,19 @@ class SyncEngine(
      * 10 Errors: a rejected token revokes the link on every caller — worker and lane rounds too,
      * not just the controller's "Sync now" — so the marker is written next to the outbox.
      */
-    private suspend fun <T> markingRevocation(block: suspend () -> T): T =
+    private suspend fun <T> markingRevocation(
+        expectedProfile: SyncStateEntity? = null,
+        block: suspend () -> T,
+    ): T =
         try {
             block()
         } catch (failure: SyncTransportException) {
-            if (failure.status == STATUS_REVOKED) markRevoked()
+            if (failure.status == STATUS_REVOKED) {
+                db.withWriteTransaction {
+                    if (expectedProfile != null) requireSyncProfile(expectedProfile, db.syncStateDao().get())
+                    markRevoked()
+                }
+            }
             throw failure
         }
 
@@ -292,5 +409,6 @@ class SyncEngine(
 
     private companion object {
         const val STATUS_REVOKED = 401
+        const val STATUS_CURSOR_EXPIRED = 410
     }
 }

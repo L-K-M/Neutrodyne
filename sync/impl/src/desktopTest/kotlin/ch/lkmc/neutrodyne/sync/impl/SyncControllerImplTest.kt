@@ -481,6 +481,69 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun aPartiallyWrittenReplacementTokenCannotLeaveTheOldLinkActive() =
+        runTest {
+            val backing = FakeSecretStore()
+            val failing =
+                object : SecretStore by backing {
+                    override suspend fun put(
+                        origin: String,
+                        username: String,
+                        secret: CharArray,
+                        attributes: Map<String, String>,
+                    ): Long? {
+                        val id = backing.put(origin, username, secret, attributes)
+                        if (secret.concatToString() ==
+                            "token-b"
+                        ) {
+                            throw java.io.IOException("fixture failure after token persistence")
+                        }
+                        return id
+                    }
+                }
+            val h = harness(this, failing)
+            try {
+                h.address.setServerUrl(serverUrl)
+                h.tokens.save(host, "token-a")
+                h.db.withWriteTransaction {
+                    h.db.syncStateDao().upsert(
+                        SyncStateEntity(
+                            enabled = true,
+                            serverUrl = serverUrl,
+                            accountId = "account-a",
+                            deviceId = "device-a",
+                            nodeId = "0000000000000001",
+                            linkedAt = now,
+                        ),
+                    )
+                }
+                h.addLocalPodcast()
+                await(h) { h.controller.status.value is SyncStatus.Linked }
+                h.client.login = { _, _ -> token().copy(token = "token-b", accountId = "account-b", username = "bob") }
+                h.controller.discover(serverUrl)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitPassword("bob", "fixture".toCharArray())
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertFalse(
+                    checkNotNull(h.db.syncStateDao().get()).enabled,
+                    "an interrupted token replacement must leave capture disabled",
+                )
+                assertEquals(
+                    1,
+                    h.db
+                        .podcastDao()
+                        .allForExport()
+                        .size,
+                )
+                val syncCalls = h.client.calls.count { it == "sync" }
+                assertEquals(0, h.engine.round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW).pushed)
+                assertEquals(syncCalls, h.client.calls.count { it == "sync" })
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun cancellingAPasswordAuthWritesNothingAndZeroesThePassword() =
         runTest {
             val h = harness(this)
@@ -2168,6 +2231,7 @@ internal class Harness(
         SettingsCapture(db, settings, writeLocks) {
             address.syncPlaybackSettings()
         }
+    val identity = SyncIdentityLock()
     val noticeBus = SyncNoticeBus()
     val engine =
         SyncEngine(
@@ -2186,6 +2250,7 @@ internal class Harness(
             capture = settingsCapture,
             notices = noticeBus,
             refreshPreferences = { flags.refreshFromStore(address) },
+            identity = identity,
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -2341,6 +2406,7 @@ internal class Harness(
             credentials = credentials,
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,
+            identity = identity,
         )
     }
 
