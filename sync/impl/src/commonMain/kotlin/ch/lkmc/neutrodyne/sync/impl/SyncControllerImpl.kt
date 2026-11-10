@@ -65,7 +65,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -92,6 +91,16 @@ private const val RESET_MODE_PURGE = "purge"
 internal const val SYNC_ERROR_REVOKED = "Revoked"
 
 /**
+ * The one "actually linked" predicate (05 Restore while linked, 08 Restore-while-linked
+ * prompts): the status's `Linked` branch, the controller's own linked context and the restore
+ * coordinator's eligibility read share it, so a stale `linkedAt` (copied database, revoked
+ * token, disabled switch or missing token) can never be mistaken for a live link. The caller
+ * supplies the token presence and the configured server URL.
+ */
+internal fun SyncStateEntity?.isActuallyLinked(hasToken: Boolean): Boolean =
+    this != null && enabled && linkedAt != null && lastError != SYNC_ERROR_REVOKED && hasToken
+
+/**
  * The [SyncController] application service (10 Client sync engine, 08 Sync screens). The status is
  * derived from `sync_state` and the secret store; the engine runs the rounds; the link flow is the
  * state machine the setup screen follows, driven here with the real client calls.
@@ -103,6 +112,7 @@ class SyncControllerImpl(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
     private val engine: SyncEngine,
+    private val playback: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort,
     private val linkFlow: LinkFlowImpl,
     private val tokenStore: SyncTokenStore,
     private val clock: Clock,
@@ -116,6 +126,7 @@ class SyncControllerImpl(
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
     private val events: SyncEventsClient,
+    private val adopter: SessionAdopter,
     private val activity: SyncActivityState,
     private val noticeBus: SyncNoticeBus,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
@@ -143,7 +154,7 @@ class SyncControllerImpl(
     private val _heldChanges = MutableStateFlow<List<MassChangePrompt>>(emptyList())
     override val heldChanges: StateFlow<List<MassChangePrompt>> = _heldChanges.asStateFlow()
 
-    override val remoteSession = MutableStateFlow<RemoteSessionOffer?>(null)
+    override val remoteSession: StateFlow<RemoteSessionOffer?> = adopter.offer
     private val _syncing = MutableStateFlow(false)
     override val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
@@ -199,6 +210,14 @@ class SyncControllerImpl(
                 .distinctUntilChanged()
                 .collect { refreshStatus() }
         }
+        // 10 Mass-change guard: the prompts follow `sync_held`, so a batch the guard holds, a
+        // resolution, or any other writer republishes without a manual refresh. STAGED and
+        // DEFERRED rows are the engine's bookkeeping and never surface as user prompts.
+        scope.launch {
+            db.syncHeldDao().observeAll().collect { rows ->
+                _heldChanges.value = rows.mapNotNull(::heldPrompt)
+            }
+        }
     }
 
     /** 10 Live updates: an in-flight round outranks the stream's LIVE, which outranks IDLE. */
@@ -229,7 +248,7 @@ class SyncControllerImpl(
                     SyncStatus.Revoked(url)
                 }
 
-                state.enabled && state.linkedAt != null && token != null -> {
+                state.isActuallyLinked(token != null) -> {
                     SyncStatus.Linked(
                         serverUrl = url,
                         accountId = state.accountId.orEmpty(),
@@ -576,7 +595,6 @@ class SyncControllerImpl(
                 // 10 Scheduling: forgetting cancels every sync work name and closes the stream.
                 scheduler.onUnlinked()
                 lastRoundProblem.value = null
-                refreshHeld()
                 Outcome.Success(Unit)
             } finally {
                 // The commit either landed or nothing did — refresh either way so a post-commit
@@ -633,37 +651,53 @@ class SyncControllerImpl(
         id: Long,
         resolution: HeldResolution,
     ) {
+        // Decide later changes nothing: the HELD row and its banner stay.
+        if (resolution == HeldResolution.DECIDE_LATER) return
         scope.launch {
-            val row = db.syncHeldDao().byId(id) ?: return@launch
-            val batch = runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull() ?: return@launch
-            when (resolution) {
-                HeldResolution.APPLY -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.apply(db, batch, clock.now())
+            // The row is read and gated inside the write transaction: an answer can only apply a
+            // batch that is still HELD — a row another path resolved, deleted or returned to
+            // STAGED/DEFERRED meanwhile is a no-op — and the apply commits or rolls back together
+            // with the row's delete (10 Mass-change guard step 3).
+            db.withWriteTransaction<Unit> {
+                val row = db.syncHeldDao().byId(id) ?: return@withWriteTransaction
+                val batch = MassChangeGuard.heldBatch(row.batch) ?: return@withWriteTransaction
+                var keepRow = false
+                db.syncStateDao().withApplying<Unit> {
+                    when (resolution) {
+                        // 10 Mass-change guard 4: an explicit Apply is no exception — the
+                        // loaded, playing item's removal never runs while it plays; the
+                        // remainder becomes a DEFERRED row for the local settle.
+                        HeldResolution.APPLY -> {
+                            val deferred =
+                                MassChangeGuard.apply(db, batch, clock.now()) { syncId ->
+                                    MassChangeGuard.playingRemovalDeferred(
+                                        db,
+                                        playback.active.value,
+                                        syncId,
+                                    )
+                                }
+                            if (deferred.isNotEmpty()) {
+                                MassChangeGuard.defer(db, row.id, deferred)
+                                keepRow = true
+                            }
                         }
-                    }
-                }
 
-                HeldResolution.KEEP_MINE -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
+                        HeldResolution.KEEP_MINE -> {
                             MassChangeGuard.keepMine(db, batch, clock)
                         }
+
+                        HeldResolution.DECIDE_LATER -> {
+                            Unit
+                        }
                     }
                 }
-
-                HeldResolution.DECIDE_LATER -> {
-                    return@launch
-                }
+                if (!keepRow) db.syncHeldDao().delete(id)
             }
-            db.syncHeldDao().delete(id)
-            refreshHeld()
         }
     }
 
     override fun dismissRemoteSession() {
-        remoteSession.value = null
+        adopter.dismiss()
     }
 
     override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
@@ -725,11 +759,11 @@ class SyncControllerImpl(
                 linkFlow.failed(SyncProblem.Server(400))
                 return null
             }
-        if (normalized.startsWith("http://") && !gate.allowsPlainHttp(host)) {
+        if (normalized.startsWith("http://", ignoreCase = true) && !gate.allowsPlainHttp(host)) {
             linkFlow.failed(SyncProblem.InsecureTransport)
             return null
         }
-        if (normalized.startsWith("http://")) {
+        if (normalized.startsWith("http://", ignoreCase = true)) {
             val confirmed = awaitInsecure(host)
             if (!confirmed) {
                 linkFlow.showAddress()
@@ -828,6 +862,15 @@ class SyncControllerImpl(
             token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
             db.withWriteTransaction {
                 val existing = db.syncStateDao().get()
+                // A different server or account is a different profile: the old profile's
+                // staged, held and deferred removals must never run against this library.
+                // A same-profile reauth — new device id, node id or token — keeps them.
+                if (existing == null ||
+                    existing.serverUrl != server.serverUrl ||
+                    existing.accountId != token.accountId
+                ) {
+                    db.syncHeldDao().deleteAll()
+                }
                 db.syncStateDao().upsert(
                     (existing ?: SyncStateEntity()).copy(
                         enabled = false,
@@ -1005,7 +1048,7 @@ class SyncControllerImpl(
         val url = address.serverUrl() ?: return null
         val state = db.syncStateDao().get()
         val token = tokenStore.load(hostOf(url))
-        return if (state?.enabled == true && state.linkedAt != null && token != null) url to token else null
+        return if (token != null && state.isActuallyLinked(hasToken = true)) url to token else null
     }
 
     /** Maps a transport failure and remembers a revocation. */
@@ -1103,23 +1146,33 @@ class SyncControllerImpl(
         return classify(failure)
     }
 
-    private suspend fun refreshHeld() {
-        _heldChanges.value =
-            db.syncHeldDao().all().mapNotNull { row ->
-                val batch =
-                    runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull()
-                        ?: return@mapNotNull null
-                val summary =
-                    runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
-                MassChangePrompt(
-                    id = row.id,
-                    deviceName = null,
-                    podcastTitles =
-                        summary?.get("podcasts")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    groupNames = summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                )
-            }
-    }
+    /**
+     * One `sync_held` row as a [MassChangePrompt], or `null` when the row is not a user prompt:
+     * STAGED/DEFERRED rows are the guard's bookkeeping, and a malformed row must never kill the
+     * observer or starve the valid rows behind it. The summary carries only title and name lists
+     * (complete — the UI truncates later); the guard records no device name yet.
+     */
+    private fun heldPrompt(row: SyncHeldEntity): MassChangePrompt? =
+        runCatching {
+            MassChangeGuard.heldBatch(row.batch) ?: return null
+            val summary =
+                runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
+            MassChangePrompt(
+                id = row.id,
+                deviceName = null,
+                podcastTitles = summaryList(summary, "podcasts"),
+                groupNames = summaryList(summary, "groups"),
+            )
+        }.getOrNull()
+
+    /** One summary string list; a malformed member reads as absent rather than failing the row. */
+    private fun summaryList(
+        summary: kotlinx.serialization.json.JsonObject?,
+        key: String,
+    ): List<String> =
+        runCatching { summary?.get(key)?.jsonArray?.map { it.jsonPrimitive.content } }
+            .getOrNull()
+            ?: emptyList()
 }
 
 /** `spaces and hyphens ignored, case-insensitive`, as the server normalises codes (10 Link methods). */

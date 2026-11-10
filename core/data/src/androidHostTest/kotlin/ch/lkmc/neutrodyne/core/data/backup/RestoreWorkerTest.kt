@@ -344,7 +344,15 @@ class RestoreWorkerTest {
             )
         return RestoreRunner(
             db = db,
-            stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO),
+            stager =
+                BackupStager(
+                    db,
+                    ZipGuard(),
+                    merger,
+                    fileSystem,
+                    Dispatchers.IO,
+                    ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+                ),
             merger = merger,
             episodes =
                 RestoreEpisodeMerger(

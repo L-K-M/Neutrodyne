@@ -29,8 +29,11 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.testing.FakeAppUpdateChecker
 import ch.lkmc.neutrodyne.core.testing.FakeCrashReporter
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.testing.FakeUpdateNotices
+import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
@@ -45,6 +48,8 @@ import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
+import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -244,6 +249,141 @@ class NeutrodyneWindowContentTest {
                 .isEqualTo(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
         }
 
+    /**
+     * MS3's Continue card through the real window (08 Continue on this device): the service's
+     * `remoteSession` offer becomes the card state, Play routes to `PlaybackController.play()`
+     * and Dismiss to `dismissRemoteSession()` — the parent wired both callbacks to no-ops and
+     * never mapped the offer, so this fails on every shortcut of the real path.
+     */
+    @Test
+    fun theContinueCardMapsResumesAndDismissesThroughTheShellPath() =
+        runComposeUiTest {
+            // The default (Feeds) tab is VM-backed: the database accessor gates on the open.
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val sync = FakeSyncController()
+            val playback = FakePlaybackController()
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = playback,
+                    playbackState = playback.state,
+                    syncController = { sync },
+                )
+            }
+
+            runOnIdle { sync.remoteSession.value = OFFER }
+            waitUntil("the continue card shows", TIMEOUT_MS) {
+                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Episode 7 · 23:14 · from Pixel 8").assertExists()
+
+            onNodeWithText("Play").performClick()
+            waitUntil("the resume reached play()", TIMEOUT_MS) {
+                playback.calls.contains(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PLAY),
+                )
+            }
+            assertThat(sync.remoteSessionDismissals).isEmpty()
+
+            runOnIdle { sync.remoteSession.value = OFFER }
+            waitUntil("the card shows again", TIMEOUT_MS) {
+                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Dismiss").performClick()
+            waitUntil("the dismissal reached the service", TIMEOUT_MS) {
+                sync.remoteSessionDismissals.size == 1
+            }
+            waitUntil("the cleared offer hides the card", TIMEOUT_MS) {
+                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isEmpty()
+            }
+        }
+
+    /**
+     * `MarkedPlayedElsewhere` must surface on the root snackbar through the window's merged
+     * `userMessages`, beside the notification banners — a notice that dies in the service or a
+     * merge that drops either upstream fails here.
+     */
+    @Test
+    fun syncNoticesReachTheShellSnackbarBesideTheBannerFlow() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val sync = FakeSyncController()
+            val banners = DesktopBannerNotifier()
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = FakePlaybackController(),
+                    playbackState = graph.playbackStateSource,
+                    banners = banners,
+                    syncController = { sync },
+                )
+            }
+
+            runBlocking { banners.post(IMPORT_NOTIFICATION) }
+            waitUntil("the banner message shows", TIMEOUT_MS) {
+                onAllNodesWithText("Import finished — 3 added").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            waitUntil("the notices flow is subscribed", TIMEOUT_MS) {
+                sync.noticeSubscriptions.value > 0
+            }
+            runOnIdle { sync.post(SyncNotice.MarkedPlayedElsewhere(42, "Episode 7", "Pixel 8")) }
+            waitUntil("the sync notice shows", TIMEOUT_MS) {
+                onAllNodesWithText("Marked played on Pixel 8. It keeps playing here.")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+        }
+
+    /**
+     * 08: the card takes the mini player's slot while the adopted item stays paused underneath —
+     * a loaded-but-paused `NowPlaying` must not suppress it; only an actively playing local
+     * session does. The offer itself is never touched by the suppression.
+     */
+    @Test
+    fun aPausedMiniPlayerKeepsTheCardAndOnlyPlayingHidesIt() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val sync = FakeSyncController()
+            val playback = FakePlaybackController()
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = playback,
+                    playbackState = playback.state,
+                    syncController = { sync },
+                )
+            }
+            runOnIdle {
+                playback.state.nowPlaying.value =
+                    testNowPlaying().copy(isPlaying = false, playWhenReady = false)
+                sync.remoteSession.value = OFFER
+            }
+            waitUntil("the card shows beside the paused mini-player", TIMEOUT_MS) {
+                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            runOnIdle { playback.state.nowPlaying.value = testNowPlaying() }
+            waitUntil("live playback hides the card", TIMEOUT_MS) {
+                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isEmpty()
+            }
+            assertThat(sync.remoteSession.value).isEqualTo(OFFER)
+
+            runOnIdle {
+                playback.state.nowPlaying.value =
+                    testNowPlaying().copy(isPlaying = false, playWhenReady = false)
+            }
+            waitUntil("pausing re-shows the card", TIMEOUT_MS) {
+                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+
     @Test
     fun licencesListTheOpenJdkRuntime() =
         runComposeUiTest {
@@ -407,6 +547,15 @@ class NeutrodyneWindowContentTest {
                 title = "Import finished",
                 body = "3 added",
                 route = "neutrodyne://open/import/7",
+            )
+
+        val OFFER =
+            RemoteSessionOffer(
+                episodeId = 42,
+                title = "Episode 7",
+                podcastTitle = "Show",
+                positionMs = 1_394_000,
+                deviceName = "Pixel 8",
             )
     }
 }

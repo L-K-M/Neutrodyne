@@ -294,7 +294,7 @@ class SyncProtectedAuthRaceTest {
                     sharePasswords = { false },
                     coordinator = credentials,
                     notices = SyncNoticeBus(),
-                    deviceNames = DeviceNames { emptyList() },
+                    deviceNames = ClientDeviceNames { emptyList() },
                 ),
             effects =
                 SyncApplyEffects(
