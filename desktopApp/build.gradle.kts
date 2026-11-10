@@ -75,6 +75,12 @@ val youtubeEngine =
 // Verify the selected variant, including command-line overrides, independently of the resource.
 tasks.withType<Test>().configureEach {
     systemProperty("neutrodyne.test.youtubeEngine", youtubeEngine.toString())
+    if (youtubeEngine) {
+        dependsOn(":youtube:ytdlp-desktop:syncEngineResources")
+        val engineResources = project(":youtube:ytdlp-desktop").layout.buildDirectory.dir("engine-resources")
+        inputs.dir(engineResources)
+        systemProperty("neutrodyne.engineResources", engineResources.get().asFile.absolutePath)
+    }
 }
 
 dependencies {
