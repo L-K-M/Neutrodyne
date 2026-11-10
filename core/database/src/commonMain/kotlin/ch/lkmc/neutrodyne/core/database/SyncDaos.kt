@@ -353,6 +353,41 @@ abstract class SyncOutboxDao(
         }
     }
 
+    /** Clock correction visits only this node's unaccepted local clocks, without loading values. */
+    @Query(
+        "SELECT MIN(hlc) FROM sync_outbox WHERE captureKind = 'LOCAL' AND nodeId = :nodeId" +
+            " AND hlc > :after AND (hlc < :min OR hlc > :max)",
+    )
+    abstract suspend fun nextLocalClockOutside(
+        min: Long,
+        max: Long,
+        nodeId: String,
+        after: Long,
+    ): Long?
+
+    @Query(
+        "SELECT rid FROM sync_outbox WHERE coll = 'setting' AND field = 'v'" +
+            " AND captureKind = 'LOCAL' AND nodeId = :nodeId AND hlc = :clock AND rid > :after" +
+            " ORDER BY rid LIMIT :limit",
+    )
+    abstract suspend fun localSettingIdsAtClock(
+        clock: Long,
+        nodeId: String,
+        after: String,
+        limit: Int,
+    ): List<String>
+
+    /** The caller owns the writer and updates setting receipt metadata in the same transaction. */
+    @Query(
+        "UPDATE sync_outbox SET hlc = :replacement WHERE captureKind = 'LOCAL'" +
+            " AND nodeId = :nodeId AND hlc = :previous",
+    )
+    abstract suspend fun restampLocalClock(
+        previous: Long,
+        replacement: Long,
+        nodeId: String,
+    )
+
     /** Moves one record's rows to another `rid`, keeping the larger complete clock on a collision. */
     suspend fun moveRecord(
         coll: String,

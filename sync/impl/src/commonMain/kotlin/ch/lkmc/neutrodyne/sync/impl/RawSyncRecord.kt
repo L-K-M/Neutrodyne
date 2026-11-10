@@ -148,6 +148,8 @@ data class SettingIntent(
     val priorReceipt: String? = null,
     val priorHash: String,
     val kind: SettingIntentKind = SettingIntentKind.LOCAL,
+    /** The immutable DataStore receipt may predate repair of this unaccepted wire clock. */
+    val receiptClock: String? = null,
 )
 
 /** A historical restore may precede an already accepted clock while being the next physical write. */

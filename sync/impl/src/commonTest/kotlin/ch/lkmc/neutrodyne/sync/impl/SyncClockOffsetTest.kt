@@ -9,6 +9,17 @@ import kotlin.test.assertNull
 
 class SyncClockOffsetTest {
     @Test
+    fun aPersistedOffsetCannotOverflowOrEscapeThePackedClockRange() {
+        assertEquals(1_700_000_000_000L, adjustedSyncWallMs(1_700_021_600_000L, -21_600_000))
+        assertNull(adjustedSyncWallMs(-1, 0))
+        assertNull(adjustedSyncWallMs(0, Long.MIN_VALUE))
+        assertNull(adjustedSyncWallMs(Long.MAX_VALUE, 1))
+        assertNull(adjustedSyncWallMs(0, -1))
+        assertNull(adjustedSyncWallMs(Hlc.MAX_MILLIS, 1))
+        assertEquals(Hlc.MAX_MILLIS, adjustedSyncWallMs(Hlc.MAX_MILLIS - 1, 1))
+    }
+
+    @Test
     fun midpointAndSmallJitterLeaveLocalTimeUnchanged() {
         for (server in listOf(1_700_000_000_500L, 1_700_000_120_500L, 1_699_999_880_500L)) {
             assertEquals(

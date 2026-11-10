@@ -21,11 +21,19 @@ internal fun estimateSyncClockOffset(
     val midpoint = sentAtMs + (receivedAtMs - sentAtMs) / 2
     val estimate = serverTimeMs - midpoint
     val offset = if (estimate in -OFFSET_JITTER_MS..OFFSET_JITTER_MS) 0 else estimate
-    if (offset > 0 && receivedAtMs > Long.MAX_VALUE - offset) return null
-    if (offset < 0 && receivedAtMs < -offset) return null
-    val adjusted = receivedAtMs + offset
-    if (adjusted !in 0..Hlc.MAX_MILLIS) return null
+    val adjusted = adjustedSyncWallMs(receivedAtMs, offset) ?: return null
     return SyncClockOffset(offset, adjusted)
+}
+
+/** Persisted offsets must never overflow or wrap when packed into an HLC. */
+internal fun adjustedSyncWallMs(
+    nowMs: Long,
+    offsetMs: Long,
+): Long? {
+    if (nowMs < 0 || offsetMs == Long.MIN_VALUE) return null
+    if (offsetMs > 0 && nowMs > Long.MAX_VALUE - offsetMs) return null
+    if (offsetMs < 0 && nowMs < -offsetMs) return null
+    return (nowMs + offsetMs).takeIf { it in 0..Hlc.MAX_MILLIS }
 }
 
 private const val OFFSET_JITTER_MS = 120_000L

@@ -959,6 +959,59 @@ class FirstLinkMergerTest {
             }
         }
 
+    @Test
+    fun adoptingTheServerLibraryKeepsTheCorrectedWallClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val offset = -21_600_000L
+                db.syncStateDao().setClockOffset(offset)
+                val merger = mergerOf(db, CountingClient(emptyList()), FakeLibraryMerger())
+                assertTrue(merger.merge(FirstLinkChoice.USE_SERVER) is FirstLinkResult.Completed)
+                val state = checkNotNull(db.syncStateDao().get())
+                assertEquals(offset, state.clockOffsetMs)
+                assertEquals(
+                    (now + offset) shl Hlc.COUNTER_BITS,
+                    state.hlc,
+                    "first-link adoption must not restore the uncorrected future clock",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun firstLinkPullSamplesTheServerClockBeforeAdoption() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val offset = -21_600_000L
+                val base = CountingClient(emptyList())
+                val timed =
+                    object : SyncClient by base {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage =
+                            base.changes(since, limit).copy(
+                                serverTime =
+                                    kotlin.time.Instant
+                                        .fromEpochMilliseconds(now + offset)
+                                        .toString(),
+                            )
+                    }
+                val merger = mergerOf(db, timed, FakeLibraryMerger())
+                assertTrue(merger.merge(FirstLinkChoice.USE_SERVER) is FirstLinkResult.Completed)
+                val state = checkNotNull(db.syncStateDao().get())
+                assertEquals(offset, state.clockOffsetMs, "staging pulls also correct the clock")
+                assertEquals((now + offset) shl Hlc.COUNTER_BITS, state.hlc)
+            } finally {
+                db.close()
+            }
+        }
+
     /** "Use the server's library" runs 05's Replace column through the port (LINK_REPLACE). */
     @Test
     fun useServerRunsTheLinkReplaceThroughThePort() =

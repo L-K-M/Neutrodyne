@@ -225,8 +225,10 @@ class SyncEngine(
         val serverMs = runCatching { Instant.parse(serverTime).toEpochMilliseconds() }.getOrNull() ?: return null
         val correction = estimateSyncClockOffset(serverMs, sentAtMs, receivedAtMs) ?: return null
         db.withWriteTransaction {
-            requireSyncProfile(profile, db.syncStateDao().get())
+            val state = checkNotNull(db.syncStateDao().get())
+            requireSyncProfile(profile, state)
             db.syncStateDao().setClockOffset(correction.offsetMs)
+            repairSyncClock(db, state, correction.adjustedReceivedAtMs)
         }
         return correction
     }

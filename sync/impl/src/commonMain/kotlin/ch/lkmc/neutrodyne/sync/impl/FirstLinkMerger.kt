@@ -29,11 +29,13 @@ import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CancellationException
@@ -465,7 +467,11 @@ class FirstLinkMerger(
         fileSystem.sink(file).buffer().use { sink ->
             while (pages < MAX_PAGES) {
                 pages++
+                val profile = db.syncStateDao().get()
+                val sentAt = clock.now()
                 val page = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
+                val receivedAt = clock.now()
+                engine.observeServerTime(profile, page.serverTime, sentAt, receivedAt)
                 // 10 Passwords: each auth is staged in the protected store before its staging
                 // line is written; the file carries only the snapshot's reference and clock.
                 val stagedAuths = stageAuthCandidates(db, secrets, coordinator, page.records)
@@ -1307,11 +1313,14 @@ class FirstLinkMerger(
     ) {
         db.withWriteTransaction {
             db.syncStateDao().get()?.let { state ->
+                val corrected =
+                    adjustedSyncWallMs(clock.now(), state.clockOffsetMs)
+                        ?: throw ProtocolException(SyncErrorCode.CLOCK_SKEW, "Corrected device time cannot fit an HLC")
                 db.syncStateDao().upsert(
                     state.copy(
                         enabled = true,
                         cursor = cursor,
-                        hlc = maxOf(state.hlc, maxClockPacked, clock.now() shl HLC_COUNTER_BITS),
+                        hlc = maxOf(state.hlc, maxClockPacked, corrected shl HLC_COUNTER_BITS),
                     ),
                 )
             }
@@ -1349,7 +1358,9 @@ class FirstLinkMerger(
         while (true) {
             check(pages++ < MAX_PAGES) { "Full sync exceeded its page limit" }
             verifyProfile(profile)
+            val sentAt = clock.now()
             val page = scopedClient.changes(cursor, ProtocolLimits.MAX_RECORDS)
+            val receivedAt = clock.now()
             verifyProfile(profile)
             check(!page.hasMore || page.cursor != cursor) { "Full sync cursor did not advance" }
             val result = applier.applyPage(page.records, roundId, expectedProfile = profile)
@@ -1360,6 +1371,7 @@ class FirstLinkMerger(
             maxClock = maxOf(maxClock, page.records.maxOfOrNull(::maxClockOf) ?: 0)
             effects.drainSettings()
             effects.drainPasswords()
+            engine.observeServerTime(profile, page.serverTime, sentAt, receivedAt)
             cursor = page.cursor
             if (!page.hasMore) break
         }
