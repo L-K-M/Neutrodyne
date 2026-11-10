@@ -50,6 +50,15 @@ import kotlinx.serialization.encodeToString
 
 /** The transport the engine and link flow use; `KtorSyncClient` is the production implementation. */
 interface SyncClient {
+    /**
+     * An isolated view for transports with mutable authentication. Already-bound transports
+     * return null, so callers retain the original instance (including decorated test clients).
+     */
+    fun withCredentials(
+        serverUrl: String,
+        token: String,
+    ): SyncClient? = null
+
     suspend fun discover(baseUrl: String): DiscoveryDocument
 
     suspend fun login(
@@ -119,7 +128,7 @@ interface SyncClient {
 }
 
 /** A [SyncClient] failure with the server's status and problem code (10 Errors). */
-class SyncTransportException(
+open class SyncTransportException(
     val status: Int,
     val code: String?,
     message: String,
@@ -143,6 +152,11 @@ class KtorSyncClient(
     private val tokenForBase: (suspend (String) -> String?)? = null,
 ) : SyncClient {
     private val client: HttpClient = clients.client(HttpClientKind.SYNC)
+
+    override fun withCredentials(
+        serverUrl: String,
+        token: String,
+    ): SyncClient = KtorSyncClient(clients, tokenProvider = { token }, baseUrlProvider = { serverUrl })
 
     override suspend fun discover(baseUrl: String): DiscoveryDocument =
         getJson(baseUrl.trimEnd('/') + "/.well-known/neutrodyne-sync", auth = false)
