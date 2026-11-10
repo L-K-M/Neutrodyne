@@ -2521,6 +2521,8 @@ physical-device checks, session handoff or real-network PB31 measurements.
 
 E12 / `CrossDeviceSyncTest` (09 owns the journey; nightly and in M11b): an Android emulator (API 36) and a desktop JVM (headless app graph) against a server from the release JAR; random offline edits to subscriptions, groups, order, played state, positions, favourites and Up next converge (MS2 acceptance 2); a desktop pause resumes on Android within 1 s of the next sync through "Continue on this device" (R8.5); unsubscribing 11 of 50 podcasts is held (MS2 acceptance 4); propagation with both apps in the foreground ≤ 10 s (PB31, MS3 acceptance 1). M11b acceptance 14 adds the manual checklist with a phone, a desktop on each OS and a server.
 
+**Implementation note (2026-11-10).** The Android half of E12 now exists as `CrossDeviceSyncAndroidTest`, a host-driven phase driver (`seed`/`link`/`edit`/`sync`/`dump`) over the real app graph, Room and `SyncController`; its config, ownership, phase and result contracts are in [10.A Cross-device Android driver](10-cross-device-android-driver.md). It is **Android driver only**: the host coordinator, the desktop half, the nightly job and the real emulator/device proof remain UNVERIFIED. The planned E12 framework above is not actual code and this is not the E12 acceptance criterion.
+
 ### Data-loss scenarios
 
 Each scenario is a test; the property test generates the first four at random, the others are scripted (`SyncScenarioTest`, `:sync:impl` `desktopTest` against `InMemorySyncServer`, and the server suite where marked).
