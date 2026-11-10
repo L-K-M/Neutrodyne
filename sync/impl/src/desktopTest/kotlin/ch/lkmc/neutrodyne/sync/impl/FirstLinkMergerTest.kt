@@ -992,6 +992,101 @@ class FirstLinkMergerTest {
         }
 
     @Test
+    fun aNonClockRejectionAfterTheClockRetryFailsImmediately() =
+        runTest {
+            val db = TestDb.inMemory()
+            var pushes = 0
+            try {
+                link(db)
+                db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId))
+                val client =
+                    ScriptedClient(emptyList(), syncHandler = { _, changes ->
+                        pushes++
+                        val code = if (pushes == 1) "clock_skew" else "invalid"
+                        SyncResponse(
+                            changes.mapIndexed { index, _ -> ChangeResultDto(index, "rejected", code = code) },
+                            emptyList(),
+                            "c:00000001:1",
+                            false,
+                            "",
+                        )
+                    })
+                val result = mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Failed)
+                assertEquals(2, pushes, "a non-clock failure ends the clock retry immediately")
+                assertNull(db.syncStateDao().get()?.linkedAt)
+                assertTrue(db.syncOutboxDao().count() > 0)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun localFirstLinkSeedsCannotPoisonTheCorrectedClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId, subscribedAt = now))
+                val serverNow = now - 21_600_000L
+                val serverTime =
+                    kotlin.time.Instant
+                        .fromEpochMilliseconds(serverNow)
+                        .toString()
+                val base = CountingClient(emptyList())
+                val client =
+                    object : SyncClient by base {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage = base.changes(since, limit).copy(serverTime = serverTime)
+
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ChangeDto>,
+                        ): SyncResponse {
+                            val response = base.sync(since, changes)
+                            return response.copy(
+                                serverTime = serverTime,
+                                results =
+                                    changes.mapIndexed { index, change ->
+                                        val future =
+                                            change.fields.values.any { field ->
+                                                field.c?.let { Hlc.parse(it).millis > serverNow + 300_000L } == true
+                                            }
+                                        ChangeResultDto(
+                                            index,
+                                            if (future) "rejected" else "applied",
+                                            code = if (future) "clock_skew" else null,
+                                        )
+                                    },
+                            )
+                        }
+                    }
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Completed)
+                val raw = checkNotNull(SyncClockStore(db).get("podcast", podcastSyncId))
+                assertTrue(
+                    checkNotNull(raw.state.maxClock).millis <= serverNow + 300_000L,
+                    "unaccepted first-link seeds must not masquerade as accepted future clocks",
+                )
+                db.withWriteTransaction {
+                    db.syncOutboxDao().captureLiteral("podcast", podcastSyncId, "title", "\"Later local edit\"")
+                }
+                val report =
+                    engine(
+                        db,
+                        client,
+                        SyncActivityState(),
+                    ).round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW)
+                assertEquals(0, report.rejected, "the next local edit must remain admissible")
+                assertEquals(0, db.syncOutboxDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun adoptingTheServerLibraryKeepsTheCorrectedWallClock() =
         runTest {
             val db = TestDb.inMemory()

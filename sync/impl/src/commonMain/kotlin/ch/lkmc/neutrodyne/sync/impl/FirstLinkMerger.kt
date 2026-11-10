@@ -963,34 +963,47 @@ class FirstLinkMerger(
     // --- Seeding and captures (10 Merge steps 4–5) --------------------------------------------------
 
     /**
-     * Stamps this device's current rows into `sync_clock` at their own timestamps (counter 0,
-     * this node), so the record merge decides each field by clock and the capture pass knows
+     * Stamps current rows at their historical times, capped at corrected now (counter 0,
+     * this node), so an unaccepted local seed cannot poison the accepted-clock frontier.
+     * The record merge decides each field by clock and the capture pass knows
      * which fields the local side owns. Groups, members and Up next are seeded too: the
      * design's capture list covers the whole library, not only podcasts and episodes.
      */
     private suspend fun seedLocalRows() {
         val nodeId = nodeId()
         db.withWriteTransaction {
+            val offset = checkNotNull(db.syncStateDao().get()).clockOffsetMs
+            val correctedNow =
+                adjustedSyncWallMs(clock.now(), offset)
+                    ?: throw ProtocolException(
+                        SyncErrorCode.CLOCK_SKEW,
+                        "Corrected device time cannot seed local sync clocks",
+                    )
+
+            fun localTime(at: Long): Long = at.coerceIn(SYNC_MIN_CLOCK_MS, maxOf(SYNC_MIN_CLOCK_MS, correctedNow))
+
             db.syncStateDao().withApplying {
                 for (podcast in db.podcastDao().allForExport()) {
+                    val at = localTime(podcast.subscribedAt)
                     val fields =
                         mapOf(
-                            "feedUrl" to fieldString(podcast.feedUrl, podcast.subscribedAt, nodeId),
-                            "subscribed" to fieldBool(true, podcast.subscribedAt, nodeId),
-                            "title" to fieldString(podcast.title, podcast.subscribedAt, nodeId),
+                            "feedUrl" to fieldString(podcast.feedUrl, at, nodeId),
+                            "subscribed" to fieldBool(true, at, nodeId),
+                            "title" to fieldString(podcast.title, at, nodeId),
                         )
                     writeSeed(SyncCollection.PODCAST, podcast.syncId, fields)
                 }
                 for (group in db.groupDao().groupsInOrder()) {
+                    val at = localTime(group.updatedAt)
                     val fields =
                         mapOf(
-                            "name" to fieldString(group.name, group.updatedAt, nodeId),
-                            "deleted" to fieldBool(false, group.updatedAt, nodeId),
+                            "name" to fieldString(group.name, at, nodeId),
+                            "deleted" to fieldBool(false, at, nodeId),
                         )
                     writeSeed(SyncCollection.GROUP, group.uuid, fields)
                     for (member in db.groupDao().membersOf(group.id)) {
                         val podcast = db.podcastDao().byId(member.podcastId) ?: continue
-                        val at = member.addedAt
+                        val at = localTime(member.addedAt)
                         writeSeed(
                             SyncCollection.MEMBER,
                             group.uuid + podcast.syncId,
@@ -1004,7 +1017,7 @@ class FirstLinkMerger(
                     writeSeed(
                         SyncCollection.UPNEXT,
                         podcast.syncId + episode.identityKey,
-                        mapOf("in" to fieldBool(true, entry.addedAt, nodeId)),
+                        mapOf("in" to fieldBool(true, localTime(entry.addedAt), nodeId)),
                     )
                 }
                 for (episode in db.episodeDao().all()) {
@@ -1013,7 +1026,7 @@ class FirstLinkMerger(
                     val position = db.positionDao().byEpisode(episode.id)
                     val fields = mutableMapOf<String, FieldState>()
                     if (state != null) {
-                        val at = maxOf(state.updatedAt, position?.updatedAt ?: 0L)
+                        val at = localTime(maxOf(state.updatedAt, position?.updatedAt ?: 0L))
                         fields["played"] = fieldBool(state.playedAt != null, at, nodeId)
                         fields["playedAt"] =
                             FieldState(state.playedAt?.let(::JsonPrimitive) ?: JsonNull, stamp(at, nodeId))
@@ -1025,7 +1038,7 @@ class FirstLinkMerger(
                         fields["pos"] =
                             FieldState(
                                 JsonObject(buildMap { put("ms", JsonPrimitive(position.positionMs)) }),
-                                stamp(position.updatedAt, nodeId),
+                                stamp(localTime(position.updatedAt), nodeId),
                             )
                     }
                     if (fields.isNotEmpty()) {

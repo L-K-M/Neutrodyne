@@ -383,6 +383,13 @@ class SyncEngine(
                         val retrying = state?.lastError in setOf(SYNC_ERROR_CLOCK_RETRY, SYNC_ERROR_CLOCK_BLOCKED)
                         db.syncStateDao().storeError(if (retrying) SYNC_ERROR_CLOCK_BLOCKED else SYNC_ERROR_CLOCK_RETRY)
                     }
+                } else {
+                    db.withWriteTransaction {
+                        snapshot.state?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+                        if (db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_RETRY) {
+                            db.syncStateDao().storeError(null)
+                        }
+                    }
                 }
                 // Drain the pull and settle its guard below, then retry in the next public round.
                 break
