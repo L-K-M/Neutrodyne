@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.feeds.opml.OpmlFailure
 import ch.lkmc.neutrodyne.feeds.opml.OpmlLimits
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReadResult
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReader
+import ch.lkmc.neutrodyne.feeds.opml.OpmlWarningCode
 import ch.lkmc.neutrodyne.feeds.opml.ParseMode
 import okio.Buffer
 import okio.source
@@ -232,91 +233,34 @@ class OpmlHostileInputTest {
     }
 
     /**
-     * `&`-dense attribute values whose only `;` sits at the very end: the entity `;` search
-     * must stay inside the `MAX_ENTITY_CHARS` window; an unbounded `indexOf` rescans the
-     * value tail per `&`, quadratic CPU inside the 64 KiB tag cap (~60 ms per outline).
-     * Timed against a same-size `&`-free baseline instead of a wall-clock budget, so machine
-     * load slows both runs alike: bounded scans stay near 1x, an unbounded one reaches ~6x.
-     * The `&#xZZZZ;` fails both pull legs unconditionally, so the salvage scanner is under test.
-     *
-     * The ratio is measured, not sampled once: one unmeasured read per shape warms the
-     * bounded `;` scan's JIT path — a single cold run bills compilation to the dense side,
-     * which is what pushed a loaded CI worker past the guard — and paired rounds in
-     * alternating order feed a median, so a GC pause or a busy neighbour taxes one sample
-     * instead of the whole comparison.
+     * `&`-dense attribute values whose only `;` sits at the very end still salvage: the
+     * `&#xZZZZ;` fails both pull legs unconditionally and the scanner's bounded `;`
+     * window decodes every `&` literally. The entity scan's linear bound itself is
+     * proven without a wall clock by `SalvageEntitiesTest`, whose counting CharSequence
+     * bills each character the decoder reads — the former wall-ratio guard flaked on a
+     * loaded CI worker at 3.10/3 while the algorithm stayed linear (CI run 42755872530).
+     * The oversized decoded values drop every outline with a warning.
      */
     @Test(timeout = HOSTILE_TIMEOUT_MS)
-    fun ampDenseSalvageValuesStayLinear() {
-        // Fixtures before any timing: building the ~36 MB document inside a measured read
-        // would bill its allocation to one side of the ratio.
-        val baseline = ampDenseDocument("a".repeat(AMP_RUN))
-        val dense = ampDenseDocument("&".repeat(AMP_RUN) + ";")
+    fun ampDenseSalvageValuesDecodeLiteral() {
+        val doc =
+            buildString {
+                append("<opml version=\"1.0\"><body>")
+                repeat(AMP_DENSE_TAGS) {
+                    append("<outline type=\"rss\" xmlUrl=\"https://x.example.com/\" text=\"")
+                    append("&".repeat(AMP_RUN))
+                    append(";\" note=\"&#xZZZZ;\"/>")
+                }
+                append("</body></opml>")
+            }.encodeToByteArray()
 
-        salvageRead(baseline)
-        salvageRead(dense)
-
-        val baselineTimes = LongArray(AMP_DENSE_ROUNDS)
-        val denseTimes = LongArray(AMP_DENSE_ROUNDS)
-        for (round in 0 until AMP_DENSE_ROUNDS) {
-            if (round % 2 == 0) {
-                baselineTimes[round] = timedSalvage(baseline)
-                denseTimes[round] = timedSalvage(dense)
-            } else {
-                denseTimes[round] = timedSalvage(dense)
-                baselineTimes[round] = timedSalvage(baseline)
-            }
-        }
-        val baselineMedian = baselineTimes.median()
-        val denseMedian = denseTimes.median()
-        println(
-            "ampDenseSalvageValuesStayLinear: baseline ${baselineTimes.contentToString()} " +
-                "dense ${denseTimes.contentToString()} " +
-                "ratio=${denseMedian.toDouble() / baselineMedian}",
-        )
-
-        assertTrue(
-            denseMedian < baselineMedian * AMP_DENSE_MAX_RATIO,
-            "dense median ${denseMedian}ns vs baseline median ${baselineMedian}ns " +
-                "ratio=${denseMedian.toDouble() / baselineMedian}",
-        )
-    }
-
-    /** The [AMP_DENSE_TAGS]-outline document carrying [value] as every `text`, built once. */
-    private fun ampDenseDocument(value: String): ByteArray =
-        buildString {
-            append("<opml version=\"1.0\"><body>")
-            repeat(AMP_DENSE_TAGS) {
-                append("<outline type=\"rss\" xmlUrl=\"https://x.example.com/\" text=\"")
-                append(value)
-                append("\" note=\"&#xZZZZ;\"/>")
-            }
-            append("</body></opml>")
-        }.encodeToByteArray()
-
-    /**
-     * One read of [bytes] asserting the same boundary as before — the pull legs fail and
-     * salvage wins. The opener streams the fixture per pass instead of copying it into a
-     * `Buffer`: three cascade passes times ~36 MB of copy was churn the 128 MB heap had to
-     * collect inside the timed region.
-     */
-    private fun salvageRead(bytes: ByteArray) {
-        val result = reader.read({ bytes.inputStream().source() })
+        val result = reader.read({ doc.inputStream().source() })
         val ok = assertIs<OpmlReadResult.Ok>(result)
         assertEquals(ParseMode.SALVAGE, ok.document.mode)
-    }
-
-    /** A collection outside the clock, then one timed read: the last read's garbage is not this one's. */
-    private fun timedSalvage(bytes: ByteArray): Long {
-        System.gc()
-        val start = System.nanoTime()
-        salvageRead(bytes)
-        return System.nanoTime() - start
-    }
-
-    /** [AMP_DENSE_ROUNDS] is odd, so the sorted middle is the median sample. */
-    private fun LongArray.median(): Long {
-        sort()
-        return this[size / 2]
+        assertTrue(
+            OpmlWarningCode.ATTRIBUTE_TOO_LONG in ok.document.warnings.map { it.code },
+            "oversized dense values drop their outlines, got ${ok.document.warnings}",
+        )
     }
 
     /** The entity scan sees through UTF-16 units, not only single-byte text. */
@@ -332,17 +276,12 @@ class OpmlHostileInputTest {
         const val HOSTILE_TIMEOUT_MS = 60_000L
 
         /**
-         * The `&`-dense case sizes so the unbounded entity scan exceeds the ratio while the
-         * bounded one stays near its baseline: ~60 KiB of `&`s per outline is the most
-         * quadratic work the 64 KiB tag cap admits, a few hundred of them stay small enough
-         * to build and hold in this task's 128 MB heap.
+         * The `&`-dense shape at its largest admitted size: ~60 KiB of `&`s per outline is
+         * the most entity work the 64 KiB tag cap admits, a few hundred of them stay small
+         * enough to build and hold in this task's 128 MB heap.
          */
         const val AMP_RUN = 60_000
         const val AMP_DENSE_TAGS = 300
-        const val AMP_DENSE_MAX_RATIO = 3
-
-        /** Timed round pairs per shape; odd so the median is an observed sample. */
-        const val AMP_DENSE_ROUNDS = 5
 
         const val DEEP_NESTING = 10_000
         const val FEED_FLOOD = 100_001

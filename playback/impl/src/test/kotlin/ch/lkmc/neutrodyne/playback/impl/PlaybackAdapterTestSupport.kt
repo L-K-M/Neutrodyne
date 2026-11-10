@@ -21,8 +21,10 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SessionStart
+import ch.lkmc.neutrodyne.core.domain.StoredEpisodeMarks
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
@@ -53,7 +55,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import okio.Path
@@ -99,12 +105,35 @@ internal class GatedLookup(
     override fun observe(episodeIds: Set<Long>) = delegate.observe(episodeIds)
 }
 
+/**
+ * Records the effectively-played marks snapshots delivered to `observeMarks` collectors. The
+ * unfreeze watch's Room read runs on real threads, so a played→unplayed write pair can coalesce
+ * into a single unplayed snapshot; a test that needs the watch armed must await the observation
+ * before committing the unplayed write.
+ */
+internal class MarksProbe {
+    private val seen = MutableStateFlow<Set<Long>>(emptySet())
+
+    fun sawEffectivelyPlayed(episodeId: Long): Boolean = episodeId in seen.value
+
+    fun wrap(delegate: PositionStore): PositionStore =
+        object : PositionStore by delegate {
+            override fun observeMarks(episodeId: Long): Flow<StoredEpisodeMarks?> =
+                delegate.observeMarks(episodeId).onEach { marks ->
+                    if (marks?.playedAt != null && marks.startedAt == null) {
+                        seen.update { it + episodeId }
+                    }
+                }
+        }
+}
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal class AdapterFixture(
     val scope: TestScope,
     sessionStore: (PlaySessionStore) -> PlaySessionStore = { it },
     mediaLookup: (PlaybackMediaLookup) -> PlaybackMediaLookup = { it },
     queueRepository: (QueueRepository) -> QueueRepository = { it },
+    positionStore: (PositionStore) -> PositionStore = { it },
 ) {
     val serviceJob = SupervisorJob(scope.backgroundScope.coroutineContext[Job])
     val playerScope = CoroutineScope(scope.backgroundScope.coroutineContext + serviceJob)
@@ -123,7 +152,7 @@ internal class AdapterFixture(
             .FakeYouTubeEngine()
     val local = FakeLocalMediaIndex()
     val sessions = sessionStore(PlaybackTestStores.sessions(db, ProtocolOrderKeys, caps))
-    val positions = PlaybackTestStores.positions(db)
+    val positions = positionStore(PlaybackTestStores.positions(db))
     val queue = queueRepository(PlaybackTestStores.queue(db, sessions, ProtocolOrderKeys, clock, caps))
     val lookup = mediaLookup(PlaybackTestStores.media(db))
     val sources = AdapterSources()
