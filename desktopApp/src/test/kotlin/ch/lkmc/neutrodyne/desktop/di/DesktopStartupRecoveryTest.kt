@@ -2,10 +2,12 @@
 package ch.lkmc.neutrodyne.desktop.di
 
 import ch.lkmc.neutrodyne.core.common.AppInitializer
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -58,6 +60,11 @@ class DesktopStartupRecoveryTest {
             }
             server.start()
             try {
+                // Keep unrelated engine copy/compile work out of this database-retry test.
+                // Its process-wide store lock otherwise couples successive throwaway graphs.
+                assertIs<Outcome.Success<*>>(
+                    graph.settingsRepository.set(YouTubeSettingKeys.ENGINE_ENABLED, false),
+                )
                 val file = dirs.data.resolve(NeutrodyneDatabase.FILE_NAME)
                 if (startup == Startup.RETRY) Files.createDirectory(file)
                 val set =

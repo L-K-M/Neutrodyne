@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.di
 
 import android.app.Application
 import android.os.Looper
+import android.os.StrictMode
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.WorkManager
@@ -23,11 +24,13 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import org.robolectric.util.ReflectionHelpers
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** Executes the production shell graph; the test task supplies the bundled driver's host JNI. */
@@ -35,12 +38,24 @@ import kotlin.test.assertTrue
 @Config(application = Application::class, sdk = [34])
 class AndroidStartupRecoveryTest {
     @Test
-    fun healthyStartupInstallsRefreshOnce() = checkStartup(Startup.HEALTHY)
+    fun healthyStartupInstallsRefreshOnce() = checkStartupAndPolicyRestoration(Startup.HEALTHY)
 
     @Test
-    fun failedOpenThenGateRetryInstallsRefreshOnce() = checkStartup(Startup.RETRY)
+    fun failedOpenThenGateRetryInstallsRefreshOnce() = checkStartupAndPolicyRestoration(Startup.RETRY)
+
+    private fun checkStartupAndPolicyRestoration(startup: Startup) {
+        val vmPolicy = StrictMode.getVmPolicy()
+        val threadMask = ReflectionHelpers.getField<Int>(StrictMode.getThreadPolicy(), "mask")
+
+        checkStartup(startup)
+
+        assertSame(vmPolicy, StrictMode.getVmPolicy(), "startup must restore the process-wide VM policy")
+        assertEquals(threadMask, ReflectionHelpers.getField<Int>(StrictMode.getThreadPolicy(), "mask"))
+    }
 
     private fun checkStartup(startup: Startup) {
+        val vmPolicy = StrictMode.getVmPolicy()
+        val threadPolicy = StrictMode.getThreadPolicy()
         val app: Application = RuntimeEnvironment.getApplication()
         WorkManagerTestInitHelper.initializeTestWorkManager(app)
         val graph = createGraphFactory<AndroidAppGraph.Factory>().create(app)
@@ -104,13 +119,20 @@ class AndroidStartupRecoveryTest {
                 postOpenRuns,
             )
         } finally {
-            graph.appScope.cancel()
-            // Best-effort teardown: a cleanup timeout must not replace the test's own failure.
-            runCatching { pumpUntil { graph.appScope.coroutineContext[Job]?.isCompleted != false } }
-            if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
-                graph.databaseOpener.requireDatabase().close()
+            try {
+                graph.appScope.cancel()
+                // Best-effort teardown: a cleanup timeout must not replace the test's own failure.
+                runCatching { pumpUntil { graph.appScope.coroutineContext[Job]?.isCompleted != false } }
+                if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+                    graph.databaseOpener.requireDatabase().close()
+                }
+                WorkManagerTestInitHelper.closeWorkDatabase()
+            } finally {
+                // The real debug initializer installs a fatal process-wide policy. Keep it
+                // within this fixture after its background work has stopped.
+                StrictMode.setVmPolicy(vmPolicy)
+                StrictMode.setThreadPolicy(threadPolicy)
             }
-            WorkManagerTestInitHelper.closeWorkDatabase()
         }
     }
 

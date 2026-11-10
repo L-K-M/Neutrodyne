@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.youtube.engine.YtxTestArming
 import ch.lkmc.neutrodyne.youtube.engine.YtxTransport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import okio.Buffer
 import okio.Path
 import okio.Path.Companion.toPath
@@ -227,8 +228,9 @@ class FakeEngineStore : EngineStore {
     }
 }
 
-class FakeEngineSettings : EngineSettings {
-    override val state = MutableStateFlow(EngineSettingsSnapshot())
+class FakeEngineSettings(
+    override val state: MutableStateFlow<EngineSettingsSnapshot> = MutableStateFlow(EngineSettingsSnapshot()),
+) : EngineSettings {
     val writes = mutableListOf<Pair<CompileMarker, Int>>()
     val checks = mutableListOf<Pair<Long, EngineUpdateOutcome>>()
     val heartbeats = mutableListOf<Long>()
@@ -243,7 +245,7 @@ class FakeEngineSettings : EngineSettings {
         count: Int,
     ) {
         writes += identity to count
-        state.value = state.value.copy(startFailures = count, failureIdentity = identity)
+        state.update { it.copy(startFailures = count, failureIdentity = identity) }
     }
 
     override suspend fun recordCheck(
@@ -251,12 +253,17 @@ class FakeEngineSettings : EngineSettings {
         outcome: EngineUpdateOutcome,
     ) {
         checks += atMs to outcome
-        state.value = state.value.copy(lastCheckAtMs = atMs, lastOutcome = outcome)
+        state.update { it.copy(lastCheckAtMs = atMs, lastOutcome = outcome) }
     }
 
     override suspend fun recordHeartbeat(issuedAtMs: Long) {
         heartbeats += issuedAtMs
-        state.value = state.value.copy(heartbeatAtMs = issuedAtMs)
+        state.update { it.copy(heartbeatAtMs = issuedAtMs) }
+    }
+
+    /** Test-side durable enable write; `EngineSettings` exposes no enabled setter to production. */
+    fun setEnabled(enabled: Boolean) {
+        state.update { it.copy(enabled = enabled) }
     }
 }
 
