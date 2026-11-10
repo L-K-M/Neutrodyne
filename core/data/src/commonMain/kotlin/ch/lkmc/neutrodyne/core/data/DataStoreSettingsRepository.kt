@@ -46,6 +46,12 @@ internal class DataStoreSettingsRepository(
 
     override suspend fun <T : Any> get(key: SettingKey<T>): T = store(key).get(key)
 
+    override suspend fun <T : Any> getOrThrow(key: SettingKey<T>): T =
+        when (key.file) {
+            SettingsFile.PORTABLE -> settingsStore.getOrThrow(key)
+            SettingsFile.DEVICE -> deviceSettingsStore.getOrThrow(key)
+        }
+
     override suspend fun <T : Any> set(
         key: SettingKey<T>,
         value: T,

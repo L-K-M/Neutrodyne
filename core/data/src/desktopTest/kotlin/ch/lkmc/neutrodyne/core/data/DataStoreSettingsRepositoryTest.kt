@@ -2,6 +2,9 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
@@ -12,20 +15,24 @@ import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
+import ch.lkmc.neutrodyne.core.model.settings.SyncSettingKeys
 import ch.lkmc.neutrodyne.core.testing.SettingsRepositoryContract
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import okio.IOException
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys as Appearance
@@ -83,6 +90,24 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
             val repository = repositoryOver(brokenRoot)
 
             assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableText, "x"))
+        }
+
+    @Test
+    fun anUnavailableDeviceStoreIsNotAnEmptySecurityJournal() =
+        runTest {
+            val failedStore =
+                object : DataStore<Preferences> {
+                    override val data = flow<Preferences> { throw IOException("device read failed") }
+
+                    override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+                        transform(emptyPreferences())
+                }
+            val repository = repositoryOver(root.resolve("repo-unreadable-device"), failedStore)
+
+            // Ordinary preferences remain usable with defaults, but a security journal
+            // must distinguish an absent entry from an unavailable device store.
+            assertEquals("", repository.get(SyncSettingKeys.ACCOUNT_NOTICE_STATE))
+            assertFailsWith<IOException> { repository.getOrThrow(SyncSettingKeys.ACCOUNT_NOTICE_STATE) }
         }
 
     @Test
@@ -237,14 +262,20 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
             )
         }
 
-    private fun TestScope.repositoryOver(dir: File): DataStoreSettingsRepository {
+    private fun TestScope.repositoryOver(
+        dir: File,
+        deviceDataStore: DataStore<Preferences>? = null,
+    ): DataStoreSettingsRepository {
         if (!::scope.isInitialized) {
             scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
         }
         val factory = SettingsDataStoreFactory(storagePathsFor(dir), scope, UnconfinedTestDispatcher(testScheduler))
         return DataStoreSettingsRepository(
             settingsStore = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory)),
-            deviceSettingsStore = DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+            deviceSettingsStore =
+                DataStoreBindings.deviceSettingsStore(
+                    deviceDataStore ?: DataStoreBindings.deviceDataStore(factory),
+                ),
             syncPort =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeSettingsSyncPort(),
