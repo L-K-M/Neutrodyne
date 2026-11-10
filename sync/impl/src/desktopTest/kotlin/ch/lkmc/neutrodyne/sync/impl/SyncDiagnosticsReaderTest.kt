@@ -16,6 +16,8 @@ import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
 import ch.lkmc.neutrodyne.sync.api.SyncLanGateState
 import ch.lkmc.neutrodyne.sync.api.SyncPendingCollection
+import ch.lkmc.neutrodyne.sync.api.SyncReport
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import kotlinx.coroutines.CancellationException
@@ -114,6 +116,24 @@ class SyncDiagnosticsReaderTest {
                 assertFalse(snapshot.toString().contains(PRIVATE_URL))
                 db.syncStateDao().upsert(STATE.copy(lastError = SYNC_ERROR_REVOKED))
                 assertEquals(SYNC_ERROR_REVOKED, success(reader(db, address, gate, runtime).read()).lastErrorCode)
+            }
+        }
+
+    @Test
+    fun theLatestRoundFailureSuppliesAStableErrorCodeUntilASuccess() =
+        runTest {
+            fixture { db, address, gate, runtime ->
+                val ticket = runtime.activate(STATE.diagnosticProfile(URL))
+                runtime.completed(
+                    ticket,
+                    SyncRoundSummary(SyncRoundReason.SYNC_NOW, 10, null, SyncRoundFailure.TRANSPORT, 503),
+                )
+                assertEquals("HTTP_503", success(reader(db, address, gate, runtime).read()).lastErrorCode)
+                runtime.completed(
+                    ticket,
+                    SyncRoundSummary(SyncRoundReason.SYNC_NOW, 11, SyncReport(0, 0, 0, 0, 0, 0, 0)),
+                )
+                assertNull(success(reader(db, address, gate, runtime).read()).lastErrorCode)
             }
         }
 
