@@ -459,7 +459,7 @@ class TwoClientWireTest {
                     sharePasswords = { false },
                     coordinator = credentials,
                     notices = notices,
-                    deviceNames = DeviceNames { client.devices() },
+                    deviceNames = ClientDeviceNames { client.devices() },
                 )
             engine =
                 SyncEngine(

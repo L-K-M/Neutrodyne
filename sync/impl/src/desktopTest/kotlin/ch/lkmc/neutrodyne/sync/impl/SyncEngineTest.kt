@@ -722,6 +722,55 @@ class SyncEngineTest {
         }
 
     @Test
+    fun aPulledSessionRunsTheAdoptionEvaluation() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            var evaluations = 0
+            val a = device("a", server, onSessionApplied = { evaluations++ })
+            val b = device("b", server)
+            try {
+                b.addPodcast(syncId("0b"), "https://b.example/feed", "B")
+                b.round()
+                a.round()
+
+                // B plays its own episode: the session capture pushes `episode` + `context`.
+                val bPodcast =
+                    b.db
+                        .podcastDao()
+                        .bySyncId(syncId("0b"))!!
+                        .id
+                val bEpisode = b.addEpisode(bPodcast, "g:one")
+                b.db.withWriteTransaction {
+                    b.db.playSessionDao().ensureNow(NOW)
+                    b.db
+                        .playSessionDao()
+                        .restoreSession(
+                            currentEpisodeId = bEpisode,
+                            contextType = null,
+                            contextId = null,
+                            contextOrder = ch.lkmc.neutrodyne.core.model.FeedOrder.NEWEST_FIRST,
+                            contextFilterFlags = 0,
+                            contextMediaFilter = ch.lkmc.neutrodyne.core.model.MediaFilter.ALL,
+                            contextMinSortDate = null,
+                            contextAnchorEpisodeId = null,
+                            contextAnchorSortDate = null,
+                            onlyWhenIdle = false,
+                            now = NOW,
+                        )
+                }
+                b.round()
+
+                a.round()
+                assertTrue(evaluations > 0, "a pulled session record runs the adopter after commit")
+                val raw = SyncClockStore(a.db).get("session", "current")
+                kotlin.test.assertNotNull(raw, "the pulled session is retained in sync_clock")
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
     fun overlappingRoundsKeepTheActivityFlagUntilTheLastOneEnds() {
         val activity = SyncActivityState()
         activity.begin()
@@ -745,6 +794,7 @@ class SyncEngineTest {
         val client: SyncClient,
         private val activity: SyncActivityState = SyncActivityState(),
         playback: PlaybackSyncPort = NoPlaybackSync,
+        onSessionApplied: suspend () -> Unit = {},
     ) {
         val clock = TestClock(NOW)
         val secrets = FakeSecretStore()
@@ -786,7 +836,7 @@ class SyncEngineTest {
                                 override suspend fun onDeleted(uuid: String) = Unit
                             },
                         notices = SyncNoticeBus(),
-                        deviceNames = DeviceNames { emptyList() },
+                        deviceNames = ClientDeviceNames { emptyList() },
                         sharePasswords = { false },
                         coordinator = credentials,
                     ),
@@ -820,6 +870,7 @@ class SyncEngineTest {
                 effects = effects,
                 capture = SettingsCapture(db, settingsPort, writeLocks) { true },
                 notices = SyncNoticeBus(),
+                onSessionApplied = onSessionApplied,
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)
@@ -908,6 +959,7 @@ class SyncEngineTest {
         name: String,
         server: InMemorySyncServer,
         playback: PlaybackSyncPort = NoPlaybackSync,
+        onSessionApplied: suspend () -> Unit = {},
     ): Device {
         val db = TestDb.inMemory()
         db.withWriteTransaction {
@@ -915,7 +967,7 @@ class SyncEngineTest {
                 .syncStateDao()
                 .upsert(SyncStateEntity(enabled = true, nodeId = name.padStart(16, '0'), hlc = 1L shl 16))
         }
-        return Device(db, InMemorySyncClient(server), playback = playback)
+        return Device(db, InMemorySyncClient(server), playback = playback, onSessionApplied = onSessionApplied)
     }
 
     private fun syncId(name: String): String = "00000000-0000-4000-8000-${name.padStart(12, '0')}"

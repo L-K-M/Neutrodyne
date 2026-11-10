@@ -115,6 +115,7 @@ class SyncControllerImpl(
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
     private val events: SyncEventsClient,
+    private val adopter: SessionAdopter,
     private val activity: SyncActivityState,
     private val noticeBus: SyncNoticeBus,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
@@ -142,7 +143,7 @@ class SyncControllerImpl(
     private val _heldChanges = MutableStateFlow<List<MassChangePrompt>>(emptyList())
     override val heldChanges: StateFlow<List<MassChangePrompt>> = _heldChanges.asStateFlow()
 
-    override val remoteSession = MutableStateFlow<RemoteSessionOffer?>(null)
+    override val remoteSession: StateFlow<RemoteSessionOffer?> = adopter.offer
     private val _syncing = MutableStateFlow(false)
     override val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
@@ -638,7 +639,7 @@ class SyncControllerImpl(
     }
 
     override fun dismissRemoteSession() {
-        remoteSession.value = null
+        adopter.dismiss()
     }
 
     override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
