@@ -14,6 +14,8 @@ import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
 import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
@@ -66,6 +68,15 @@ class FakeSyncController(
     val confirmations = mutableListOf<Pair<String, Boolean>>()
     val deviceLists = mutableListOf<Unit>()
     val disclosureReads = mutableListOf<Unit>()
+    val diagnosticsReads = mutableListOf<Unit>()
+
+    var diagnosticsResult: Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> =
+        Outcome.Success(SyncDiagnosticsSnapshot())
+
+    override suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> {
+        diagnosticsReads += Unit
+        return diagnosticsResult
+    }
 
     /** Scripted results; the defaults succeed (UI tests rarely exercise failures). */
     var devicesResult: Outcome<List<SyncDevice>, SyncProblem> = Outcome.Success(emptyList())
