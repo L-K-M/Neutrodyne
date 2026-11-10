@@ -176,10 +176,6 @@ class SyncControllerImpl(
      */
     private val statusMutex = Mutex()
 
-    // Own the store-write/runtime-publication span together. A delayed older completion must
-    // never overwrite a newer gate, and caller cancellation after commit cannot strand it.
-    private val preferenceMutex = Mutex()
-
     // Authorization and an admitted disconnect must not replace each other's account or token.
     private val identityMutex = Mutex()
 
