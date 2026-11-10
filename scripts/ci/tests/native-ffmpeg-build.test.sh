@@ -343,11 +343,6 @@ FAKE
     sleep 0.2
     if [ -f "$FIXTURE/pid" ] && [ -f "$FIXTURE/child" ]; then
         mgr_pid="$(cat "$FIXTURE/pid")"; child_pid="$(cat "$FIXTURE/child")"
-        # The child fixture must be reaped on every path, including the Perl
-        # fallback where only the manager was signalled.
-        if kill -0 "$child_pid" 2>/dev/null; then
-            kill "$child_pid" 2>/dev/null || true
-        fi
         if [ "$BOOTSTRAP_GNU_TIMEOUT" -eq 1 ]; then
             if kill -0 "$mgr_pid" 2>/dev/null || kill -0 "$child_pid" 2>/dev/null; then
                 t_fail "the timed-out manager left an orphan (mgr=$mgr_pid child=$child_pid)"
@@ -356,6 +351,9 @@ FAKE
                 t_ok "the timed-out manager left no orphan child"
             fi
         else
+            # The Perl fallback only signals the manager. Clean its fixture
+            # child without weakening the GNU-path orphan assertion above.
+            kill "$child_pid" 2>/dev/null || true
             t_ok "the child fixture was reaped after the timeout (Perl path)"
         fi
     else
