@@ -5,7 +5,6 @@ import android.util.Log
 import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import ch.lkmc.neutrodyne.core.common.getOrNull
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
@@ -23,6 +22,13 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.sync.SyncAddress
 import ch.lkmc.neutrodyne.core.testing.sync.canonicalSyncSnapshot
+import ch.lkmc.neutrodyne.crossdevice.CrossDevicePasswordTransfer
+import ch.lkmc.neutrodyne.crossdevice.CrossDeviceSyncBarrier
+import ch.lkmc.neutrodyne.crossdevice.awaitLinkedStatus
+import ch.lkmc.neutrodyne.crossdevice.fixtureNextRefreshAt
+import ch.lkmc.neutrodyne.crossdevice.hasLinkOrSyncResidue
+import ch.lkmc.neutrodyne.crossdevice.skippedClockRowsFailure
+import ch.lkmc.neutrodyne.crossdevice.syncRoundFailure
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.EpisodeKeys
 import ch.lkmc.neutrodyne.feeds.identity.KeyInput
@@ -31,15 +37,11 @@ import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.SyncController
-import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
-import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
-import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.impl.RawSyncRecord
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
-import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -140,12 +142,13 @@ private class CrossDevicePhaseRunner(
         } catch (failure: PhaseError) {
             writeResult(result(runId, phase, ok = false, error = failure.safeMessage, payload = safeCounts()))
             Log.i(TAG, "phase=$phase ok=false error=${failure.safeMessage}")
-            throw AssertionError(failure.safeMessage, failure)
+            // No cause: test runners print causes, and a raw failure can carry payloads.
+            throw AssertionError(failure.safeMessage)
         } catch (failure: Throwable) {
             val safe = PhaseError("phase", failure::class.simpleName ?: "failure")
             writeResult(result(runId, phase, ok = false, error = safe.safeMessage, payload = safeCounts()))
             Log.i(TAG, "phase=$phase ok=false error=${safe.safeMessage}")
-            throw AssertionError(safe.safeMessage, failure)
+            throw AssertionError(safe.safeMessage)
         }
     }
 
@@ -297,13 +300,8 @@ private class CrossDevicePhaseRunner(
         ) {
             throw PhaseError("seed", "existing non-fixture library or sync state")
         }
-        if (syncState != null &&
-            (
-                syncState.enabled || syncState.linkedAt != null || syncState.serverUrl != null ||
-                    syncState.deviceId != null
-            )
-        ) {
-            throw PhaseError("seed", "existing non-fixture link state")
+        if (syncState.hasLinkOrSyncResidue()) {
+            throw PhaseError("seed", "existing non-fixture link or sync state")
         }
 
         db.withWriteTransaction {
@@ -323,7 +321,7 @@ private class CrossDevicePhaseRunner(
                             initialFetch = false,
                             subscribedAt = T_BASE,
                             guidCoverageSince = T_BASE,
-                            nextRefreshAt = T_BASE + REFRESH_FAR_FUTURE_MS,
+                            nextRefreshAt = fixtureNextRefreshAt(System.currentTimeMillis()),
                         ),
                     )
                 }
@@ -459,8 +457,9 @@ private class CrossDevicePhaseRunner(
     /**
      * The real first-link flow: `startLink(PASSWORD)` -> loopback `confirmInsecure` ->
      * `submitPassword` -> `chooseFirstLink(MERGE)`. The actual `LinkState` machine drives the
-     * answers; no token or profile row is inserted directly, and the password `CharArray` is
-     * cleared after use.
+     * answers; no token or profile row is inserted directly. The controller clears the array it
+     * is given in its asynchronous login, so the driver transfers an independent copy and clears
+     * only its own array; the linked status is awaited boundedly.
      */
     private suspend fun link(
         graph: ch.lkmc.neutrodyne.di.AndroidAppGraph,
@@ -470,9 +469,7 @@ private class CrossDevicePhaseRunner(
         requireOwnership(config.runId, "link")
         val controller = graph.syncController
         val state = db.syncStateDao().get()
-        if (state != null &&
-            (state.enabled || state.linkedAt != null || state.serverUrl != null || state.deviceId != null)
-        ) {
+        if (state.hasLinkOrSyncResidue()) {
             throw PhaseError("link", "device is already configured or linked")
         }
         if (controller.link?.state?.value != LinkState.Address) {
@@ -480,7 +477,9 @@ private class CrossDevicePhaseRunner(
         }
 
         val password = config.password.toCharArray()
+        var transfer: CrossDevicePasswordTransfer? = null
         var passwordSubmitted = false
+        var submittedAtMs = 0L
         var mergeChosen = false
         try {
             controller.startLink(config.serverUrl, LinkMethod.PASSWORD)
@@ -500,13 +499,27 @@ private class CrossDevicePhaseRunner(
 
                     is LinkState.AwaitingInput -> {
                         if (passwordSubmitted) {
-                            throw PhaseError("link", "link returned to AwaitingInput after submitPassword")
-                        }
-                        passwordSubmitted = true
-                        try {
-                            controller.submitPassword(config.username, password)
-                        } finally {
-                            password.fill('\u0000')
+                            // The controller launches its login asynchronously; give a slow
+                            // dispatch the grace period to leave AwaitingInput before treating
+                            // the state as a synchronous rejection.
+                            if (System.currentTimeMillis() - submittedAtMs >= SUBMISSION_GRACE_MS) {
+                                transfer?.close()
+                                throw PhaseError("link", "link returned to AwaitingInput after submitPassword")
+                            }
+                        } else {
+                            passwordSubmitted = true
+                            submittedAtMs = System.currentTimeMillis()
+                            val submission = CrossDevicePasswordTransfer(password)
+                            transfer = submission
+                            try {
+                                controller.submitPassword(config.username, submission.array)
+                            } catch (failure: Throwable) {
+                                submission.close()
+                                throw failure
+                            }
+                            // The controller owns the transfer from here; it clears the copy in
+                            // its login coroutine. Only the driver-owned original is cleared.
+                            submission.launched()
                         }
                     }
 
@@ -537,8 +550,9 @@ private class CrossDevicePhaseRunner(
             password.fill('\u0000')
         }
 
-        val status = controller.status.value
-        if (status !is SyncStatus.Linked) {
+        // `beginMerge` publishes `LinkState.Linked` before the asynchronous status refresh;
+        // wait boundedly for the linked status instead of failing in that window.
+        if (!awaitLinkedStatus(controller.status, STATUS_TIMEOUT_MS, POLL_MS, System::nanoTime) { delay(it) }) {
             throw PhaseError("link", "link did not reach the linked status")
         }
         return buildJsonObject {
@@ -762,10 +776,11 @@ private class CrossDevicePhaseRunner(
     // --- sync -----------------------------------------------------------------------------------
 
     /**
-     * A real `SyncController.syncNow()` round. The baseline is armed before the call and the
-     * completion barrier is a new `SYNC_NOW` round summary in the local diagnostics, so an empty
-     * outbox cannot pass without an RPC: a round that never ran leaves no summary. A failed,
-     * revoked or clock-skewed round fails the phase.
+     * A real `SyncController.syncNow()` round. The identity baseline is armed before the call,
+     * after any prior round is idle, and the completion barrier is a fresh `SYNC_NOW` round
+     * summary in the local diagnostics, so a preexisting summary cannot certify the round that is
+     * about to run and an empty outbox cannot pass without an RPC. A failed, rejected, revoked or
+     * clock-blocked round fails the phase.
      */
     private suspend fun sync(
         graph: ch.lkmc.neutrodyne.di.AndroidAppGraph,
@@ -780,29 +795,26 @@ private class CrossDevicePhaseRunner(
         }
         // The controller publishes its status from an async refresh on creation; give a linked
         // install the bounded time it needs before declaring the device not linked.
-        val statusDeadline = System.nanoTime() + STATUS_TIMEOUT_MS * 1_000_000
-        while (controller.status.value !is SyncStatus.Linked) {
-            if (System.nanoTime() >= statusDeadline) {
-                throw PhaseError("sync", "device is not linked")
-            }
-            delay(POLL_MS)
+        if (!awaitLinkedStatus(controller.status, STATUS_TIMEOUT_MS, POLL_MS, System::nanoTime) { delay(it) }) {
+            throw PhaseError("sync", "device is not linked")
         }
 
-        val startMs = System.currentTimeMillis()
-        controller.syncNow()
-        val round = awaitSyncNowRound(controller, startMs)
-        if (round.failure != null) {
-            throw PhaseError(
-                "sync",
-                "round failed: ${round.failure} (${round.protocolCode ?: "no code"})",
-            )
+        // Arm the identity baseline before `syncNow`, after any prior round is idle, so a
+        // preexisting `SYNC_NOW` summary cannot certify the round that is about to run.
+        val barrier = CrossDeviceSyncBarrier(controller, SYNC_TIMEOUT_MS, POLL_MS, System::nanoTime) { delay(it) }
+        val armFailure = barrier.arm()
+        if (armFailure != null) {
+            throw PhaseError("sync", armFailure)
         }
+        val round =
+            barrier.syncNowAndAwait()
+                ?: throw PhaseError("sync", "no SYNC_NOW round completed within ${SYNC_TIMEOUT_MS}ms")
         val report =
             round.report
                 ?: throw PhaseError("sync", "round finished without a report")
-        val lastError = db.syncStateDao().get()?.lastError
-        if (lastError == SYNC_ERROR_REVOKED || lastError == SyncErrorCode.CLOCK_SKEW.wire) {
-            throw PhaseError("sync", "link is revoked or clock-skewed")
+        val failure = syncRoundFailure(round, controller.status.value, db.syncStateDao().get()?.lastError)
+        if (failure != null) {
+            throw PhaseError("sync", failure)
         }
         return buildJsonObject {
             put(
@@ -819,33 +831,6 @@ private class CrossDevicePhaseRunner(
                 },
             )
             put("counts", counts(db))
-        }
-    }
-
-    private suspend fun awaitSyncNowRound(
-        controller: SyncController,
-        startMs: Long,
-    ): SyncRoundSummary {
-        val deadline = System.nanoTime() + SYNC_TIMEOUT_MS * 1_000_000
-        var observed = 0
-        while (true) {
-            val snapshot = controller.diagnostics().getOrNull()
-            if (snapshot != null) {
-                observed = snapshot.rounds.size
-                val candidate =
-                    snapshot.rounds.lastOrNull {
-                        it.reason == SyncRoundReason.SYNC_NOW &&
-                            it.completedAtMs >= startMs - CLOCK_TOLERANCE_MS
-                    }
-                if (candidate != null) return candidate
-            }
-            if (System.nanoTime() >= deadline) {
-                throw PhaseError(
-                    "sync",
-                    "no SYNC_NOW round completed within ${SYNC_TIMEOUT_MS}ms (rounds=$observed)",
-                )
-            }
-            delay(POLL_MS)
         }
     }
 
@@ -876,6 +861,12 @@ private class CrossDevicePhaseRunner(
             } catch (_: Exception) {
                 skippedClockRows++
             }
+        }
+        // A malformed row silently removes a record from the canonical wire state the host
+        // compares, so the phase must fail rather than report a partial dump.
+        val dumpFailure = skippedClockRowsFailure(skippedClockRows)
+        if (dumpFailure != null) {
+            throw PhaseError("dump", dumpFailure)
         }
         val snapshot =
             try {
@@ -1264,10 +1255,8 @@ private const val TAG = "CrossDeviceSync"
 private const val PODCAST_COUNT = 50
 private const val QUEUE_COUNT = 8
 private const val T_BASE = 1_730_000_000_000L
-private const val REFRESH_FAR_FUTURE_MS = 365L * 24 * 60 * 60 * 1000
 private const val POLL_MS = 50L
 private const val LINK_TIMEOUT_MS = 60_000L
 private const val SYNC_TIMEOUT_MS = 60_000L
 private const val STATUS_TIMEOUT_MS = 5_000L
-private const val CLOCK_TOLERANCE_MS = 5_000L
-private const val SYNC_ERROR_REVOKED = "Revoked"
+private const val SUBMISSION_GRACE_MS = 1_000L

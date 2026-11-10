@@ -53,14 +53,20 @@ in-progress / favourite / Up next values. Every `syncId`, group `uuid` and episo
 from `runId` plus the record key; order keys come from `OrderKey.rewrite`, so the seed is
 byte-deterministic for the host and both devices. The writes go through the production DAOs while
 `sync_state.enabled = 0`, so the capture triggers stay silent and the seed is bootstrap state.
+`nextRefreshAt` is a current-time future bound (the production `RefreshPolicy.NEVER` sentinel is
+internal to `:core:data`), so the refresh scheduler cannot run against the fixture feed; the
+identity and subscription timestamps stay on the deterministic `T_BASE`.
 
 ## Link
 
 `startLink(serverUrl, PASSWORD)` -> `confirmInsecure()` on the loopback `InsecureConnection`
 state -> `submitPassword(username, password)` -> `chooseFirstLink(MERGE)` on `ChooseFirstLink` or
 `ConfirmUpload`. The actual `LinkState` machine drives the answers; no token or profile row is
-inserted directly. The password `CharArray` is cleared after use. A typed `Failed` state or a
-timeout fails the phase.
+inserted directly. `submitPassword` launches its login asynchronously and clears the array it is
+given, so the driver transfers an independent copy and clears only its own array; a synchronous
+rejection clears the transfer. A typed `Failed` state or a timeout fails the phase. The linked
+status is awaited boundedly because `beginMerge` publishes `LinkState.Linked` before the
+asynchronous status refresh.
 
 ## Edit operations
 
@@ -85,9 +91,12 @@ The phase fails when the sequence captures no outbox row, so a broken capture pa
 ## Sync
 
 `controller.syncNow()` is armed with a diagnostics baseline before the call; the completion
-barrier is a new `SYNC_NOW` round summary. A round that never ran leaves no summary, so an empty
-outbox cannot pass without an RPC. The phase fails on a round failure (including `clock_skew`), a
-persisted `Revoked` marker, or a still-running round.
+barrier is a fresh `SYNC_NOW` round summary. The baseline is captured by object identity after
+any prior round is idle, so a preexisting summary from an earlier round cannot certify the one
+that is about to run; the production diagnostics reuse the same immutable summary objects across
+reads. The barrier waits for `syncing` to become false before accepting a round. A round with
+`rejected > 0`, a round failure (including `clock_skew`), a revoked or clock-blocked status or
+persisted marker, or a still-running round fails the phase.
 
 ## Result contract (`files/cross-device/result.json`)
 
@@ -99,7 +108,7 @@ persisted `Revoked` marker, or a still-running round.
 | `wire` | canonical accepted wire state (`canonicalSyncSnapshot().canonicalRaw()`), `auth` fields stripped |
 | `library` | materialized fixture podcasts, episodes (played/position/favourite/Up next), groups (order + members), Up next |
 | `held` | held batch summary (id, heldAt, podcast/group titles) |
-| `skippedClockRows` | malformed `sync_clock` rows skipped |
+| `skippedClockRows` | malformed `sync_clock` rows skipped; the dump phase fails when this is non-zero |
 
 The wire and library objects are canonicalized with sorted object keys; array order is preserved.
 
