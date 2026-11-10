@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.sync.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
@@ -152,9 +153,130 @@ class SyncApplierTest {
                         roundId = now,
                     )
                 assertEquals(1, result.held)
-                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1)
-                assertNull(held, "one removal of one is below the thresholds")
-                assertNotNull(db.podcastDao().bySyncId(podcastSyncId))
+                val approved =
+                    MassChangeGuard
+                        .evaluate(db, roundId = now, localPodcasts = 1)
+                        .filterIsInstance<MassChangeGuard.Verdict.Approved>()
+                        .singleOrNull()
+                assertNotNull(approved, "one removal of one is below the thresholds")
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        MassChangeGuard.apply(db, approved.batch, now)
+                    }
+                    db.syncHeldDao().delete(approved.rowId)
+                }
+                assertNull(db.podcastDao().bySyncId(podcastSyncId), "the staged removal applies")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun theGuardThresholdsKeepTheirBoundaries() {
+        // Podcasts: more than 10, or more than 20% with at least 3 removed; never `>=`.
+        assertFalse(MassChangeGuard.isMassChange(podcastCount = 10, groupCount = 0, localPodcasts = 50))
+        assertTrue(MassChangeGuard.isMassChange(podcastCount = 11, groupCount = 0, localPodcasts = 50))
+        assertFalse(MassChangeGuard.isMassChange(podcastCount = 3, groupCount = 0, localPodcasts = 15))
+        assertTrue(MassChangeGuard.isMassChange(podcastCount = 4, groupCount = 0, localPodcasts = 15))
+        assertFalse(MassChangeGuard.isMassChange(podcastCount = 2, groupCount = 0, localPodcasts = 4))
+        // Groups: more than 3.
+        assertFalse(MassChangeGuard.isMassChange(podcastCount = 0, groupCount = 3, localPodcasts = 50))
+        assertTrue(MassChangeGuard.isMassChange(podcastCount = 0, groupCount = 4, localPodcasts = 50))
+    }
+
+    @Test
+    fun aNewerLocalCaptureCancelsAStagedRemoval() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedPodcast(db, podcastSyncId)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                        roundId = now,
+                    )
+                assertEquals(1, result.held)
+
+                // The user re-subscribes before the guard settles; the pending capture's clock
+                // beats the staged removal's (10 Mass-change guard 2).
+                db.withWriteTransaction {
+                    db
+                        .syncOutboxDao()
+                        .upsert(
+                            SyncOutboxEntity(
+                                coll = "podcast",
+                                rid = podcastSyncId,
+                                field = "subscribed",
+                                hlc = clock(11).packed,
+                                nodeId = node.value,
+                                value = "true",
+                            ),
+                        )
+                }
+
+                val approved =
+                    MassChangeGuard
+                        .evaluate(db, roundId = now, localPodcasts = 1)
+                        .filterIsInstance<MassChangeGuard.Verdict.Approved>()
+                        .single()
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        MassChangeGuard.apply(db, approved.batch, now)
+                    }
+                    db.syncHeldDao().delete(approved.rowId)
+                }
+                assertNotNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "the newer local capture cancels the removal",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aNewerRemoteRevivalCancelsAStagedRemoval() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedPodcast(db, podcastSyncId)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                        roundId = now,
+                    )
+                assertEquals(1, result.held)
+
+                // A newer remote record revives the subscription before the guard settles.
+                applier.applyPage(
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "subscribed" to FieldValue(JsonPrimitive(true), clock(11).toString()),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+
+                val approved =
+                    MassChangeGuard
+                        .evaluate(db, roundId = now + 1, localPodcasts = 1)
+                        .filterIsInstance<MassChangeGuard.Verdict.Approved>()
+                        .single()
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        MassChangeGuard.apply(db, approved.batch, now)
+                    }
+                    db.syncHeldDao().delete(approved.rowId)
+                }
+                assertNotNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "the newer remote revival cancels the removal",
+                )
             } finally {
                 db.close()
             }
@@ -175,14 +297,18 @@ class SyncApplierTest {
                     }
                 assertEquals(11, applier.applyPage(removals, roundId = now).held)
 
-                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 50)
+                val held =
+                    MassChangeGuard
+                        .evaluate(db, roundId = now, localPodcasts = 50)
+                        .filterIsInstance<MassChangeGuard.Verdict.Held>()
+                        .singleOrNull()
                 assertNotNull(held)
-                assertEquals(11, held.podcasts.size)
+                assertEquals(11, held.batch.podcasts.size)
                 assertEquals(50, db.podcastDao().allForExport().size)
 
                 db.withWriteTransaction {
                     db.syncStateDao().withApplying {
-                        MassChangeGuard.keepMine(db, held, TestClock(now))
+                        MassChangeGuard.keepMine(db, held.batch, TestClock(now))
                     }
                 }
                 val outbox = db.syncOutboxDao().rows()

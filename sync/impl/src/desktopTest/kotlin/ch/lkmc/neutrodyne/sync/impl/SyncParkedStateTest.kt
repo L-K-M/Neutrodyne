@@ -940,6 +940,7 @@ class SyncParkedStateTest {
             db = db,
             client = client,
             applier = applier(db, settingsPort),
+            playback = NoPlaybackSync,
             clock = TestClock(now),
             secrets = FakeSecretStore(),
             sharePasswords = { false },
