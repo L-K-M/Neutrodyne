@@ -7,9 +7,11 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -50,7 +52,10 @@ import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 /** AC2 at the engine level: two devices converge through the shared merge rules. */
 private const val NOW = 1_800_000_000_000L
@@ -157,6 +162,211 @@ class SyncEngineTest {
                         .groupDao()
                         .membersOf(bGroup!!.id)
                         .size,
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
+    fun aRemoteUnsubscribeAndGroupDeleteBelowTheThresholdApply() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val b = device("b", server)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                a.addPodcast(syncId("0b"), "https://b.example/feed", "B")
+                a.addGroup(syncId("07"), "News")
+                a.addGroup(syncId("08"), "Other")
+                a.addMember(syncId("08"), syncId("0b"))
+                a.round()
+                b.round()
+
+                // A unsubscribes one podcast and deletes one group — below every threshold.
+                a.db.withWriteTransaction {
+                    a.db.podcastDao().deleteCascade(
+                        a.db
+                            .podcastDao()
+                            .bySyncId(syncId("0a"))!!
+                            .id,
+                        NOW,
+                    )
+                    a.db.groupDao().deleteGroup(
+                        a.db
+                            .groupDao()
+                            .groupByUuid(syncId("07"))!!
+                            .id,
+                    )
+                }
+                // The group deletion pushes once 05's 10-s undo window has passed.
+                a.clock.advanceBy(11.seconds)
+                a.round()
+                b.round()
+
+                assertNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the below-threshold unsubscribe applies",
+                )
+                assertNotNull(b.db.podcastDao().bySyncId(syncId("0b")))
+                assertNull(
+                    b.db.groupDao().groupByUuid(syncId("07")),
+                    "the below-threshold group delete applies",
+                )
+                val other = b.db.groupDao().groupByUuid(syncId("08"))
+                assertNotNull(other, "an unrelated group is untouched")
+                assertEquals(
+                    1,
+                    b.db
+                        .groupDao()
+                        .membersOf(other.id)
+                        .size,
+                )
+                assertTrue(
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
+                    "no provisional or held row remains",
+                )
+                assertTrue(
+                    b.db
+                        .syncOutboxDao()
+                        .rows()
+                        .isEmpty(),
+                    "applied removals never re-capture",
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
+    fun fourRemoteRemovalsOfFifteenStayHeldDespiteRemoteAdds() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val b = device("b", server)
+            try {
+                // The rid must stay a hex UUID: `syncId` pads the name, so only 0-9a-f is
+                // safe — anything else drops the whole change at `RecordId.fromRid`.
+                repeat(15) { i ->
+                    a.addPodcast(syncId("a$i"), "https://a.example/$i", "A$i")
+                }
+                a.round()
+                b.round()
+
+                // A unsubscribes 4 of the 15 and adds 10 more in the same push. The removals
+                // are 4/15 > 20 % of the library B starts the round with — the pull's own
+                // adds must not dilute the denominator (10 Mass-change guard 1).
+                val removed =
+                    a.db
+                        .podcastDao()
+                        .allForExport()
+                        .take(4)
+                        .map { it.syncId }
+                a.db.withWriteTransaction {
+                    removed.forEach { rid ->
+                        a.db
+                            .podcastDao()
+                            .deleteCascade(
+                                a.db
+                                    .podcastDao()
+                                    .bySyncId(rid)!!
+                                    .id,
+                                NOW,
+                            )
+                    }
+                }
+                repeat(10) { i ->
+                    a.addPodcast(syncId("e$i"), "https://e.example/$i", "E$i")
+                }
+                a.round()
+                b.round()
+
+                val held =
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .single()
+                val batch = MassChangeGuard.heldBatch(held.batch)
+                assertNotNull(batch, "4/15 removals hold despite the pull's ten adds")
+                assertEquals(4, batch.podcasts.size)
+                removed.forEach { rid ->
+                    assertNotNull(b.db.podcastDao().bySyncId(rid), "a held removal never applies")
+                }
+                assertEquals(
+                    25,
+                    b.db
+                        .podcastDao()
+                        .allForExport()
+                        .size,
+                    "the held four and the pulled ten all stay",
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
+    fun aPlayingPodcastDefersItsRemoteUnsubscribe() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val playback = FakePlaybackSyncPort()
+            val b = device("b", server, playback)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                a.addPodcast(syncId("0b"), "https://b.example/feed", "B")
+                a.round()
+                b.round()
+
+                // B is playing an episode of the podcast A is about to remove; 10 Mass-change
+                // guard 4 defers the approved removal while the loaded item plays.
+                val bPodcast = b.db.podcastDao().bySyncId(syncId("0a"))!!
+                val bEpisode = b.addEpisode(bPodcast.id, "g:playing")
+                playback.setActive(episodeId = bEpisode, isPlaying = true)
+
+                a.db.withWriteTransaction {
+                    a.db.podcastDao().deleteCascade(
+                        a.db
+                            .podcastDao()
+                            .bySyncId(syncId("0a"))!!
+                            .id,
+                        NOW,
+                    )
+                }
+                a.round()
+                b.round()
+
+                assertNotNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the playing podcast's removal defers",
+                )
+                assertNotNull(b.db.podcastDao().bySyncId(syncId("0b")))
+                assertEquals(
+                    1,
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .size,
+                    "the deferred remainder is retained",
+                )
+
+                playback.setPlaying(false)
+                b.round()
+                assertNull(
+                    b.db.podcastDao().bySyncId(syncId("0a")),
+                    "the next round applies the deferred removal",
+                )
+                assertTrue(
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .isEmpty(),
                 )
             } finally {
                 a.close()
@@ -382,6 +592,7 @@ class SyncEngineTest {
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         val client: SyncClient,
         private val activity: SyncActivityState = SyncActivityState(),
+        playback: PlaybackSyncPort = NoPlaybackSync,
     ) {
         val clock = TestClock(NOW)
         val secrets = FakeSecretStore()
@@ -409,7 +620,7 @@ class SyncEngineTest {
                         clock = clock,
                         secrets = secrets,
                         settings = settingsPort,
-                        playback = NoPlaybackSync,
+                        playback = playback,
                         syncIngestHook = SyncIngestHook.None,
                         channelSync =
                             object : GroupChannelSync {
@@ -427,6 +638,7 @@ class SyncEngineTest {
                         sharePasswords = { false },
                         coordinator = credentials,
                     ),
+                playback = playback,
                 clock = clock,
                 secrets = secrets,
                 sharePasswords = { false },
@@ -543,6 +755,7 @@ class SyncEngineTest {
     private suspend fun device(
         name: String,
         server: InMemorySyncServer,
+        playback: PlaybackSyncPort = NoPlaybackSync,
     ): Device {
         val db = TestDb.inMemory()
         db.withWriteTransaction {
@@ -550,7 +763,7 @@ class SyncEngineTest {
                 .syncStateDao()
                 .upsert(SyncStateEntity(enabled = true, nodeId = name.padStart(16, '0'), hlc = 1L shl 16))
         }
-        return Device(db, InMemorySyncClient(server))
+        return Device(db, InMemorySyncClient(server), playback = playback)
     }
 
     private fun syncId(name: String): String = "00000000-0000-4000-8000-${name.padStart(12, '0')}"

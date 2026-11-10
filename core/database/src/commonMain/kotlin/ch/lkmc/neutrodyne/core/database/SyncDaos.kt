@@ -524,6 +524,10 @@ interface SyncHeldDao {
     @Query("DELETE FROM sync_held WHERE id = :id")
     suspend fun delete(id: Long)
 
+    /** Every row at once — only the profile switch inside `authorised` calls it. */
+    @Query("DELETE FROM sync_held")
+    suspend fun deleteAll()
+
     @Query("SELECT COUNT(*) FROM sync_held")
     suspend fun count(): Int
 }

@@ -357,6 +357,7 @@ class SyncSchedulingTest {
             db = db,
             client = client,
             applier = applier,
+            playback = NoPlaybackSync,
             clock = clock,
             secrets = secrets,
             sharePasswords = { false },

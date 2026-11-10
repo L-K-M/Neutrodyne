@@ -76,6 +76,13 @@ abstract class SyncEngineEffectsDrainTestBase {
         val capture: SettingsCapture,
     )
 
+    /** The inert settler for the drain tests: `NoPlaybackSync` keeps its settle a no-op. */
+    private fun deferredSettler(
+        db: NeutrodyneDatabase,
+        h: DrainHarness,
+    ): DeferredRemovalSettler =
+        DeferredRemovalSettler(db, NoPlaybackSync, TestClock(now), h.address, SyncTokenStore(h.secrets))
+
     private fun harness(
         db: NeutrodyneDatabase,
         client: SyncClient,
@@ -108,6 +115,7 @@ abstract class SyncEngineEffectsDrainTestBase {
                 db = db,
                 client = client,
                 applier = applier(db, port, clock, secrets, credentials),
+                playback = NoPlaybackSync,
                 clock = clock,
                 secrets = secrets,
                 sharePasswords = { flags.sharePasswords },
@@ -376,6 +384,8 @@ abstract class SyncEngineEffectsDrainTestBase {
                         dev.zacsweers.metro.Provider { h.address },
                         dev.zacsweers.metro.Provider { h.effects },
                         dev.zacsweers.metro.Provider { h.capture },
+                        dev.zacsweers.metro.Provider { deferredSettler(db, h) },
+                        backgroundScope,
                     )
 
                 assertEquals(true, initializer.order in 101..199, "the drain belongs to the data band")
@@ -435,6 +445,8 @@ abstract class SyncEngineEffectsDrainTestBase {
                         dev.zacsweers.metro.Provider { h.address },
                         dev.zacsweers.metro.Provider { probe },
                         dev.zacsweers.metro.Provider { h.capture },
+                        dev.zacsweers.metro.Provider { deferredSettler(db, h) },
+                        backgroundScope,
                     )
 
                 assertFalse(h.flags.sharePasswords, "a restart left the cache at its default")
@@ -472,6 +484,8 @@ abstract class SyncEngineEffectsDrainTestBase {
                         dev.zacsweers.metro.Provider { unconfigured },
                         dev.zacsweers.metro.Provider { h.effects },
                         dev.zacsweers.metro.Provider { h.capture },
+                        dev.zacsweers.metro.Provider { deferredSettler(db, h) },
+                        backgroundScope,
                     )
 
                 initializer.run()
