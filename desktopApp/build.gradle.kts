@@ -72,6 +72,12 @@ val youtubeEngine =
         .get()
         .toBoolean()
 
+// Real graph fixtures claim the same MPRIS name on this task's session bus. They must
+// finish their native teardown before another test class creates a graph.
+tasks.named<Test>("test") {
+    maxParallelForks = 1
+}
+
 // Verify the selected variant, including command-line overrides, independently of the resource.
 tasks.withType<Test>().configureEach {
     systemProperty("neutrodyne.test.youtubeEngine", youtubeEngine.toString())

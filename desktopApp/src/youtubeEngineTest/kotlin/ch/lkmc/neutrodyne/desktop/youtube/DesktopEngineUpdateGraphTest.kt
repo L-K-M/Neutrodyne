@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.youtube
 
+import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.desktop.system.LinuxMprisSession
 import ch.lkmc.neutrodyne.youtube.ytdlpdesktop.DesktopEngineStorePaths
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Job
@@ -14,6 +16,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertThrows
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 import java.io.IOException
@@ -30,13 +33,37 @@ class DesktopEngineUpdateGraphTest {
     private val reporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
     private val graph = createDesktopGraph(dirs, buildInfo, reporter)
 
+    private var closed = false
+
     @After
-    fun tearDown() =
-        runBlocking {
+    fun tearDown() = runBlocking { closeGraph() }
+
+    private suspend fun closeGraph() {
+        if (closed) return
+        closed = true
+        try {
+            graph.osSurfaces.close()
+        } finally {
             graph.appScope.coroutineContext[Job]?.cancelAndJoin()
             if (graph.databaseOpener.openState.value is ch.lkmc.neutrodyne.core.database.DatabaseOpenState.Opened) {
                 graph.databaseOpener.requireDatabase().close()
             }
+        }
+    }
+
+    @Test
+    fun engineGraphTeardownReleasesTheMprisBusName() =
+        runBlocking {
+            val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+            assumeTrue(
+                "private Linux session bus required",
+                buildInfo.desktop?.os == DesktopOs.LINUX && address?.startsWith("unix:") == true,
+            )
+            graph.databaseOpener.awaitOpen()
+            assertThat(graph.initializers).isNotEmpty()
+            assertThat(graph.systemMediaSession).isInstanceOf(LinuxMprisSession::class.java)
+            closeGraph()
+            LinuxMprisSession.open(address).use { }
         }
 
     /**

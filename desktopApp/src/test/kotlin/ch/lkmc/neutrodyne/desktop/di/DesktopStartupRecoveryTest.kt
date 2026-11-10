@@ -124,6 +124,7 @@ class DesktopStartupRecoveryTest {
                     runnerStarts,
                 )
             } finally {
+                graph.osSurfaces.close()
                 if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
                     graph.jobRunner.stop(3.seconds)
                 }
