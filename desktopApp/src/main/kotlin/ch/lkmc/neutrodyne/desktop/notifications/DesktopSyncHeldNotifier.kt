@@ -96,6 +96,9 @@ class DesktopSyncHeldNotifier
                 // older generation's clear() leaves it alone, and never repost.
                 posted.remove(current.owner)
                 posted[owner] = current.copy(owner = owner)
+                // The adopted record describes a confirmed delivery: the new owner
+                // inherits that marker or its next identical emission reposts.
+                settled += owner
                 return@withLock
             }
             val notice = HeldNotice(owner, profile, ids)

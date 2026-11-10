@@ -276,6 +276,25 @@ class DesktopSyncHeldNotifierTest {
         }
 
     @Test
+    fun anAdoptedNoticeIsNotRepostedOnTheNextEmission() =
+        runTest {
+            val h = Harness()
+            val held = h.held
+            val o1 = held.newOwner()
+            val o2 = held.newOwner()
+            held.onSyncState(o1, LINKED, listOf(PROMPT), windowHidden = true)
+            assertThat(h.posted).hasSize(1)
+
+            // o2's first identical emission adopts the confirmed delivery; adoption
+            // must carry the confirmed-delivery marker over, or the next identical
+            // emission reposts the already-shown notice.
+            held.onSyncState(o2, LINKED, listOf(PROMPT), windowHidden = true)
+            assertThat(h.posted).hasSize(1)
+            held.onSyncState(o2, LINKED, listOf(PROMPT), windowHidden = true)
+            assertThat(h.ops).containsExactly("post:sync-held")
+        }
+
+    @Test
     fun aProfileSwitchWithdrawsAnInFlightPost() =
         runTest {
             val h = Harness()
