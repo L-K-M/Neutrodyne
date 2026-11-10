@@ -10,13 +10,18 @@
   <string name="sync_activity_syncing">Syncing…</string>
   <string name="sync_activity_live">Live updates connected</string>
   <string name="sync_what_syncs">Synced: subscriptions (including private feed links), groups and their order, played state, positions, favourites, Up next, what’s playing, podcast and group playback settings, and (with Sync playback settings) your playback defaults. Not synced: downloads and audio files, artwork, automatic downloads, storage, notifications, refresh schedule, appearance, the YouTube engine and update settings.</string>
-  <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
+  <string name="sync_reconnect">Reconnect to %1$s</string>
+  <string name="sync_reconnect_body">This copy of Neutrodyne isn't linked yet. Nothing has been synced since it was restored or copied.</string>
   <string name="sync_finish_link">Finish linking to %1$s.</string>
   <string name="sync_revoked">This device was unlinked from %1$s.</string>
   <string name="sync_server_address">Server address</string>
   <string name="sync_run_server">How to run a server</string>
   <string name="sync_reconnect_action">Reconnect</string>
   <string name="sync_link_again">Link again</string>
+  <string name="sync_forget_server">Forget server</string>
+  <string name="sync_forget_stale">The saved link changed while the server was being forgotten. Nothing was cleared; check the status above.</string>
+  <string name="sync_forget_failed">The server couldn't be forgotten. The saved sync data is unchanged.</string>
+  <string name="sync_forget_unexpected">Something went wrong while forgetting the server. Check the status above, then try again.</string>
 
   <string name="sync_setup_title">Link a device</string>
   <string name="sync_setup_address_hint">sync.example.org</string>
@@ -151,4 +156,39 @@
   <string name="sync_devices_empty">No devices are linked.</string>
   <string name="sync_devices_manage_link">You can also manage devices on %1$s</string>
   <string name="sync_device_menu">Device actions</string>
+
+  <!-- Sync diagnostics (08 Sync diagnostics, 10 Diagnostics). -->
+  <string name="sync_diagnostics_row">Diagnostics</string>
+  <string name="sync_diag_title">Sync diagnostics</string>
+  <string name="sync_diag_refresh">Refresh</string>
+  <string name="sync_diag_copied">Diagnostics copied</string>
+  <string name="sync_diag_unavailable">Sync diagnostics could not be loaded. Try again.</string>
+  <string name="sync_diag_unknown">Unknown</string>
+  <string name="sync_diag_section_server">Server</string>
+  <string name="sync_diag_section_sync">Sync</string>
+  <string name="sync_diag_section_rounds">Rounds</string>
+  <string name="sync_diag_server_version">Server version</string>
+  <string name="sync_diag_protocol">Protocol</string>
+  <string name="sync_diag_account">Account</string>
+  <string name="sync_diag_device">This device</string>
+  <string name="sync_diag_lan">Local network</string>
+  <string name="sync_diag_last_sync">Last sync</string>
+  <string name="sync_diag_clock_offset">Clock offset</string>
+  <string name="sync_diag_stream">Live connection</string>
+  <string name="sync_diag_reconnects">Reconnects</string>
+  <string name="sync_diag_last_error">Last error</string>
+  <string name="sync_diag_cursor">Cursor</string>
+  <string name="sync_diag_parked">Parked changes</string>
+  <string name="sync_diag_held">Held changes</string>
+  <string name="sync_diag_pending">Pending changes</string>
+  <string name="sync_diag_last_round">Last round</string>
+  <string name="sync_diag_rounds_empty">No rounds recorded yet</string>
+  <string name="sync_diag_collection_podcast">Podcasts</string>
+  <string name="sync_diag_collection_group">Groups</string>
+  <string name="sync_diag_collection_member">Members</string>
+  <string name="sync_diag_collection_episode">Episodes</string>
+  <string name="sync_diag_collection_upnext">Up next</string>
+  <string name="sync_diag_collection_session">Session</string>
+  <string name="sync_diag_collection_setting">Settings</string>
+  <string name="sync_diag_collection_other">Other</string>
 </resources>

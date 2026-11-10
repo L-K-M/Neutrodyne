@@ -50,6 +50,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
 import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
@@ -67,6 +68,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_name_label
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_renamed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices_linked
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_diagnostics_row
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_expanded
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_this_device
@@ -83,6 +85,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_playback_settings_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_pref_save_failed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect_action
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_rename_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_revoked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_run_server
@@ -112,7 +115,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
  * entry affordance pushes `SyncSetupKey`: with the typed address while unconfigured, with the
  * known `serverUrl` for `Reconnect`, `LinkUnfinished` (which resumes whatever step the existing
  * `LinkFlow` holds — it is never cancelled or restarted here) and `Revoked`. `Linked` stays
- * read-only for linking: a replacement link is the separate confirmed unlink flow.
+ * read-only for linking: a replacement link is the separate confirmed unlink flow. The
+ * `Reconnect` and `Revoked` cards additionally offer the local-only "Forget server" clear
+ * ([ForgetServerAction]).
  */
 @Composable
 fun SyncSettingsScreen(
@@ -175,15 +180,26 @@ fun SyncSettingsScreen(
                                 host = hostOf(current.serverUrl),
                                 onDevices = { navigator.push(SyncDevicesKey) },
                                 onApprove = { navigator.push(SyncApproveKey()) },
+                                onDiagnostics = { navigator.push(SyncDiagnosticsKey) },
                             )
                         }
                     }
                 }
 
                 is SyncStatus.Reconnect -> {
-                    Text(stringResource(Res.string.sync_reconnect, current.serverUrl))
+                    Text(
+                        stringResource(Res.string.sync_reconnect, hostOf(current.serverUrl)),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(Res.string.sync_reconnect_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     Button(onClick = { navigator.push(SyncSetupKey(current.serverUrl)) }) {
                         Text(stringResource(Res.string.sync_reconnect_action))
+                    }
+                    key(current) {
+                        ForgetServerAction(controller, current)
                     }
                 }
 
@@ -195,9 +211,12 @@ fun SyncSettingsScreen(
                 }
 
                 is SyncStatus.Revoked -> {
-                    Text(stringResource(Res.string.sync_revoked, current.serverUrl))
+                    Text(stringResource(Res.string.sync_revoked, hostOf(current.serverUrl)))
                     Button(onClick = { navigator.push(SyncSetupKey(current.serverUrl)) }) {
                         Text(stringResource(Res.string.sync_link_again))
+                    }
+                    key(current) {
+                        ForgetServerAction(controller, current)
                     }
                 }
             }
@@ -266,6 +285,7 @@ private fun ColumnScope.LinkedSection(
     host: String,
     onDevices: () -> Unit,
     onApprove: () -> Unit,
+    onDiagnostics: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHost.current
@@ -437,6 +457,11 @@ private fun ColumnScope.LinkedSection(
     }
 
     DisconnectActions(controller, identity, host)
+
+    ListItem(
+        headlineContent = { Text(stringResource(Res.string.sync_diagnostics_row)) },
+        modifier = Modifier.clickable(onClick = onDiagnostics),
+    )
 
     when (dialog) {
         LinkedDialog.RenameSelf -> {

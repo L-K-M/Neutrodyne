@@ -64,6 +64,9 @@ interface SyncController {
 
     fun syncNow()
 
+    /** Local diagnostics; no sync RPC or credential access. */
+    suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError>
+
     /** Approves nothing yet; returns the device the code names (10 Link methods). */
     suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem>
 
@@ -77,6 +80,18 @@ interface SyncController {
     suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem>
 
     suspend fun unlink(): Outcome<Unit, SyncProblem>
+
+    /**
+     * "Forget server" (08 Settings › Sync, the `Reconnect` and `Revoked` cards): clears the
+     * stored server address and username plus the local link residue — sync scheduling, capture
+     * and the events stream stop, the link's token, staged auth snapshots and `sync_*`
+     * bookkeeping go with it; the library and every device preference stay. Never contacts the
+     * server: no push, logout or purge runs. An action admitted against a since-replaced or
+     * no-longer-disconnected profile fails with [ForgetServerError.StaleLink] instead of
+     * clearing a newer link; a failed settings write keeps both stored values and never reports
+     * `NotConfigured`.
+     */
+    suspend fun forgetServer(): Outcome<Unit, ForgetServerError>
 
     suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem>
 

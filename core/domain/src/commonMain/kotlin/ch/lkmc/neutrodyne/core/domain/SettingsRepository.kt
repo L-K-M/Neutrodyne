@@ -36,6 +36,16 @@ interface SettingsRepository {
     suspend fun reset(key: SettingKey<*>)
 
     /**
+     * Removes every key's stored value in one atomic commit of their shared file, so reads fall
+     * back to each [SettingKey.default]; all keys must belong to the same
+     * [ch.lkmc.neutrodyne.core.model.settings.SettingsFile]. Each key goes through the same write
+     * lock and sync-capture pipeline as [reset]: a synced key's intent and receipt still commit
+     * with its removal. A failed write leaves every stored value intact and fails with
+     * [SettingsError.WriteFailed].
+     */
+    suspend fun resetAll(keys: List<SettingKey<*>>): Outcome<Unit, SettingsError>
+
+    /**
      * Every portable key of [ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys] with its
      * current value (defaults included), for 05's backup whitelist export. Never contains
      * `DEVICE` keys.

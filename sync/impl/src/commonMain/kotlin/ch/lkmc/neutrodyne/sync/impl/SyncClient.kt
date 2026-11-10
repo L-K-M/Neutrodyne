@@ -128,7 +128,7 @@ interface SyncClient {
 }
 
 /** A [SyncClient] failure with the server's status and problem code (10 Errors). */
-class SyncTransportException(
+open class SyncTransportException(
     val status: Int,
     val code: String?,
     message: String,

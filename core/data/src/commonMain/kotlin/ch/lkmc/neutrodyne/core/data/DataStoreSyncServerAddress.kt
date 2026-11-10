@@ -45,6 +45,9 @@ internal class DataStoreSyncServerAddress(
         }
     }
 
+    override suspend fun clearServerIdentity(): Outcome<Unit, SettingsError> =
+        settings.resetAll(listOf(SyncSettingKeys.SERVER_URL, SyncSettingKeys.USERNAME))
+
     override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SettingsError> =
         settings.set(SyncSettingKeys.SHARE_FEED_PASSWORDS, enabled)
 

@@ -141,6 +141,10 @@ abstract class SyncOutboxDao(
     @Query("SELECT COUNT(*) FROM sync_outbox")
     abstract suspend fun count(): Int
 
+    /** Diagnostics count rows without loading record IDs or values. No schema change. */
+    @Query("SELECT coll, COUNT(*) AS count FROM sync_outbox GROUP BY coll ORDER BY coll")
+    abstract suspend fun pendingCounts(): List<SyncOutboxCount>
+
     @Query("SELECT * FROM sync_outbox WHERE coll = :coll AND rid = :rid AND field = :field")
     abstract suspend fun get(
         coll: String,

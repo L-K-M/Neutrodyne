@@ -59,7 +59,7 @@ object SyncBindings {
             gate,
             identity,
             scope,
-            onRevoked = { controller().passwordNoticeTokenRejected(it) },
+            onRevoked = { controller().markRevoked(it) },
         )
 
     /** 10 Now playing and handoff: the card's writer-name lookup rides the account client. */
@@ -172,6 +172,7 @@ object SyncBindings {
         adopter: SessionAdopter,
         merger: Provider<FirstLinkMerger>,
         identity: SyncIdentityLock,
+        diagnosticsRuntime: SyncRuntimeDiagnostics,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -194,6 +195,7 @@ object SyncBindings {
             refreshPreferences = { flags.refreshFromStore(address) },
             recoverExpiredCursor = { expected, scoped -> merger().resyncForRound(expected, scoped) },
             identity = identity,
+            diagnosticsRuntime = diagnosticsRuntime,
         )
 
     /**
@@ -253,6 +255,8 @@ object SyncBindings {
         network: NetworkMonitor,
         @ApplicationScope scope: CoroutineScope,
         scheduler: SyncScheduler,
+        diagnosticsRuntime: SyncRuntimeDiagnostics,
+        identityMutex: SyncIdentityLock,
     ): SyncEventsClient =
         SyncEventsClient(
             db = db,
@@ -264,6 +268,8 @@ object SyncBindings {
             scope = scope,
             onRemoteChanged = { scheduler.onRemoteChanged() },
             onRevoked = { scheduler.onUnlinked() },
+            diagnosticsRuntime = diagnosticsRuntime,
+            identityMutex = identityMutex,
         )
 
     /**

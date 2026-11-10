@@ -10,9 +10,12 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
@@ -27,6 +30,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
 import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.testing.FakeLinkFlow
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
@@ -249,6 +253,36 @@ class SyncSettingsEntryTest {
                 harness.navigator.calls,
             )
             assertTrue(harness.controller.startLinks.isEmpty(), "approval must not start a replacement link")
+        }
+
+    @Test
+    fun aLinkedDeviceOpensDiagnosticsFromTheRow() =
+        runComposeUiTest {
+            val harness =
+                Harness(
+                    SyncStatus.Linked(
+                        serverUrl = "https://sync.example.org",
+                        accountId = "acc",
+                        deviceId = "dev",
+                        username = "anna",
+                        nodeId = "node",
+                        lastSyncAtMs = null,
+                        activity = SyncActivity.IDLE,
+                        problem = null,
+                    ),
+                )
+            setSyncPage(harness)
+
+            // The Diagnostics row closes the linked section — the screen scrolls to it.
+            onNode(hasScrollAction()).performScrollToNode(hasText("Diagnostics"))
+            onNodeWithText("Diagnostics").performClick()
+            waitForIdle()
+
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(SyncDiagnosticsKey)),
+                harness.navigator.calls,
+            )
+            assertTrue(harness.controller.diagnosticsReads.isEmpty(), "the row only routes; it never reads")
         }
 
     private fun assertUntouched(harness: Harness) {

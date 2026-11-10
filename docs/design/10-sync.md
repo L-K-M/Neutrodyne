@@ -1142,6 +1142,21 @@ responses cannot mutate a replacement link. Authorisation disables capture
 and records the new pending identity before saving its token or address. A
 partial credential write therefore leaves sync disabled and retains the
 local library instead of running the old account with new credentials.
+Direct control requests capture the same credentials and identity. A late 401
+can revoke only its owning link, including cleanup after the engine has already
+marked that link revoked. First-link merges also hold the identity lock until
+all their writes and cancellation cleanup finish. The event stream uses the
+same ownership check for its credential snapshot, remote-change signal and
+401 cleanup. A stable link identity change replaces the open stream even
+when both accounts are linked. Pending authorization closes the old stream;
+its own gate cancellation cannot interrupt committed revocation cleanup.
+
+After successful authentication to a different server or account, the pending
+profile starts with empty clock, outbox, parked and held tables and resets its
+HLC namespace and offset. Visible library rows remain for the explicit merge
+choice to seed under the new identity. Reauthentication to the same server and
+account retains its accepted clocks and pending writes; a failed password
+attempt never clears them.
 
 ### Local-network gate
 
