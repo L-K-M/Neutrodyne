@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
+import kotlinx.coroutines.flow.first
 
 /**
  * The device-bound store wrapping `device_settings.preferences_pb` (01 DataStore files and typed
@@ -17,6 +18,12 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 class DeviceSettingsStore internal constructor(
     private val dataStore: DataStore<Preferences>,
 ) : SettingStore by SettingStoreImpl(SettingsFile.DEVICE, dataStore) {
+    /** Security bookkeeping must distinguish an absent key from an unavailable file. */
+    suspend fun <T : Any> getOrThrow(key: SettingKey<T>): T {
+        require(key.file == SettingsFile.DEVICE) { "'${key.name}' is not a device key" }
+        return SettingPreferences.read(dataStore.data.first(), key)
+    }
+
     /**
      * Removes every key's stored value in one atomic commit — the device file's counterpart of
      * [SettingsStore.resetAll]. Device keys are never synced, so there are no write receipts.

@@ -29,6 +29,39 @@ import okio.Path.Companion.toPath
 @ContributesTo(AppScope::class)
 @BindingContainer
 object SyncBindings {
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncNoticeBus(startup: Provider<SyncPasswordNotices>): SyncNoticeBus = SyncNoticeBus { startup().notices }
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun passwordNotices(
+        db: NeutrodyneDatabase,
+        client: SyncClient,
+        address: SyncServerAddress,
+        tokens: SyncTokenStore,
+        settings: ch.lkmc.neutrodyne.core.domain.SettingsRepository,
+        clock: Clock,
+        network: NetworkMonitor,
+        gate: LocalNetworkGate,
+        identity: SyncIdentityLock,
+        @ApplicationScope scope: CoroutineScope,
+        controller: Provider<SyncControllerImpl>,
+    ): SyncPasswordNotices =
+        SyncPasswordNotices(
+            db,
+            client,
+            address,
+            tokens,
+            settings,
+            clock,
+            network,
+            gate,
+            identity,
+            scope,
+            onRevoked = { controller().markRevoked(it) },
+        )
+
     /** 10 Now playing and handoff: the card's writer-name lookup rides the account client. */
     @Provides
     @SingleIn(AppScope::class)

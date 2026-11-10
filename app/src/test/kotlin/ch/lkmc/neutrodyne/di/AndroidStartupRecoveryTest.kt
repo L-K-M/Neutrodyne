@@ -186,6 +186,9 @@ class AndroidStartupRecoveryTest {
                 "PeriodicRefreshInitializer",
                 "SyncSchedulingInitializer",
                 "RefreshForegroundObserverInitializer",
+                // 10 Scheduling on Android's held-batch notice: the collector resolves
+                // `SyncController` at 230, which reaches the opened database.
+                "SyncHeldNotifier",
             )
     }
 }

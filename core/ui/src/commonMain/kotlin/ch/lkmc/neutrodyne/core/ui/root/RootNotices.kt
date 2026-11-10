@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdOutlinedButton
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.dismiss
 import ch.lkmc.neutrodyne.core.ui.resources.group_count
@@ -32,6 +33,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
 import ch.lkmc.neutrodyne.core.ui.resources.remote_session_detail
 import ch.lkmc.neutrodyne.core.ui.resources.remote_session_title
 import ch.lkmc.neutrodyne.core.ui.resources.review
+import ch.lkmc.neutrodyne.core.ui.resources.sync_not_now
+import ch.lkmc.neutrodyne.core.ui.resources.sync_reconnect_action
+import ch.lkmc.neutrodyne.core.ui.resources.sync_reconnect_message
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -46,9 +50,11 @@ internal fun RootBanners(
     actions: RootActions,
     navigator: AppNavigator,
     onFeedsOrLibrary: Boolean,
+    onLibrary: Boolean = false,
     importResume: @Composable (available: Boolean) -> Boolean = { false },
 ) {
     val held = state.heldChanges
+    val reconnect = state.reconnect
     if (held != null && onFeedsOrLibrary) {
         val device = held.deviceName ?: stringResource(Res.string.held_changes_unknown_device)
         // The counts are real plurals so e.g. "1 podcast" reads correctly in every locale.
@@ -64,7 +70,31 @@ internal fun RootBanners(
         )
     }
 
-    val shown = if (held != null && onFeedsOrLibrary) 1 else 0
+    // Priority 4: the reconnect banner is Library-only (08). "Not now" hides this exact profile
+    // for the process run; "Reconnect" checks the live status before pushing the setup key.
+    if (reconnect != null && onLibrary) {
+        NdBanner(
+            message = stringResource(Res.string.sync_reconnect_message, reconnect.host),
+            primary =
+                NdDialogAction(
+                    label = stringResource(Res.string.sync_reconnect_action),
+                    onClick = {
+                        if (actions.isReconnectTargetLive(reconnect)) {
+                            navigator.push(SyncSetupKey(reconnect.serverUrl))
+                        }
+                    },
+                ),
+            secondary =
+                NdDialogAction(
+                    label = stringResource(Res.string.sync_not_now),
+                    onClick = { actions.dismissReconnect(reconnect) },
+                ),
+        )
+    }
+
+    val shown =
+        (if (held != null && onFeedsOrLibrary) 1 else 0) +
+            (if (reconnect != null && onLibrary) 1 else 0)
     val hasImport = importResume(shown < MAX_BANNERS)
     if (onFeedsOrLibrary && state.notice == RootNotice.FIRST_RUN_CHOICE &&
         shown + (if (hasImport) 1 else 0) < MAX_BANNERS
