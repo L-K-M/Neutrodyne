@@ -51,6 +51,7 @@ import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.desktop.system.LinuxMprisSession
 import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
@@ -75,6 +76,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
@@ -95,9 +97,17 @@ class DesktopAppGraphTest {
     fun tearDown() = runBlocking { closeGraph() }
 
     private suspend fun closeGraph() {
-        graph.appScope.coroutineContext[Job]?.cancelAndJoin()
-        if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
-            graph.databaseOpener.requireDatabase().close()
+        // Production shutdown closes the OS surfaces before the scope (DesktopShell's
+        // stopServices). The graph's LinuxMprisSession owns org.mpris.MediaPlayer2.neutrodyne
+        // on CI's single session bus, so a leaked graph blocks :desktop:system's MPRIS tests.
+        // Surface close is idempotent; scope and database cleanup still run afterward.
+        try {
+            graph.osSurfaces.close()
+        } finally {
+            graph.appScope.coroutineContext[Job]?.cancelAndJoin()
+            if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+                graph.databaseOpener.requireDatabase().close()
+            }
         }
     }
 
@@ -564,6 +574,27 @@ class DesktopAppGraphTest {
         assertThat(orders.getValue("DesktopOsSurfacesInitializer"))
             .isLessThan(orders.getValue("DesktopPlaybackInitializer"))
     }
+
+    /**
+     * 11 Linux MPRIS: the graph's teardown must release the fixed bus name. CI's unit job
+     * shares one session bus between `:desktopApp:test` and `:desktop:system:test`, and a
+     * graph that leaks its `LinuxMprisSession` blocks every `LinuxMprisSessionTest`
+     * registration (the 2026-11-10 seven-failure run). The graph's session is asserted
+     * real first, so the test cannot pass on the documented Unavailable fallback. Skipped
+     * where no private session bus exists (macOS/Windows).
+     */
+    @Test
+    fun graphTeardownReleasesTheMprisBusName() =
+        runBlocking {
+            val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+            assumeTrue(
+                "private session bus required",
+                buildInfo.desktop?.os == DesktopOs.LINUX && address?.startsWith("unix:") == true,
+            )
+            assertThat(graph.systemMediaSession).isInstanceOf(LinuxMprisSession::class.java)
+            closeGraph()
+            LinuxMprisSession.open(address).use { }
+        }
 
     /** The same keys as `app/src/test/.../AndroidAppGraphTest` (01 Graph tests rule 11). */
     @Test

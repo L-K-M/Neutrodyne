@@ -96,6 +96,49 @@ def _java() -> str | None:
 
 
 class PreserveDesktopTestCrashesTest(unittest.TestCase):
+    def test_both_unit_commands_run_and_either_failure_fails_the_step(self):
+        block = _step_block((ROOT / WORKFLOW).read_text(), UNIT_STEP)
+        self.assertIsNotNone(block)
+        script = _run_script(block)
+        self.assertIsNotNone(script)
+        for aggregate, mpris in ((0, 0), (9, 0), (0, 7)):
+            with self.subTest(aggregate=aggregate, mpris=mpris), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                dbus = bin_dir / "dbus-run-session"
+                dbus.write_text('#!/bin/sh\n[ "$1" = "--" ] && shift\nexec "$@"\n')
+                dbus.chmod(0o755)
+                gradlew = root / "gradlew"
+                gradlew.write_text(
+                    '#!/bin/sh\n'
+                    'if [ "$1" = ":desktop:system:test" ]; then\n'
+                    '  echo mpris >> "$NEUTRODYNE_TEST_CALLS"\n'
+                    '  exit "$NEUTRODYNE_TEST_MPRIS_EXIT"\n'
+                    'fi\n'
+                    'echo aggregate >> "$NEUTRODYNE_TEST_CALLS"\n'
+                    'exit "$NEUTRODYNE_TEST_AGGREGATE_EXIT"\n'
+                )
+                gradlew.chmod(0o755)
+                calls = root / "calls.txt"
+                env = {
+                    **os.environ,
+                    "TMPDIR": str(root / "tmp"),
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                    "NEUTRODYNE_TEST_CALLS": str(calls),
+                    "NEUTRODYNE_TEST_AGGREGATE_EXIT": str(aggregate),
+                    "NEUTRODYNE_TEST_MPRIS_EXIT": str(mpris),
+                }
+                result = subprocess.run(
+                    ["bash", "-euo", "pipefail", "-c", script],
+                    cwd=root, env=env, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(["aggregate", "mpris"], calls.read_text().splitlines())
+                if aggregate or mpris:
+                    self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                else:
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     def test_failed_unit_command_still_preserves_the_crash_report(self):
         java = _java()
         if java is None:
