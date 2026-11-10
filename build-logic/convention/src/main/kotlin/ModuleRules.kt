@@ -70,6 +70,7 @@ internal fun Project.configureModuleGraphAssert() {
                 ":sync:impl -> :sync:(api|protocol)",
                 ":sync:impl -> :core:(domain|model|common|database|datastore|network)",
                 ":sync:impl -> :feeds",
+                ":sync:impl -> :playback:api", // MS3: loaded-item attribution uses the player contract.
                 ":youtube:ytdlp -> :youtube:(engine|api)",
                 ":youtube:ytdlp -> :core:(model|common|datastore|network:okhttp)",
                 ":youtube:ytdlp-desktop -> :youtube:(engine|api)",
