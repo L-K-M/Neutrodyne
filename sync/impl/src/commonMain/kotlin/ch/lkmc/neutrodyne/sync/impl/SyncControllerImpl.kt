@@ -43,6 +43,7 @@ import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CancellationException
@@ -110,6 +111,7 @@ internal fun SyncStateEntity?.isActuallyLinked(hasToken: Boolean): Boolean =
 @Inject
 @ContributesBinding(AppScope::class)
 @SingleIn(AppScope::class)
+@ExposeImplBinding
 class SyncControllerImpl(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
@@ -1159,7 +1161,7 @@ class SyncControllerImpl(
         return problem
     }
 
-    private suspend fun markRevoked(expected: SyncStateEntity?) {
+    internal suspend fun markRevoked(expected: SyncStateEntity?) {
         if (expected == null) return
         identityMutex.withLock {
             if (expected.serverUrl != null && address.serverUrl() != expected.serverUrl) return@withLock

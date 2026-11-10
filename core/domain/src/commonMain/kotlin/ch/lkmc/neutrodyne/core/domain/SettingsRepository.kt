@@ -22,6 +22,9 @@ interface SettingsRepository {
     /** The key's current value — its default when never written or corrupt. */
     suspend fun <T : Any> get(key: SettingKey<T>): T
 
+    /** Reads the same defaults for absent keys, but propagates storage read failures. */
+    suspend fun <T : Any> getOrThrow(key: SettingKey<T>): T
+
     /**
      * Persists [value] for [key]. Fails with [SettingsError.OutOfRange] when the value is rejected
      * by the key's own validator (for example a `Choice` outside its values) and with

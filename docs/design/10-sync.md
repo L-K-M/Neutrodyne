@@ -1991,6 +1991,21 @@ could otherwise mint a permanent device token through `POST
 /api/v1/auth/login` and outlive the standard remediation. Devices then get
 `401` and offer "Link again"; local data stays.
 
+**Implementation note (2026-11-10, linked password notice).** The first notice
+collector at app start starts one app-scoped account check. A device-local
+receipt commits before HTTP and limits attempts, including failures, to one
+per 24 hours. Offline, unlinked or permission-blocked starts make no request;
+a failed receipt read or write cannot enable an unthrottled request. The
+request captures its URL, token and account identity together, and a late
+401 cannot revoke a replacement account.
+
+Notice receipts use a hash of the URL and account plus the normalized
+password timestamp. A result waits for a collector and records its receipt
+after emission; a failed receipt write can repeat it at a later permitted
+startup. Cancelling a window collector leaves the app-scoped request alive.
+The journal is a DEVICE setting, excluded from portable backup and sync;
+forgetting a server retains the device's daily request budget.
+
 ### Tokens
 
 **Implementation note (2026-11-01, MS1).** W5 adds the DB-only `AuthStore` /
