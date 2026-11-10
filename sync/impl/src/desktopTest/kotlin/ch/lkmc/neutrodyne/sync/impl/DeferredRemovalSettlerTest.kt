@@ -3,6 +3,9 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.SQLiteDriver
+import androidx.sqlite.SQLiteStatement
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -15,11 +18,15 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.Test
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -41,6 +48,14 @@ class DeferredRemovalSettlerTest {
 
     private companion object {
         const val WAIT_WINDOW_NS = 10_000_000_000L
+        const val HOLD_BOUND_MS = 30_000L
+
+        /**
+         * `SyncStateDao.withApplying`'s flag restore — written only after the settle guard
+         * has already evaluated the player state, and only the settle path runs
+         * `withApplying` in these tests.
+         */
+        const val APPLYING_RESTORE_SQL = "UPDATE sync_state SET applying = ? WHERE id = 0"
     }
 
     @Test
@@ -70,6 +85,47 @@ class DeferredRemovalSettlerTest {
                 // before its boundary, so the port reports "nothing loaded".
                 playback.setActive(null, isPlaying = false)
                 runCurrent()
+                waitFor("the stop settles the removal offline — no round ran") {
+                    db.podcastDao().bySyncId(podcastSyncId) == null
+                }
+                assertTrue(db.syncHeldDao().all().isEmpty())
+            } finally {
+                job?.cancelAndJoin()
+                db.close()
+            }
+        }
+
+    @Test
+    fun aStopDuringAnInFlightSettleSettlesTheDeferredRemoval() =
+        runTest {
+            // The CI failure behind `waitFor`: the collector's first settle was still inside
+            // its Room transaction when the stop landed, so its resumption queued on the test
+            // scheduler after `runCurrent` — and a blocking wait starved that resumption
+            // forever. Holding the real writer mid-transaction once forces the same
+            // ordering deterministically.
+            val gate = HeldApplyingWriteDriver(TestDb.bundledDriver())
+            val db = TestDb.inMemory(driver = gate)
+            var job: kotlinx.coroutines.Job? = null
+            try {
+                val playback = FakePlaybackSyncPort()
+                val settler = linkedSettler(db, playback)
+                seedPodcast(db, podcastSyncId)
+                val episodeId = episodeOf(db, podcastSyncId, "g:inflight")
+                stageDeferred(db, podcastSyncId)
+                playback.setActive(episodeId, isPlaying = true)
+
+                gate.arm()
+                job = settler.start(backgroundScope)
+                runCurrent()
+                // The first settle declined with the item still loaded and now parks at
+                // the post-guard restore write, so the collector's resumption cannot be
+                // queued yet.
+                gate.reached.await()
+                playback.setActive(null, isPlaying = false)
+                runCurrent()
+                // Releasing the writer queues the collector's resumption strictly after
+                // that last pump — the ordering a blocking wait cannot survive.
+                gate.release()
                 waitFor("the stop settles the removal offline — no round ran") {
                     db.podcastDao().bySyncId(podcastSyncId) == null
                 }
@@ -342,16 +398,18 @@ class DeferredRemovalSettlerTest {
     /**
      * `runCurrent` only pumps the test scheduler — the observer's `settle` commits on Room's
      * real dispatcher afterwards, so poll the database until that write lands or the window
-     * closes. Failing the deadline means the boundary never settled.
+     * closes. The wait itself must stay cooperative: the observer's resumptions are
+     * scheduler tasks too, and a blocking wait starves them, so `delay` yields between
+     * polls. Failing the deadline means the boundary never settled.
      */
-    private fun waitFor(
+    private suspend fun waitFor(
         description: String,
         check: suspend () -> Boolean,
     ) {
         val deadline = System.nanoTime() + WAIT_WINDOW_NS
         while (System.nanoTime() < deadline) {
-            if (runBlocking { check() }) return
-            Thread.sleep(10)
+            if (check()) return
+            delay(10)
         }
         error("timed out waiting for: $description")
     }
@@ -434,6 +492,64 @@ class DeferredRemovalSettlerTest {
             MassChangeGuard.stagePodcast(db, 7L, syncId, clock)
             val row = db.syncHeldDao().forRound(7L).single()
             MassChangeGuard.defer(db, row.id, listOf(HeldRemoval(syncId, clock)))
+        }
+    }
+
+    /**
+     * A [SQLiteDriver] whose first armed `withApplying` restore write parks inside `step`:
+     * [reached] reports the hold, [release] lets the real write through. That statement
+     * only comes from `withApplying`'s `finally`, which only the settle path runs here —
+     * and it executes strictly after `settleDeferred` has evaluated the live player state,
+     * so holding it parks the settler coroutine inside its real Room transaction with the
+     * decline already decided. Its resumption on the test scheduler then lands strictly
+     * after the last `runCurrent`: the ordering that starved a blocking `waitFor` of the
+     * observer it was waiting on. Holding earlier would let the parked settle observe the
+     * stop. Room caches prepared statements per connection, so the arm is consumed at
+     * `step`, not at `prepare`; every other statement and every unarmed step passes
+     * straight through.
+     */
+    private class HeldApplyingWriteDriver(
+        private val delegate: SQLiteDriver,
+    ) : SQLiteDriver {
+        private val holdNextApplyingWrite = AtomicBoolean(false)
+
+        /** Completes once the held write reaches `step`. */
+        val reached = CompletableDeferred<Unit>()
+        private val released = CompletableDeferred<Unit>()
+
+        override val hasConnectionPool: Boolean
+            get() = delegate.hasConnectionPool
+
+        /** The next restore write's `step` — and only that one — holds. */
+        fun arm() {
+            holdNextApplyingWrite.set(true)
+        }
+
+        /** Lets the held write step through; a no-op after the first call. */
+        fun release() {
+            released.complete(Unit)
+        }
+
+        override fun open(fileName: String): SQLiteConnection {
+            val connection = delegate.open(fileName)
+            return object : SQLiteConnection by connection {
+                override fun prepare(sql: String): SQLiteStatement {
+                    val statement = connection.prepare(sql)
+                    if (sql != APPLYING_RESTORE_SQL) return statement
+                    return object : SQLiteStatement by statement {
+                        override fun step(): Boolean {
+                            if (holdNextApplyingWrite.compareAndSet(true, false)) {
+                                reached.complete(Unit)
+                                // Bounded: an unreleased gate must not park a pool worker.
+                                runBlocking {
+                                    withTimeoutOrNull(HOLD_BOUND_MS) { released.await() }
+                                }
+                            }
+                            return statement.step()
+                        }
+                    }
+                }
+            }
         }
     }
 }

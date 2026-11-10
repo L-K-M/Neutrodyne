@@ -567,27 +567,39 @@ class AndroidAppGraphTest {
         runBlocking {
             graph.databaseOpener.awaitOpen()
             val db = graph.databaseOpener.requireDatabase()
+            // A finished query is a valid shutdown outcome too. Cancellation need not
+            // retroactively change a successfully completed child job's state.
+            val completed = graph.appScope.launch { db.syncStateDao().get() }
+            completed.join()
+            assertThat(completed.isCancelled).isFalse()
             val release = CompletableDeferred<Unit>()
             val entered = CountDownLatch(4)
-            repeat(4) {
-                graph.appScope.launch {
-                    db.useReaderConnection {
-                        entered.countDown()
-                        release.await()
+            val holders =
+                List(4) {
+                    graph.appScope.launch {
+                        db.useReaderConnection {
+                            entered.countDown()
+                            release.await()
+                        }
                     }
                 }
-            }
             assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue()
-            // A graph-scope read and `SyncControllerImpl.init`'s database children
-            // (`refreshStatus` plus the `syncHeld` observer) park at `Pool.acquire`'s
-            // permit wait while the reader pool is fully held.
+            // The four holders are guaranteed to be in flight at cancellation: their
+            // release is still incomplete. An additional query may finish normally or
+            // park; either way, joining the graph must leave no live child behind.
             val parked = graph.appScope.launch { db.syncStateDao().get() }
             val controller = graph.syncController
             graph.appScope.coroutineContext.job
                 .cancelAndJoin()
             db.close()
             release.complete(Unit)
-            assertThat(parked.isCancelled).isTrue()
+            holders.forEach { holder ->
+                assertThat(holder.isCancelled).isTrue()
+                assertThat(holder.isCompleted).isTrue()
+            }
+            assertThat(parked.isCompleted).isTrue()
+            assertThat(completed.isCompleted).isTrue()
+            assertThat(completed.isCancelled).isFalse()
             assertThat(controller.status.value).isEqualTo(SyncStatus.NotConfigured)
             // A leaked failure would sit on the main looper; the queue must be clean.
             var rounds = 0

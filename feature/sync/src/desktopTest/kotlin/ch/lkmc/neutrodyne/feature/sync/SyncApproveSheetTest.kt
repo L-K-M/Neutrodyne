@@ -33,11 +33,15 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.root.LocalRootScope
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
+import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
@@ -409,12 +413,15 @@ internal class GatedSyncController(
     var approveGate: CompletableDeferred<Unit>? = null
     var confirmGate: CompletableDeferred<Unit>? = null
     var devicesGate: CompletableDeferred<Unit>? = null
+    var diagnosticsGate: CompletableDeferred<Unit>? = null
     var renameGate: CompletableDeferred<Unit>? = null
     var revokeGate: CompletableDeferred<Unit>? = null
     var unlinkGate: CompletableDeferred<Unit>? = null
+    var forgetGate: CompletableDeferred<Unit>? = null
     var deleteServerDataGate: CompletableDeferred<Unit>? = null
     var playbackSettingsGate: CompletableDeferred<Unit>? = null
     var sharePasswordsGate: CompletableDeferred<Unit>? = null
+    var disclosureGate: CompletableDeferred<Unit>? = null
 
     /**
      * Where successful switch writes land, mirroring `SyncControllerImpl`'s persistence through
@@ -440,6 +447,20 @@ internal class GatedSyncController(
         return fake.devices()
     }
 
+    override suspend fun disclosure(): SyncDisclosure? {
+        disclosureGate?.await()
+        return fake.disclosure()
+    }
+
+    override suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> {
+        diagnosticsAttempts += Unit
+        diagnosticsGate?.await()
+        return fake.diagnostics()
+    }
+
+    /** Every attempted [diagnostics] read, including ones the gate still holds. */
+    val diagnosticsAttempts = mutableListOf<Unit>()
+
     override suspend fun renameDevice(
         deviceId: String,
         name: String,
@@ -456,6 +477,11 @@ internal class GatedSyncController(
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
         unlinkGate?.await()
         return fake.unlink()
+    }
+
+    override suspend fun forgetServer(): Outcome<Unit, ForgetServerError> {
+        forgetGate?.await()
+        return fake.forgetServer()
     }
 
     override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {

@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,17 +45,21 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
 import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDiagnosticsKey
+import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
+import ch.lkmc.neutrodyne.core.ui.resources.review
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_idle
@@ -67,10 +72,14 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_name_label
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_device_renamed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices_linked
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_diagnostics_row
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_disclosure_load_failed
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_disclosure_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_expanded
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_what_syncs
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_held_waiting
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_intro
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_again
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_another
@@ -83,11 +92,14 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_playback_settings_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_pref_save_failed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect_action
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_rename_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_revoked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_run_server
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_server_address
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_server_stores
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_address_hint
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_done
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_share_passwords
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_share_passwords_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_share_passwords_confirm
@@ -97,8 +109,10 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_what_syncs
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -112,7 +126,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
  * entry affordance pushes `SyncSetupKey`: with the typed address while unconfigured, with the
  * known `serverUrl` for `Reconnect`, `LinkUnfinished` (which resumes whatever step the existing
  * `LinkFlow` holds — it is never cancelled or restarted here) and `Revoked`. `Linked` stays
- * read-only for linking: a replacement link is the separate confirmed unlink flow.
+ * read-only for linking: a replacement link is the separate confirmed unlink flow. The
+ * `Reconnect` and `Revoked` cards additionally offer the local-only "Forget server" clear
+ * ([ForgetServerAction]).
  */
 @Composable
 fun SyncSettingsScreen(
@@ -123,6 +139,7 @@ fun SyncSettingsScreen(
 ) {
     val status by controller.status.collectAsStateWithLifecycle()
     val syncing by controller.syncing.collectAsStateWithLifecycle()
+    val heldChanges by controller.heldChanges.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     Column(
         modifier =
@@ -158,6 +175,28 @@ fun SyncSettingsScreen(
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    // Held mass changes (08's status card): the waiting count and a Review that
+                    // opens the oldest batch — `heldChanges` emits oldest first and the dialog
+                    // itself re-checks the row before it resolves anything.
+                    if (heldChanges.isNotEmpty()) {
+                        Text(
+                            pluralStringResource(
+                                Res.plurals.sync_held_waiting,
+                                heldChanges.size,
+                                heldChanges.size,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Button(
+                            onClick = {
+                                controller.heldChanges.value.firstOrNull()?.let {
+                                    navigator.push(SyncHeldChangesKey(it.id))
+                                }
+                            },
+                        ) {
+                            Text(stringResource(UiRes.string.review))
+                        }
+                    }
                     Button(onClick = controller::syncNow, enabled = !syncing) {
                         Text(stringResource(Res.string.sync_now))
                     }
@@ -175,15 +214,26 @@ fun SyncSettingsScreen(
                                 host = hostOf(current.serverUrl),
                                 onDevices = { navigator.push(SyncDevicesKey) },
                                 onApprove = { navigator.push(SyncApproveKey()) },
+                                onDiagnostics = { navigator.push(SyncDiagnosticsKey) },
                             )
                         }
                     }
                 }
 
                 is SyncStatus.Reconnect -> {
-                    Text(stringResource(Res.string.sync_reconnect, current.serverUrl))
+                    Text(
+                        stringResource(Res.string.sync_reconnect, hostOf(current.serverUrl)),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(Res.string.sync_reconnect_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     Button(onClick = { navigator.push(SyncSetupKey(current.serverUrl)) }) {
                         Text(stringResource(Res.string.sync_reconnect_action))
+                    }
+                    key(current) {
+                        ForgetServerAction(controller, current)
                     }
                 }
 
@@ -195,9 +245,12 @@ fun SyncSettingsScreen(
                 }
 
                 is SyncStatus.Revoked -> {
-                    Text(stringResource(Res.string.sync_revoked, current.serverUrl))
+                    Text(stringResource(Res.string.sync_revoked, hostOf(current.serverUrl)))
                     Button(onClick = { navigator.push(SyncSetupKey(current.serverUrl)) }) {
                         Text(stringResource(Res.string.sync_link_again))
+                    }
+                    key(current) {
+                        ForgetServerAction(controller, current)
                     }
                 }
             }
@@ -266,6 +319,7 @@ private fun ColumnScope.LinkedSection(
     host: String,
     onDevices: () -> Unit,
     onApprove: () -> Unit,
+    onDiagnostics: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHost.current
@@ -400,6 +454,12 @@ private fun ColumnScope.LinkedSection(
             },
         )
     }
+    // 08 "Rows while linked": the disclosure the pre-link card showed, recomputed for the
+    // configured server. Nothing is read until the row is tapped.
+    ListItem(
+        headlineContent = { Text(stringResource(Res.string.sync_server_stores)) },
+        modifier = Modifier.clickable { dialog = LinkedDialog.Stores },
+    )
     failure?.let { current ->
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -438,6 +498,11 @@ private fun ColumnScope.LinkedSection(
 
     DisconnectActions(controller, identity, host)
 
+    ListItem(
+        headlineContent = { Text(stringResource(Res.string.sync_diagnostics_row)) },
+        modifier = Modifier.clickable(onClick = onDiagnostics),
+    )
+
     when (dialog) {
         LinkedDialog.RenameSelf -> {
             OwnNameDialog(
@@ -464,6 +529,14 @@ private fun ColumnScope.LinkedSection(
                         },
                     ),
                 dismiss = NdDialogAction(stringResource(UiRes.string.action_cancel)) { dialog = null },
+            )
+        }
+
+        LinkedDialog.Stores -> {
+            ServerStoresDialog(
+                controller = controller,
+                identity = identity,
+                onDismiss = { dialog = null },
             )
         }
 
@@ -537,6 +610,90 @@ private sealed interface LinkedDialog {
     data object RenameSelf : LinkedDialog
 
     data object ConfirmShare : LinkedDialog
+
+    data object Stores : LinkedDialog
+}
+
+/**
+ * "What the server stores" (08 "Rows while linked"): the same disclosure text the pre-link card
+ * shows, in the present tense, recomputed by [SyncController.disclosure] for the configured
+ * server. The read runs only once the row's tap opened the dialog — a failed read keeps the
+ * dialog actionable (Retry) instead of flashing past. Like the rest of the linked section the
+ * dialog is keyed to [identity], and the completion re-checks it before writing — a relink
+ * closes the dialog itself, and a late answer can never describe a different account's server.
+ * The scrollable body keeps the whole text and the dismiss reachable in a 360×300 window.
+ */
+@Composable
+private fun ServerStoresDialog(
+    controller: SyncController,
+    identity: SyncIdentity,
+    onDismiss: () -> Unit,
+) {
+    fun stillCurrent(): Boolean = controller.status.value.identity() == identity
+
+    var loaded by remember { mutableStateOf<DisclosureLoad>(DisclosureLoad.Reading) }
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(attempt) {
+        loaded = DisclosureLoad.Reading
+        // A `null` answer means the link was already gone — the same actionable failure as a
+        // thrown read; retrying re-reads against the live identity.
+        val outcome =
+            try {
+                controller.disclosure()?.let { DisclosureLoad.Ready(it) } ?: DisclosureLoad.Failed
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                DisclosureLoad.Failed
+            }
+        if (stillCurrent()) {
+            loaded = outcome
+        }
+    }
+
+    NdDialog(
+        onDismissRequest = onDismiss,
+        dismiss = NdDialogAction(stringResource(Res.string.sync_setup_done)) { onDismiss() },
+    ) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            when (val state = loaded) {
+                DisclosureLoad.Reading -> {
+                    NdProgress.Linear(progress = null, modifier = Modifier.fillMaxWidth())
+                }
+
+                DisclosureLoad.Failed -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            stringResource(Res.string.sync_disclosure_load_failed),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        NdTextButton(
+                            label = stringResource(UiRes.string.action_retry),
+                            onClick = { attempt += 1 },
+                        )
+                    }
+                }
+
+                is DisclosureLoad.Ready -> {
+                    DisclosureText(
+                        title = stringResource(Res.string.sync_disclosure_title, state.disclosure.host),
+                        disclosure = state.disclosure,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The disclosure read's state inside the open dialog. */
+private sealed interface DisclosureLoad {
+    data object Reading : DisclosureLoad
+
+    data class Ready(
+        val disclosure: SyncDisclosure,
+    ) : DisclosureLoad
+
+    data object Failed : DisclosureLoad
 }
 
 /**

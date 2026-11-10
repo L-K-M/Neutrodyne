@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.core.testing.sync.InMemorySyncServer
 import ch.lkmc.neutrodyne.core.testing.sync.SyncAddress
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
@@ -44,6 +45,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
@@ -53,9 +55,11 @@ import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -63,6 +67,79 @@ import kotlin.time.Duration.Companion.seconds
 private const val NOW = 1_800_000_000_000L
 
 class SyncEngineTest {
+    @Test
+    fun diagnosticsRecordTheActualCompletedRoundAndItsReason() =
+        runTest {
+            val device = device("d", InMemorySyncServer { NOW })
+            try {
+                val report = device.engine.round(SyncRoundReason.PERIODIC)
+                val runtime = device.engine.diagnosticsRuntime
+                val ticket = assertNotNull(runtime.currentTicket())
+                val summary = runtime.snapshot(ticket.profile).rounds.single()
+                assertEquals(SyncRoundReason.PERIODIC, summary.reason)
+                assertEquals(report, summary.report)
+                assertEquals(NOW, summary.completedAtMs)
+                assertNull(summary.failure)
+            } finally {
+                device.close()
+            }
+        }
+
+    @Test
+    fun diagnosticsKeepTheOriginalFailureWithoutItsMessageOrProblemPayload() =
+        runTest {
+            val failure = SyncTransportException(503, "private-problem-code", "https://secret.example/?token=secret")
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse = throw failure
+                }
+            val db = TestDb.inMemory()
+            val activity = SyncActivityState()
+            val device = Device(db, client, activity)
+            try {
+                db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+                assertSame(failure, assertFailsWith<SyncTransportException> { device.round() })
+                val runtime = device.engine.diagnosticsRuntime
+                val summary = runtime.snapshot(assertNotNull(runtime.currentTicket()).profile).rounds.single()
+                assertEquals(SyncRoundFailure.TRANSPORT, summary.failure)
+                assertEquals(503, summary.httpStatus)
+                assertNull(summary.report)
+                assertFalse(summary.toString().contains("secret"))
+                assertFalse(summary.toString().contains("private-problem"))
+                assertFalse(activity.active)
+            } finally {
+                device.close()
+            }
+        }
+
+    @Test
+    fun aCancelledRoundDoesNotAddDiagnosticErrorNoise() =
+        runTest {
+            val cancelled = CancellationException("cancel requested")
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse = throw cancelled
+                }
+            val db = TestDb.inMemory()
+            val activity = SyncActivityState()
+            val device = Device(db, client, activity)
+            try {
+                db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+                assertSame(cancelled, assertFailsWith<CancellationException> { device.round() })
+                val runtime = device.engine.diagnosticsRuntime
+                assertTrue(runtime.snapshot(assertNotNull(runtime.currentTicket()).profile).rounds.isEmpty())
+                assertFalse(activity.active)
+            } finally {
+                device.close()
+            }
+        }
+
     @Test
     fun twoDevicesConvergeAfterOfflineEdits() =
         runTest {
@@ -859,6 +936,8 @@ class SyncEngineTest {
                         override suspend fun setServerUrl(url: String?) = Unit
 
                         override suspend fun setUsername(username: String?) = Unit
+
+                        override suspend fun clearServerIdentity() = Outcome.Success(Unit)
 
                         override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
 
