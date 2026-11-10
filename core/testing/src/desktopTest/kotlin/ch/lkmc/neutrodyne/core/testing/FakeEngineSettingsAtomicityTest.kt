@@ -93,11 +93,15 @@ class FakeEngineSettingsAtomicityTest {
         val flow = GatedSnapshotFlow(MutableStateFlow(EngineSettingsSnapshot()), thread)
         val settings = FakeEngineSettings(flow)
         slot.set(settings)
+        thread.isDaemon = true
         thread.start()
-        assertTrue(flow.writeArrived.await(10, TimeUnit.SECONDS), "writer never reached its state write")
-        caller(settings)
-        flow.releaseWrite.countDown()
-        thread.join(10_000)
+        try {
+            assertTrue(flow.writeArrived.await(10, TimeUnit.SECONDS), "writer never reached its state write")
+            caller(settings)
+        } finally {
+            flow.releaseWrite.countDown()
+            thread.join(10_000)
+        }
         assertFalse(thread.isAlive, "writer still parked after release")
         writerError.get()?.let { throw it }
         return settings
