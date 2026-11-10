@@ -140,6 +140,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_forward
 import ch.lkmc.neutrodyne.feature.player.resources.player_forward_value
 import ch.lkmc.neutrodyne.feature.player.resources.player_hide_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_mark_skip
+import ch.lkmc.neutrodyne.feature.player.resources.player_marked_played_elsewhere
 import ch.lkmc.neutrodyne.feature.player.resources.player_metered_blocked
 import ch.lkmc.neutrodyne.feature.player.resources.player_minutes
 import ch.lkmc.neutrodyne.feature.player.resources.player_mobile_consent
@@ -409,6 +410,18 @@ internal fun PlayerSheet(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    ui.markedPlayedElsewhere?.let { mark ->
+                        Text(
+                            stringResource(
+                                Res.string.player_marked_played_elsewhere,
+                                mark.deviceName,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
                     if (now.isVideo) {
                         Text(

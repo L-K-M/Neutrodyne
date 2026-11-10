@@ -17,6 +17,7 @@ internal fun samplePosition(
 internal fun sampleNow(
     id: Long = 1,
     playing: Boolean = false,
+    loadId: Long = id,
 ) = NowPlaying(
     episodeId = id,
     podcastId = 2,
@@ -33,4 +34,5 @@ internal fun sampleNow(
     stream = StreamKind.STREAM,
     issue = null,
     context = null,
+    loadId = loadId,
 )

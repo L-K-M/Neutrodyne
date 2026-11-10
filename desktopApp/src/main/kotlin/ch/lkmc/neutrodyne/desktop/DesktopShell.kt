@@ -346,6 +346,7 @@ internal object DesktopShell {
                 playbackState = graph.playbackStateSource,
                 // Deferred until the open gate: resolving builds the database-backed service.
                 syncController = { graph.syncController },
+                syncHeldNotifier = { graph.syncHeldNotifier },
                 reconnectDismissals = { graph.reconnectDismissals },
                 busySignal = busySignal,
                 clock = DesktopClock,

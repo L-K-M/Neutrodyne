@@ -1,6 +1,7 @@
 <resources>
     <string name="player_skipped">%1$s übersprungen: %2$s</string>
     <string name="player_marked_played">Als gehört markiert</string>
+    <string name="player_marked_played_elsewhere">Auf %1$s als gehört markiert</string>
     <string name="player_no_group">Nur bei Wiedergabe aus einer Gruppe möglich</string>
     <string name="player_invalid_presets">2–8 Geschwindigkeiten von 0.5 bis 3.0 in Schritten von 0.05 eingeben</string>
     <string name="player_nothing_to_play">Nichts zum Abspielen</string>

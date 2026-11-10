@@ -18,7 +18,10 @@ class FakePlatformInfo(
 }
 
 /** A loaded, advancing item; tests use copy for paused, buffering and transition snapshots. */
-fun testNowPlaying(id: Long = 1): NowPlaying {
+fun testNowPlaying(
+    id: Long = 1,
+    loadId: Long = id,
+): NowPlaying {
     val row = testEpisodeRow(id)
     return NowPlaying(
         id,
@@ -36,6 +39,7 @@ fun testNowPlaying(id: Long = 1): NowPlaying {
         stream = null,
         issue = null,
         context = null,
+        loadId = loadId,
     )
 }
 

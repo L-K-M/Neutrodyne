@@ -7,4 +7,5 @@
         <item quantity="one">%1$d neue Episode</item>
         <item quantity="other">%1$d neue Episoden</item>
     </plurals>
+    <string name="notification_sync_held_title">Sync wartet auf dich</string>
 </resources>

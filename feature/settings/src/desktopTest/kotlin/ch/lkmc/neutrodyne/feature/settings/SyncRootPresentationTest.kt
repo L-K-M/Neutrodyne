@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -11,20 +12,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.SyncAccountHelpKey
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
+import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
 import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
 import ch.lkmc.neutrodyne.core.ui.root.RemoteSessionCard
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_feed_password_needed
 import ch.lkmc.neutrodyne.feature.settings.resources.sync_marked_played_elsewhere
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_not_you
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_password_set
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_resynced
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_resynced_added
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_show
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
+import kotlinx.coroutines.CompletableDeferred
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -50,10 +62,14 @@ class SyncRootPresentationTest {
             deviceName = "Pixel 8",
         )
 
-    private class Probe {
+    private class Probe(
+        val navigator: RecordingAppNavigator = RecordingAppNavigator(),
+    ) {
         var syncResolutions = 0
         var presentation: SyncRootPresentation? = null
         val messages = mutableListOf<UserMessage>()
+        var holding = true
+        val holdFirst = CompletableDeferred<Unit>()
     }
 
     @Test
@@ -307,7 +323,7 @@ class SyncRootPresentationTest {
         }
 
     @Test
-    fun markedPlayedElsewhereIsTheOnlyNoticeOnTheSnackbarFlow() =
+    fun everyNoticeLandsOnTheSnackbarFlowInOrder() =
         runComposeUiTest {
             val sync = FakeSyncController()
             val probe = setSyncContent(sync, FakePlaybackController())
@@ -322,14 +338,193 @@ class SyncRootPresentationTest {
                 sync.post(SyncNotice.MarkedPlayedElsewhere(42, "Episode 7", "Pixel 8"))
             }
 
-            waitUntil("the one notice lands", TIMEOUT_MS) { probe.messages.size == 1 }
+            waitUntil("all four notices land", TIMEOUT_MS) { probe.messages.size == 4 }
             assertEquals(
-                UiText.Res(
-                    Res.string.sync_marked_played_elsewhere,
-                    listOf("Pixel 8"),
+                listOf(
+                    UiText.Joined(
+                        listOf(
+                            UiText.Res(Res.string.sync_resynced),
+                            UiText.Res(Res.string.sync_resynced_added, listOf(5)),
+                        ),
+                        separator = "",
+                        suffix = "",
+                    ),
+                    UiText.Plural(Res.plurals.sync_feed_password_needed, 2, listOf(2)),
+                    UiText.Res(Res.string.sync_password_set, listOf("2026-11-09")),
+                    UiText.Res(Res.string.sync_marked_played_elsewhere, listOf("Pixel 8")),
                 ),
+                probe.messages.map { it.text },
+            )
+            assertEquals(
+                listOf(
+                    null,
+                    UiText.Res(Res.string.sync_show),
+                    UiText.Res(Res.string.sync_not_you),
+                    null,
+                ),
+                probe.messages.map { it.action },
+            )
+            // Negative, monotonic ids: the desktop banner notifier owns the nonnegative ones.
+            assertEquals(listOf(-1L, -2L, -3L, -4L), probe.messages.map { it.id })
+        }
+
+    /** 08: the resync suffix appears only when the re-asserted count is positive. */
+    @Test
+    fun aResyncWithoutAdditionsOmitsTheSuffix() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            val probe = setSyncContent(sync, FakePlaybackController())
+            waitUntil("the notice collector resolved", TIMEOUT_MS) {
+                sync.noticeSubscriptions.value > 0
+            }
+
+            runOnIdle { sync.post(SyncNotice.Resynced(0)) }
+            waitUntil("the notice lands", TIMEOUT_MS) { probe.messages.size == 1 }
+            assertEquals(UiText.Res(Res.string.sync_resynced), probe.messages.single().text)
+            assertNull(probe.messages.single().action)
+        }
+
+    /** An empty id list has no first podcast to open, so the action is omitted entirely. */
+    @Test
+    fun anEmptyFeedPasswordNeedOmitsTheAction() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            val probe = setSyncContent(sync, FakePlaybackController())
+            waitUntil("the notice collector resolved", TIMEOUT_MS) {
+                sync.noticeSubscriptions.value > 0
+            }
+
+            runOnIdle { sync.post(SyncNotice.FeedPasswordNeeded(emptyList())) }
+            waitUntil("the notice lands", TIMEOUT_MS) { probe.messages.size == 1 }
+            assertEquals(
+                UiText.Plural(Res.plurals.sync_feed_password_needed, 0, listOf(0)),
                 probe.messages.single().text,
             )
+            assertNull(probe.messages.single().action)
+        }
+
+    /**
+     * The active notice's "Show" opens the first named podcast; the queued notice stays queued
+     * until the snackbar is acknowledged, a stale id is inert, and a positive (desktop banner) id
+     * is never consumed.
+     */
+    @Test
+    fun theActiveShowActionOpensTheFirstPodcastAndStaleOnesAreInert() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            val probe =
+                setSyncContent(
+                    sync,
+                    FakePlaybackController(),
+                    holdFirstMessage = true,
+                )
+            waitUntil("the notice collector resolved", TIMEOUT_MS) {
+                sync.noticeSubscriptions.value > 0
+            }
+            runOnIdle {
+                sync.post(SyncNotice.FeedPasswordNeeded(listOf(7L, 9L)))
+                sync.post(SyncNotice.MarkedPlayedElsewhere(42, "Episode 7", "Pixel 8"))
+            }
+
+            waitUntil("the first notice lands", TIMEOUT_MS) { probe.messages.size == 1 }
+            val first = probe.messages.single()
+            // The second notice is queued behind the visible snackbar.
+            assertEquals(1, probe.messages.size)
+
+            runOnIdle { assertTrue(probe.presentation!!.messageAction(first.id)) }
+            waitUntil("Show opened the first podcast", TIMEOUT_MS) {
+                probe.navigator.calls.any { it == RecordingAppNavigator.Call.Push(PodcastKey(7L)) }
+            }
+            // Idempotent: a second tap while the snackbar is still visible does not push again.
+            runOnIdle { assertFalse(probe.presentation!!.messageAction(first.id)) }
+
+            runOnIdle { probe.holdFirst.complete(Unit) }
+            waitUntil("the queued notice lands", TIMEOUT_MS) { probe.messages.size == 2 }
+
+            runOnIdle {
+                assertFalse(probe.presentation!!.messageAction(first.id))
+                // A positive id belongs to the desktop banner notifier, never to sync.
+                assertFalse(probe.presentation!!.messageAction(0L))
+            }
+            waitForIdle()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.Push(PodcastKey(7L)),
+                ),
+                probe.navigator.calls,
+            )
+        }
+
+    /** "Not you?" opens the static sync-account help page, and only while that notice is active. */
+    @Test
+    fun theNotYouActionOpensTheSyncAccountHelpPage() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            val probe =
+                setSyncContent(
+                    sync,
+                    FakePlaybackController(),
+                    holdFirstMessage = true,
+                )
+            waitUntil("the notice collector resolved", TIMEOUT_MS) {
+                sync.noticeSubscriptions.value > 0
+            }
+            runOnIdle { sync.post(SyncNotice.PasswordSet("2026-11-09")) }
+
+            waitUntil("the notice lands", TIMEOUT_MS) { probe.messages.size == 1 }
+            val first = probe.messages.single()
+            assertEquals(UiText.Res(Res.string.sync_not_you), first.action)
+
+            runOnIdle { assertTrue(probe.presentation!!.messageAction(first.id)) }
+            waitUntil("the help page opened", TIMEOUT_MS) {
+                probe.navigator.calls.any {
+                    it == RecordingAppNavigator.Call.Push(SyncAccountHelpKey)
+                }
+            }
+
+            runOnIdle { probe.holdFirst.complete(Unit) }
+            waitForIdle()
+            runOnIdle { assertFalse(probe.presentation!!.messageAction(first.id)) }
+            waitForIdle()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.Push(SyncAccountHelpKey),
+                ),
+                probe.navigator.calls,
+            )
+        }
+
+    /** A closed gate emits no notices and dispatches no actions, even for an already-active one. */
+    @Test
+    fun aClosedGateStopsNoticesAndDispatchesNoActions() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            var enabled by mutableStateOf(true)
+            val probe =
+                setSyncContent(
+                    sync,
+                    FakePlaybackController(),
+                    enabled = { enabled },
+                    holdFirstMessage = true,
+                )
+            waitUntil("the notice collector resolved", TIMEOUT_MS) {
+                sync.noticeSubscriptions.value > 0
+            }
+            runOnIdle { sync.post(SyncNotice.FeedPasswordNeeded(listOf(7L))) }
+            waitUntil("the notice lands", TIMEOUT_MS) { probe.messages.size == 1 }
+            val first = probe.messages.single()
+
+            runOnIdle { enabled = false }
+            waitForIdle()
+            runOnIdle {
+                assertFalse(probe.presentation!!.messageAction(first.id))
+                sync.post(SyncNotice.PasswordSet("2026-11-09"))
+            }
+            runOnIdle { probe.holdFirst.complete(Unit) }
+            waitForIdle()
+            // The notice posted after the close is skipped, and no action navigated.
+            assertEquals(1, probe.messages.size)
+            assertTrue(probe.navigator.calls.isEmpty())
         }
 
     /**
@@ -601,25 +796,37 @@ class SyncRootPresentationTest {
         playback: FakePlaybackController,
         enabled: () -> Boolean = { true },
         isPlaying: () -> Boolean = { false },
+        holdFirstMessage: Boolean = false,
         dismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
         generation: () -> Int = { 0 },
     ): Probe {
         val probe = Probe()
         setContent {
             key(generation()) {
-                probe.presentation =
-                    rememberSyncRootPresentation(
-                        syncController = {
-                            probe.syncResolutions++
-                            sync
-                        },
-                        playbackController = { playback },
-                        enabled = enabled(),
-                        isPlaying = isPlaying(),
-                        reconnectDismissals = dismissals,
-                    )
-                LaunchedEffect(probe.presentation?.userMessages) {
-                    probe.presentation?.userMessages?.collect { probe.messages += it }
+                CompositionLocalProvider(LocalAppNavigator provides probe.navigator) {
+                    probe.presentation =
+                        rememberSyncRootPresentation(
+                            syncController = {
+                                probe.syncResolutions++
+                                sync
+                            },
+                            playbackController = { playback },
+                            enabled = enabled(),
+                            isPlaying = isPlaying(),
+                            reconnectDismissals = dismissals,
+                        )
+                    // The shells invoke this inside the player slot; here it is the only navigator
+                    // source, exactly as under NeutrodyneRoot.
+                    probe.presentation?.feedback()
+                    LaunchedEffect(probe.presentation?.userMessages) {
+                        probe.presentation?.userMessages?.collect { message ->
+                            probe.messages += message
+                            if (holdFirstMessage && probe.holding) {
+                                probe.holding = false
+                                probe.holdFirst.await()
+                            }
+                        }
+                    }
                 }
             }
         }
