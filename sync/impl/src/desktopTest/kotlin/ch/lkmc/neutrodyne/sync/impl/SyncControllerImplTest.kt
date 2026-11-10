@@ -90,6 +90,67 @@ class SyncControllerImplTest {
     private val serverUrl = "https://$host"
 
     @Test
+    fun aRepeatedFirstLinkClockRejectionShowsTheClockProblem() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
+                h.client.syncHandler = { _, changes ->
+                    SyncResponse(
+                        changes.mapIndexed { index, _ ->
+                            ChangeResultDto(index, "rejected", code = "clock_skew")
+                        },
+                        emptyList(),
+                        "c:00000001:1",
+                        false,
+                        "",
+                    )
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+                h.controller.chooseFirstLink(FirstLinkChoice.MERGE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(2, h.client.calls.count { it == "sync" })
+                assertEquals(SyncProblem.ClockSkew, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.linkedAt,
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aPersistedClockBlockSurvivesSuccessfulPulls() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.db.withWriteTransaction {
+                    val state = checkNotNull(h.db.syncStateDao().get())
+                    h.db.syncStateDao().upsert(state.copy(lastError = "ClockSkew"))
+                }
+                h.controller.refreshStatus()
+                assertEquals(SyncProblem.ClockSkew, (h.controller.status.value as SyncStatus.Linked).problem)
+                h.controller.syncNow()
+                assertEquals(
+                    "ClockSkew",
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.lastError,
+                )
+                assertEquals(SyncProblem.ClockSkew, (h.controller.status.value as SyncStatus.Linked).problem)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun discoveryFailureShowsTheTransportProblem() =
         runTest {
             val h = harness(this)
