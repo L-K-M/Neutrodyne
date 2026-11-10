@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
 import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.testing.FakeLinkFlow
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
@@ -41,6 +42,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.sync.api.LinkPhase
 import ch.lkmc.neutrodyne.sync.api.LinkState
+import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import java.util.Locale
@@ -251,6 +253,74 @@ class SyncSettingsEntryTest {
             assertTrue(harness.controller.startLinks.isEmpty(), "approval must not start a replacement link")
         }
 
+    @Test
+    fun linkedReviewShowsTheWaitingCountAndOpensTheOldestBatch() =
+        runComposeUiTest {
+            val harness = Harness(LINKED)
+            // `heldChanges` is oldest first: Review opens the head of the list, by id.
+            harness.controller.heldChanges.value =
+                listOf(
+                    MassChangePrompt(
+                        id = 7,
+                        deviceName = "Pixel",
+                        podcastTitles = listOf("A"),
+                        groupNames = emptyList(),
+                    ),
+                    MassChangePrompt(id = 9, deviceName = null, podcastTitles = emptyList(), groupNames = listOf("G")),
+                )
+            setSyncPage(harness)
+
+            onNodeWithText("2 changes are waiting for you").assertIsDisplayed()
+            onNodeWithText("Review").performClick()
+            waitForIdle()
+
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.Push(SyncHeldChangesKey(7)),
+                ),
+                harness.navigator.calls,
+            )
+        }
+
+    @Test
+    fun heldBatchesArrivingWhileLinkedUpdateTheReviewEntry() =
+        runComposeUiTest {
+            val harness = Harness(LINKED)
+            setSyncPage(harness)
+
+            onNodeWithText("Review").assertDoesNotExist()
+            harness.controller.heldChanges.value =
+                listOf(
+                    MassChangePrompt(id = 4, deviceName = null, podcastTitles = listOf("A"), groupNames = emptyList()),
+                )
+            waitForIdle()
+
+            onNodeWithText("1 change is waiting for you").assertIsDisplayed()
+            onNodeWithText("Review").performClick()
+            waitForIdle()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.Push(SyncHeldChangesKey(4)),
+                ),
+                harness.navigator.calls,
+            )
+        }
+
+    @Test
+    fun notLinkedExposesNoHeldReview() =
+        runComposeUiTest {
+            val harness = Harness()
+            // A held row with no link is inert: no waiting count, no Review affordance (R7.1).
+            harness.controller.heldChanges.value =
+                listOf(
+                    MassChangePrompt(id = 7, deviceName = null, podcastTitles = listOf("A"), groupNames = emptyList()),
+                )
+            setSyncPage(harness)
+
+            onNodeWithText("Review").assertDoesNotExist()
+            onNodeWithText("1 change is waiting for you").assertDoesNotExist()
+        }
+
     private fun assertUntouched(harness: Harness) {
         assertTrue(harness.controller.startLinks.isEmpty(), "no second authorisation")
         assertTrue(harness.controller.discoveries.isEmpty(), "no discovery restart")
@@ -314,5 +384,19 @@ class SyncSettingsEntryTest {
                 override val reveal = null
                 override val notifications = null
             }
+    }
+
+    private companion object {
+        val LINKED =
+            SyncStatus.Linked(
+                serverUrl = "https://sync.example.org",
+                accountId = "acc",
+                deviceId = "dev",
+                username = "anna",
+                nodeId = "node",
+                lastSyncAtMs = null,
+                activity = SyncActivity.IDLE,
+                problem = null,
+            )
     }
 }

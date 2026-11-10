@@ -42,11 +42,13 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
 import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
+import ch.lkmc.neutrodyne.core.ui.resources.review
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_idle
@@ -61,6 +63,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_devices_linked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_header_what_syncs
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_held_waiting
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_intro
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_again
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_link_another
@@ -113,6 +116,7 @@ fun SyncSettingsScreen(
 ) {
     val status by controller.status.collectAsStateWithLifecycle()
     val syncing by controller.syncing.collectAsStateWithLifecycle()
+    val heldChanges by controller.heldChanges.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     Column(
         modifier =
@@ -148,6 +152,28 @@ fun SyncSettingsScreen(
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    // Held mass changes (08's status card): the waiting count and a Review that
+                    // opens the oldest batch — `heldChanges` emits oldest first and the dialog
+                    // itself re-checks the row before it resolves anything.
+                    if (heldChanges.isNotEmpty()) {
+                        Text(
+                            pluralStringResource(
+                                Res.plurals.sync_held_waiting,
+                                heldChanges.size,
+                                heldChanges.size,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Button(
+                            onClick = {
+                                controller.heldChanges.value.firstOrNull()?.let {
+                                    navigator.push(SyncHeldChangesKey(it.id))
+                                }
+                            },
+                        ) {
+                            Text(stringResource(UiRes.string.review))
+                        }
+                    }
                     Button(onClick = controller::syncNow, enabled = !syncing) {
                         Text(stringResource(Res.string.sync_now))
                     }
