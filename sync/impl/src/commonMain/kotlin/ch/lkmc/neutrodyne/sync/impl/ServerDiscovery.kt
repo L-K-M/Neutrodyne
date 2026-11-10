@@ -59,11 +59,22 @@ class ServerDiscovery(
     fun normalise(address: String): String? {
         val trimmed = address.trim()
         if (trimmed.isEmpty()) return null
+        // Canonicalise the scheme alone: `HTTP://host` must reach the preflight checks as plain
+        // `http` (so it is refused or confirmed), while the authority's and path's case — a path
+        // prefix, a query token — stays exactly as typed.
         val withScheme =
-            if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
-                trimmed
-            } else {
-                "https://$trimmed"
+            when {
+                trimmed.startsWith("https://", ignoreCase = true) -> {
+                    "https://" + trimmed.substring("https://".length)
+                }
+
+                trimmed.startsWith("http://", ignoreCase = true) -> {
+                    "http://" + trimmed.substring("http://".length)
+                }
+
+                else -> {
+                    "https://$trimmed"
+                }
             }
         val path = withScheme.substringAfter("://", "").dropWhile { it == '/' }
         if (path.isEmpty()) return null
