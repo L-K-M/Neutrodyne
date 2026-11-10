@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.common.RingBufferLogSink
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.data.exporting.ExportDestination
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
+import ch.lkmc.neutrodyne.core.domain.DiagnosticsContributor
 import ch.lkmc.neutrodyne.core.domain.DiagnosticsError
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsLine
@@ -85,6 +86,7 @@ class DiagnosticsRepositoryImplTest {
         platform: PlatformInfo,
         destination: FakeDestination = FakeDestination(),
         factory: DatabaseFactory = FakeFactory(databasePath = "unused.db", usable = null),
+        contributors: Set<DiagnosticsContributor> = emptySet(),
     ): DiagnosticsRepositoryImpl {
         val dirs =
             AppDirs(
@@ -106,7 +108,7 @@ class DiagnosticsRepositoryImplTest {
                 Dispatchers.Default,
             )
         return DiagnosticsRepositoryImpl(
-            contributors = emptySet(),
+            contributors = contributors,
             exporter = exporter,
             destination = destination,
             platformInfo = platform,
@@ -115,6 +117,65 @@ class DiagnosticsRepositoryImplTest {
             io = Dispatchers.Default,
         )
     }
+
+    @Test
+    fun sameSectionContributorsProduceOneDeterministicCard() =
+        runTest {
+            val first = contributor(listOf(DiagnosticsLine("enabled", "true")))
+            val second =
+                contributor(listOf(DiagnosticsLine("heldChanges", "2"), DiagnosticsLine("cursorPrefix", "12345678")))
+            val forward =
+                repository(
+                    FakePlatform(PlatformKind.DESKTOP),
+                    contributors = linkedSetOf(first, second),
+                ).snapshot()
+            val reverse =
+                repository(
+                    FakePlatform(PlatformKind.DESKTOP),
+                    contributors = linkedSetOf(second, first),
+                ).snapshot()
+            assertEquals(1, forward.sections.size)
+            assertEquals(forward.sections, reverse.sections)
+            assertEquals(
+                listOf("cursorPrefix", "enabled", "heldChanges"),
+                forward.sections
+                    .single()
+                    .lines
+                    .map { it.key },
+            )
+        }
+
+    @Test
+    fun aFailedRuntimeContributorKeepsTheDatabaseSubsetAndRedaction() =
+        runTest {
+            val database = contributor(listOf(DiagnosticsLine("enabled", "true")))
+            val runtime =
+                object : DiagnosticsContributor {
+                    override val section = DiagnosticsSectionId.SYNC
+
+                    override suspend fun collect(): List<DiagnosticsLine> =
+                        error("never export https://private.example/?token=abc")
+                }
+            val text =
+                contributor(listOf(DiagnosticsLine("deviceName", "https://alice:secret@example.org/path?token=abc")))
+            val report =
+                repository(
+                    FakePlatform(PlatformKind.DESKTOP),
+                    contributors = linkedSetOf(database, runtime, text),
+                ).snapshot()
+            assertEquals(1, report.sections.size)
+            val lines = report.sections.single().lines
+            assertTrue(DiagnosticsLine("enabled", "true") in lines)
+            assertTrue(lines.any { it.key == "unavailable" && it.value == "IllegalStateException" })
+            assertTrue(lines.none { it.value.contains("secret") || it.value.contains("token=abc") })
+        }
+
+    private fun contributor(lines: List<DiagnosticsLine>): DiagnosticsContributor =
+        object : DiagnosticsContributor {
+            override val section = DiagnosticsSectionId.SYNC
+
+            override suspend fun collect(): List<DiagnosticsLine> = lines
+        }
 
     @Test
     fun theByteBudgetCountsEncodedBytesNotUtf16Chars() {

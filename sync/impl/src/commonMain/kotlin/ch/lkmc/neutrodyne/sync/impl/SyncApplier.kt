@@ -109,6 +109,7 @@ class SyncApplier(
     suspend fun applyPage(
         records: List<RecordDto>,
         roundId: Long,
+        expectedProfile: ch.lkmc.neutrodyne.core.database.SyncStateEntity? = null,
     ): SyncApplyResult {
         val remotePlayed = mutableListOf<RemotePlayedMark>()
         val result =
@@ -130,6 +131,7 @@ class SyncApplier(
                 var sessionApplied = false
                 try {
                     db.withWriteTransaction<Unit> {
+                        if (expectedProfile != null) requireSyncProfile(expectedProfile, db.syncStateDao().get())
                         db.syncStateDao().withApplying<Unit> {
                             val ordered = records.sortedBy { it.coll }
                             for (dto in ordered) {
@@ -1119,7 +1121,13 @@ class SyncApplier(
     }
 
     private fun wireFieldsOf(field: String): List<String> =
-        if (field == "played") listOf("played", "playedAt") else listOf(field)
+        if (field ==
+            "played"
+        ) {
+            listOf("played", "playedAt")
+        } else {
+            listOf(field)
+        }
 
     /** Resolves a record ID through at most 8 redirect/alias hops (10 Redirects on clients). */
     private suspend fun resolve(id: RecordId): RecordId {
