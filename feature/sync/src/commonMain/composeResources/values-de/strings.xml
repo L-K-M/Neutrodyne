@@ -114,6 +114,9 @@
   <string name="sync_share_passwords_body">Die Passwörter deiner privaten Feeds werden auf %1$s lesbar gespeichert, damit deine anderen Geräte sie verwenden können. Wer die Daten des Servers lesen kann, kann sie lesen.</string>
   <string name="sync_share_passwords_confirm">Teilen</string>
   <string name="sync_pref_save_failed">Die Einstellung konnte nicht gespeichert werden</string>
+  <string name="sync_server_stores">Was der Server speichert</string>
+  <string name="sync_disclosure_title">Was %1$s speichert</string>
+  <string name="sync_disclosure_load_failed">Die gespeicherten Serverdaten konnten nicht gelesen werden.</string>
   <string name="sync_unlink_device">Dieses Gerät trennen</string>
   <string name="sync_unlink_title">Dieses Gerät trennen?</string>
   <string name="sync_unlink_body">Es synchronisiert dann nicht mehr; seine Bibliothek bleibt wie sie ist, und deine anderen Geräte synchronisieren weiter.</string>
@@ -191,4 +194,21 @@
   <string name="sync_diag_collection_session">Sitzung</string>
   <string name="sync_diag_collection_setting">Einstellungen</string>
   <string name="sync_diag_collection_other">Andere</string>
+
+  <!-- Held-changes review and dialog (08 Settings › Sync status card, Held changes). -->
+  <plurals name="sync_held_waiting">
+    <item quantity="one">%1$d Änderung wartet auf dich</item>
+    <item quantity="other">%1$d Änderungen warten auf dich</item>
+  </plurals>
+  <string name="sync_held_title">%1$s hat %2$s entfernt</string>
+  <string name="sync_held_title_groups">%1$s hat %2$s und %3$s entfernt</string>
+  <string name="sync_held_question">Auch auf diesem Gerät übernehmen?</string>
+  <plurals name="sync_held_and_more">
+    <item quantity="one">und %1$d weitere</item>
+    <item quantity="other">und %1$d weitere</item>
+  </plurals>
+  <string name="sync_held_apply">Anwenden</string>
+  <string name="sync_held_keep_mine">Meine behalten</string>
+  <string name="sync_held_keep_mine_hint">Behält sie hier und fügt sie auf deinen anderen Geräten wieder hinzu</string>
+  <string name="sync_held_decide_later">Später entscheiden</string>
 </resources>
