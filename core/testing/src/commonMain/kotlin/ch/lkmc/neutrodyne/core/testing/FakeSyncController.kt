@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
@@ -54,6 +55,7 @@ class FakeSyncController(
     val firstLinkChoices = mutableListOf<FirstLinkChoice>()
     val syncNows = mutableListOf<Unit>()
     val unlinks = mutableListOf<Unit>()
+    val serverForgets = mutableListOf<Unit>()
     val serverDataDeletes = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
     val revokes = mutableListOf<String>()
@@ -80,6 +82,7 @@ class FakeSyncController(
         Outcome.Success(PendingDevice("", "", "", "", 0, LinkPurpose.DEVICE, sameNetwork = true))
     var confirmResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var unlinkResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var forgetResult: Outcome<Unit, ForgetServerError> = Outcome.Success(Unit)
     var deleteServerDataResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var renameResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var revokeResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
@@ -144,6 +147,11 @@ class FakeSyncController(
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
         unlinks += Unit
         return unlinkResult
+    }
+
+    override suspend fun forgetServer(): Outcome<Unit, ForgetServerError> {
+        serverForgets += Unit
+        return forgetResult
     }
 
     override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {

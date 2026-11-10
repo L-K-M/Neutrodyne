@@ -2620,6 +2620,8 @@ class FirstLinkMergerTest {
 
             override suspend fun setUsername(username: String?) = Unit
 
+            override suspend fun clearServerIdentity() = Outcome.Success(Unit)
+
             override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
 
             override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Outcome.Success(Unit)
