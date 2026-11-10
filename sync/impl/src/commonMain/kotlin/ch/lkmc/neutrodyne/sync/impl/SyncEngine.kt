@@ -169,7 +169,9 @@ class SyncEngine(
             effects.drainSettings()
             effects.drainPasswords()
             stale += page.stale
-            held += page.held
+            // `page.held` only counts records staged for the mass-change verdict — the settle
+            // block below adds the batches that actually held, once, so staged-but-applied
+            // removals never report as held.
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
             raiseHlc(response.records)

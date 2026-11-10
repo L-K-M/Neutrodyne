@@ -66,7 +66,9 @@ class DeferredRemovalSettlerTest {
                     "the loaded, playing item's removal holds",
                 )
 
-                playback.setPlaying(false)
+                // A real stop unloads the item: `PlaybackSyncBridge.stopped` clears `active`
+                // before its boundary, so the port reports "nothing loaded".
+                playback.setActive(null, isPlaying = false)
                 runCurrent()
                 waitFor("the stop settles the removal offline — no round ran") {
                     db.podcastDao().bySyncId(podcastSyncId) == null
@@ -126,6 +128,54 @@ class DeferredRemovalSettlerTest {
                     db.podcastDao().bySyncId(podcastSyncId) == null
                 }
                 assertTrue(db.syncHeldDao().all().isEmpty())
+            } finally {
+                job?.cancelAndJoin()
+                db.close()
+            }
+        }
+
+    @Test
+    fun aPausedLoadedItemKeepsItsDeferredRemoval() =
+        runTest {
+            val db = TestDb.inMemory()
+            var job: kotlinx.coroutines.Job? = null
+            try {
+                val playback = FakePlaybackSyncPort()
+                val settler = linkedSettler(db, playback)
+                seedPodcast(db, podcastSyncId)
+                seedPodcast(db, otherSyncId)
+                val episodeId = episodeOf(db, podcastSyncId, "g:playing")
+                val otherEpisode = episodeOf(db, otherSyncId, "g:other")
+                stageDeferred(db, podcastSyncId)
+                playback.setActive(episodeId, isPlaying = true)
+
+                job = settler.start(backgroundScope)
+                runCurrent()
+                settler.settle()
+                assertNotNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "the loaded, playing item's removal holds",
+                )
+
+                // 10's settle boundary is a stop or a new item — a pause unloads neither,
+                // so the observer must not fire while the same episode stays loaded.
+                playback.setPlaying(false)
+                runCurrent()
+                // The would-be settle runs on Room's real executor; give it a real window to
+                // prove it never happens, then keep the negative check honest with a boundary.
+                Thread.sleep(400)
+                assertNotNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "a pause is no settle boundary — the loaded item keeps its removal deferred",
+                )
+                assertTrue(db.syncHeldDao().all().isNotEmpty())
+
+                // The row still settles on the next real boundary: a different loaded item.
+                playback.setActive(otherEpisode, isPlaying = true)
+                runCurrent()
+                waitFor("the item change settles the deferred removal") {
+                    db.podcastDao().bySyncId(podcastSyncId) == null
+                }
             } finally {
                 job?.cancelAndJoin()
                 db.close()

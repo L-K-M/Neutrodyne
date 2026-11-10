@@ -3,11 +3,13 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -22,8 +24,11 @@ import kotlinx.coroutines.launch
  * each settle is a single writer transaction under `applying = 1` that re-checks every
  * staged clock against the stored state and the pending outbox, so a newer local write
  * still wins. Nothing here pushes, polls, links or logs out — the settled removals surface
- * with the next ordinary round. HELD and STAGED rows never auto-apply.
+ * with the next ordinary round. HELD and STAGED rows never auto-apply. App-scoped: the
+ * band-160 initializer re-resolves its `Provider` on every run, so only the scope keeps a
+ * retried band from arming a second collector.
  */
+@SingleIn(AppScope::class)
 class DeferredRemovalSettler
     @Inject
     constructor(
@@ -33,8 +38,8 @@ class DeferredRemovalSettler
         private val address: SyncServerAddress,
         private val tokens: SyncTokenStore,
     ) {
-        // The initializer and tests call `start` serially, so a plain field guards
-        // idempotence: a second arm attempt gets `null` instead of a duplicate collector.
+        // `start` is invoked serially from the app-scope initializer path, so a plain field
+        // guards idempotence on this instance: a re-run gets `null`, never a second collector.
         private var job: Job? = null
 
         /**
@@ -48,11 +53,13 @@ class DeferredRemovalSettler
             if (job != null) return null
             return scope
                 .launch {
-                    // Distinct (episodeId, isPlaying) states only: a repeated identical state
-                    // settles nothing new, and a failed settle keeps the batch — and this
-                    // collector — for the next boundary or retry.
+                    // 10's settle boundaries are "stopped or the item changed": the loaded
+                    // episode, nothing else. A stop unloads to null and a new item carries a
+                    // different id; a pause keeps the same id, so it is no boundary. A
+                    // repeated state settles nothing new, and a failed settle keeps the
+                    // batch — and this collector — for the next boundary or retry.
                     playback.active
-                        .map { it.episodeId to it.isPlaying }
+                        .map { it.episodeId }
                         .distinctUntilChanged()
                         .collect {
                             try {

@@ -182,6 +182,9 @@ object MassChangeGuard {
                 continue
             }
             val group = db.groupDao().groupByUuid(removal.rid) ?: continue
+            // 05 Delete and undo step 2: the repository's delete pair — a GROUP play context
+            // clears inside the same transaction, and the current item keeps playing.
+            db.groupDao().clearGroupContext(group.id, now)
             db.groupDao().deleteGroup(group.id)
         }
         return deferred
