@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncActive
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
@@ -206,6 +207,45 @@ object MassChangeGuard {
                     summary = summary(db, batch),
                 ),
             )
+    }
+
+    /**
+     * 10 Mass-change guard step 4's playing predicate: the removal of the podcast that owns
+     * the loaded episode never applies while the player reports `isPlaying`. Shared by the
+     * round's apply, `resolveHeld` and the deferred settle — no path gets an exception.
+     */
+    suspend fun playingRemovalDeferred(
+        db: NeutrodyneDatabase,
+        active: PlaybackSyncActive,
+        podcastSyncId: String,
+    ): Boolean {
+        val episodeId = active.episodeId ?: return false
+        if (!active.isPlaying) return false
+        val episode = db.episodeDao().byId(episodeId) ?: return false
+        return db.podcastDao().byId(episode.podcastId)?.syncId == podcastSyncId
+    }
+
+    /**
+     * Settles every DEFERRED row's staged removals in the caller's transaction (10
+     * Mass-change guard step 4): each still-winning removal applies, the loaded, playing
+     * item's removal holds, and a remainder stays DEFERRED for the next boundary. HELD and
+     * STAGED rows are never touched.
+     */
+    suspend fun settleDeferred(
+        db: NeutrodyneDatabase,
+        now: Long,
+        defer: suspend (podcastSyncId: String) -> Boolean,
+    ) {
+        for (row in db.syncHeldDao().all()) {
+            if (stateOf(row.batch) != HeldState.DEFERRED) continue
+            val batch = runCatching { decode(row.batch) }.getOrNull() ?: continue
+            val remainder = apply(db, batch, now, defer)
+            if (remainder.isEmpty()) {
+                db.syncHeldDao().delete(row.id)
+            } else {
+                defer(db, row.id, remainder)
+            }
+        }
     }
 
     /**

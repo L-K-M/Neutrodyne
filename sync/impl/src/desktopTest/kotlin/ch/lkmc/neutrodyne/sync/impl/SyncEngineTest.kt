@@ -244,6 +244,74 @@ class SyncEngineTest {
         }
 
     @Test
+    fun fourRemoteRemovalsOfFifteenStayHeldDespiteRemoteAdds() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            val b = device("b", server)
+            try {
+                // The rid must stay a hex UUID: `syncId` pads the name, so only 0-9a-f is
+                // safe — anything else drops the whole change at `RecordId.fromRid`.
+                repeat(15) { i ->
+                    a.addPodcast(syncId("a$i"), "https://a.example/$i", "A$i")
+                }
+                a.round()
+                b.round()
+
+                // A unsubscribes 4 of the 15 and adds 10 more in the same push. The removals
+                // are 4/15 > 20 % of the library B starts the round with — the pull's own
+                // adds must not dilute the denominator (10 Mass-change guard 1).
+                val removed =
+                    a.db
+                        .podcastDao()
+                        .allForExport()
+                        .take(4)
+                        .map { it.syncId }
+                a.db.withWriteTransaction {
+                    removed.forEach { rid ->
+                        a.db
+                            .podcastDao()
+                            .deleteCascade(
+                                a.db
+                                    .podcastDao()
+                                    .bySyncId(rid)!!
+                                    .id,
+                                NOW,
+                            )
+                    }
+                }
+                repeat(10) { i ->
+                    a.addPodcast(syncId("e$i"), "https://e.example/$i", "E$i")
+                }
+                a.round()
+                b.round()
+
+                val held =
+                    b.db
+                        .syncHeldDao()
+                        .all()
+                        .single()
+                val batch = MassChangeGuard.heldBatch(held.batch)
+                assertNotNull(batch, "4/15 removals hold despite the pull's ten adds")
+                assertEquals(4, batch.podcasts.size)
+                removed.forEach { rid ->
+                    assertNotNull(b.db.podcastDao().bySyncId(rid), "a held removal never applies")
+                }
+                assertEquals(
+                    25,
+                    b.db
+                        .podcastDao()
+                        .allForExport()
+                        .size,
+                    "the held four and the pulled ten all stay",
+                )
+            } finally {
+                a.close()
+                b.close()
+            }
+        }
+
+    @Test
     fun aPlayingPodcastDefersItsRemoteUnsubscribe() =
         runTest {
             val server = InMemorySyncServer { NOW }

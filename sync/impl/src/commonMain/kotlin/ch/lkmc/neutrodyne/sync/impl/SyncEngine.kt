@@ -133,6 +133,9 @@ class SyncEngine(
         capture.reconcile()
         effects.drainSettings()
         effects.drainPasswords()
+        // 10 Mass-change guard 1: the share threshold's denominator is the local library as the
+        // round starts — before this pull's adds and dedupes can dilute the removals' share.
+        val localPodcastsAtStart = localPodcastCount()
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -198,7 +201,7 @@ class SyncEngine(
         // keeps the cascaded deletes from echoing back through the outbox.
         db.withWriteTransaction {
             db.syncStateDao().withApplying {
-                for (verdict in MassChangeGuard.evaluate(db, roundId, localPodcastCount())) {
+                for (verdict in MassChangeGuard.evaluate(db, roundId, localPodcastsAtStart)) {
                     when (verdict) {
                         is MassChangeGuard.Verdict.Held -> {
                             held += verdict.batch.podcasts.size + verdict.batch.groups.size
@@ -207,7 +210,7 @@ class SyncEngine(
                         is MassChangeGuard.Verdict.Approved -> {
                             val deferred =
                                 MassChangeGuard.apply(db, verdict.batch, clock.now()) { syncId ->
-                                    playingPodcast(syncId)
+                                    MassChangeGuard.playingRemovalDeferred(db, playback.active.value, syncId)
                                 }
                             if (deferred.isEmpty()) {
                                 db.syncHeldDao().delete(verdict.rowId)
@@ -245,15 +248,6 @@ class SyncEngine(
     }
 
     private suspend fun localPodcastCount(): Int = db.podcastDao().allForExport().size
-
-    /** 10 Mass-change guard 4: the loaded, playing item's podcast defers its removal. */
-    private suspend fun playingPodcast(syncId: String): Boolean {
-        val active = playback.active.value
-        val episodeId = active.episodeId ?: return false
-        if (!active.isPlaying) return false
-        val episode = db.episodeDao().byId(episodeId) ?: return false
-        return db.podcastDao().byId(episode.podcastId)?.syncId == syncId
-    }
 
     /**
      * 10 Errors: a rejected token revokes the link on every caller — worker and lane rounds too,
