@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.GradleException
 import org.gradle.testfixtures.ProjectBuilder
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -27,6 +29,9 @@ import kotlin.test.assertTrue
  * install one); it fails loudly when none is found rather than skipping the boundary.
  */
 class DesktopAotTrainingRealTest {
+    @get:Rule
+    val scratch = TemporaryFolder.builder().assureDeletion().build()
+
     private val jdk25: File =
         requireNotNull(jdk25Home()) {
             "no JDK 25 with bin/jpackage and bin/javac found for the real AOT probe"
@@ -134,7 +139,7 @@ class DesktopAotTrainingRealTest {
     @Test
     fun `a trusted fixture JDK alias is resolved before training`() {
         org.junit.Assume.assumeFalse("the hosted Linux JDK alias fixture", osWire == "windows")
-        val directory = Files.createTempDirectory("aot-real-jdk-alias")
+        val directory = scratchDirectory("aot-real-jdk-alias").toPath()
         val alias = directory.resolve("jdk25")
         val ownedHome = directory.resolve("real-jdk")
         try {
@@ -277,24 +282,15 @@ class DesktopAotTrainingRealTest {
         val archive = File(image, "$appDirRelative/neutrodyne.aot")
         assertTrue(archive.isFile && archive.length() > 0L, "the training launch must leave the archive")
 
-        val packaged = packageImage(image)
-        try {
-            val extracted = extractImage(packaged)
-            try {
-                val result =
-                    launchImage(
-                        extracted,
-                        mapOf("JAVA_TOOL_OPTIONS" to "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"),
-                    )
-                assertEquals(0, result.exit, result.output)
-                assertTrue(result.output.contains(SMOKE_REPORT_PREFIX), result.output)
-                assertTrue(result.output.contains("\"aotCache\":\"in-use\""), result.output)
-            } finally {
-                extracted.deleteRecursively()
-            }
-        } finally {
-            packaged.delete()
-        }
+        val extracted = extractImage(packageImage(image))
+        val result =
+            launchImage(
+                extracted,
+                mapOf("JAVA_TOOL_OPTIONS" to "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"),
+            )
+        assertEquals(0, result.exit, result.output)
+        assertTrue(result.output.contains(SMOKE_REPORT_PREFIX), result.output)
+        assertTrue(result.output.contains("\"aotCache\":\"in-use\""), result.output)
     }
 
     /**
@@ -322,7 +318,7 @@ class DesktopAotTrainingRealTest {
 
         // Emulate copyAppImage: the app image is remapped into the package layout's
         // install tree (opt/neutrodyne) through the attribute-losing copy.
-        val staging = Files.createTempDirectory("aot-staging").toFile()
+        val staging = scratchDirectory("aot-staging")
         val stagedApp = File(staging, "opt/neutrodyne")
         copyAppImageForStaging(image, stagedApp)
 
@@ -387,12 +383,12 @@ class DesktopAotTrainingRealTest {
 
         val hook = File(repoRoot(), "desktopApp/packaging/dmg/Neutrodyne-post-image.sh")
         assertTrue(hook.isFile, "the shipped DMG post-image hook is missing: $hook")
-        val hookDir = Files.createTempDirectory("aot-dmg-hook").toFile()
+        val hookDir = scratchDirectory("aot-dmg-hook")
         hook.copyTo(File(hookDir, hook.name), overwrite = true)
-        val emptyDir = Files.createTempDirectory("aot-dmg-empty").toFile()
+        val emptyDir = scratchDirectory("aot-dmg-empty")
 
         // RED: without the hook the staged classpath JARs carry the packaging time.
-        val redTemp = Files.createTempDirectory("aot-dmg-red").toFile()
+        val redTemp = scratchDirectory("aot-dmg-red")
         buildDmg(image, emptyDir, redTemp)
         val redApp = File(redTemp, "image/Neutrodyne.app")
         assertTrue(redApp.isDirectory, "jpackage produced no staged app at $redApp")
@@ -407,7 +403,7 @@ class DesktopAotTrainingRealTest {
         assertTrue(red.output.contains("timestamp has changed"), red.output)
 
         // GREEN: the shipped hook restores the epoch on the staged copy.
-        val greenTemp = Files.createTempDirectory("aot-dmg-green").toFile()
+        val greenTemp = scratchDirectory("aot-dmg-green")
         buildDmg(image, hookDir, greenTemp)
         val greenApp = File(greenTemp, "image/Neutrodyne.app")
         assertTrue(greenApp.isDirectory, "jpackage produced no staged app at $greenApp")
@@ -431,7 +427,7 @@ class DesktopAotTrainingRealTest {
         resourceDir: File,
         tempDir: File,
     ) {
-        val dest = Files.createTempDirectory("aot-dmg-dest").toFile()
+        val dest = scratchDirectory("aot-dmg-dest")
         runCommand(
             listOf(
                 toolPath(jdk25, "jpackage").absolutePath,
@@ -474,27 +470,18 @@ class DesktopAotTrainingRealTest {
     fun `a drifted classpath timestamp breaks the strict cache`() {
         val image = tinyImage(MAIN_BODY)
         trainTask(image).train(System.getenv())
-        val packaged = packageImage(image)
-        try {
-            val extracted = extractImage(packaged)
-            try {
-                val jar =
-                    aotClasspathJars(File(extracted, cfgRelative).readText(), extracted, osWire)
-                        .first { it.isFile }
-                assertTrue(jar.setLastModified(jar.lastModified() + 1000L), "the drift was applied")
-                val result =
-                    launchImage(
-                        extracted,
-                        mapOf("JAVA_TOOL_OPTIONS" to "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"),
-                    )
-                assertNotEquals(0, result.exit, result.output)
-                assertTrue(result.output.contains("timestamp has changed"), result.output)
-            } finally {
-                extracted.deleteRecursively()
-            }
-        } finally {
-            packaged.delete()
-        }
+        val extracted = extractImage(packageImage(image))
+        val jar =
+            aotClasspathJars(File(extracted, cfgRelative).readText(), extracted, osWire)
+                .first { it.isFile }
+        assertTrue(jar.setLastModified(jar.lastModified() + 1000L), "the drift was applied")
+        val result =
+            launchImage(
+                extracted,
+                mapOf("JAVA_TOOL_OPTIONS" to "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"),
+            )
+        assertNotEquals(0, result.exit, result.output)
+        assertTrue(result.output.contains("timestamp has changed"), result.output)
     }
 
     /**
@@ -547,7 +534,7 @@ class DesktopAotTrainingRealTest {
 
     /** Packages the image as `packageZip` does after the normalization. */
     private fun packageImage(image: File): File {
-        val zip = File.createTempFile("aot-packaged", ".zip")
+        val zip = File.createTempFile("aot-packaged", ".zip", scratch.root)
         ZipOutputStream(zip.outputStream().buffered()).use { out ->
             image.walkTopDown().forEach { file ->
                 val relative = file.relativeTo(image).path.replace(File.separatorChar, '/')
@@ -566,7 +553,7 @@ class DesktopAotTrainingRealTest {
 
     /** Extracts a packaged image, restoring each entry's recorded modification time. */
     private fun extractImage(zip: File): File {
-        val root = Files.createTempDirectory("aot-extracted").toFile()
+        val root = scratchDirectory("aot-extracted")
         ZipFile(zip).use { zipFile ->
             zipFile.entries().asSequence().forEach { entry ->
                 val target = File(root, entry.name)
@@ -747,7 +734,7 @@ class DesktopAotTrainingRealTest {
     }
 
     private fun goodArchive(): File {
-        val archive = File.createTempFile("aot-strict-good", ".aot")
+        val archive = File.createTempFile("aot-strict-good", ".aot", scratch.root)
         val result =
             runJava(listOf("-XX:AOTCacheOutput=${archive.absolutePath}", "-version"))
         assertEquals(0, result.exit, result.output)
@@ -756,7 +743,7 @@ class DesktopAotTrainingRealTest {
     }
 
     private fun badArchive(): File =
-        File.createTempFile("aot-strict-bad", ".aot").apply {
+        File.createTempFile("aot-strict-bad", ".aot", scratch.root).apply {
             writeBytes(byteArrayOf(1, 2, 3, 4))
         }
 
@@ -780,7 +767,7 @@ class DesktopAotTrainingRealTest {
     )
 
     private fun tinyImage(mainBody: String): File {
-        val work = Files.createTempDirectory("aot-real-probe").toFile()
+        val work = scratchDirectory("aot-real-probe")
         val classes = File(work, "classes").apply { mkdirs() }
         File(work, "TinyAotProbeMain.java").writeText(
             """
@@ -816,7 +803,7 @@ class DesktopAotTrainingRealTest {
         // A clean input dir carries only the jar, so the image's app dir stays minimal.
         val input = File(work, "input").apply { mkdirs() }
         jar.copyTo(File(input, "tiny.jar"), overwrite = true)
-        val dest = Files.createTempDirectory("aot-real-image").toFile()
+        val dest = scratchDirectory("aot-real-image")
         runCommand(
             listOf(
                 toolPath(jdk25, "jpackage").absolutePath,
@@ -850,7 +837,7 @@ class DesktopAotTrainingRealTest {
         image: File,
         fixtureJdk: File = jdk25,
     ): TrainAotCacheTask {
-        val projectDir = Files.createTempDirectory("aot-real-project").toFile()
+        val projectDir = scratchDirectory("aot-real-project")
         val project = ProjectBuilder.builder().withProjectDir(projectDir).build()
         val task =
             project.tasks
@@ -872,6 +859,9 @@ class DesktopAotTrainingRealTest {
         task.expectedInstallKinds.set(expectedInstallKinds)
         return task
     }
+
+    private fun scratchDirectory(prefix: String): File =
+        Files.createTempDirectory(scratch.root.toPath(), prefix).toFile()
 
     private fun launchImage(
         image: File,
