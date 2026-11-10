@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.sync.api.SyncStreamState
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangedEvent
@@ -217,6 +218,7 @@ class SyncEventsClient(
     private val onRemoteChanged: suspend () -> Unit,
     private val onRevoked: suspend () -> Unit,
     private val random: Random = Random,
+    private val diagnosticsRuntime: SyncRuntimeDiagnostics = SyncRuntimeDiagnostics(),
 ) {
     /** `SyncActivity.LIVE` while a stream is open (10 Live updates). */
     private val _connected = MutableStateFlow(false)
@@ -234,6 +236,7 @@ class SyncEventsClient(
 
     @Volatile private var started = false
     private var heartbeatSeconds = SSE_HEARTBEAT_DESKTOP_SECONDS
+    private var diagnosticsTicket: SyncDiagnosticTicket? = null
 
     /**
      * Starts the supervisor once (the platform's start-up initializer calls it). [allowedFlow]
@@ -263,7 +266,12 @@ class SyncEventsClient(
             .distinctUntilChanged()
             .collectLatest { run ->
                 _connected.value = false
-                if (run) runLoop()
+                try {
+                    if (run) runLoop()
+                } finally {
+                    _connected.value = false
+                    diagnosticsTicket?.let { diagnosticsRuntime.streamState(it, SyncStreamState.STOPPED) }
+                }
             }
     }
 
@@ -275,7 +283,18 @@ class SyncEventsClient(
         var failures = 0
         var retryMs = SERVER_RETRY_MS
         while (coroutineContext.isActive && db.isSyncLinked()) {
-            when (val outcome = runOnce { retryMs = it }) {
+            val outcome = runOnce { retryMs = it }
+            diagnosticsTicket?.let {
+                diagnosticsRuntime.streamState(
+                    it,
+                    when (outcome) {
+                        Outcome.NoSse -> SyncStreamState.UNSUPPORTED
+                        Outcome.Idle, Outcome.Revoked -> SyncStreamState.STOPPED
+                        else -> SyncStreamState.WAITING
+                    },
+                )
+            }
+            when (outcome) {
                 // A clean end (24-h cap, shutdown, a proxy hop) reconnects at the server's
                 // own cadence; a stream that opened proves the route works, so no backoff.
                 Outcome.Ended -> {
@@ -314,14 +333,20 @@ class SyncEventsClient(
 
     private suspend fun runOnce(onServerRetry: (Long) -> Unit): Outcome {
         val url = address.serverUrl() ?: return Outcome.Idle
-        val deviceId = db.syncStateDao().get()?.deviceId
+        val state = db.syncStateDao().get()
+        val deviceId = state?.deviceId
         val token = tokens.load(hostOf(url))
         // A linked row without a token is the "Reconnect" state — idle, not live.
         if (deviceId == null || token == null) return Outcome.Idle
+        val ticket = diagnosticsRuntime.activate(state.diagnosticProfile(url))
+        diagnosticsTicket = ticket
+        diagnosticsRuntime.streamState(ticket, SyncStreamState.CONNECTING)
 
         val features =
             try {
-                discover(url).features
+                val document = discover(url)
+                diagnosticsRuntime.rememberVersion(url, document.serverVersion)
+                document.features
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
@@ -330,6 +355,7 @@ class SyncEventsClient(
         // 10 Live updates: connect only while the server advertises the events endpoint.
         if (FEATURE_SSE !in features) return Outcome.NoSse
 
+        diagnosticsRuntime.streamOpening(ticket)
         val session =
             try {
                 transport.open(url, token, heartbeatSeconds)
@@ -339,13 +365,17 @@ class SyncEventsClient(
                 return failure.asOutcome()
             }
         _connected.value = true
+        diagnosticsRuntime.streamState(ticket, SyncStreamState.CONNECTED)
         // The bus does not replay (10 EventBus): pushes missed while this device was
         // disconnected surface only through a round, so every (re)connect pokes one.
-        onRemoteChanged()
         return try {
+            // The session is already open: cancellation/failure in the initial poke must
+            // release it and clear the connected state just like a read failure.
+            onRemoteChanged()
             readStream(session, deviceId, onServerRetry)
         } finally {
             _connected.value = false
+            diagnosticsRuntime.streamState(ticket, SyncStreamState.STOPPED)
             runCatching { session.close() }
         }
     }

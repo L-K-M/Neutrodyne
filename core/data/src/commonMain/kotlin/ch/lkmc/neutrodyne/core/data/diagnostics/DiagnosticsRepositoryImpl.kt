@@ -83,6 +83,21 @@ internal class DiagnosticsRepositoryImpl
                                 }
                             }.awaitAll()
                             .filterNotNull()
+                            .groupBy { it.id }
+                            .map { (id, contributions) ->
+                                // A runtime contributor can extend a DB-only section. Keep one
+                                // card, retain every result and make duplicate-section ordering
+                                // independent of the injected set's iteration order.
+                                val lines = contributions.flatMap { it.lines }
+                                DiagnosticsSection(
+                                    id,
+                                    if (contributions.size == 1) {
+                                        lines
+                                    } else {
+                                        lines.sortedWith(compareBy<DiagnosticsLine> { it.key }.thenBy { it.value })
+                                    },
+                                )
+                            }
                     }
                 val logLines = logSink.linesFlow.value
                 val withLog =

@@ -133,6 +133,7 @@ object SyncBindings {
         capture: SettingsCapture,
         notices: SyncNoticeBus,
         adopter: SessionAdopter,
+        diagnosticsRuntime: SyncRuntimeDiagnostics,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -153,6 +154,7 @@ object SyncBindings {
             // commit — the adopter never runs inside the apply transaction.
             onSessionApplied = { adopter.evaluate() },
             refreshPreferences = { flags.refreshFromStore(address) },
+            diagnosticsRuntime = diagnosticsRuntime,
         )
 
     /**
@@ -212,6 +214,7 @@ object SyncBindings {
         network: NetworkMonitor,
         @ApplicationScope scope: CoroutineScope,
         scheduler: SyncScheduler,
+        diagnosticsRuntime: SyncRuntimeDiagnostics,
     ): SyncEventsClient =
         SyncEventsClient(
             db = db,
@@ -223,6 +226,7 @@ object SyncBindings {
             scope = scope,
             onRemoteChanged = { scheduler.onRemoteChanged() },
             onRevoked = { scheduler.onUnlinked() },
+            diagnosticsRuntime = diagnosticsRuntime,
         )
 
     /**
