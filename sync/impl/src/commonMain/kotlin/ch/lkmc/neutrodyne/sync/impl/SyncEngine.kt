@@ -13,8 +13,8 @@ import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
-import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.protocol.ChangeStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -145,11 +145,12 @@ class SyncEngine(
                         reason = reason,
                         completedAtMs = clock.now(),
                         report = null,
-                        failure = when (failure) {
-                            is SyncTransportException -> SyncRoundFailure.TRANSPORT
-                            is ProtocolException -> SyncRoundFailure.PROTOCOL
-                            else -> SyncRoundFailure.UNEXPECTED
-                        },
+                        failure =
+                            when (failure) {
+                                is SyncTransportException -> SyncRoundFailure.TRANSPORT
+                                is ProtocolException -> SyncRoundFailure.PROTOCOL
+                                else -> SyncRoundFailure.UNEXPECTED
+                            },
                         httpStatus = (failure as? SyncTransportException)?.status?.takeIf { it in 100..599 },
                         protocolCode = (failure as? ProtocolException)?.code?.wire,
                     ),
@@ -161,7 +162,9 @@ class SyncEngine(
         }
     }
 
-    private class RoundObservation(var ticket: SyncDiagnosticTicket?)
+    private class RoundObservation(
+        var ticket: SyncDiagnosticTicket?,
+    )
 
     /** The round mutex stays held for both the full pull and its resumed push. */
     private suspend fun roundWithRecovery(
@@ -435,11 +438,12 @@ class SyncEngine(
         try {
             block()
         } catch (failure: SyncTransportException) {
-            if (failure.status == STATUS_REVOKED) {
+            if (failure.status == STATUS_REVOKED && expectedProfile != null) {
                 db.withWriteTransaction {
-                    if (expectedProfile != null) requireSyncProfile(expectedProfile, db.syncStateDao().get())
+                    requireSyncProfile(expectedProfile, db.syncStateDao().get())
                     markRevoked()
                 }
+                throw SyncOwnedRevocationException(expectedProfile, failure)
             }
             throw failure
         }
