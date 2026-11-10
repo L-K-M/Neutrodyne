@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.sync.impl
 
+import androidx.room3.useWriterConnection
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -11,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.LibraryMerger
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.MergePolicy
@@ -27,8 +29,10 @@ import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.dto.AccountSummary
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeResultDto
@@ -44,13 +48,16 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.SyncRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
@@ -1743,12 +1750,735 @@ class FirstLinkMergerTest {
             }
         }
 
+    @Test
+    fun resyncAdoptsTheCursorOnlyAfterTheLastPage() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                db.syncStateDao().storeCursor("c:00000009:3")
+                val cursors = mutableListOf<String?>()
+                val client =
+                    object : SyncClient by ScriptedClient(emptyList()) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            cursors += since
+                            assertEquals("c:00000009:3", db.syncStateDao().get()?.cursor)
+                            return ChangesPage(
+                                emptyList(),
+                                if (since ==
+                                    null
+                                ) {
+                                    "c:0000000a:1"
+                                } else {
+                                    "c:0000000a:2"
+                                },
+                                since == null,
+                                "",
+                            )
+                        }
+                    }
+                val result = mergerOf(db, client, FakeLibraryMerger()).resync()
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertEquals(listOf(null, "c:0000000a:1"), cursors)
+                assertEquals("c:0000000a:2", db.syncStateDao().get()?.cursor)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun resyncDiscardsAPageAfterTheLinkIdentityChanges() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val client =
+                    object : SyncClient by ScriptedClient(emptyList()) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            db.withWriteTransaction { db.syncStateDao().unlink() }
+                            return ChangesPage(
+                                listOf(settingRecord(key, 15_000L, Hlc.of(october, 5, remote))),
+                                "c:0000000a:2",
+                                false,
+                                "",
+                            )
+                        }
+                    }
+                val result = mergerOf(db, client, FakeLibraryMerger()).resync()
+                assertTrue(result is FirstLinkResult.Failed, "$result")
+                assertNull(db.syncStateDao().get()?.cursor)
+                assertTrue(db.syncClockDao().all().isEmpty(), "a stale page must not seed the unlinked profile")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun resyncReplaysEveryKeyPageAndSkipsAMalformedTail() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val stamp = Hlc.of(october, 7, remote)
+                db.withWriteTransaction {
+                    repeat(300) { index ->
+                        val raw =
+                            RawSyncRecord(
+                                ch.lkmc.neutrodyne.sync.protocol.RecordState(
+                                    ch.lkmc.neutrodyne.sync.protocol.SyncCollection.SETTING,
+                                    mapOf(
+                                        "v" to
+                                            ch.lkmc.neutrodyne.sync.protocol
+                                                .FieldState(JsonPrimitive(index), stamp),
+                                    ),
+                                ),
+                            )
+                        db.syncClockDao().upsert(
+                            ch.lkmc.neutrodyne.core.database
+                                .SyncClockEntity(
+                                    "setting",
+                                    "page.$index",
+                                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                                        .encodeToString(raw),
+                                ),
+                        )
+                    }
+                    db.syncClockDao().upsert(
+                        ch.lkmc.neutrodyne.core.database
+                            .SyncClockEntity("setting", "zz.invalid", "not-json"),
+                    )
+                }
+                val result = mergerOf(db, ScriptedClient(emptyList()), FakeLibraryMerger()).resync()
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val captured = db.syncOutboxDao().rows()
+                assertEquals(300, captured.size)
+                assertEquals((0 until 300).map { "page.$it" }.toSet(), captured.map { it.rid }.toSet())
+                assertTrue(captured.all { it.hlc == stamp.packed && it.nodeId == remote.value })
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFullResyncPublishesLargeRemovalsThroughTheGuard() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val ids = (1..5).map { "00000000-0000-4000-8000-" + it.toString().padStart(12, '0') }
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        ids.forEachIndexed {
+                            index,
+                            id,
+                            ->
+                            db.podcastDao().insertPodcast(
+                                podcastEntity(
+                                    syncId = id,
+                                    feedUrl = "https://feed$index.example/rss",
+                                    feedKey = "feed$index.example/rss",
+                                ),
+                            )
+                        }
+                    }
+                }
+                val stamp = Hlc.of(october, 7, remote)
+                val records =
+                    ids.take(3).mapIndexed { index, id ->
+                        RecordDto(
+                            "podcast",
+                            JsonPrimitive(id),
+                            index.toLong(),
+                            null,
+                            mapOf("subscribed" to FieldValue(JsonPrimitive(false), stamp.toString())),
+                        )
+                    }
+                val result = mergerOf(db, ScriptedClient(records), FakeLibraryMerger()).resync()
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val prompts = db.syncHeldDao().all().mapNotNull { MassChangeGuard.heldBatch(it.batch) }
+                assertEquals(3, prompts.single().podcasts.size)
+                assertEquals(5, db.podcastDao().allForExport().size, "held removals must not delete the local library")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aNewerPendingPlayedPairNeverGetsAnOlderReplayTimestamp() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val old = Hlc.of(october, 7, remote)
+                val pending = Hlc.of(now, 3, localNode)
+                val rid = podcastSyncId + "g:one"
+                db.withWriteTransaction {
+                    val raw =
+                        RawSyncRecord(
+                            ch.lkmc.neutrodyne.sync.protocol.RecordState(
+                                ch.lkmc.neutrodyne.sync.protocol.SyncCollection.EPISODE,
+                                mapOf(
+                                    "played" to
+                                        ch.lkmc.neutrodyne.sync.protocol
+                                            .FieldState(JsonPrimitive(true), old),
+                                    "playedAt" to
+                                        ch.lkmc.neutrodyne.sync.protocol
+                                            .FieldState(JsonPrimitive(october), old),
+                                ),
+                            ),
+                        )
+                    db.syncClockDao().upsert(
+                        ch.lkmc.neutrodyne.core.database
+                            .SyncClockEntity(
+                                "episode",
+                                rid,
+                                ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                                    .encodeToString(raw),
+                            ),
+                    )
+                    db.syncOutboxDao().upsert(
+                        SyncOutboxEntity(
+                            "episode",
+                            rid,
+                            "played",
+                            pending.packed,
+                            localNode.value,
+                            value = """{"played":false,"playedAt":null}""",
+                        ),
+                    )
+                }
+                val result = mergerOf(db, ScriptedClient(emptyList()), FakeLibraryMerger()).resync()
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val changes = ChangeBuilder(db, FakeSecretStore()) { false }.build(db.syncOutboxDao().rows())
+                assertEquals(JsonPrimitive(false), changes.single().fields["played"]?.v)
+                assertEquals(JsonNull, changes.single().fields["playedAt"]?.v)
+                assertEquals(pending.toString(), changes.single().fields["playedAt"]?.c)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aStaleRecoveryPushCannotAcknowledgeANewLink() =
+        runTest {
+            val db = TestDb.inMemory()
+            val activity = SyncActivityState()
+            try {
+                link(db, enabled = true)
+                db.withWriteTransaction {
+                    val state = checkNotNull(db.syncStateDao().get())
+                    db.syncStateDao().upsert(
+                        state.copy(serverUrl = "https://sync.example", accountId = "a", linkedAt = now),
+                    )
+                }
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                var pushes = 0
+                val client =
+                    object : SyncClient by ScriptedClient(emptyList()) {
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ChangeDto>,
+                        ): SyncResponse {
+                            if (pushes++ == 0) throw SyncTransportException(410, "cursor_expired", "fixture")
+                            db.withWriteTransaction {
+                                db.syncStateDao().unlink()
+                                db.syncStateDao().upsert(
+                                    SyncStateEntity(
+                                        enabled = true,
+                                        serverUrl = "https://sync.example",
+                                        accountId = "b",
+                                        deviceId = "b-device",
+                                        nodeId = "0000000000000003",
+                                        linkedAt =
+                                            now + 1,
+                                        cursor = "c:0000000b:1",
+                                    ),
+                                )
+                                db.syncOutboxDao().upsert(
+                                    SyncOutboxEntity(
+                                        "setting",
+                                        key.name,
+                                        "v",
+                                        Hlc.of(june, 0, NodeId("0000000000000003")).packed,
+                                        "0000000000000003",
+                                        value = "30000",
+                                    ),
+                                )
+                            }
+                            return ackingSync(since, changes)
+                        }
+                    }
+                lateinit var merger: FirstLinkMerger
+                val engine =
+                    engine(db, client, activity, recover = {
+                        profile,
+                        scoped,
+                        ->
+                        merger.resyncForRound(profile, scoped)
+                    })
+                merger =
+                    FirstLinkMerger(
+                        db,
+                        client,
+                        applier(db),
+                        engine,
+                        FakeLibraryMerger(),
+                        paths,
+                        newEffects(db),
+                        TestClock(now),
+                        activity,
+                        FakeSecretStore(),
+                        FakeCredentialCommitCoordinator(),
+                    )
+                assertFailsWith<IllegalStateException> {
+                    engine.round(
+                        ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW,
+                    )
+                }
+                assertEquals(
+                    "c:0000000b:1",
+                    db.syncStateDao().get()?.cursor,
+                    "the old response must not advance the new link",
+                )
+                assertEquals(
+                    "30000",
+                    db.syncOutboxDao().get("setting", key.name, "v")?.value,
+                    "the old ACK must not delete the new link's intent",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aSavedAddressForAnotherProfileCannotSendTheLinkedOutbox() =
+        runTest {
+            val db = TestDb.inMemory()
+            val activity = SyncActivityState()
+            try {
+                link(db, enabled = true)
+                db.withWriteTransaction {
+                    val state = checkNotNull(db.syncStateDao().get())
+                    db.syncStateDao().upsert(state.copy(serverUrl = "https://original.example", linkedAt = now))
+                }
+                val sent = mutableListOf<ChangeDto>()
+                val client =
+                    ScriptedClient(emptyList(), syncHandler = { since, changes ->
+                        sent += changes
+                        ackingSync(since, changes)
+                    })
+                val engine =
+                    engine(
+                        db,
+                        client,
+                        activity,
+                        address = FakeSyncServerAddress(serverUrl = "https://replacement.example"),
+                    )
+
+                val result = runCatching { engine.round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW) }
+
+                assertTrue(sent.isEmpty(), "The linked account's writes reached the replacement transport: $sent")
+                assertNotNull(result.exceptionOrNull(), "A mismatched persisted identity must fail closed")
+                assertEquals("https://original.example", db.syncStateDao().get()?.serverUrl)
+                assertEquals(0, activity.count.value)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aRejectedReplayCannotAnnounceSuccessfulRecovery() =
+        runTest {
+            val db = TestDb.inMemory()
+            val activity = SyncActivityState()
+            try {
+                link(db, enabled = true)
+                db.withWriteTransaction {
+                    val state = checkNotNull(db.syncStateDao().get())
+                    db.syncStateDao().upsert(state.copy(serverUrl = "https://sync.example", linkedAt = now))
+                }
+                val key = PlaybackSettingKeys.SKIP_FORWARD_MS
+                val replayClock = Hlc.of(now + 1_000, 7, remote)
+                var pushes = 0
+                val client =
+                    ScriptedClient(
+                        listOf(settingRecord(key, 15_000L, replayClock)),
+                        syncHandler = { _, changes ->
+                            pushes++
+                            if (pushes == 1) throw SyncTransportException(410, "cursor_expired", "fixture")
+                            val results =
+                                changes.mapIndexed { index, _ ->
+                                    ChangeResultDto(index, "rejected", code = "clock_skew")
+                                }
+                            SyncResponse(results, emptyList(), "c:0000000a:1", false, "")
+                        },
+                    )
+                val bus = SyncNoticeBus()
+                val published = mutableListOf<ch.lkmc.neutrodyne.sync.api.SyncNotice>()
+                backgroundScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                    bus.notices.collect { published += it }
+                }
+                lateinit var merger: FirstLinkMerger
+                val engine =
+                    engine(
+                        db,
+                        client,
+                        activity,
+                        noticeBus = bus,
+                        recover = { profile, scoped -> merger.resyncForRound(profile, scoped) },
+                    )
+                merger =
+                    FirstLinkMerger(
+                        db,
+                        client,
+                        applier(db),
+                        engine,
+                        FakeLibraryMerger(),
+                        paths,
+                        newEffects(db),
+                        TestClock(now),
+                        activity,
+                        FakeSecretStore(),
+                        FakeCredentialCommitCoordinator(),
+                    )
+
+                val result = runCatching { engine.round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW) }
+                runCurrent()
+
+                assertTrue(published.isEmpty(), "A rejected replay must not announce success: $published")
+                assertNotNull(result.exceptionOrNull(), "The rejection must be visible to the caller")
+                assertEquals(2, pushes, "Do not resend an unchanged rejected replay in the same round")
+                val replay = assertNotNull(db.syncOutboxDao().get("setting", key.name, "v"))
+                assertEquals(ch.lkmc.neutrodyne.core.database.SyncCaptureKind.REPLAY, replay.captureKind)
+                assertEquals(replayClock.packed, replay.hlc, "Rejected replays keep the original complete clock")
+                assertEquals(replayClock.nodeId.value, replay.nodeId)
+                assertEquals(0, activity.count.value)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun unauthorizedDuringFullRecoveryRevokesTheSameLink() =
+        runTest {
+            val db = TestDb.inMemory()
+            val activity = SyncActivityState()
+            try {
+                link(db, enabled = true)
+                db.withWriteTransaction {
+                    val state = checkNotNull(db.syncStateDao().get())
+                    db.syncStateDao().upsert(state.copy(serverUrl = "https://sync.example", linkedAt = now))
+                }
+                val client =
+                    ScriptedClient(emptyList(), failAtPage = 0, failure = {
+                        SyncTransportException(401, "unauthorized", "fixture")
+                    }, syncHandler = {
+                        _,
+                        _,
+                        ->
+                        throw SyncTransportException(410, "cursor_expired", "fixture")
+                    })
+                lateinit var merger: FirstLinkMerger
+                val engine =
+                    engine(db, client, activity, recover = {
+                        profile,
+                        scoped,
+                        ->
+                        merger.resyncForRound(profile, scoped)
+                    })
+                merger =
+                    FirstLinkMerger(
+                        db,
+                        client,
+                        applier(db),
+                        engine,
+                        FakeLibraryMerger(),
+                        paths,
+                        newEffects(db),
+                        TestClock(now),
+                        activity,
+                        FakeSecretStore(),
+                        FakeCredentialCommitCoordinator(),
+                    )
+                val failure =
+                    assertFailsWith<SyncTransportException> {
+                        engine.round(
+                            ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW,
+                        )
+                    }
+                assertEquals(401, failure.status)
+                assertEquals(SYNC_ERROR_REVOKED, db.syncStateDao().get()?.lastError)
+                assertEquals(0, activity.count.value)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun resyncKeepsTheExpiredCursorUntilReplayIsDurable() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val stamp = Hlc.of(october, 7, remote)
+                val raw = RawSyncRecord(ProtocolValidation.record(settingRecord(key, 15_000L, stamp)))
+                db.withWriteTransaction {
+                    db.syncStateDao().storeCursor("c:00000009:3")
+                    db.syncClockDao().upsert(
+                        ch.lkmc.neutrodyne.core.database
+                            .SyncClockEntity(
+                                "setting",
+                                key.name,
+                                ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                                    .encodeToString(raw),
+                            ),
+                    )
+                    db.useWriterConnection { connection ->
+                        connection.usePrepared(
+                            "CREATE TRIGGER fail_reassert BEFORE INSERT ON sync_outbox " +
+                                "BEGIN SELECT RAISE(ABORT, 'fixture reassert failure'); END",
+                        ) { it.step() }
+                    }
+                }
+                val result = mergerOf(db, ScriptedClient(emptyList()), FakeLibraryMerger()).resync()
+                assertTrue(result is FirstLinkResult.Failed, "$result")
+                assertEquals(
+                    "c:00000009:3",
+                    db.syncStateDao().get()?.cursor,
+                    "a retry must still enter full recovery when replay capture failed",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anExpiredCursorRecoversOverHttpAndAcknowledgesOriginalReplays() =
+        runTest {
+            val db = TestDb.inMemory()
+            val server = mockwebserver3.MockWebServer().apply { start() }
+            val http = recoveryHttpClients()
+            val activity = SyncActivityState()
+            val wireUrl = server.url("/").toString().trimEnd('/')
+            val wireAddress = FakeSyncServerAddress(serverUrl = wireUrl)
+            try {
+                link(db, enabled = true)
+                val stored = Hlc.of(october, 7, remote)
+                val pending = Hlc.of(now, 3, localNode)
+                val rid = podcastSyncId + "g:one"
+                db.withWriteTransaction {
+                    val state = checkNotNull(db.syncStateDao().get())
+                    db.syncStateDao().upsert(
+                        state.copy(
+                            serverUrl = wireUrl,
+                            accountId = "a",
+                            linkedAt = now,
+                            cursor = "c:00000009:3",
+                        ),
+                    )
+                    db.syncClockDao().upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncClockEntity(
+                            "episode",
+                            rid,
+                            ch.lkmc.neutrodyne.sync.protocol.SyncJson.encodeToString(
+                                RawSyncRecord(
+                                    ch.lkmc.neutrodyne.sync.protocol.RecordState(
+                                        ch.lkmc.neutrodyne.sync.protocol.SyncCollection.EPISODE,
+                                        mapOf(
+                                            "played" to
+                                                ch.lkmc.neutrodyne.sync.protocol.FieldState(
+                                                    JsonPrimitive(true),
+                                                    stored,
+                                                ),
+                                            "playedAt" to
+                                                ch.lkmc.neutrodyne.sync.protocol
+                                                    .FieldState(JsonNull, stored),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                    db.syncOutboxDao().upsert(
+                        SyncOutboxEntity("episode", rid, "fav", pending.packed, localNode.value, value = "true"),
+                    )
+                }
+
+                fun json(
+                    body: String,
+                    code: Int = 200,
+                ) = mockwebserver3.MockResponse
+                    .Builder()
+                    .code(
+                        code,
+                    ).addHeader("Content-Type", "application/json")
+                    .body(body)
+                    .build()
+                val requestIndex =
+                    java.util.concurrent.atomic
+                        .AtomicInteger()
+                server.dispatcher =
+                    object : mockwebserver3.Dispatcher() {
+                        override fun dispatch(request: mockwebserver3.RecordedRequest): mockwebserver3.MockResponse =
+                            when (requestIndex.getAndIncrement()) {
+                                0 -> {
+                                    json(
+                                        """{"type":"about:blank","title":"Old","status":410,"code":"cursor_expired"}""",
+                                        410,
+                                    )
+                                }
+
+                                1 -> {
+                                    json("""{"records":[],"cursor":"c:0000000a:1","hasMore":true,"serverTime":""}""")
+                                }
+
+                                2 -> {
+                                    json("""{"records":[],"cursor":"c:0000000a:2","hasMore":false,"serverTime":""}""")
+                                }
+
+                                3 -> {
+                                    val push =
+                                        ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                                            .decodeFromString<SyncRequest>(checkNotNull(request.body).utf8())
+                                    json(
+                                        ch.lkmc.neutrodyne.sync.protocol.SyncJson.encodeToString(
+                                            SyncResponse(
+                                                push.changes.mapIndexed {
+                                                    index,
+                                                    _,
+                                                    ->
+                                                    ChangeResultDto(index, "applied")
+                                                },
+                                                emptyList(),
+                                                "c:0000000a:3",
+                                                false,
+                                                "",
+                                            ),
+                                        ),
+                                    )
+                                }
+
+                                else -> {
+                                    json(
+                                        """{"type":"about:blank","title":"Oops","status":400,"code":"unexpected"}""",
+                                        400,
+                                    )
+                                }
+                            }
+                    }
+                val client = KtorSyncClient(http, { "fixture-token" }, { server.url("/").toString() })
+                val notices = SyncNoticeBus()
+                lateinit var merger: FirstLinkMerger
+                val engine =
+                    engine(db, client, activity, address = wireAddress, noticeBus = notices, recover = {
+                        profile,
+                        scoped,
+                        ->
+                        merger.resyncForRound(profile, scoped)
+                    })
+                merger =
+                    FirstLinkMerger(
+                        db,
+                        client,
+                        applier(db),
+                        engine,
+                        FakeLibraryMerger(),
+                        paths,
+                        newEffects(db),
+                        TestClock(now),
+                        activity,
+                        FakeSecretStore(),
+                        FakeCredentialCommitCoordinator(),
+                    )
+                val notice =
+                    backgroundScope.async(
+                        start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED,
+                    ) { notices.notices.first() }
+
+                val report = engine.round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW)
+
+                fun take() = assertNotNull(server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS))
+                assertEquals("POST", take().method)
+                val firstPull = take()
+                assertEquals("GET", firstPull.method)
+                assertTrue(firstPull.url.queryParameter("since").isNullOrEmpty())
+                assertEquals("c:0000000a:1", take().url.queryParameter("since"))
+                val pushed =
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                        .decodeFromString<SyncRequest>(
+                            checkNotNull(take().body).utf8(),
+                        )
+                assertEquals("c:0000000a:2", pushed.since)
+                val fields = pushed.changes.single { it.coll == "episode" }.fields
+                assertEquals(stored.toString(), fields["played"]?.c)
+                assertEquals(JsonPrimitive(true), fields["played"]?.v)
+                assertEquals(stored.toString(), fields["playedAt"]?.c)
+                assertEquals(JsonNull, fields["playedAt"]?.v)
+                assertEquals(pending.toString(), fields["fav"]?.c)
+                assertEquals(JsonPrimitive(true), fields["fav"]?.v)
+                assertEquals(pushed.changes.size, report.pushed)
+                assertTrue(report.pushed > 0)
+                assertEquals(
+                    ch.lkmc.neutrodyne.sync.api.SyncNotice
+                        .Resynced(report.pushed),
+                    notice.await(),
+                )
+                assertEquals("c:0000000a:3", db.syncStateDao().get()?.cursor)
+                assertTrue(db.syncOutboxDao().rows().isEmpty())
+                assertEquals(0, activity.count.value)
+            } finally {
+                http.close()
+                server.close()
+                db.close()
+            }
+        }
+
+    private fun recoveryHttpClients(): ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients {
+        val platform =
+            object : ch.lkmc.neutrodyne.core.common.PlatformInfo {
+                override val kind = ch.lkmc.neutrodyne.core.common.PlatformKind.DESKTOP
+                override val userAgentPlatform = "Linux; x64"
+                override val androidSdkInt: Int? = null
+                override val regionCode = "DE"
+            }
+        val userAgent =
+            ch.lkmc.neutrodyne.core.common
+                .UserAgentProvider(platform, "0.1.0", "https://example.com/repo")
+        return ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients(
+            ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients(
+                ch.lkmc.neutrodyne.core.network.okhttp.CoreClients(
+                    ch.lkmc.neutrodyne.core.network.okhttp
+                        .UserAgentInterceptor(userAgent),
+                    ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard(
+                        ch.lkmc.neutrodyne.core.common
+                            .LocalNetworkAccess(),
+                        platform,
+                    ),
+                    ch.lkmc.neutrodyne.core.network.okhttp
+                        .DnsFamilyHints(),
+                    emptySet(),
+                ),
+                ch.lkmc.neutrodyne.core.network.okhttp
+                    .AuthInterceptor { ch.lkmc.neutrodyne.core.common.CredentialLookup.None },
+            ),
+            userAgent,
+        )
+    }
+
     // --- Fixtures -----------------------------------------------------------------------------------
 
     private fun mergerOf(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
-        library: ch.lkmc.neutrodyne.core.domain.LibraryMerger,
+        library: LibraryMerger,
         activity: SyncActivityState = SyncActivityState(),
         effects: SyncApplyEffects = newEffects(db),
         secrets: FakeSecretStore = FakeSecretStore(),
@@ -1890,6 +2620,8 @@ class FirstLinkMergerTest {
 
             override suspend fun setUsername(username: String?) = Unit
 
+            override suspend fun clearServerIdentity() = Outcome.Success(Unit)
+
             override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
 
             override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Outcome.Success(Unit)
@@ -1906,6 +2638,8 @@ class FirstLinkMergerTest {
         flags: SyncFlags = SyncFlags(),
         address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress = defaultEngineAddress,
         secrets: FakeSecretStore = FakeSecretStore(),
+        noticeBus: SyncNoticeBus = SyncNoticeBus(),
+        recover: (suspend (SyncStateEntity, SyncClient) -> SyncReport)? = null,
     ): SyncEngine {
         val writeLocks = TestSettingsWriteCoordinator()
         val settings =
@@ -1927,7 +2661,7 @@ class FirstLinkMergerTest {
             address = address,
             tokens =
                 SyncTokenStore(secrets).apply {
-                    kotlinx.coroutines.runBlocking { save("sync.example", "token") }
+                    kotlinx.coroutines.runBlocking { save(hostOf(checkNotNull(address.serverUrl())), "token") }
                 },
             activity = activity,
             gate =
@@ -1935,8 +2669,9 @@ class FirstLinkMergerTest {
                     .FakeLocalNetworkGate(),
             effects = newEffects(db, settings, writeLocks, secrets),
             capture = SettingsCapture(db, settings, writeLocks) { true },
-            notices = SyncNoticeBus(),
+            notices = noticeBus,
             refreshPreferences = { flags.refreshFromStore(address) },
+            recoverExpiredCursor = recover,
         )
     }
 

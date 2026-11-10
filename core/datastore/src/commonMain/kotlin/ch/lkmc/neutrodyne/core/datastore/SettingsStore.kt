@@ -69,6 +69,26 @@ class SettingsStore internal constructor(
         }
     }
 
+    /**
+     * Removes every entry's stored value in one atomic commit — the batch either lands together
+     * or not at all. Each entry's [SettingReset.receipt] commits with the removal like
+     * [resetWithReceipt]'s, `null` clears it like [reset].
+     */
+    suspend fun resetAll(entries: List<SettingReset>) {
+        entries.forEach { requirePortable(it.key) }
+        dataStore.edit { preferences ->
+            for (entry in entries) {
+                SettingPreferences.remove(preferences, entry.key)
+                val receiptKey = receiptPreferenceKey(entry.key)
+                if (entry.receipt == null) {
+                    preferences -= receiptKey
+                } else {
+                    preferences[receiptKey] = entry.receipt
+                }
+            }
+        }
+    }
+
     /** Strict value read: an unreadable file must not masquerade as a real default. */
     suspend fun <T : Any> getOrThrow(key: SettingKey<T>): T = readWithReceipt(key).value
 
@@ -82,5 +102,11 @@ class SettingsStore internal constructor(
 /** A [SettingsStore.readWithReceipt] result: the value and the write receipt committed with it. */
 data class SettingSnapshot<T : Any>(
     val value: T,
+    val receipt: String?,
+)
+
+/** One key in a [SettingsStore.resetAll] batch; [receipt] `null` clears the write receipt. */
+data class SettingReset(
+    val key: SettingKey<*>,
     val receipt: String?,
 )

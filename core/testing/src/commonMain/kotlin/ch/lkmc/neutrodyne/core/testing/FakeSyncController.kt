@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
@@ -13,6 +14,9 @@ import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsError
+import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
+import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.api.SyncPreferenceError
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
@@ -52,6 +56,7 @@ class FakeSyncController(
     val firstLinkChoices = mutableListOf<FirstLinkChoice>()
     val syncNows = mutableListOf<Unit>()
     val unlinks = mutableListOf<Unit>()
+    val serverForgets = mutableListOf<Unit>()
     val serverDataDeletes = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
     val revokes = mutableListOf<String>()
@@ -62,6 +67,16 @@ class FakeSyncController(
     val approvals = mutableListOf<String>()
     val confirmations = mutableListOf<Pair<String, Boolean>>()
     val deviceLists = mutableListOf<Unit>()
+    val disclosureReads = mutableListOf<Unit>()
+    val diagnosticsReads = mutableListOf<Unit>()
+
+    var diagnosticsResult: Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> =
+        Outcome.Success(SyncDiagnosticsSnapshot())
+
+    override suspend fun diagnostics(): Outcome<SyncDiagnosticsSnapshot, SyncDiagnosticsError> {
+        diagnosticsReads += Unit
+        return diagnosticsResult
+    }
 
     /** Scripted results; the defaults succeed (UI tests rarely exercise failures). */
     var devicesResult: Outcome<List<SyncDevice>, SyncProblem> = Outcome.Success(emptyList())
@@ -69,9 +84,14 @@ class FakeSyncController(
         Outcome.Success(PendingDevice("", "", "", "", 0, LinkPurpose.DEVICE, sameNetwork = true))
     var confirmResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var unlinkResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var forgetResult: Outcome<Unit, ForgetServerError> = Outcome.Success(Unit)
     var deleteServerDataResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var renameResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var revokeResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+
+    /** Scripted disclosure; [disclosureError] throws instead — a local read can fail. */
+    var disclosureResult: SyncDisclosure? = SyncDisclosure("sync.example", 0, encrypted = true)
+    var disclosureError: Throwable? = null
 
     override fun startLink(
         serverUrl: String,
@@ -130,9 +150,20 @@ class FakeSyncController(
         return devicesResult
     }
 
+    override suspend fun disclosure(): SyncDisclosure? {
+        disclosureReads += Unit
+        disclosureError?.let { throw it }
+        return disclosureResult
+    }
+
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
         unlinks += Unit
         return unlinkResult
+    }
+
+    override suspend fun forgetServer(): Outcome<Unit, ForgetServerError> {
+        serverForgets += Unit
+        return forgetResult
     }
 
     override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {

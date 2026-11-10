@@ -78,6 +78,13 @@ private class StagedPull(
     val maxClockPacked: Long,
 )
 
+/** Cursor progress commits only once every replay row is durable. */
+private data class FullResyncPull(
+    val report: ch.lkmc.neutrodyne.sync.api.SyncReport,
+    val cursor: String?,
+    val maxClockPacked: Long,
+)
+
 /** One staged episode's park hints; [podcastSyncId] keys them for the parking callback. */
 private data class EpisodeParkHints(
     val podcastSyncId: String,
@@ -129,6 +136,7 @@ class FirstLinkMerger(
      * `SyncBindings`; bare test mergers may omit it.
      */
     private val beforeMerge: suspend () -> Unit = {},
+    private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress? = null,
 ) {
     private val fileSystem: FileSystem = FileSystem.SYSTEM
     private val cacheDir: Path = storagePaths.cacheDir.toPath()
@@ -165,27 +173,47 @@ class FirstLinkMerger(
      * literal value and complete clock (counter and origin node included). A newer pending local
      * intent stays untouched.
      */
-    suspend fun resync(): FirstLinkResult {
-        val roundId = clock.now()
-        // Seeding, the pull and the re-assert all hold the shared activity flag.
-        activity.begin()
+    suspend fun resync(): FirstLinkResult =
         try {
-            beforeMerge()
-            val applied = pullAndApply(roundId, { _, _, _ -> })
-            // 10 Durable apply effects: the pull's committed settings effects drain before the
-            // re-assertion, so DataStore holds the server value first and the re-assert replays
-            // each stored raw clock without re-reading a projection (no echo).
-            effects.drainSettings()
-            effects.drainPasswords()
-            reassert()
-            return FirstLinkResult.Completed(applied)
+            val profile = checkNotNull(db.syncStateDao().get()) { "No sync profile" }
+            FirstLinkResult.Completed(resyncForRound(profile).applied)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
-            return FirstLinkResult.Failed(failure.message ?: "resync failed")
+            FirstLinkResult.Failed(failure.message ?: "resync failed")
+        }
+
+    /** Called inside the engine's round mutex; does not re-enter a public push round. */
+    internal suspend fun resyncForRound(
+        profile: ch.lkmc.neutrodyne.core.database.SyncStateEntity,
+        scopedClient: SyncClient = client,
+    ): ch.lkmc.neutrodyne.sync.api.SyncReport {
+        val started = clock.now()
+        activity.begin()
+        try {
+            beforeMerge()
+            verifyProfile(profile)
+            val result = pullAndApply(started, profile, scopedClient)
+            effects.drainSettings()
+            effects.drainPasswords()
+            verifyProfile(profile)
+            reassert(profile)
+            db.withWriteTransaction {
+                requireSyncProfile(profile, db.syncStateDao().get())
+                val current = checkNotNull(db.syncStateDao().get())
+                db.syncStateDao().upsert(
+                    current.copy(cursor = result.cursor, hlc = maxOf(current.hlc, result.maxClockPacked)),
+                )
+            }
+            return result.report.copy(durationMs = clock.now() - started)
         } finally {
             activity.end()
         }
+    }
+
+    private suspend fun verifyProfile(profile: ch.lkmc.neutrodyne.core.database.SyncStateEntity) {
+        requireSyncProfile(profile, db.syncStateDao().get())
+        if (address != null) check(address.serverUrl() == profile.serverUrl) { "Sync profile changed during recovery" }
     }
 
     /**
@@ -1163,49 +1191,76 @@ class FirstLinkMerger(
 
     // --- Shared steps ------------------------------------------------------------------------------
 
-    private suspend fun reassert() {
-        for (row in db.syncClockDao().all()) {
-            val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: continue
-            if (db.syncOutboxDao().rowsFor(row.coll, listOf(row.rid)).isNotEmpty()) continue
-            db.withWriteTransaction {
-                db.syncStateDao().withApplying {
-                    for ((name, field) in raw.state.fields) {
-                        val stampClock = field.c ?: continue
-                        db
-                            .syncOutboxDao()
-                            .captureStored(
-                                row.coll,
-                                row.rid,
-                                name,
-                                stampClock.packed,
-                                stampClock.nodeId.value,
-                                field.v.toString(),
-                            )
-                    }
-                    raw.state.growSets.forEach { (name, values) ->
-                        val stampClock = raw.state.maxClock ?: return@forEach
-                        db
-                            .syncOutboxDao()
-                            .captureStored(
-                                row.coll,
-                                row.rid,
-                                name,
-                                stampClock.packed,
-                                stampClock.nodeId.value,
-                                values.sorted().joinToString(prefix = "[", postfix = "]") { "\"$it\"" },
-                            )
-                    }
-                    // 10 Passwords: the winning auth re-asserts as a replay row at its
-                    // reference clock; the literal is a placeholder — the push hydrates the
-                    // protected snapshot, so no plaintext touches the outbox either.
-                    raw.authReference?.let { ref ->
-                        val stamp = runCatching { Hlc.parse(ref.clock) }.getOrNull() ?: return@let
-                        db
-                            .syncOutboxDao()
-                            .captureStored(row.coll, row.rid, "auth", stamp.packed, stamp.nodeId.value, "{}")
+    private suspend fun reassert(profile: ch.lkmc.neutrodyne.core.database.SyncStateEntity) {
+        var after =
+            ch.lkmc.neutrodyne.core.database
+                .SyncClockKey("", "")
+        while (true) {
+            verifyProfile(profile)
+            val keys = db.syncClockDao().keysAfter(after.coll, after.rid, REASSERT_KEYS_PER_PAGE)
+            if (keys.isEmpty()) return
+            for (key in keys) {
+                val row = db.syncClockDao().get(key.coll, key.rid) ?: continue
+                val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: continue
+                db.withWriteTransaction {
+                    requireSyncProfile(profile, db.syncStateDao().get())
+                    db.syncStateDao().withApplying {
+                        val pending = db.syncOutboxDao().rowsFor(row.coll, listOf(row.rid))
+                        // A local whole-record capture already covers every field. A local played
+                        // capture carries both played and playedAt, so an older separate replay
+                        // must not overwrite its paired timestamp during change construction.
+                        if (pending.any { it.field == "*" }) return@withApplying
+                        for ((name, field) in raw.state.fields) {
+                            val stampClock = field.c ?: continue
+                            if (name == "playedAt" &&
+                                pending.any {
+                                    it.field == "played" &&
+                                        it.captureKind == ch.lkmc.neutrodyne.core.database.SyncCaptureKind.LOCAL &&
+                                        outboxClock(it)?.let { pendingClock -> pendingClock >= stampClock } == true
+                                }
+                            ) {
+                                continue
+                            }
+                            db
+                                .syncOutboxDao()
+                                .captureStored(
+                                    row.coll,
+                                    row.rid,
+                                    name,
+                                    stampClock.packed,
+                                    stampClock.nodeId.value,
+                                    field.v.toString(),
+                                )
+                        }
+                        raw.state.growSets.forEach { (name, values) ->
+                            val stampClock = raw.state.maxClock ?: return@forEach
+                            db
+                                .syncOutboxDao()
+                                .captureStored(
+                                    row.coll,
+                                    row.rid,
+                                    name,
+                                    stampClock.packed,
+                                    stampClock.nodeId.value,
+                                    kotlinx.serialization.json
+                                        .JsonArray(values.sorted().map(::JsonPrimitive))
+                                        .toString(),
+                                )
+                        }
+                        // 10 Passwords: the winning auth re-asserts as a replay row at its
+                        // reference clock; the literal is a placeholder — the push hydrates the
+                        // protected snapshot, so no plaintext touches the outbox either.
+                        raw.authReference?.let { ref ->
+                            val stamp = runCatching { Hlc.parse(ref.clock) }.getOrNull() ?: return@let
+                            db
+                                .syncOutboxDao()
+                                .captureStored(row.coll, row.rid, "auth", stamp.packed, stamp.nodeId.value, "{}")
+                        }
                     }
                 }
             }
+            // Advance by the key page, even if its final payload was malformed or removed.
+            after = keys.last()
         }
     }
 
@@ -1280,23 +1335,42 @@ class FirstLinkMerger(
 
     private suspend fun pullAndApply(
         roundId: Long,
-        onProgress: (LinkPhase, Int, Int) -> Unit,
-    ): Int {
+        profile: ch.lkmc.neutrodyne.core.database.SyncStateEntity,
+        scopedClient: SyncClient,
+    ): FullResyncPull {
+        val localPodcasts = db.podcastDao().allForExport().size
         var applied = 0
+        var stale = 0
+        var sessionApplied = false
+        val feedsNeedingCredentials = linkedSetOf<Long>()
         var cursor: String? = null
         var pages = 0
-        while (pages < MAX_PAGES) {
-            pages++
-            val page = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
+        var maxClock = 0L
+        while (true) {
+            check(pages++ < MAX_PAGES) { "Full sync exceeded its page limit" }
+            verifyProfile(profile)
+            val page = scopedClient.changes(cursor, ProtocolLimits.MAX_RECORDS)
+            verifyProfile(profile)
+            check(!page.hasMore || page.cursor != cursor) { "Full sync cursor did not advance" }
+            val result = applier.applyPage(page.records, roundId, expectedProfile = profile)
             applied += page.records.size
-            applier.applyPage(page.records, roundId)
-            // A resync drains the page's durable credential effects before the re-assert.
+            stale += result.stale
+            sessionApplied = sessionApplied || result.sessionApplied
+            feedsNeedingCredentials += result.feedsNeedingCredentials
+            maxClock = maxOf(maxClock, page.records.maxOfOrNull(::maxClockOf) ?: 0)
+            effects.drainSettings()
             effects.drainPasswords()
             cursor = page.cursor
-            onProgress(LinkPhase.DOWNLOADING, applied, applied.coerceAtLeast(1))
             if (!page.hasMore) break
         }
-        return applied
+        val held = engine.completePull(roundId, localPodcasts, sessionApplied, feedsNeedingCredentials, profile)
+        verifyProfile(profile)
+        return FullResyncPull(
+            ch.lkmc.neutrodyne.sync.api
+                .SyncReport(0, applied, stale, 0, applied, held, 0),
+            cursor,
+            maxClock,
+        )
     }
 
     private suspend fun writeSeed(
@@ -1343,6 +1417,7 @@ class FirstLinkMerger(
         const val STAGING_META_ENTRY = "link-meta.json"
 
         const val MAX_PAGES = 10_000
+        const val REASSERT_KEYS_PER_PAGE = 128
         const val MAX_PUSH_ROUNDS = 100
         const val DELETE_CONFIRMATION = "DELETE"
         const val RESET_MODE_LIBRARY = "library"

@@ -79,7 +79,8 @@ class SyncWorkerTest {
                         SyncClient::class.java.classLoader,
                         arrayOf(SyncClient::class.java),
                     ) { _, method, _ ->
-                        error("unscripted ${method.name}")
+                        // The optional transport view is unavailable on this scripted client.
+                        if (method.name == "withCredentials") null else error("unscripted ${method.name}")
                     } as SyncClient
                 val client =
                     object : SyncClient by unscripted {
