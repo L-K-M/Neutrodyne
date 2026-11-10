@@ -617,11 +617,11 @@ class SyncControllerImpl(
                 linkFlow.failed(SyncProblem.Server(400))
                 return null
             }
-        if (normalized.startsWith("http://") && !gate.allowsPlainHttp(host)) {
+        if (normalized.startsWith("http://", ignoreCase = true) && !gate.allowsPlainHttp(host)) {
             linkFlow.failed(SyncProblem.InsecureTransport)
             return null
         }
-        if (normalized.startsWith("http://")) {
+        if (normalized.startsWith("http://", ignoreCase = true)) {
             val confirmed = awaitInsecure(host)
             if (!confirmed) {
                 linkFlow.showAddress()
