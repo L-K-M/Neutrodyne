@@ -243,7 +243,20 @@ jobs:
           # JAVA_TOOL_OPTIONS is inherited by every JVM this step forks:
           # the daemon and each test worker. Existing options are kept.
           export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
-          dbus-run-session -- ./gradlew allTests test mutationTest :youtube:ytdlp:shimTest :youtube:ytdlp:preparedShimTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
+          # :desktop:system:test is excluded from the aggregate: its MPRIS suite claims
+          # org.mpris.MediaPlayer2.neutrodyne on the session bus, and :desktopApp:test's
+          # real graph can hold that same name (the 2026-11-10 seven-failure run). It
+          # runs next in its own private bus. Both commands run; either failure fails
+          # the step.
+          set +e
+          dbus-run-session -- ./gradlew allTests test mutationTest :youtube:ytdlp:shimTest :youtube:ytdlp:preparedShimTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue -x :desktop:system:test
+          aggregate_status=$?
+          dbus-run-session -- ./gradlew :desktop:system:test --continue
+          mpris_status=$?
+          set -e
+          if [ "$aggregate_status" -ne 0 ] || [ "$mpris_status" -ne 0 ]; then
+            exit 1
+          fi
       # A desktop test worker that dies mid-suite leaves no test XML — the
       # debug crash-fast path writes crash-<UTC>.txt under <root>/state and
       # then halt(1)s, and /tmp was never inside the unit-reports glob.
