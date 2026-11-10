@@ -2,9 +2,11 @@
 package ch.lkmc.neutrodyne.di
 
 import android.app.Application
+import android.os.Looper
 import androidx.core.content.FileProvider
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import androidx.room3.useReaderConnection
 import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.artwork.ArtworkProviderGraph
@@ -53,23 +55,31 @@ import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.impl.PlaybackServiceInjector
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * The Android graph test (01 Dependency injection rule 10): the real graph builds, every key that exists in M0a has
@@ -92,6 +102,32 @@ class AndroidAppGraphTest {
             (get(null) as MutableMap<*, *>).clear()
         }
     }
+
+    /**
+     * Graph-owned work must die before the database it may still be reading. An
+     * application-scope coroutine suspended inside Room's `Pool.acquire` throws
+     * `Connection pool is closed` when the pool closes underneath it, and the debug
+     * handler rethrows the failure on the main looper — CI 462's
+     * `theCredentialLookupIsTheSecretStore` crash, attributed to whichever test
+     * drained the shared queue. Cancel and join every graph child first, close the
+     * opened pool second, then run the looper so a failure a child already posted
+     * lands on the test that produced it instead of a later one.
+     */
+    @After
+    fun shutdownGraph() =
+        runBlocking {
+            graph.appScope.coroutineContext.job
+                .cancelAndJoin()
+            if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+                graph.databaseOpener.requireDatabase().close()
+            }
+            // Bounded against a self-reposting runnable; a failure a graph child posted
+            // propagates out of idle() and fails the test that produced it.
+            var rounds = 0
+            while (!shadowOf(Looper.getMainLooper()).isIdle && rounds++ < LOOPER_DRAIN_ROUNDS) {
+                shadowOf(Looper.getMainLooper()).idle()
+            }
+        }
 
     @Test
     fun thePlaybackFreezeGuardsTheGraphPositionWriter() =
@@ -136,24 +172,20 @@ class AndroidAppGraphTest {
 
     @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
-        try {
-            assertThat(graph.appUpdateChecker::class.simpleName).isEqualTo("AppUpdateCheckerImpl")
-            assertThat(graph.appUpdateChecker).isSameInstanceAs(graph.appUpdateChecker)
-            assertThat(graph.updateNotices::class.simpleName).isEqualTo("UpdateNoticesImpl")
-            assertThat(graph.updateNotices).isSameInstanceAs(graph.updateNotices)
-            val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
-            for (key in listOf(
-                SettingsKey(SettingsPage.UPDATES),
-                SettingsKey(SettingsPage.UPDATES, openRelease = true),
-                InstallHelpKey(),
-                VerificationNoticeKey,
-            )) {
-                assertThat(provider(key).contentKey).isNotNull()
-            }
-            assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
-        } finally {
-            graph.appScope.cancel()
+        assertThat(graph.appUpdateChecker::class.simpleName).isEqualTo("AppUpdateCheckerImpl")
+        assertThat(graph.appUpdateChecker).isSameInstanceAs(graph.appUpdateChecker)
+        assertThat(graph.updateNotices::class.simpleName).isEqualTo("UpdateNoticesImpl")
+        assertThat(graph.updateNotices).isSameInstanceAs(graph.updateNotices)
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        for (key in listOf(
+            SettingsKey(SettingsPage.UPDATES),
+            SettingsKey(SettingsPage.UPDATES, openRelease = true),
+            InstallHelpKey(),
+            VerificationNoticeKey,
+        )) {
+            assertThat(provider(key).contentKey).isNotNull()
         }
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
     }
 
     @Test
@@ -186,60 +218,52 @@ class AndroidAppGraphTest {
         runBlocking<Unit> {
             graph.databaseOpener.awaitOpen()
             val db = graph.databaseOpener.requireDatabase()
-            try {
-                val channel =
-                    db.podcastDao().insertPodcast(
-                        podcastEntity().copy(
-                            sourceType = SourceType.YOUTUBE_CHANNEL,
-                            youtubeChannelId = "UC" + "0".repeat(21) + "A",
-                        ),
-                    )
-                val id =
-                    db.episodeDao().insertStub(
-                        episodeEntity(podcastId = channel).copy(externalMediaId = "aaaaaaaaaaA", durationMs = 30_000),
-                    )
-                db.ingestDao().fillYouTubeDescription(
-                    id,
-                    EpisodeDescriptionCodec.encode(
-                        "0:00 Intro\n0:10 Next\n0:20 End",
-                        DescriptionFormat.PLAIN_TEXT,
-                        DescriptionCompleteness.COMPLETE,
+            val channel =
+                db.podcastDao().insertPodcast(
+                    podcastEntity().copy(
+                        sourceType = SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = "UC" + "0".repeat(21) + "A",
                     ),
-                    "notes",
                 )
-                graph.chapterRepository().ensureCurrentLoaded(id)
-                val rows = graph.chapterRepository().observe(id).first()
-                assertThat(rows.map { it.startMs }).containsExactly(0L, 10_000L, 20_000L).inOrder()
-                assertThat(rows.map { it.source }.toSet()).containsExactly(ChapterSource.YOUTUBE_DESC)
-            } finally {
-                db.close()
-            }
+            val id =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = channel).copy(externalMediaId = "aaaaaaaaaaA", durationMs = 30_000),
+                )
+            db.ingestDao().fillYouTubeDescription(
+                id,
+                EpisodeDescriptionCodec.encode(
+                    "0:00 Intro\n0:10 Next\n0:20 End",
+                    DescriptionFormat.PLAIN_TEXT,
+                    DescriptionCompleteness.COMPLETE,
+                ),
+                "notes",
+            )
+            graph.chapterRepository().ensureCurrentLoaded(id)
+            val rows = graph.chapterRepository().observe(id).first()
+            assertThat(rows.map { it.startMs }).containsExactly(0L, 10_000L, 20_000L).inOrder()
+            assertThat(rows.map { it.source }.toSet()).containsExactly(ChapterSource.YOUTUBE_DESC)
         }
 
     @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
-            try {
-                val bindings =
-                    listOf(
-                        graph.queueRepository() to "QueueRepositoryImpl",
-                        graph.playContextResolver() to "PlayContextResolverImpl",
-                        graph.playSessionStore() to "SessionWriter",
-                        graph.positionStore() to "PositionWriter",
-                        graph.playbackMediaLookup() to "PlaybackMediaLookupImpl",
-                    )
-                for ((binding, expectedName) in bindings) {
-                    assertThat(binding::class.simpleName).isEqualTo(expectedName)
-                }
-                assertThat(graph.queueRepository()).isSameInstanceAs(graph.queueRepository())
-                assertThat(graph.playContextResolver()).isSameInstanceAs(graph.playContextResolver())
-                assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
-                assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
-                assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
+            val bindings =
+                listOf(
+                    graph.queueRepository() to "QueueRepositoryImpl",
+                    graph.playContextResolver() to "PlayContextResolverImpl",
+                    graph.playSessionStore() to "SessionWriter",
+                    graph.positionStore() to "PositionWriter",
+                    graph.playbackMediaLookup() to "PlaybackMediaLookupImpl",
+                )
+            for ((binding, expectedName) in bindings) {
+                assertThat(binding::class.simpleName).isEqualTo(expectedName)
             }
+            assertThat(graph.queueRepository()).isSameInstanceAs(graph.queueRepository())
+            assertThat(graph.playContextResolver()).isSameInstanceAs(graph.playContextResolver())
+            assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
+            assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
+            assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
         }
 
     @Test
@@ -359,7 +383,6 @@ class AndroidAppGraphTest {
         val orders = graph.initializers.associate { it::class.simpleName to it.order }
         assertThat(orders["UpdateCheckInitializer"]).isEqualTo(200)
         assertThat(orders["UpdateChannelsInitializer"]).isEqualTo(10)
-        graph.appScope.cancel()
     }
 
     @Test
@@ -449,12 +472,110 @@ class AndroidAppGraphTest {
     @Test
     fun theCredentialLookupIsTheSecretStore() {
         runBlocking { graph.databaseOpener.awaitOpen() }
-        try {
-            assertThat(graph.credentialLookup).isSameInstanceAs(graph.secretStore)
-        } finally {
-            graph.databaseOpener.requireDatabase().close()
-        }
+        assertThat(graph.credentialLookup).isSameInstanceAs(graph.secretStore)
     }
+
+    /**
+     * CI 462's crash, reproduced deterministically (run 42757540920, unit job 129635302258:
+     * `android.database.SQLException: Error code: 21, message: Connection pool is closed`
+     * from `androidx.room3.coroutines.Pool.acquire` on the IO dispatcher). WAL sizes the
+     * reader pool at four (`WAL_DEFAULT_NUMBER_OF_READERS`); holding all four connections
+     * parks the next reader inside `Pool.acquire`'s permit wait — the in-flight position
+     * CI's reader occupied when `close()` won the race. `Pool.close` never releases the
+     * semaphore: the parked reader wakes only when a holder recycles, then meets
+     * `isClosed` and throws. `SyncControllerImpl.init` launches exactly such an uncaught
+     * graph-owned read (`scope.launch { refreshStatus() }` → `db.syncStateDao().get()`),
+     * and the application scope's debug handler rethrows it on the main looper — the
+     * delivery path that attributed the crash to whichever test drained the queue.
+     */
+    @Test
+    fun anUnjoinedGraphReaderMeetsTheClosedPoolAsCiSaw() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            val release = CompletableDeferred<Unit>()
+            val entered = CountDownLatch(4)
+            repeat(4) {
+                graph.appScope.launch {
+                    db.useReaderConnection {
+                        entered.countDown()
+                        release.await()
+                    }
+                }
+            }
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue()
+            // The production reader parks at the permit wait; closing first is the OLD
+            // order — the pool dies while graph-owned work is still alive.
+            val controller = graph.syncController
+            db.close()
+            release.complete(Unit)
+            // A reader that arrives only now meets `isClosed` at `useConnection`'s entry
+            // check — the deterministic twin of the in-flight `Pool.acquire` throw.
+            // Joining it before the scope dies guarantees it ran to the throw: nothing
+            // cancels it first, so the "Connection pool is closed" post always lands
+            // regardless of which parked coroutine wins the wake-up race.
+            graph.appScope.launch { db.syncStateDao().get() }.join()
+            graph.appScope.coroutineContext.job
+                .cancelAndJoin()
+            // Every uncaught child failure was posted to the main looper. Draining it
+            // must surface SQLITE_MISUSE closed-resource crashes: "Connection pool is
+            // closed" from an acquire that meets `isClosed`, or "connection is closed"
+            // from a `useConnection` recycle whose wrapper `Pool.close` reaped mid-use.
+            val posted = mutableListOf<Throwable>()
+            var rounds = 0
+            while (!shadowOf(Looper.getMainLooper()).isIdle && rounds++ < LOOPER_DRAIN_ROUNDS) {
+                try {
+                    shadowOf(Looper.getMainLooper()).idle()
+                } catch (failure: Throwable) {
+                    posted += failure
+                }
+            }
+            assertThat(posted).isNotEmpty()
+            for (failure in posted) {
+                assertThat(failure).hasMessageThat().contains("closed")
+            }
+            assertThat(posted.mapNotNull { it.message }.count { "pool is closed" in it }).isAtLeast(1)
+            assertThat(controller.status.value).isEqualTo(SyncStatus.NotConfigured)
+        }
+
+    /**
+     * The ordering the class' `@After` enforces for every test: graph-owned work is
+     * cancelled and joined before the opened pool may close, so no reader can meet
+     * `isClosed` — each dies at the permit wait with a `CancellationException` instead
+     * of a `Connection pool is closed` posted to the main looper.
+     */
+    @Test
+    fun graphReadersAreCancelledAndJoinedBeforeThePoolCloses() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            val release = CompletableDeferred<Unit>()
+            val entered = CountDownLatch(4)
+            repeat(4) {
+                graph.appScope.launch {
+                    db.useReaderConnection {
+                        entered.countDown()
+                        release.await()
+                    }
+                }
+            }
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue()
+            // A graph-scope read and `SyncControllerImpl.init`'s `refreshStatus` both park
+            // at `Pool.acquire`'s permit wait while the reader pool is fully held.
+            val parked = graph.appScope.launch { db.syncStateDao().get() }
+            val controller = graph.syncController
+            graph.appScope.coroutineContext.job
+                .cancelAndJoin()
+            db.close()
+            release.complete(Unit)
+            assertThat(parked.isCancelled).isTrue()
+            assertThat(controller.status.value).isEqualTo(SyncStatus.NotConfigured)
+            // A leaked failure would sit on the main looper; the queue must be clean.
+            var rounds = 0
+            while (!shadowOf(Looper.getMainLooper()).isIdle && rounds++ < LOOPER_DRAIN_ROUNDS) {
+                shadowOf(Looper.getMainLooper()).idle()
+            }
+        }
 
     /**
      * MS2 wiring: the app graph's post-ingest hook must be 10's `SyncParkedStateApplier` — never
@@ -495,37 +616,29 @@ class AndroidAppGraphTest {
                 (get(null) as MutableMap<*, *>).clear()
             }
             graph.databaseOpener.awaitOpen()
-            try {
-                val prepared =
-                    (graph.exportRepository.prepare(ExportRequest()) as Outcome.Success).value
+            val prepared =
+                (graph.exportRepository.prepare(ExportRequest()) as Outcome.Success).value
 
-                val authority = "${RuntimeEnvironment.getApplication().packageName}.fileprovider"
-                assertThat(prepared.shareUri)
-                    .isEqualTo("content://$authority/export/${prepared.fileName}")
-                assertThat(prepared.mimeType).isEqualTo("text/x-opml")
-                assertThat(
-                    File(
-                        RuntimeEnvironment.getApplication().cacheDir,
-                        "export/${prepared.fileName}",
-                    ).isFile,
-                ).isTrue()
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
-            }
+            val authority = "${RuntimeEnvironment.getApplication().packageName}.fileprovider"
+            assertThat(prepared.shareUri)
+                .isEqualTo("content://$authority/export/${prepared.fileName}")
+            assertThat(prepared.mimeType).isEqualTo("text/x-opml")
+            assertThat(
+                File(
+                    RuntimeEnvironment.getApplication().cacheDir,
+                    "export/${prepared.fileName}",
+                ).isFile,
+            ).isTrue()
         }
 
     @Test
     fun newEpisodePosterUsesTheAndroidAdapter() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
-            try {
-                assertThat(graph.groupChannelSync).isInstanceOf(AndroidGroupChannelSync::class.java)
-                assertThat(graph.groupChannelSync).isSameInstanceAs(graph.groupChannelSync)
-                assertThat(graph.newEpisodePoster).isInstanceOf(AndroidNewEpisodePoster::class.java)
-                assertThat(graph.newEpisodePoster).isSameInstanceAs(graph.newEpisodePoster)
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
-            }
+            assertThat(graph.groupChannelSync).isInstanceOf(AndroidGroupChannelSync::class.java)
+            assertThat(graph.groupChannelSync).isSameInstanceAs(graph.groupChannelSync)
+            assertThat(graph.newEpisodePoster).isInstanceOf(AndroidNewEpisodePoster::class.java)
+            assertThat(graph.newEpisodePoster).isSameInstanceAs(graph.newEpisodePoster)
         }
 
     /**
@@ -536,14 +649,10 @@ class AndroidAppGraphTest {
     fun theImportLanesBindTheRealServices() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
-            try {
-                // The implementations are internal to :core:data, so the bindings are pinned by name.
-                assertThat(graph.importRepository.javaClass.name).isEqualTo(IMPORT_REPOSITORY_IMPL)
-                assertThat(graph.backupRepository.javaClass.name).isEqualTo(BACKUP_REPOSITORY_IMPL)
-                assertThat(graph.importReportPoster).isInstanceOf(AndroidImportReportPoster::class.java)
-            } finally {
-                graph.databaseOpener.requireDatabase().close()
-            }
+            // The implementations are internal to :core:data, so the bindings are pinned by name.
+            assertThat(graph.importRepository.javaClass.name).isEqualTo(IMPORT_REPOSITORY_IMPL)
+            assertThat(graph.backupRepository.javaClass.name).isEqualTo(BACKUP_REPOSITORY_IMPL)
+            assertThat(graph.importReportPoster).isInstanceOf(AndroidImportReportPoster::class.java)
         }
 
     @Test
@@ -567,6 +676,7 @@ class AndroidAppGraphTest {
     private companion object {
         const val IMPORT_REPOSITORY_IMPL = "ch.lkmc.neutrodyne.core.data.importing.ImportRepositoryImpl"
         const val BACKUP_REPOSITORY_IMPL = "ch.lkmc.neutrodyne.core.data.backup.BackupRepositoryImpl"
+        const val LOOPER_DRAIN_ROUNDS = 16
 
         val STARTUP_BANDS =
             mapOf(
