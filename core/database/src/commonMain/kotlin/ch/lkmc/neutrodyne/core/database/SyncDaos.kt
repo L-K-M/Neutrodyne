@@ -44,6 +44,13 @@ abstract class SyncStateDao(
     @Query("UPDATE sync_state SET lastError = NULL WHERE id = 0 AND lastError <> :keep")
     abstract suspend fun clearTransientError(keep: String)
 
+    /** Successful pulls preserve errors that explicitly pause writes. */
+    @Query("UPDATE sync_state SET lastError = NULL WHERE id = 0 AND lastError NOT IN (:keep)")
+    abstract suspend fun clearTransientErrorsExcept(keep: List<String>)
+
+    @Query("UPDATE sync_state SET lastError = :error WHERE id = 0")
+    abstract suspend fun storeError(error: String?)
+
     @Query("UPDATE sync_state SET cursor = :cursor WHERE id = 0")
     abstract suspend fun storeCursor(cursor: String)
 
@@ -353,6 +360,54 @@ abstract class SyncOutboxDao(
         }
     }
 
+    /** Clock correction visits only this node's unaccepted local clocks, without loading values. */
+    @Query(
+        "SELECT MIN(hlc) FROM sync_outbox WHERE captureKind = 'LOCAL' AND nodeId = :nodeId" +
+            " AND hlc > :after AND (hlc < :min OR hlc > :max)",
+    )
+    abstract suspend fun nextLocalClockOutside(
+        min: Long,
+        max: Long,
+        nodeId: String,
+        after: Long,
+    ): Long?
+
+    @Query(
+        "SELECT rid FROM sync_outbox WHERE coll = 'setting' AND field = 'v'" +
+            " AND captureKind = 'LOCAL' AND nodeId = :nodeId AND hlc = :clock AND rid > :after" +
+            " ORDER BY rid LIMIT :limit",
+    )
+    abstract suspend fun localSettingIdsAtClock(
+        clock: Long,
+        nodeId: String,
+        after: String,
+        limit: Int,
+    ): List<String>
+
+    @Query(
+        "SELECT DISTINCT coll, rid FROM sync_outbox WHERE captureKind = 'LOCAL' AND nodeId = :nodeId" +
+            " AND hlc = :clock AND (coll > :coll OR (coll = :coll AND rid > :rid))" +
+            " ORDER BY coll, rid LIMIT :limit",
+    )
+    abstract suspend fun localRecordKeysAtClock(
+        clock: Long,
+        nodeId: String,
+        coll: String,
+        rid: String,
+        limit: Int,
+    ): List<SyncClockKey>
+
+    /** The caller owns the writer and updates setting receipt metadata in the same transaction. */
+    @Query(
+        "UPDATE sync_outbox SET hlc = :replacement WHERE captureKind = 'LOCAL'" +
+            " AND nodeId = :nodeId AND hlc = :previous",
+    )
+    abstract suspend fun restampLocalClock(
+        previous: Long,
+        replacement: Long,
+        nodeId: String,
+    )
+
     /** Moves one record's rows to another `rid`, keeping the larger complete clock on a collision. */
     suspend fun moveRecord(
         coll: String,
@@ -497,6 +552,12 @@ interface SyncParkedDao {
     /** 10's start-up recovery: every row, ordered for a deterministic retry pass. */
     @Query("SELECT * FROM sync_parked ORDER BY podcastSyncId, identityKey, id")
     suspend fun all(): List<SyncParkedEntity>
+
+    @Query("SELECT id FROM sync_parked WHERE id > :after ORDER BY id LIMIT :limit")
+    suspend fun idsAfter(
+        after: Long,
+        limit: Int,
+    ): List<Long>
 
     /** Applied rows leave the table (10). */
     @Query("DELETE FROM sync_parked WHERE id IN (:ids)")

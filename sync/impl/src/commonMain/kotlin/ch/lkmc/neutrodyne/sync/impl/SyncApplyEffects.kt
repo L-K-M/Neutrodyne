@@ -364,6 +364,7 @@ class SyncApplyEffects(
                         db.syncOutboxDao().deleteField(coll, rid, "~rekey")
                         return@forEachIndexed
                     }
+                    confirmAcknowledged(change, rid)
                     for ((field, value) in change.fields) {
                         val clock = value.c ?: continue
                         val parsed = runCatching { Hlc.parse(clock) }.getOrNull() ?: continue
@@ -383,6 +384,28 @@ class SyncApplyEffects(
                 }
             }
         }
+    }
+
+    /** Freeze the immutable sent snapshot before deleting its outbox proof. */
+    private suspend fun confirmAcknowledged(
+        change: ChangeDto,
+        rid: String,
+    ) {
+        val write =
+            ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+                .change(change) as?
+                ch.lkmc.neutrodyne.sync.protocol.ValidatedChange.Write ?: return
+        val store = SyncClockStore(db)
+        val stored = store.get(change.coll, rid)
+        val accepted = stored.confirm(write.state)
+        val visible =
+            SyncRecordMerger
+                .merge(
+                    stored?.state,
+                    null,
+                    write.state.copy(fields = write.state.fields - "auth"),
+                ).record
+        store.put(change.coll, rid, (stored ?: RawSyncRecord(visible)).copy(state = visible).withConfirmed(accepted))
     }
 
     /**
@@ -452,6 +475,7 @@ class SyncApplyEffects(
                         pendingSetting = materializeWinner,
                         pendingAuth = stored?.pendingAuth,
                         settingIntent = stored?.settingIntent,
+                        accepted = stored?.accepted,
                     ),
                 ),
             ),
@@ -501,6 +525,7 @@ class SyncApplyEffects(
                         pendingSetting = stored?.pendingSetting,
                         pendingAuth = stored?.pendingAuth,
                         settingIntent = stored?.settingIntent,
+                        accepted = stored?.accepted,
                     ),
                 ),
             ),
