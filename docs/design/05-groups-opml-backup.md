@@ -1896,6 +1896,15 @@ through the same controller consent path; restore itself never starts transfers.
 - The report is the import report of the restore session; podcasts with `AUTH_REQUIRED` show "Enter password" (stored credentials are bound to their device — an Android Keystore key, a DPAPI blob or a `0600` file — and never move, [03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore)).
 - **Re-download offer** (M6): transactions B record the episode IDs of `dl = true` lines in `ImportOptions.redownloadIds` (newest `d` first, at most 2,000); those that still exist and have no `COMPLETED` download → the report shows "Re-download 23 episodes (about 1.1 GB)" (size as in `downloadAllEstimate`); tapping calls `DownloadController.request(ids, DownloadLane.MANUAL, allowMetered = null)` from the visible screen (Android: UIDT must be scheduled while visible, [07 Runners and scheduling](07-downloads.md#runners-and-scheduling); desktop: the `downloads-manual` lane, [07 Desktop runners](07-downloads.md#desktop-runners)). YouTube lines are skipped while `YouTubeCapabilitiesSource.capabilities.value.downloads` is false (external mode).
 
+**Implementation note (2026-11-10, server-library adoption).** First-link
+`LINK_REPLACE` discards the previous outbox, raw clocks, parked records and
+held removals during the Replace pre-step. It preserves the authenticated
+identity and corrected clock offset, and clears the old cursor and HLC;
+10's adopter then seeds the server's accepted clocks and cursor. Otherwise
+a later push or full resync could restore the library the user discarded.
+New unmatched records are parked after this reset. A failed download
+preflight leaves the previous sync history intact.
+
 ### Restore while linked
 
 [R7.9](../PLAN.md#21-functional-requirements), [D33](../PLAN.md#3-key-decisions), [D93](../PLAN.md#3-key-decisions). Delivered in [MS2](../PLAN.md#ms2-client-sync) (MS2 acceptance 6); 08 owns the prompts ([08 Sync screens](08-ui-ux.md#sync-screens)). A restore on a device that syncs must neither overwrite newer state on the other devices nor be undone by the next pull. The device's sync status (10's `SyncStatus`) decides:

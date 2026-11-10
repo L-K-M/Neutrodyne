@@ -59,6 +59,7 @@
     <string name="group_tab_desc">%1$s, %2$s, %3$s</string>
     <string name="held_changes_message">%1$s hat %2$s und %3$s entfernt. Hier auch übernehmen?</string>
     <string name="held_changes_unknown_device">Ein anderes Gerät</string>
+    <string name="notification_sync_held_title">Sync wartet auf dich</string>
     <string name="review">Prüfen</string>
     <string name="sync_reconnect_message">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren</string>
     <string name="sync_reconnect_action">Erneut verbinden</string>
