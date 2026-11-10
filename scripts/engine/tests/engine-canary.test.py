@@ -468,6 +468,64 @@ class WorkflowShapeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = (ROOT / '.github/workflows/engine-canary.yml').read_text()
 
+    @classmethod
+    def job_block(cls, name):
+        """The job's YAML block, from its two-space header to the next job."""
+        lines = cls.workflow.splitlines()
+        start = next(
+            (i for i, line in enumerate(lines) if line == f'  {name}:'), None
+        )
+        assert start is not None, name
+        end = len(lines)
+        for i in range(start + 1, len(lines)):
+            if lines[i].startswith('  ') and not lines[i].startswith('   ') and lines[i].strip():
+                end = i
+                break
+        return '\n'.join(lines[start:end])
+
+    @classmethod
+    def job_condition(cls, name):
+        """The job-level `if:` expression, with a block scalar folded."""
+        lines = cls.job_block(name).splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith('    if:'):
+                value = line.split('if:', 1)[1].strip()
+                if value in ('>', '>-', '|', '|-'):
+                    collected = []
+                    for cont in lines[i + 1:]:
+                        if cont.startswith('      ') and cont.strip():
+                            collected.append(cont.strip())
+                        elif not cont.strip():
+                            continue
+                        else:
+                            break
+                    value = ' '.join(collected)
+                return value
+        return None
+
+    @classmethod
+    def step_block(cls, job, name):
+        """One step's YAML block, from its `- name:` line to the next step."""
+        lines = cls.job_block(job).splitlines()
+        start = next(
+            (i for i, line in enumerate(lines) if line == f'      - name: {name}'),
+            None,
+        )
+        assert start is not None, name
+        end = len(lines)
+        for i in range(start + 1, len(lines)):
+            if lines[i].startswith('      - '):
+                end = i
+                break
+        return '\n'.join(lines[start:end])
+
+    @classmethod
+    def step_condition(cls, job, name):
+        for line in cls.step_block(job, name).splitlines():
+            if line.startswith('        if:'):
+                return line.split('if:', 1)[1].strip()
+        return None
+
     def test_schedule_dispatch_and_concurrency(self):
         self.assertIn("cron: '23 */6 * * *'", self.workflow.replace('"', "'"))
         self.assertIn('workflow_dispatch:', self.workflow)
@@ -499,21 +557,23 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn('GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}', self.workflow)
 
     def test_deploy_only_runs_when_signed(self):
-        deploy = self.workflow.split('  deploy:', 1)[1]
-        condition = next(line for line in deploy.splitlines() if 'if:' in line)
+        condition = self.job_condition('deploy')
         self.assertIn("needs.approve.outputs.signed == 'true'", condition)
+        self.assertIn("github.ref == 'refs/heads/main'", condition)
 
     def test_no_secret_dry_run_stays_green_and_publishes_nothing(self):
         # The sign step maps the missing secret to exit 77 and signed=false;
         # deploy's condition then keeps the publisher out of the run.
-        self.assertIn('[ "$rc" = 77 ]', self.workflow)
-        self.assertIn('signed=false', self.workflow)
-        self.assertIn("needs.approve.outputs.signed == 'true'", self.workflow)
+        sign = self.step_block('approve', 'Sign (or dry-run without the secret)')
+        self.assertIn('[ "$rc" = 77 ]', sign)
+        self.assertIn('signed=false', sign)
+        condition = self.job_condition('deploy')
+        self.assertIn("needs.approve.outputs.signed == 'true'", condition)
+        self.assertIn("github.ref == 'refs/heads/main'", condition)
 
     def test_api_probe_failure_publishes_nothing(self):
         # approve never runs on a failed gate, so deploy cannot sign or publish.
-        approve = self.workflow.split('  approve:', 1)[1].split('  deploy:', 1)[0]
-        condition = next(line for line in approve.splitlines() if 'if:' in line)
+        condition = self.job_condition('approve')
         self.assertIn("'success'", condition)
         self.assertIn("'skipped'", condition)
         self.assertNotIn("!= 'failure'", condition)
@@ -527,9 +587,9 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn('--bundled candidate/bundled.json', self.workflow)
 
     def test_approve_verifies_the_current_manifest_before_trusting_it(self):
+        step = self.step_block('approve', 'Write the new manifest')
         self.assertIn('--current current/ytdlp-approved.json --current-sig current/ytdlp-approved.json.sig',
-                      self.workflow)
-        self.assertIn('--keep-candidate', self.workflow)
+                      step)
 
     def test_noop_run_reuses_the_current_manifest_pair(self):
         # A skipped gate must not invent a candidate: the verified current
@@ -545,11 +605,68 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertNotIn('sign-engine-manifest.sh', self.workflow)
 
     def test_approve_runs_on_a_skipped_gate_but_never_a_failed_one(self):
-        approve = self.workflow.split('  approve:', 1)[1].split('  deploy:', 1)[0]
-        condition = next(line for line in approve.splitlines() if 'if:' in line)
+        condition = self.job_condition('approve')
         self.assertIn("'success'", condition)
         self.assertIn("'skipped'", condition)
         self.assertNotIn("!= 'failure'", condition)
+
+    def test_privileged_jobs_require_main(self):
+        for name in ('gate', 'approve', 'deploy'):
+            with self.subTest(job=name):
+                self.assertIn(
+                    "github.ref == 'refs/heads/main'", self.job_condition(name)
+                )
+
+    def test_detect_is_read_only_and_has_no_environment(self):
+        detect = self.job_block('detect')
+        self.assertNotIn('environment:', detect)
+        self.assertNotIn('NEUTRODYNE_ENGINE_MANIFEST_KEY', detect)
+        self.assertNotIn('contents: write', detect)
+
+    def test_gate_runs_only_for_a_changed_candidate(self):
+        self.assertIn(
+            "needs.detect.outputs.changed == 'true'", self.job_condition('gate')
+        )
+
+    def test_approve_requires_a_green_gate_for_a_change_and_a_skipped_gate_for_a_noop(self):
+        condition = self.job_condition('approve')
+        self.assertIn("needs.detect.outputs.changed == 'true'", condition)
+        self.assertIn("needs.gate.result == 'success'", condition)
+        self.assertIn("needs.detect.outputs.changed == 'false'", condition)
+        self.assertIn("needs.gate.result == 'skipped'", condition)
+
+    def test_approve_binds_the_gate_candidate_to_the_detected_candidate(self):
+        approve = self.job_block('approve')
+        self.assertIn('DETECT_TAG: ${{ needs.detect.outputs.candidate }}', approve)
+        self.assertIn('GATE_TAG: ${{ needs.gate.outputs.tag }}', approve)
+        self.assertIn("does not match detected candidate", approve)
+
+    def test_approve_has_no_keep_candidate_fallback_for_a_changed_run(self):
+        step = self.step_block('approve', 'Write the new manifest')
+        self.assertIn('changed run without a gate candidate', step)
+        self.assertNotIn('args+=(--keep-candidate)', step)
+        self.assertNotIn('args+=(--keep-candidate)', self.job_block('approve'))
+
+    def test_strict_drift_report_is_main_only_and_nonblocking(self):
+        step = self.step_block('gate', 'Record the strict-mode drift')
+        self.assertIn('continue-on-error: true', step)
+        self.assertEqual(
+            "steps.strict.outcome == 'failure' && github.ref == 'refs/heads/main'",
+            self.step_condition('gate', 'Record the strict-mode drift'),
+        )
+
+    def test_current_manifest_downloads_are_bounded(self):
+        detect = self.job_block('detect')
+        self.assertIn('--max-filesize 65536', detect)
+        self.assertIn('--max-filesize 4096', detect)
+
+    def test_deploy_states_the_verified_index_precondition(self):
+        step = self.step_block('deploy', 'Publish the immutable snapshot and advance the index')
+        self.assertIn('PRESENT: ${{ needs.detect.outputs.present }}', step)
+        self.assertIn('--expected-index-tag', step)
+        self.assertIn('--expect-no-index', step)
+        # The bootstrap path must not silently fall back to an unguarded publish.
+        self.assertNotIn('if [ -n "$EXPECTED_INDEX_TAG" ]', step)
 
     def test_keepalive_reenables_the_canary(self):
         keepalive = (ROOT / '.github/workflows/keepalive.yml').read_text()

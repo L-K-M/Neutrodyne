@@ -17,6 +17,14 @@
 # as a dry run: everything up to the signature still runs, nothing is published,
 # and the run stays green so forks and not-yet-configured environments see the
 # pipeline work.
+#
+# Trust boundary: gate/approve/deploy each require github.ref ==
+# refs/heads/main, so a workflow_dispatch on another branch runs only the
+# read-only detect job and never reaches the engine-approval environment or its
+# secret. That code guard is defense in depth, not the primary control: the
+# engine-approval environment MUST carry GitHub's deployment-branch
+# restriction to main before the owner installs the signing key, because an
+# edit to this workflow could remove the guards.
 
 name: engine-canary
 
@@ -98,8 +106,10 @@ jobs:
           fi
           base=$(python3 -c "import json;print(json.load(open('current/index.json'))['snapshot_base_url'])")
           snapshot=$(python3 -c "import json;print(json.load(open('current/index.json'))['snapshot_tag'])")
-          curl -fsSLo current/ytdlp-approved.json "$base/ytdlp-approved.json"
-          curl -fsSLo current/ytdlp-approved.json.sig "$base/ytdlp-approved.json.sig"
+          # The caps match the publisher's ASSET_LIMITS (64 KiB manifest,
+          # 4 KiB signature); an oversized document fails before verification.
+          curl -fsSL --max-filesize 65536 -o current/ytdlp-approved.json "$base/ytdlp-approved.json"
+          curl -fsSL --max-filesize 4096 -o current/ytdlp-approved.json.sig "$base/ytdlp-approved.json.sig"
           python3 - <<'EOF'
           import json, sys
           sys.path.insert(0, 'scripts/engine')
@@ -152,7 +162,9 @@ jobs:
 
   gate:
     needs: detect
-    if: needs.detect.outputs.changed == 'true'
+    # Main-only: a branch dispatch must never run the privileged leg, and a
+    # changed candidate may only be gated on main.
+    if: needs.detect.outputs.changed == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -188,7 +200,10 @@ jobs:
         continue-on-error: true
         run: ./gradlew :youtube:ytdlp:shimTest
       - name: Record the strict-mode drift
-        if: steps.strict.outcome == 'failure'
+        # Informational only: a gh failure must not fail the gate or block
+        # approval, and branch dispatches must not file issues.
+        if: steps.strict.outcome == 'failure' && github.ref == 'refs/heads/main'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -244,9 +259,15 @@ jobs:
 
   approve:
     needs: [detect, gate]
-    # Runs for a green gate and for no-op runs (gate skipped) so the signed
-    # heartbeat still republishes; a red or cancelled gate never reaches the key.
-    if: always() && needs.detect.result == 'success' && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
+    # Main-only. A changed candidate requires a real green gate; a no-op run
+    # requires the explicitly skipped gate and the verified current manifest.
+    # A red or cancelled gate never reaches the key, and a branch dispatch
+    # never reaches the engine-approval environment.
+    if: >-
+      always() && needs.detect.result == 'success' &&
+      ((needs.detect.outputs.changed == 'true' && needs.gate.result == 'success') ||
+      (needs.detect.outputs.changed == 'false' && needs.gate.result == 'skipped')) &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: engine-approval
@@ -278,6 +299,7 @@ jobs:
         env:
           REVOKE: ${{ inputs.revoke }}
           FLOOR: ${{ needs.detect.outputs.floor }}
+          DETECT_TAG: ${{ needs.detect.outputs.candidate }}
           GATE_TAG: ${{ needs.gate.outputs.tag }}
         run: |
           set -e
@@ -287,14 +309,19 @@ jobs:
           else
               args+=(--bootstrap)
           fi
-          # A skipped gate means no candidate was staged: keep the current
-          # ytdlp block and sign only the heartbeat. A green gate's staged
-          # metadata is the only thing approve may sign.
-          if [ -n "$GATE_TAG" ]; then
-              args+=(--bundled candidate/bundled.json --floor "$FLOOR")
-          else
-              args+=(--keep-candidate)
+          # A green gate's staged metadata is the only thing approve may sign,
+          # and it must be the candidate detect resolved. A changed run with
+          # no gate candidate fails closed: there is no --keep-candidate
+          # fallback (that path belongs to the skipped-gate no-op above).
+          if [ -z "$GATE_TAG" ]; then
+              echo "changed run without a gate candidate; refusing to sign" >&2
+              exit 1
           fi
+          if [ "$GATE_TAG" != "$DETECT_TAG" ]; then
+              echo "gate candidate '$GATE_TAG' does not match detected candidate '$DETECT_TAG'" >&2
+              exit 1
+          fi
+          args+=(--bundled candidate/bundled.json --floor "$FLOOR")
           if [ -n "$REVOKE" ]; then
               args+=(--revoke "$REVOKE")
           fi
@@ -328,7 +355,9 @@ jobs:
 
   deploy:
     needs: [detect, approve]
-    if: needs.approve.outputs.signed == 'true'
+    # Main-only: a branch dispatch never holds contents: write or the engine
+    # approval environment, even if an approve job somehow produced a signature.
+    if: needs.approve.outputs.signed == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: engine-approval
@@ -359,14 +388,23 @@ jobs:
       - name: Publish the immutable snapshot and advance the index
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRESENT: ${{ needs.detect.outputs.present }}
           EXPECTED_INDEX_TAG: ${{ needs.detect.outputs.snapshot_tag }}
         run: |
           set -e
           args=(--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" --commit-sha "$GITHUB_SHA" --snapshot-dir approved)
-          # A resolved index pins the pointer this run may advance; a missing
-          # one is the bootstrap path. A moved index fails the publish closed.
-          if [ -n "$EXPECTED_INDEX_TAG" ]; then
+          # detect verified the index state: a resolved index pins the pointer
+          # this run may advance, and a verified bootstrap requires its absence.
+          # A reused bootstrap output therefore fails closed instead of
+          # repointing a live index at a stale snapshot.
+          if [ "$PRESENT" = 'true' ]; then
+              if [ -z "$EXPECTED_INDEX_TAG" ]; then
+                  echo "detect reported an index without a snapshot tag" >&2
+                  exit 1
+              fi
               args+=(--expected-index-tag "$EXPECTED_INDEX_TAG")
+          else
+              args+=(--expect-no-index)
           fi
           python3 scripts/engine/approval_release.py publish "${args[@]}"
       - name: Record the published snapshot
