@@ -92,9 +92,12 @@ import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
+import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
+import ch.lkmc.neutrodyne.feature.settings.serialUserMessages
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.sync.api.SyncController
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -158,6 +161,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     desktopPlaybackController: ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController? = null,
     repoUrl: String = "",
     crashOffer: DesktopCrashOffer? = null,
+    syncController: (() -> SyncController)? = null,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -385,6 +389,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 viewModelFactory = viewModelFactory,
                 playbackController = playbackController,
                 playbackState = playbackState,
+                syncController = syncController,
                 portal = portal,
                 openHandler = openHandler,
                 failedDownloads = failedDownloads,
@@ -662,6 +667,7 @@ internal fun NeutrodyneWindowContent(
     volumeUp: () -> Unit = {},
     volumeDown: () -> Unit = {},
     crashOffer: DesktopCrashOffer? = null,
+    syncController: (() -> SyncController)? = null,
 ) {
     val panelScope = rememberCoroutineScope()
     val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
@@ -690,6 +696,18 @@ internal fun NeutrodyneWindowContent(
             null
         }
     val currentUpdates by rememberUpdatedState(updates)
+    // MS3's sync bridge. The thunk defers `graph.syncController` (database-backed at
+    // construction) until the open gate reports Ready/Recovered — the same rule the crash
+    // offer below follows.
+    val syncRoot =
+        syncController?.let { resolve ->
+            rememberSyncRootPresentation(
+                syncController = resolve,
+                playbackController = { playbackController },
+                enabled = startup == StartupGateState.Ready || startup is StartupGateState.Recovered,
+                isPlaying = nowPlaying?.isPlaying == true,
+            )
+        }
     // `NeutrodyneRoot` keys its snackbar effect on `slots` identity — a per-recomposition
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
@@ -706,13 +724,15 @@ internal fun NeutrodyneWindowContent(
             onTextFieldFocusChange,
             volumeUp,
             volumeDown,
+            syncRoot?.continueHere,
+            syncRoot?.dismissRemoteSession,
         ) {
             RootActions(
                 retryStartup = onRetryStartup,
                 dismissNotice = { currentUpdates?.dismiss?.invoke(it) },
                 disableUpdateChecks = { currentUpdates?.disable?.invoke() },
-                continueHere = {},
-                dismissRemoteSession = {},
+                continueHere = syncRoot?.continueHere ?: {},
+                dismissRemoteSession = syncRoot?.dismissRemoteSession ?: {},
                 playbackKey = { key ->
                     when (key) {
                         // 11's volume chords are the desktop's in-app gain (08 Keyboard and
@@ -746,7 +766,7 @@ internal fun NeutrodyneWindowContent(
             )
         }
     val slots =
-        remember(menuActions, banners, openHandler) {
+        remember(menuActions, banners, openHandler, syncRoot?.userMessages) {
             RootSlots(
                 // Keep menu and input hooks inside the root alongside the window-scoped player.
                 player = {
@@ -758,7 +778,13 @@ internal fun NeutrodyneWindowContent(
                     openHandler?.let { DesktopInputFeedback(it) }
                     PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
                 },
-                userMessages = banners?.userMessages ?: emptyFlow(),
+                // Banner posts and sync notices share the root's serial snackbar through an
+                // acknowledged fan-in: plain `merge` would let a banner's `emit` return before
+                // the snackbar dismisses and drop its route bookkeeping before "Open" taps.
+                userMessages =
+                    serialUserMessages(
+                        *listOfNotNull(banners?.userMessages, syncRoot?.userMessages).toTypedArray(),
+                    ),
                 importResume = { available, open -> importResumeBanner(available, open) },
             )
         }
@@ -780,6 +806,8 @@ internal fun NeutrodyneWindowContent(
                     playerPanelHidden = panelHidden,
                     settingsBadge = updates?.badge ?: false,
                     notice = updates?.notice,
+                    heldChanges = syncRoot?.heldChanges,
+                    remoteSession = syncRoot?.remoteSession,
                 ),
             actions = actions,
             slots = slots,

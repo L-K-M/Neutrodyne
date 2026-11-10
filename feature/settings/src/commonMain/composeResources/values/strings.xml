@@ -19,6 +19,8 @@
     <string name="settings_sync_linked">Linked</string>
     <string name="settings_sync_linked_at">Linked · synced %1$s</string>
     <string name="settings_sync_revoked">This device was unlinked</string>
+    <!-- 08 Sync notices: the MarkedPlayedElsewhere snackbar on the shell's message flow. -->
+    <string name="sync_marked_played_elsewhere">Marked played on %1$s. It keeps playing here.</string>
 
     <!-- Settings › Appearance (M0a rows of 08 Settings screen structure). -->
     <string name="appearance_theme">Theme</string>

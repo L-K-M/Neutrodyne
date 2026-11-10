@@ -344,6 +344,8 @@ internal object DesktopShell {
                 viewModelFactory = graph.metroViewModelFactory,
                 playbackController = graph.playbackController,
                 playbackState = graph.playbackStateSource,
+                // Deferred until the open gate: resolving builds the database-backed service.
+                syncController = { graph.syncController },
                 busySignal = busySignal,
                 clock = DesktopClock,
                 syncFocusPoke = graph.syncFocusPoke::poke,

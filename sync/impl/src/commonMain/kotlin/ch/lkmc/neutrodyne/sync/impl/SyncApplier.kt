@@ -62,6 +62,8 @@ data class SyncApplyResult(
     val feedsNeedingCredentials: List<Long> = emptyList(),
     /** Remote played marks projected onto the loaded item by this committed transaction. */
     val remotePlayed: List<RemotePlayedMark> = emptyList(),
+    /** A committed session winner requires a post-commit offer evaluation. */
+    val sessionApplied: Boolean = false,
 )
 
 /** A remote `played` the committed page projected onto the loaded item (10 Remote played marks). */
@@ -125,6 +127,7 @@ class SyncApplier(
                 var parked = 0
                 var held = 0
                 var invalid = 0
+                var sessionApplied = false
                 try {
                     db.withWriteTransaction<Unit> {
                         db.syncStateDao().withApplying<Unit> {
@@ -141,11 +144,26 @@ class SyncApplier(
                                         remotePlayed = remotePlayed,
                                     )
                                 when (result) {
-                                    is RecordOutcome.Applied -> applied++
-                                    is RecordOutcome.Stale -> stale++
-                                    is RecordOutcome.Parked -> parked++
-                                    is RecordOutcome.Held -> held++
-                                    is RecordOutcome.Invalid -> invalid++
+                                    is RecordOutcome.Applied -> {
+                                        applied++
+                                        if (dto.coll == SyncCollection.SESSION.wire) sessionApplied = true
+                                    }
+
+                                    is RecordOutcome.Stale -> {
+                                        stale++
+                                    }
+
+                                    is RecordOutcome.Parked -> {
+                                        parked++
+                                    }
+
+                                    is RecordOutcome.Held -> {
+                                        held++
+                                    }
+
+                                    is RecordOutcome.Invalid -> {
+                                        invalid++
+                                    }
                                 }
                             }
                         }
@@ -169,7 +187,16 @@ class SyncApplier(
                         )
                     }
                 }
-                SyncApplyResult(applied, stale, parked, held, invalid, feedsNeedingCredentials, remotePlayed.toList())
+                SyncApplyResult(
+                    applied,
+                    stale,
+                    parked,
+                    held,
+                    invalid,
+                    feedsNeedingCredentials,
+                    remotePlayed.toList(),
+                    sessionApplied = sessionApplied,
+                )
             }
         // Device-name lookup may use HTTP. Neither Room nor the credential coordinator is held.
         postMarks(remotePlayed)
@@ -1245,7 +1272,7 @@ private fun maxOfNullable(
     }
 
 /** The stub row of 02 Restore matching: `inFeed = 0`, `isNew = 0`, `contentHash = 0`. */
-private fun episodeEntity(
+internal fun episodeEntity(
     podcastId: Long,
     key: String,
     hints: ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints?,
