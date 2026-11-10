@@ -24,9 +24,11 @@ import ch.lkmc.neutrodyne.core.testing.sync.SyncAddress
 import ch.lkmc.neutrodyne.core.testing.sync.canonicalSyncSnapshot
 import ch.lkmc.neutrodyne.crossdevice.CrossDevicePasswordTransfer
 import ch.lkmc.neutrodyne.crossdevice.CrossDeviceSyncBarrier
+import ch.lkmc.neutrodyne.crossdevice.HeldDumpException
 import ch.lkmc.neutrodyne.crossdevice.awaitLinkedStatus
 import ch.lkmc.neutrodyne.crossdevice.fixtureNextRefreshAt
 import ch.lkmc.neutrodyne.crossdevice.hasLinkOrSyncResidue
+import ch.lkmc.neutrodyne.crossdevice.heldDumpEntry
 import ch.lkmc.neutrodyne.crossdevice.skippedClockRowsFailure
 import ch.lkmc.neutrodyne.crossdevice.syncRoundFailure
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
@@ -976,16 +978,11 @@ private class CrossDevicePhaseRunner(
         val held =
             buildJsonArray {
                 db.syncHeldDao().all().forEach { row ->
-                    val summary =
-                        runCatching { json.parseToJsonElement(row.summary).jsonObject }.getOrNull()
-                    add(
-                        buildJsonObject {
-                            put("id", row.id)
-                            put("heldAt", row.heldAt)
-                            put("podcasts", summary.titles("podcasts"))
-                            put("groups", summary.titles("groups"))
-                        },
-                    )
+                    try {
+                        add(heldDumpEntry(row))
+                    } catch (failure: HeldDumpException) {
+                        throw PhaseError("dump", failure.message ?: "held row is malformed")
+                    }
                 }
             }
 
@@ -1043,11 +1040,6 @@ private class CrossDevicePhaseRunner(
             put("ok", ok)
             put("error", JsonPrimitive(error))
             payload.forEach { (key, value) -> put(key, value) }
-        }
-
-    private fun JsonObject?.titles(key: String): JsonArray =
-        buildJsonArray {
-            (this@titles?.get(key) as? JsonArray)?.forEach { add(it) }
         }
 
     private fun JsonObject.string(field: String): String? {

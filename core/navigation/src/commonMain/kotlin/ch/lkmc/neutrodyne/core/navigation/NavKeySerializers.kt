@@ -48,6 +48,7 @@ public object NavKeySerializers {
                 subclass(SyncDevicesKey::class)
                 subclass(SyncHeldChangesKey::class)
                 subclass(SyncDiagnosticsKey::class)
+                subclass(SyncAccountHelpKey::class)
                 subclass(DiagnosticsKey::class)
                 subclass(SpeedKey::class)
                 subclass(SleepTimerKey::class)
