@@ -116,6 +116,7 @@ import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.playerTime
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
@@ -1321,12 +1322,6 @@ private fun accessiblePlayerTime(ms: Long): String {
     if (seconds == 0) return minutesText
 
     return stringResource(Res.string.player_time_description, minutesText, secondsText)
-}
-
-internal fun playerTime(ms: Long): String {
-    val seconds = ms.coerceAtLeast(0) / MILLIS_PER_SECOND
-    val minutes = seconds / SECONDS_PER_MINUTE
-    return "$minutes:${(seconds % SECONDS_PER_MINUTE).toString().padStart(2, '0')}"
 }
 
 private val MINI_HEIGHT = 64.dp
