@@ -1145,7 +1145,11 @@ local library instead of running the old account with new credentials.
 Direct control requests capture the same credentials and identity. A late 401
 can revoke only its owning link, including cleanup after the engine has already
 marked that link revoked. First-link merges also hold the identity lock until
-all their writes and cancellation cleanup finish.
+all their writes and cancellation cleanup finish. The event stream uses the
+same ownership check for its credential snapshot, remote-change signal and
+401 cleanup. A stable link identity change replaces the open stream even
+when both accounts are linked. Pending authorization closes the old stream;
+its own gate cancellation cannot interrupt committed revocation cleanup.
 
 After successful authentication to a different server or account, the pending
 profile starts with empty clock, outbox, parked and held tables and resets its

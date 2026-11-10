@@ -904,6 +904,8 @@ class SyncControllerImpl(
                     changed
                 }
             if (changedAccount) settingsCapture.clear()
+            // The persisted pending link is inert even if a later secret/address write fails.
+            events.reevaluate()
             tokenStore.save(hostOf(server.serverUrl), token.token)
             address.setServerUrl(server.serverUrl)
             token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }

@@ -223,6 +223,7 @@ object SyncBindings {
         @ApplicationScope scope: CoroutineScope,
         scheduler: SyncScheduler,
         diagnosticsRuntime: SyncRuntimeDiagnostics,
+        identityMutex: SyncIdentityLock,
     ): SyncEventsClient =
         SyncEventsClient(
             db = db,
@@ -235,6 +236,7 @@ object SyncBindings {
             onRemoteChanged = { scheduler.onRemoteChanged() },
             onRevoked = { scheduler.onUnlinked() },
             diagnosticsRuntime = diagnosticsRuntime,
+            identityMutex = identityMutex,
         )
 
     /**
