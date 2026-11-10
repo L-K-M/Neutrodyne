@@ -13,30 +13,37 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.playerTime
+import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
 import ch.lkmc.neutrodyne.core.ui.root.RemoteSessionCard
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.sync_marked_played_elsewhere
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 
 /**
  * The MS3 shell bridge over `SyncController` (08 Continue on this device / Sync notices): the
- * offer mapped onto [RootUiState.remoteSession], its two actions and the one-shot notices
- * mapped into [RootSlots.userMessages]. UI-only — eligibility, staleness, adoption and the
- * playing boundary stay with `SessionAdopter` and the playback gates; nothing here decides
- * what plays or when.
+ * offer mapped onto [RootUiState.remoteSession], its two actions, the one-shot notices
+ * mapped into [RootSlots.userMessages], and the oldest held batch projected onto
+ * [RootUiState.heldChanges] (MS2's banner, 08 priority 3). UI-only — eligibility, staleness,
+ * adoption and the playing boundary stay with `SessionAdopter` and the playback gates;
+ * nothing here decides what plays or when.
  */
 public class SyncRootPresentation internal constructor(
     public val remoteSession: RemoteSessionCard?,
+    public val heldChanges: HeldChangesBanner?,
     public val continueHere: () -> Unit,
     public val dismissRemoteSession: () -> Unit,
     public val userMessages: Flow<UserMessage>,
@@ -78,6 +85,23 @@ public fun rememberSyncRootPresentation(
     val offer by produceState<RemoteSessionOffer?>(null) {
         snapshotFlow { gate }.first { it }
         controller().remoteSession.collect { value = it }
+    }
+    // The held-changes banner (MS2, 08 priority 3): the oldest published prompt — the DAO
+    // already orders `ORDER BY heldAt, id` — projected only while the profile is Linked
+    // (R7.1 keeps a NotConfigured install sync-free). Unlike the offer this collector
+    // re-parks when the gate drops: unlink, relink or a closing database clears the banner
+    // in the same frame, so a previous profile's prompt — and the Review target bound to it
+    // — can never outlive the state that published it.
+    val held by produceState<MassChangePrompt?>(null) {
+        snapshotFlow { gate }.collectLatest { open ->
+            value = null
+            if (open) {
+                val sync = controller()
+                combine(sync.status, sync.heldChanges) { status, prompts ->
+                    if (status is SyncStatus.Linked) prompts.firstOrNull() else null
+                }.collect { value = it }
+            }
+        }
     }
     // What this frame rendered: null while playing suppresses the card. Bound into the
     // callbacks below by value, so a stale frame's tap names the offer it was rendered for.
@@ -134,6 +158,7 @@ public fun rememberSyncRootPresentation(
         }
     return SyncRootPresentation(
         remoteSession = rendered?.toCard(),
+        heldChanges = held?.toBanner(),
         continueHere = continueHere,
         dismissRemoteSession = dismissRemoteSession,
         userMessages = userMessages,
@@ -168,6 +193,14 @@ public fun serialUserMessages(vararg upstreams: Flow<UserMessage>): Flow<UserMes
             }
         }
     }
+
+internal fun MassChangePrompt.toBanner(): HeldChangesBanner =
+    HeldChangesBanner(
+        id = id,
+        deviceName = deviceName,
+        podcastCount = podcastTitles.size,
+        groupCount = groupNames.size,
+    )
 
 internal fun RemoteSessionOffer.toCard(): RemoteSessionCard =
     RemoteSessionCard(

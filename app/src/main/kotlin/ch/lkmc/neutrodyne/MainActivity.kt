@@ -159,6 +159,7 @@ class MainActivity : AppCompatActivity() {
                             playerPanelHidden = panelHidden,
                             settingsBadge = updates.badge,
                             notice = updates.notice,
+                            heldChanges = syncRoot.heldChanges,
                             remoteSession = syncRoot.remoteSession,
                         ),
                     actions =

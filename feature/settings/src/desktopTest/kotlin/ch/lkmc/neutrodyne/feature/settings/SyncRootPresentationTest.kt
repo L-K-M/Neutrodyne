@@ -13,11 +13,15 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
+import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
 import ch.lkmc.neutrodyne.core.ui.root.RemoteSessionCard
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.sync_marked_played_elsewhere
+import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -324,6 +328,136 @@ class SyncRootPresentationTest {
             )
         }
 
+    /**
+     * R7.7 + 08 Banners: the presentation maps the oldest published `MassChangePrompt` onto
+     * `RootUiState.heldChanges` — the DAO already publishes `ORDER BY heldAt, id`, so the banner
+     * is the flow's first element — and follows the list as held rows resolve or arrive.
+     */
+    @Test
+    fun theOldestHeldPromptMapsToTheBannerAndFollowsTheList() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = linked)
+            val probe = setSyncContent(sync, FakePlaybackController())
+
+            runOnIdle {
+                sync.heldChanges.value =
+                    listOf(
+                        held(7, "Pixel 8", podcasts = 2, groups = 1),
+                        held(9, "Desktop", podcasts = 1, groups = 0),
+                    )
+            }
+            waitUntil("the oldest prompt maps to the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges != null
+            }
+            assertEquals(
+                HeldChangesBanner(7, "Pixel 8", 2, 1),
+                probe.presentation?.heldChanges,
+            )
+
+            runOnIdle { sync.heldChanges.value = listOf(held(9, "Desktop", 1, 0)) }
+            waitUntil("the resolved row leaves the next-oldest", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 9L
+            }
+            assertEquals(
+                HeldChangesBanner(9, "Desktop", 1, 0),
+                probe.presentation?.heldChanges,
+            )
+
+            runOnIdle { sync.heldChanges.value = emptyList() }
+            waitUntil("the emptied list hides the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges == null
+            }
+        }
+
+    /**
+     * `MassChangePrompt.deviceName == null` passes through as `HeldChangesBanner.deviceName ==
+     * null` — `RootBanners` renders the generic "Another device" wording — and a prompt with no
+     * group removals reports a zero group count.
+     */
+    @Test
+    fun aPromptWithoutADeviceOrGroupsMapsTheFallbacks() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = linked)
+            val probe = setSyncContent(sync, FakePlaybackController())
+
+            runOnIdle { sync.heldChanges.value = listOf(held(3, null, podcasts = 4, groups = 0)) }
+            waitUntil("the prompt maps", TIMEOUT_MS) { probe.presentation?.heldChanges != null }
+            assertEquals(
+                HeldChangesBanner(3, null, 4, 0),
+                probe.presentation?.heldChanges,
+            )
+        }
+
+    /**
+     * R7.1: only a Linked profile shows sync UI. NotConfigured hides the banner even while the
+     * service still lists prompts, unlink drops it immediately (the Review target is bound
+     * per-frame, so a cleared banner can no longer navigate), and a relinked profile shows only
+     * what its own publication carries.
+     */
+    @Test
+    fun onlyALinkedProfileShowsTheBanner() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            sync.heldChanges.value = listOf(held(7, "Pixel 8", 2, 1))
+            val probe = setSyncContent(sync, FakePlaybackController())
+
+            waitUntil("the presentation exists", TIMEOUT_MS) { probe.presentation != null }
+            waitForIdle()
+            assertNull(probe.presentation?.heldChanges)
+
+            runOnIdle { sync.status.value = linked }
+            waitUntil("linking shows the held prompt", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 7L
+            }
+
+            runOnIdle { sync.status.value = SyncStatus.NotConfigured }
+            waitUntil("unlink clears the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges == null
+            }
+
+            runOnIdle {
+                sync.heldChanges.value = listOf(held(11, "Desktop", 1, 1))
+                sync.status.value = linked.copy(accountId = "acct-2", deviceId = "dev-2")
+            }
+            waitUntil("the relinked profile shows its own prompt", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 11L
+            }
+            assertEquals(
+                HeldChangesBanner(11, "Desktop", 1, 1),
+                probe.presentation?.heldChanges,
+            )
+        }
+
+    /**
+     * A closed database gate resolves nothing and publishes no banner (the inert pre-open frame
+     * covers NotConfigured — the service thunk is never dereferenced), and dropping the gate
+     * afterwards clears the projected banner immediately even though the service's list is
+     * unchanged.
+     */
+    @Test
+    fun aClosedGatePublishesNoBannerAndADroppedGateClearsIt() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = linked)
+            sync.heldChanges.value = listOf(held(7, "Pixel 8", 2, 1))
+            var enabled by mutableStateOf(false)
+            val probe = setSyncContent(sync, FakePlaybackController(), enabled = { enabled })
+
+            waitUntil("the first frame settled", TIMEOUT_MS) { probe.presentation != null }
+            waitForIdle()
+            assertEquals(0, probe.syncResolutions)
+            assertNull(probe.presentation?.heldChanges)
+
+            runOnIdle { enabled = true }
+            waitUntil("the opened gate publishes the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 7L
+            }
+
+            runOnIdle { enabled = false }
+            waitUntil("the dropped gate clears the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges == null
+            }
+        }
+
     private fun ComposeUiTest.setSyncContent(
         sync: FakeSyncController,
         playback: FakePlaybackController,
@@ -351,5 +485,30 @@ class SyncRootPresentationTest {
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+
+        val linked =
+            SyncStatus.Linked(
+                serverUrl = "https://sync.example",
+                accountId = "acct",
+                deviceId = "dev-1",
+                username = "me",
+                nodeId = "node",
+                lastSyncAtMs = null,
+                activity = SyncActivity.IDLE,
+                problem = null,
+            )
+
+        fun held(
+            id: Long,
+            deviceName: String?,
+            podcasts: Int,
+            groups: Int,
+        ): MassChangePrompt =
+            MassChangePrompt(
+                id = id,
+                deviceName = deviceName,
+                podcastTitles = List(podcasts) { "podcast-$it" },
+                groupNames = List(groups) { "group-$it" },
+            )
     }
 }

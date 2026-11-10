@@ -806,6 +806,7 @@ internal fun NeutrodyneWindowContent(
                     playerPanelHidden = panelHidden,
                     settingsBadge = updates?.badge ?: false,
                     notice = updates?.notice,
+                    heldChanges = syncRoot?.heldChanges,
                     remoteSession = syncRoot?.remoteSession,
                 ),
             actions = actions,
