@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
@@ -13,13 +15,19 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
+import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
+import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
 import ch.lkmc.neutrodyne.core.ui.root.RemoteSessionCard
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.sync_marked_played_elsewhere
+import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -324,26 +332,295 @@ class SyncRootPresentationTest {
             )
         }
 
+    /**
+     * R7.7 + 08 Banners: the presentation maps the oldest published `MassChangePrompt` onto
+     * `RootUiState.heldChanges` — the DAO already publishes `ORDER BY heldAt, id`, so the banner
+     * is the flow's first element — and follows the list as held rows resolve or arrive.
+     */
+    @Test
+    fun theOldestHeldPromptMapsToTheBannerAndFollowsTheList() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = linked)
+            val probe = setSyncContent(sync, FakePlaybackController())
+
+            runOnIdle {
+                sync.heldChanges.value =
+                    listOf(
+                        held(7, "Pixel 8", podcasts = 2, groups = 1),
+                        held(9, "Desktop", podcasts = 1, groups = 0),
+                    )
+            }
+            waitUntil("the oldest prompt maps to the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges != null
+            }
+            assertEquals(
+                HeldChangesBanner(7, "Pixel 8", 2, 1),
+                probe.presentation?.heldChanges,
+            )
+
+            runOnIdle { sync.heldChanges.value = listOf(held(9, "Desktop", 1, 0)) }
+            waitUntil("the resolved row leaves the next-oldest", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 9L
+            }
+            assertEquals(
+                HeldChangesBanner(9, "Desktop", 1, 0),
+                probe.presentation?.heldChanges,
+            )
+
+            runOnIdle { sync.heldChanges.value = emptyList() }
+            waitUntil("the emptied list hides the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges == null
+            }
+        }
+
+    /**
+     * `MassChangePrompt.deviceName == null` passes through as `HeldChangesBanner.deviceName ==
+     * null` — `RootBanners` renders the generic "Another device" wording — and a prompt with no
+     * group removals reports a zero group count.
+     */
+    @Test
+    fun aPromptWithoutADeviceOrGroupsMapsTheFallbacks() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = linked)
+            val probe = setSyncContent(sync, FakePlaybackController())
+
+            runOnIdle { sync.heldChanges.value = listOf(held(3, null, podcasts = 4, groups = 0)) }
+            waitUntil("the prompt maps", TIMEOUT_MS) { probe.presentation?.heldChanges != null }
+            assertEquals(
+                HeldChangesBanner(3, null, 4, 0),
+                probe.presentation?.heldChanges,
+            )
+        }
+
+    /**
+     * R7.1: only a Linked profile shows sync UI. NotConfigured hides the banner even while the
+     * service still lists prompts, unlink drops it immediately (the Review target is bound
+     * per-frame, so a cleared banner can no longer navigate), and a relinked profile shows only
+     * what its own publication carries.
+     */
+    @Test
+    fun onlyALinkedProfileShowsTheBanner() =
+        runComposeUiTest {
+            val sync = FakeSyncController()
+            sync.heldChanges.value = listOf(held(7, "Pixel 8", 2, 1))
+            val probe = setSyncContent(sync, FakePlaybackController())
+
+            waitUntil("the presentation exists", TIMEOUT_MS) { probe.presentation != null }
+            waitForIdle()
+            assertNull(probe.presentation?.heldChanges)
+
+            runOnIdle { sync.status.value = linked }
+            waitUntil("linking shows the held prompt", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 7L
+            }
+
+            runOnIdle { sync.status.value = SyncStatus.NotConfigured }
+            waitUntil("unlink clears the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges == null
+            }
+
+            runOnIdle {
+                sync.heldChanges.value = listOf(held(11, "Desktop", 1, 1))
+                sync.status.value = linked.copy(accountId = "acct-2", deviceId = "dev-2")
+            }
+            waitUntil("the relinked profile shows its own prompt", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 11L
+            }
+            assertEquals(
+                HeldChangesBanner(11, "Desktop", 1, 1),
+                probe.presentation?.heldChanges,
+            )
+        }
+
+    /**
+     * A closed database gate resolves nothing and publishes no banner (the inert pre-open frame
+     * covers NotConfigured — the service thunk is never dereferenced), and dropping the gate
+     * afterwards clears the projected banner immediately even though the service's list is
+     * unchanged.
+     */
+    @Test
+    fun aClosedGatePublishesNoBannerAndADroppedGateClearsIt() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = linked)
+            sync.heldChanges.value = listOf(held(7, "Pixel 8", 2, 1))
+            var enabled by mutableStateOf(false)
+            val probe = setSyncContent(sync, FakePlaybackController(), enabled = { enabled })
+
+            waitUntil("the first frame settled", TIMEOUT_MS) { probe.presentation != null }
+            waitForIdle()
+            assertEquals(0, probe.syncResolutions)
+            assertNull(probe.presentation?.heldChanges)
+
+            runOnIdle { enabled = true }
+            waitUntil("the opened gate publishes the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges?.id == 7L
+            }
+
+            runOnIdle { enabled = false }
+            waitUntil("the dropped gate clears the banner", TIMEOUT_MS) {
+                probe.presentation?.heldChanges == null
+            }
+        }
+
+    @Test
+    fun onlyReconnectPublishesTheReconnectBanner() =
+        runComposeUiTest {
+            val status = SyncStatus.Reconnect("https://sync.example/private", "anna")
+            val sync = FakeSyncController(status = status)
+            val probe = setSyncContent(sync, FakePlaybackController())
+            for (other in listOf(
+                SyncStatus.NotConfigured,
+                SyncStatus.Revoked(status.serverUrl),
+                SyncStatus.LinkUnfinished(status.serverUrl),
+                linked,
+            )) {
+                runOnIdle { sync.status.value = status }
+                waitUntil("reconnect is published", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+                assertEquals(status.serverUrl, probe.presentation?.reconnect?.serverUrl)
+                runOnIdle { sync.status.value = other }
+                waitUntil("other states withdraw reconnect", TIMEOUT_MS) { probe.presentation?.reconnect == null }
+            }
+        }
+
+    @Test
+    fun notNowSurvivesCompositionRecreationButANewProcessStartsFresh() =
+        runComposeUiTest {
+            val status = SyncStatus.Reconnect("https://sync.example", "anna")
+            val sync = FakeSyncController(status = status)
+            var holder = ReconnectDismissals()
+            var generation by mutableIntStateOf(0)
+            val probe =
+                setSyncContent(
+                    sync,
+                    FakePlaybackController(),
+                    dismissals = { holder },
+                    generation = { generation },
+                )
+            waitUntil("reconnect is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val banner = probe.presentation!!.reconnect!!
+            runOnIdle { probe.presentation!!.dismissReconnect(banner) }
+            waitUntil("Not now hides this process profile", TIMEOUT_MS) {
+                holder.isDismissed(banner.profile) && probe.presentation?.reconnect == null
+            }
+            val before = probe.syncResolutions
+            runOnIdle { generation++ }
+            waitUntil("a recreated composition resolves its controller", TIMEOUT_MS) {
+                probe.syncResolutions > before
+            }
+            waitForIdle()
+            assertNull(probe.presentation?.reconnect)
+            runOnIdle {
+                holder = ReconnectDismissals()
+                generation++
+            }
+            waitUntil("a new process holder shows reconnect again", TIMEOUT_MS) {
+                probe.presentation?.reconnect?.profile == banner.profile
+            }
+        }
+
+    @Test
+    fun staleProfileActionsCannotDismissOrOpenAnotherProfile() =
+        runComposeUiTest {
+            val first = SyncStatus.Reconnect("https://sync.example/path", "anna")
+            val second = first.copy(username = "bob")
+            val sync = FakeSyncController(status = first)
+            val holder = ReconnectDismissals()
+            val probe = setSyncContent(sync, FakePlaybackController(), dismissals = { holder })
+            waitUntil("the first banner is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val old = probe.presentation!!
+            val banner = old.reconnect!!
+            runOnIdle { sync.status.value = second }
+            waitUntil("the second profile is shown", TIMEOUT_MS) {
+                probe.presentation?.reconnect?.username == "bob"
+            }
+            assertFalse(old.isReconnectTargetLive(banner))
+            runOnIdle { old.dismissReconnect(banner) }
+            waitForIdle()
+            assertFalse(holder.isDismissed(banner.profile))
+            assertFalse(holder.isDismissed(ReconnectProfile(second.serverUrl, second.username)))
+            assertEquals("bob", probe.presentation?.reconnect?.username)
+        }
+
+    @Test
+    fun aDismissedBannerCannotRunItsQueuedReconnectAction() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = SyncStatus.Reconnect("https://sync.example", "anna"))
+            val holder = ReconnectDismissals()
+            val probe = setSyncContent(sync, FakePlaybackController(), dismissals = { holder })
+            waitUntil("reconnect is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val old = probe.presentation!!
+            val banner = old.reconnect!!
+            assertTrue(old.isReconnectTargetLive(banner))
+            runOnIdle { old.dismissReconnect(banner) }
+            waitUntil("dismissal is recorded", TIMEOUT_MS) { holder.isDismissed(banner.profile) }
+            assertFalse(old.isReconnectTargetLive(banner))
+        }
+
+    @Test
+    fun reconnectWaitsForTheDatabaseAndClosedGateActionsResolveNothing() =
+        runComposeUiTest {
+            val sync = FakeSyncController(status = SyncStatus.Reconnect("https://sync.example", "anna"))
+            val holder = ReconnectDismissals()
+            var open by mutableStateOf(false)
+            val probe = setSyncContent(sync, FakePlaybackController(), enabled = { open }, dismissals = { holder })
+            waitForIdle()
+            assertEquals(0, probe.syncResolutions)
+            assertNull(probe.presentation?.reconnect)
+            runOnIdle { open = true }
+            waitUntil("opening the gate shows reconnect", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            val old = probe.presentation!!
+            val banner = old.reconnect!!
+            runOnIdle { open = false }
+            waitUntil("closing the gate removes reconnect", TIMEOUT_MS) { probe.presentation?.reconnect == null }
+            val before = probe.syncResolutions
+            assertFalse(old.isReconnectTargetLive(banner))
+            runOnIdle { old.dismissReconnect(banner) }
+            waitForIdle()
+            assertEquals(before, probe.syncResolutions)
+            assertFalse(holder.isDismissed(banner.profile))
+        }
+
+    @Test
+    fun displayHostsNeverIncludeCredentialsPathsQueriesOrFragments() =
+        runComposeUiTest {
+            val serverUrl = "https://person:secret@sync.example:8443/private?q=hidden#fragment"
+            val sync = FakeSyncController(status = SyncStatus.Reconnect(serverUrl, "anna"))
+            val probe = setSyncContent(sync, FakePlaybackController())
+            waitUntil("the safe host is shown", TIMEOUT_MS) { probe.presentation?.reconnect != null }
+            assertEquals("sync.example:8443", probe.presentation?.reconnect?.host)
+            runOnIdle {
+                sync.status.value = SyncStatus.Reconnect("https://person:secret@/private", "anna")
+            }
+            waitUntil("the malformed host uses a safe fallback", TIMEOUT_MS) {
+                probe.presentation?.reconnect?.host == "?"
+            }
+        }
+
     private fun ComposeUiTest.setSyncContent(
         sync: FakeSyncController,
         playback: FakePlaybackController,
         enabled: () -> Boolean = { true },
         isPlaying: () -> Boolean = { false },
+        dismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
+        generation: () -> Int = { 0 },
     ): Probe {
         val probe = Probe()
         setContent {
-            probe.presentation =
-                rememberSyncRootPresentation(
-                    syncController = {
-                        probe.syncResolutions++
-                        sync
-                    },
-                    playbackController = { playback },
-                    enabled = enabled(),
-                    isPlaying = isPlaying(),
-                )
-            LaunchedEffect(probe.presentation?.userMessages) {
-                probe.presentation?.userMessages?.collect { probe.messages += it }
+            key(generation()) {
+                probe.presentation =
+                    rememberSyncRootPresentation(
+                        syncController = {
+                            probe.syncResolutions++
+                            sync
+                        },
+                        playbackController = { playback },
+                        enabled = enabled(),
+                        isPlaying = isPlaying(),
+                        reconnectDismissals = dismissals,
+                    )
+                LaunchedEffect(probe.presentation?.userMessages) {
+                    probe.presentation?.userMessages?.collect { probe.messages += it }
+                }
             }
         }
         return probe
@@ -351,5 +628,30 @@ class SyncRootPresentationTest {
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+
+        val linked =
+            SyncStatus.Linked(
+                serverUrl = "https://sync.example",
+                accountId = "acct",
+                deviceId = "dev-1",
+                username = "me",
+                nodeId = "node",
+                lastSyncAtMs = null,
+                activity = SyncActivity.IDLE,
+                problem = null,
+            )
+
+        fun held(
+            id: Long,
+            deviceName: String?,
+            podcasts: Int,
+            groups: Int,
+        ): MassChangePrompt =
+            MassChangePrompt(
+                id = id,
+                deviceName = deviceName,
+                podcastTitles = List(podcasts) { "podcast-$it" },
+                groupNames = List(groups) { "group-$it" },
+            )
     }
 }

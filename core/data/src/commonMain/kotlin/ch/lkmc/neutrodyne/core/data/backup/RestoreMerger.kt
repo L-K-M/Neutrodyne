@@ -212,6 +212,7 @@ internal class RestoreMerger(
                     categories,
                     now,
                     suppress,
+                    policy,
                 )
             } else {
                 emptyList()
@@ -467,6 +468,7 @@ internal class RestoreMerger(
         categories: Set<RestoreCategory>,
         now: Long,
         suppressCapture: Boolean,
+        policy: MergePolicy,
     ): List<String> {
         downloads().beforeLibraryReplace()
         val localOnly = podcastDao.allForExport().map { it.id }.filter { it !in matchedPodcastIds }
@@ -481,6 +483,19 @@ internal class RestoreMerger(
         val deletedUuids = mutableListOf<String>()
         db.withWriteTransaction {
             val block: suspend () -> Unit = {
+                if (policy == MergePolicy.LINK_REPLACE) {
+                    // The server snapshot is authoritative: old outbox/raw/held/parked rows
+                    // must not restore the discarded library on a later push or full resync.
+                    // Preserve the authenticated link and corrected offset in this writer;
+                    // first-link adoption seeds its new accepted clocks and cursor afterward.
+                    val profile = db.syncStateDao().get()
+                    db.syncStateDao().unlink()
+                    profile?.let {
+                        db.syncStateDao().upsert(
+                            it.copy(hlc = 0, cursor = null, lastSyncAt = null, lastError = null),
+                        )
+                    }
+                }
                 for (group in groupDao.groupsInOrder()) {
                     if (group.id in matchedGroupIds) continue
                     groupDao.clearGroupContext(group.id, now)

@@ -3,12 +3,15 @@ package ch.lkmc.neutrodyne
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
+import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -147,8 +150,44 @@ class MainActivitySyncHandoffTest {
         }
     }
 
+    @Test
+    fun reconnectOpensTheRealSetupEntryWithTheSavedAddress() {
+        app.sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
+        composeRule.onNodeWithTag("nav_library").performClick()
+        composeRule.waitUntil(TIMEOUT_MS) {
+            composeRule.onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithText("Reconnect").performClick()
+        composeRule.waitUntil(TIMEOUT_MS) {
+            composeRule.onAllNodesWithText("Link a device").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(RECONNECT_URL).assertExists()
+        composeRule.onNodeWithText(RECONNECT_MESSAGE).assertDoesNotExist()
+    }
+
+    @Test
+    fun notNowSurvivesActivityRecreationThroughTheAppScopedHolder() {
+        app.sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
+        composeRule.onNodeWithTag("nav_library").performClick()
+        composeRule.waitUntil(TIMEOUT_MS) {
+            composeRule.onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Not now").performClick()
+        assertThat(app.productionGraph.reconnectDismissals.isDismissed(ReconnectProfile(RECONNECT_URL, "anna")))
+            .isTrue()
+
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("nav_library").performClick()
+        composeRule.onNodeWithText(RECONNECT_MESSAGE).assertDoesNotExist()
+        assertThat(app.sync.status.value).isEqualTo(SyncStatus.Reconnect(RECONNECT_URL, "anna"))
+    }
+
     private companion object {
         const val TIMEOUT_MS = 15_000L
+        const val RECONNECT_URL = "https://sync.example.org/personal"
+        const val RECONNECT_MESSAGE = "Reconnect to sync.example.org to keep syncing"
 
         val OFFER =
             RemoteSessionOffer(

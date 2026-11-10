@@ -43,6 +43,8 @@ class FakeSettingsRepository : SettingsRepository {
         return values.value.storedValue(key)
     }
 
+    override suspend fun <T : Any> getOrThrow(key: SettingKey<T>): T = get(key)
+
     override suspend fun <T : Any> set(
         key: SettingKey<T>,
         value: T,

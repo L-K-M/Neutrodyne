@@ -1490,6 +1490,7 @@ Play (or a tap on the card) → `RootActions.continueHere`, which the shell wire
 | `heldChanges` non-empty | Banner in Feeds and Library (priority 3): "{device} removed {n} podcasts. Apply here too?" + **Review** → `SyncHeldChangesKey(id)` (oldest first) |
 | `status = Reconnect` | Library banner (priority 4): "Reconnect to {host} to keep syncing" + **Reconnect** → `SyncSetupKey(serverUrl)`, **Not now** (hidden for this process run) |
 | Desktop: a held batch while the window is hidden | 10's held-change notification through `DesktopNotifier` ("Sync is waiting for you"; click → `…/open/settings/sync`) |
+| Android: a held batch while linked | 10's held-change notification through `SyncHeldNotifier` on the `sync_held` channel ("Sync is waiting for you" + the banner's device/counts line; tap → `neutrodyne://open/settings/sync`, ID 4300, `POST_NOTIFICATIONS` self-checked and channel blocks honoured); a batch alarms once per link profile, and the notice is cancelled when the batch resolves or the link ends |
 
 #### Sync status and problem texts
 

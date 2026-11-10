@@ -1074,7 +1074,7 @@ R7.4's background sync is "requested every 60 min" (amended 2026-10-05, [PO-47](
 | `PowerMonitor` `Suspending` / `Resumed` (the `:core:common` port) | close SSE / reconnect and run a round |
 | Live updates | SSE whenever the app runs and the server offers `sse` |
 
-On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the outbox is not empty ([11 Desktop shell](11-desktop.md#desktop-shell)); whatever is left stays in the outbox for the next start. Nothing runs while the app is quit. Only the instance holding the single-instance lock syncs (risk T26). When the window is hidden, a held batch of the [Mass-change guard](#mass-change-guard) also posts a desktop notification (`NotificationKind.SYNC_HELD`, [11 OS integration](11-desktop.md#os-integration)); on Android it posts one notification on the channel 08 assigns.
+On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the outbox is not empty ([11 Desktop shell](11-desktop.md#desktop-shell)); whatever is left stays in the outbox for the next start. Nothing runs while the app is quit. Only the instance holding the single-instance lock syncs (risk T26). When the window is hidden, a held batch of the [Mass-change guard](#mass-change-guard) also posts a desktop notification (`NotificationKind.SYNC_HELD`, [11 OS integration](11-desktop.md#os-integration)); on Android the app-scoped `SyncHeldNotifier` (band 230, after the open gate) posts one notification on the `sync_held` channel 08 assigns while the link lives and cancels it when the batch resolves or the link ends.
 
 **Implementation note (2026-11-04, MS2, scheduling).** The shared
 `SyncScheduler` (`commonMain`) owns the outbox debounce, the playback
@@ -1990,6 +1990,21 @@ reset already do; the caller's own web session survives. A leaked password
 could otherwise mint a permanent device token through `POST
 /api/v1/auth/login` and outlive the standard remediation. Devices then get
 `401` and offer "Link again"; local data stays.
+
+**Implementation note (2026-11-10, linked password notice).** The first notice
+collector at app start starts one app-scoped account check. A device-local
+receipt commits before HTTP and limits attempts, including failures, to one
+per 24 hours. Offline, unlinked or permission-blocked starts make no request;
+a failed receipt read or write cannot enable an unthrottled request. The
+request captures its URL, token and account identity together, and a late
+401 cannot revoke a replacement account.
+
+Notice receipts use a hash of the URL and account plus the normalized
+password timestamp. A result waits for a collector and records its receipt
+after emission; a failed receipt write can repeat it at a later permitted
+startup. Cancelling a window collector leaves the app-scoped request alive.
+The journal is a DEVICE setting, excluded from portable backup and sync;
+forgetting a server retains the device's daily request budget.
 
 ### Tokens
 
