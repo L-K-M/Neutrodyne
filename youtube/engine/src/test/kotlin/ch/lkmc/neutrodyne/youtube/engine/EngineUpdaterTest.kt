@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.engine
 
+import ch.lkmc.neutrodyne.core.testing.EngineUpdateFixtures
 import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStorePaths

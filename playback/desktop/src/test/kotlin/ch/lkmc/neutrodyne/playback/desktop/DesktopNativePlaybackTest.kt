@@ -154,6 +154,7 @@ class DesktopNativePlaybackTest {
                     { runtime },
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
                     RemotePlayedGuard(),
+                    { runtime.starter },
                 )
             try {
                 assertEquals(PlayResult.Started, controller.play())
@@ -283,6 +284,7 @@ class DesktopNativePlaybackTest {
                     { runtime },
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
                     RemotePlayedGuard(),
+                    { runtime.starter },
                     routeMonitor = route,
                 )
             try {
@@ -431,6 +433,7 @@ class DesktopNativePlaybackTest {
                         { runtime },
                         FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
                         RemotePlayedGuard(),
+                        { runtime.starter },
                     )
                 try {
                     assertEquals(PlayResult.Started, controller.play())

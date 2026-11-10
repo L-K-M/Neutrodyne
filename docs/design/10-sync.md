@@ -735,6 +735,40 @@ Further rules:
 4. **Pull before play.** When the user starts an episode on an online, linked device, `PrePlaySync.beforeStart()` first runs a round with a 1.5-s budget, so a stale local position does not start playback and then overwrite the newer remote one. It returns early when sync is not configured, the device is offline, or a round finished less than 15 s ago; on timeout playback starts and the round continues in the background.
 5. **Position push cadence.** Positions are saved locally every 5 s ([D41](../PLAN.md#3-key-decisions)) and captured each time, but pushed only on pause, stop and item transition and at most every 60 s while playing; the outbox coalesces them into one row per episode ([Scheduling on Android](#scheduling-on-android), [Scheduling on the desktop](#scheduling-on-the-desktop)).
 
+**Implementation note (2026-11-09, MS3).** `PrePlaySyncImpl` (`:sync:impl`)
+checks connectivity before any database read, then reads `sync_state` for the
+enabled/linked/recent gates inside the same 1.5-s budget that also covers the
+coalescing mutex and the wait on the shared round — the budget bounds the whole
+UI wait, not only the round. One `ApplicationScope`-spawned round
+(`SyncRoundReason.PRE_PLAY`, which pulls even with an empty outbox) is shared by
+concurrent UI starts through a mutex-held `Deferred`; it keeps running after a
+timeout or caller cancellation, only cancellation propagates to the caller, and
+a `lastSyncAt` in the future never counts as recent. The UI hook is
+`PlayStarter.beforeUiStart()`: Android's `PlaybackControllerImpl` runs it before
+the `PLAY_CONTEXT` session command and re-checks the current intent and
+foreground state after the wait; the desktop controller runs it outside the
+serial transition lock and re-checks the intent ticket. OS surfaces bypass it
+through `PlayOrigin.SYSTEM` on `play`/`togglePlayPause`
+(`MediaSessionCoordinator`); Android's notification, media-key, Bluetooth,
+Auto, resumption and service command paths never reach the UI controller.
+
+A pulled row must also reach an already-loaded paused item, which plans no
+position on resume (`StartOutcome.AlreadyCurrent`): both adapters run 06's
+paused-item pickup at that boundary — `PositionSaver` keeps the last position
+it wrote or applied for the current item (`baselinePositionMs`, updated on each
+successful own write, reset, `startPositionApplied` and `SeekOrigin.CORE`
+seek), and a stored row differing from that baseline by more than 1 s is taken
+up with a core seek before playing. An unchanged own row is never treated as
+an outside change — a playhead ahead of its own last write is not rewound —
+and the playing state, loaded item (and the desktop intent ticket) are
+re-checked after the suspending row read, so an OS start or item change during
+the read cannot move a playing or wrong item. Explicit-position starts,
+completed-boundary replays and remote-played freezes bypass the pickup by
+construction.
+
+Verified against fakes and the androidHost Room harness only — real two-device
+pull-before-play timing remains S17's manual checklist.
+
 ### Ordered lists
 
 - Group order, member order within a group and Up next are lists of independent items with an `orderKey`: a base-62 fractional index (digits `0-9A-Za-z` in ASCII order, so SQLite's `BINARY` collation sorts them correctly), ported from [rocicorp/fractional-indexing](https://github.com/rocicorp/fractional-indexing) (CC0-1.0). Lists sort by `ORDER BY orderKey, id` locally ([02 Up next ordering](02-data-model.md#up-next-ordering)); across devices equal keys tie-break by record ID.
@@ -2423,6 +2457,18 @@ S14 plus MS2, in `desktopTest` with the bundled SQLite driver and a subset as An
 - `HealthCheckTest`, `ListenRuleTest` (M0b acceptance 16).
 
 ### Cross-device journey
+
+**Implementation note (2026-11-09, MS3 wire coverage).** `TwoClientWireTest`
+runs the server fat JAR on loopback with two independent file-backed Room
+clients and the production HTTP/SSE transport, capture, engine, scheduler
+and desktop job routing. Seven writes cover played state, a group rename,
+two Up next inserts, and reverse-direction reordering, removal and played
+state. Each write and its peer observation must finish within ten seconds;
+there are no manual sync calls during these timed edits. Bootstrap seeds
+known podcast and episode identities on both clients. Settings, credentials,
+network availability, power and playback remain test substitutes. This
+synthetic loopback test does not replace E12's Android/desktop journey,
+physical-device checks, session handoff or real-network PB31 measurements.
 
 E12 / `CrossDeviceSyncTest` (09 owns the journey; nightly and in M11b): an Android emulator (API 36) and a desktop JVM (headless app graph) against a server from the release JAR; random offline edits to subscriptions, groups, order, played state, positions, favourites and Up next converge (MS2 acceptance 2); a desktop pause resumes on Android within 1 s of the next sync through "Continue on this device" (R8.5); unsubscribing 11 of 50 podcasts is held (MS2 acceptance 4); propagation with both apps in the foreground ≤ 10 s (PB31, MS3 acceptance 1). M11b acceptance 14 adds the manual checklist with a phone, a desktop on each OS and a server.
 

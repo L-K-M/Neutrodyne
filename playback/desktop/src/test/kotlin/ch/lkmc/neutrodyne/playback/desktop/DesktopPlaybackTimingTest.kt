@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.desktop
 
+import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.PrePlaySync
+import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -28,6 +31,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeStreamResolver
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
+import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings
@@ -43,8 +47,14 @@ import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineState
 import ch.lkmc.neutrodyne.playback.engine.Gapless
 import ch.lkmc.neutrodyne.playback.engine.SpanCache
+import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -54,6 +64,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -569,6 +580,267 @@ class DesktopPlaybackTimingTest {
         }
 
     @Test
+    fun uiPlayRunsThePullBeforePlanningReadsThePosition() =
+        runTest {
+            // MS3 pull before play (10): the pull must land before the start reads the stored
+            // position — the pulled 45 s wins over the stale local 12 s.
+            val fixture = TimingFixture(this)
+            try {
+                var pulls = 0
+                fixture.prePlay =
+                    PrePlaySync {
+                        pulls++
+                        fixture.positions.positions.value =
+                            mapOf(1L to StoredPosition(1, 45_000, 0, null))
+                    }
+
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                runCurrent()
+
+                assertEquals(1, pulls)
+                assertEquals(45_000L, fixture.engine.position)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aUiResumeOnTheLoadedPausedItemTakesUpThePulledPosition() =
+        runTest {
+            // MS3 pull before play (10): an AlreadyCurrent resume plans no position, so the
+            // paused-item pickup must take up the pulled 45 s over the loaded paused 12 s.
+            val fixture = TimingFixture(this)
+            try {
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 12_000
+                fixture.controller.pause()
+                runCurrent()
+
+                var pulls = 0
+                fixture.prePlay =
+                    PrePlaySync {
+                        pulls++
+                        fixture.positions.positions.value =
+                            mapOf(1L to StoredPosition(1, 45_000, 0, null))
+                    }
+
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                runCurrent()
+
+                assertEquals(1, pulls)
+                assertEquals(45_000L, fixture.engine.position)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun anUnchangedOwnRowNeverRewindsAnAheadPlayhead() =
+        runTest {
+            // 06's paused-item pickup compares the stored row with the saver's last write or
+            // applied position, not the playhead: a row this player wrote itself is not an
+            // outside change even when the playhead advanced past the last save.
+            val fixture = TimingFixture(this)
+            try {
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 40_000
+                advanceTimeBy(5_000)
+                runCurrent()
+                // Own row at 40 s, then the playhead ran ahead to 45 s without a save.
+                fixture.engine.position = 45_000
+                fixture.engine.state.value = EngineState.Ready(1, playing = false)
+
+                var pulls = 0
+                fixture.prePlay = PrePlaySync { pulls++ }
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                runCurrent()
+
+                assertEquals(1, pulls)
+                assertEquals(45_000L, fixture.engine.position)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aResetToZeroStoredRowIsPickedUpOnResume() =
+        runTest {
+            // A remote reset is an outside change too: the stored 0 seeks the paused item.
+            val fixture = TimingFixture(this)
+            try {
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 12_000
+                fixture.controller.pause()
+                runCurrent()
+
+                fixture.positions.positions.value = mapOf(1L to StoredPosition(1, 0, 0, null))
+                assertEquals(PlayResult.Started, fixture.controller.play(PlayOrigin.SYSTEM))
+                runCurrent()
+
+                assertEquals(0L, fixture.engine.position)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aSystemResumePicksUpTheObservedRowWithoutPulling() =
+        runTest {
+            // OS resumes never run the pull, but the pickup still applies a newer row.
+            val fixture = TimingFixture(this)
+            try {
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 12_000
+                fixture.controller.pause()
+                runCurrent()
+
+                var pulls = 0
+                fixture.prePlay = PrePlaySync { pulls++ }
+                fixture.positions.positions.value = mapOf(1L to StoredPosition(1, 45_000, 0, null))
+
+                assertEquals(PlayResult.Started, fixture.controller.play(PlayOrigin.SYSTEM))
+                runCurrent()
+
+                assertEquals(0, pulls)
+                assertEquals(45_000L, fixture.engine.position)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aPlayingStartDuringThePickupReadNeverSeeks() =
+        runTest {
+            // The stored-row read suspends; a playing start that lands inside it must not be
+            // moved backwards once the read returns.
+            val fixture = TimingFixture(this)
+            try {
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 12_000
+                fixture.controller.pause()
+                runCurrent()
+
+                fixture.positions.positions.value = mapOf(1L to StoredPosition(1, 45_000, 0, null))
+                fixture.pickupReadGate = CompletableDeferred()
+                val uiStart = async { fixture.controller.play(PlayOrigin.SYSTEM) }
+                fixture.pickupReadEntered.await()
+
+                fixture.engine.state.value = EngineState.Ready(1, playing = true)
+                fixture.pickupReadGate?.complete(Unit)
+
+                assertEquals(PlayResult.Started, uiStart.await())
+                assertEquals(12_000L, fixture.engine.position)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aSystemPlayNeverWaitsOnThePull() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                var pulls = 0
+                fixture.prePlay = PrePlaySync { pulls++ }
+
+                assertEquals(PlayResult.Started, fixture.controller.play(PlayOrigin.SYSTEM))
+                assertEquals(0, pulls)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun anOsCommandIsNotQueuedBehindAUiPull() =
+        runTest {
+            // The UI wait sits outside the transition lock: a SYSTEM play reaches it while the
+            // pull still waits, and its newer intent cancels the stalled UI start.
+            val fixture = TimingFixture(this)
+            try {
+                val pullEntered = CompletableDeferred<Unit>()
+                val releasePull = CompletableDeferred<Unit>()
+                fixture.prePlay =
+                    PrePlaySync {
+                        pullEntered.complete(Unit)
+                        releasePull.await()
+                    }
+                val uiStart = async { fixture.controller.play() }
+                pullEntered.await()
+
+                val sysStart = async { fixture.controller.play(PlayOrigin.SYSTEM) }
+                runCurrent()
+                assertEquals(PlayResult.Started, sysStart.await())
+                assertTrue(fixture.engine.items.isNotEmpty())
+
+                releasePull.complete(Unit)
+                assertFailsWith<CancellationException> { uiStart.await() }
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aPauseDuringThePullCancelsTheUiStart() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                val pullEntered = CompletableDeferred<Unit>()
+                val releasePull = CompletableDeferred<Unit>()
+                fixture.prePlay =
+                    PrePlaySync {
+                        pullEntered.complete(Unit)
+                        releasePull.await()
+                    }
+                val uiStart = async { fixture.controller.play() }
+                pullEntered.await()
+
+                fixture.controller.pause()
+                releasePull.complete(Unit)
+                runCurrent()
+
+                assertFailsWith<CancellationException> { uiStart.await() }
+                assertTrue(fixture.engine.items.isEmpty())
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aUiToggleToResumeRunsThePullButASystemToggleNeverDoes() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                var pulls = 0
+                fixture.prePlay = PrePlaySync { pulls++ }
+
+                fixture.controller.togglePlayPause(PlayOrigin.UI)
+                runCurrent()
+                assertEquals(1, pulls)
+                assertTrue(fixture.engine.items.isNotEmpty())
+
+                fixture.controller.pause()
+                runCurrent()
+                pulls = 0
+                fixture.controller.togglePlayPause(PlayOrigin.SYSTEM)
+                runCurrent()
+                assertEquals(0, pulls)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
     fun foreignSessionClearRemovesPlayingItemFromStateAndEngine() =
         runTest {
             val fixture = TimingFixture(this)
@@ -606,6 +878,25 @@ private class TimingFixture(
     private val settings = FakeSettingsRepository()
     val effectiveResolver = FakeEffectiveSettingsResolver()
     val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+
+    /** The pull-before-play port behind the starter; UI-start tests set a recording fake. */
+    var prePlay: PrePlaySync = PrePlaySync.None
+
+    /**
+     * Gate for the paused-item pickup's stored-row read only: [pickupReadGate] suspends the
+     * read and [pickupReadEntered] completes once it is parked.
+     */
+    var pickupReadGate: CompletableDeferred<Unit>? = null
+    val pickupReadEntered = CompletableDeferred<Unit>()
+    private val pickupPositions =
+        object : PositionStore by positions {
+            override fun observe(episodeId: Long): Flow<StoredPosition?> =
+                flow {
+                    pickupReadEntered.complete(Unit)
+                    pickupReadGate?.await()
+                    emitAll(positions.observe(episodeId))
+                }
+        }
     private val runtime =
         DesktopPlaybackRuntime(
             PlayStarter(
@@ -620,6 +911,7 @@ private class TimingFixture(
                 clock,
                 startPosition,
                 rule,
+                prePlay = Provider { prePlay },
             ),
             QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), startPosition, rule),
             PositionSaver(positions, clock, rule),
@@ -627,7 +919,7 @@ private class TimingFixture(
             sessions,
             queue,
             media,
-            positions,
+            pickupPositions,
             caps,
             chapters,
             resolver,
@@ -641,6 +933,7 @@ private class TimingFixture(
             { runtime },
             network,
             RemotePlayedGuard(),
+            { runtime.starter },
             StandardTestDispatcher(test.testScheduler),
             StandardTestDispatcher(test.testScheduler),
         )

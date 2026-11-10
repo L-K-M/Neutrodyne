@@ -18,6 +18,8 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabaseConstructor
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.PrePlaySync
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -47,12 +49,14 @@ import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
 import okio.Path
@@ -106,6 +110,22 @@ internal class LifecycleHarness(
     val queues = FakeQueueRepository()
     val store = FakePlaySessionStore()
     val positions = FakePositionStore()
+
+    /**
+     * Gate for the paused-item pickup's stored-row read only (`ports.positions`):
+     * [pickupReadGate] suspends every emission after [pickupReadEntered] completes, so a
+     * queued own flush can commit while the read is parked.
+     */
+    var pickupReadGate: CompletableDeferred<Unit>? = null
+    var pickupReadEntered = CompletableDeferred<Unit>()
+    val pickupPositions =
+        object : PositionStore by positions {
+            override fun observe(episodeId: Long): Flow<StoredPosition?> =
+                positions.observe(episodeId).onEach {
+                    pickupReadEntered.complete(Unit)
+                    pickupReadGate?.await()
+                }
+        }
     val chapters = FakeChapterRepository()
     val lookup = FakePlaybackMediaLookup()
     val contexts = FakePlayContextResolver()
@@ -118,6 +138,12 @@ internal class LifecycleHarness(
         ch.lkmc.neutrodyne.playback.core
             .RemotePlayedGuard()
     val sync = PlaybackSyncBridge(remoteGuard, deferred(positions), scope)
+
+    /**
+     * The pull-before-play port behind [starter]. UI-start tests set it to a recording fake; any
+     * service/system path calling `beforeUiStart` would show up here too — it never should.
+     */
+    var prePlaySync: PrePlaySync = PrePlaySync.None
     private val sources = SourceHarness(File(app.cacheDir, "lifecycle-cache"))
     val index = sources.index
     val resolver = sources.resolver
@@ -216,7 +242,7 @@ internal class LifecycleHarness(
             Provider { BoostLimiterProcessor() },
             Provider { prefs },
         )
-    private val saver = PositionSaver(positions, clock, PlayedRule())
+    val saver = PositionSaver(positions, clock, PlayedRule())
     private val planner =
         QueueWindowPlanner(
             queues,
@@ -228,7 +254,7 @@ internal class LifecycleHarness(
             StartPositionRule(),
             PlayedRule(),
         )
-    private val starter =
+    val starter =
         PlayStarter(
             contexts,
             queues,
@@ -242,6 +268,7 @@ internal class LifecycleHarness(
             StartPositionRule(),
             PlayedRule(),
             setOf(gate),
+            prePlay = Provider { prePlaySync },
         )
     val access =
         PlaybackServiceAccess(
@@ -277,7 +304,7 @@ internal class LifecycleHarness(
             deferred(effective),
             deferred(sessions),
             deferred(queues),
-            deferred(positions),
+            deferred(pickupPositions),
             deferred(lookup),
             deferred(items),
             deferred(chapters),
@@ -461,6 +488,7 @@ internal class LifecycleHarness(
             opener,
             deferred(queues),
             deferred(sessions),
+            Provider { starter },
             clock,
             scope,
             Dispatchers.IO,

@@ -16,9 +16,11 @@ import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -60,28 +62,33 @@ class SyncEventsHttpTest {
                         ": hb\n\n" +
                         "event: changed\n" +
                         "data: {\"cursor\":\"c:1:0\",\"by\":\"dev-2\"}\n\n",
+                    // Real wire latency: a virtual-clock deadline would elapse
+                    // before the delayed body lands.
+                    bodyDelayMs = 100,
                 ),
             )
 
             val session = fixture.transport.open(fixture.baseUrl, "tok", 60)
-            val events = withTimeout(5_000) { session.events.take(3).toList() }
-            session.close()
+            try {
+                val events = session.collectEvents(3)
+                assertEquals(
+                    listOf(
+                        SyncStreamEvent.Retry(10_000),
+                        SyncStreamEvent.Comment,
+                        SyncStreamEvent.Changed("dev-2"),
+                    ),
+                    events,
+                )
 
-            assertEquals(
-                listOf(
-                    SyncStreamEvent.Retry(10_000),
-                    SyncStreamEvent.Comment,
-                    SyncStreamEvent.Changed("dev-2"),
-                ),
-                events,
-            )
-
-            val request = fixture.take()
-            assertEquals("GET", request.method)
-            assertEquals("/api/v1/events", request.url.encodedPath)
-            assertEquals("60", request.url.queryParameter("hb"))
-            assertEquals("Bearer tok", request.headers["Authorization"])
-            assertEquals(PROTOCOL_VERSION.toString(), request.headers["Neutrodyne-Sync-Protocol"])
+                val request = fixture.take()
+                assertEquals("GET", request.method)
+                assertEquals("/api/v1/events", request.url.encodedPath)
+                assertEquals("60", request.url.queryParameter("hb"))
+                assertEquals("Bearer tok", request.headers["Authorization"])
+                assertEquals(PROTOCOL_VERSION.toString(), request.headers["Neutrodyne-Sync-Protocol"])
+            } finally {
+                session.close()
+            }
         }
 
     @Test
@@ -113,18 +120,20 @@ class SyncEventsHttpTest {
             )
 
             val session = fixture.transport.open(fixture.baseUrl, "tok", 60)
-            val events = withTimeout(5_000) { session.events.take(1).toList() }
-            session.close()
-
-            assertEquals(listOf(SyncStreamEvent.Comment), events)
-            // The first hop carried the bearer; the cross-authority hop must not.
-            assertEquals("Bearer tok", fixture.take().headers["Authorization"])
-            val redirected =
-                assertNotNull(
-                    other.takeRequest(TAKE_SECONDS, TimeUnit.SECONDS),
-                    "no request reached the redirect target",
-                )
-            assertNull(redirected.headers["Authorization"], "bearer leaked to a cross-origin hop")
+            try {
+                val events = session.collectEvents(1)
+                assertEquals(listOf(SyncStreamEvent.Comment), events)
+                // The first hop carried the bearer; the cross-authority hop must not.
+                assertEquals("Bearer tok", fixture.take().headers["Authorization"])
+                val redirected =
+                    assertNotNull(
+                        other.takeRequest(TAKE_SECONDS, TimeUnit.SECONDS),
+                        "no request reached the redirect target",
+                    )
+                assertNull(redirected.headers["Authorization"], "bearer leaked to a cross-origin hop")
+            } finally {
+                session.close()
+            }
         }
 
     @Test
@@ -137,20 +146,34 @@ class SyncEventsHttpTest {
             )
 
             val session = fixture.transport.open(fixture.baseUrl, "tok", 60)
-            val events = withTimeout(5_000) { session.events.take(1).toList() }
-            session.close()
-            assertEquals(listOf(SyncStreamEvent.Changed("dev-2")), events)
+            try {
+                val events = session.collectEvents(1)
+                assertEquals(listOf(SyncStreamEvent.Changed("dev-2")), events)
 
-            // The changed event only signals: the pull itself is a normal sync request with
-            // the bearer the per-request header adds — never an interceptor shared elsewhere.
-            fixture.client.changes("c:0:0", 5)
+                // The changed event only signals: the pull itself is a normal sync request with
+                // the bearer the per-request header adds — never an interceptor shared elsewhere.
+                fixture.client.changes("c:0:0", 5)
 
-            val pull = fixture.take(2)
-            assertEquals("/api/v1/changes", pull.url.encodedPath)
-            assertEquals("Bearer tok", pull.headers["Authorization"])
+                val pull = fixture.take(2)
+                assertEquals("/api/v1/changes", pull.url.encodedPath)
+                assertEquals("Bearer tok", pull.headers["Authorization"])
+            } finally {
+                session.close()
+            }
         }
 
     // --- fixture -----------------------------------------------------------------------------
+
+    /**
+     * Awaits [count] stream events under a wall-clock 5 s bound. `withTimeout` inside
+     * `runTest` ticks on the virtual scheduler, which fast-forwards while the collect
+     * is parked on the real socket and cancels it before MockWebServer's body lands;
+     * on a real dispatcher the same bound measures the wire latency it exists to cap.
+     */
+    private suspend fun SyncEventSession.collectEvents(count: Int): List<SyncStreamEvent> =
+        withContext(Dispatchers.IO) {
+            withTimeout(5_000) { events.take(count).toList() }
+        }
 
     private class Fixture(
         val transport: KtorSyncEventTransport,
@@ -197,12 +220,16 @@ class SyncEventsHttpTest {
         )
     }
 
-    private fun sse(body: String): MockResponse =
+    private fun sse(
+        body: String,
+        bodyDelayMs: Long = 0,
+    ): MockResponse =
         MockResponse
             .Builder()
             .code(200)
             .addHeader("Content-Type", "text/event-stream")
             .body(body)
+            .bodyDelay(bodyDelayMs, TimeUnit.MILLISECONDS)
             .build()
 
     private fun json(
