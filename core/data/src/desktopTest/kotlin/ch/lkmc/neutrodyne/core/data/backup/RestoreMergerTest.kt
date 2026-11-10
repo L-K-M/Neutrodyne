@@ -20,7 +20,9 @@ import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.database.SyncClockEntity
+import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
+import ch.lkmc.neutrodyne.core.database.SyncParkedEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
@@ -55,6 +57,7 @@ import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.test.runTest
+import okio.IOException
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -118,6 +121,98 @@ class RestoreMergerTest {
             // so only the `withApplying` wrap keeps the insert trigger silent.
             assertTrue(db.syncOutboxDao().rows().isEmpty(), "rows=${db.syncOutboxDao().rows()}")
         }
+
+    @Test
+    fun linkReplaceDiscardsPreviousSyncHistoryButKeepsTheAccountIdentity() =
+        runTest {
+            val before = seedPreviousSyncHistory()
+            merger.mergeLibrary(
+                stagedOf(podcasts = listOf(podcastV1("server-only"))),
+                MergePolicy.LINK_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            assertTrue(db.syncOutboxDao().rows().isEmpty(), "Discarded local writes must never be uploaded later")
+            assertTrue(db.syncClockDao().all().isEmpty(), "A resync must not replay the discarded library")
+            assertTrue(db.syncParkedDao().all().isEmpty())
+            assertTrue(db.syncHeldDao().all().isEmpty())
+            val after = assertNotNull(db.syncStateDao().get())
+            assertEquals(before.serverUrl, after.serverUrl)
+            assertEquals(before.accountId, after.accountId)
+            assertEquals(before.deviceId, after.deviceId)
+            assertEquals(before.nodeId, after.nodeId)
+            assertEquals(before.linkedAt, after.linkedAt)
+            assertEquals(before.enabled, after.enabled)
+            assertEquals(before.clockOffsetMs, after.clockOffsetMs)
+            assertNull(after.cursor)
+            assertEquals(0L, after.hlc)
+            assertEquals(1, db.podcastDao().allForExport().size)
+        }
+
+    @Test
+    fun linkMergeKeepsPreviousSyncHistoryForItsUploadAndReconciliation() =
+        runTest {
+            val before = seedPreviousSyncHistory()
+            merger.mergeLibrary(
+                stagedOf(podcasts = listOf(podcastV1("server-only"))),
+                MergePolicy.LINK_MERGE,
+                ALL_CATEGORIES,
+            )
+
+            assertEquals(1, db.syncOutboxDao().rows().size)
+            assertEquals(1, db.syncClockDao().all().size)
+            assertEquals(1, db.syncParkedDao().all().size)
+            assertEquals(1, db.syncHeldDao().all().size)
+            assertEquals(before.cursor, db.syncStateDao().get()!!.cursor)
+            assertEquals(before.hlc, db.syncStateDao().get()!!.hlc)
+        }
+
+    @Test
+    fun linkReplacePreflightFailureKeepsThePreviousSyncHistory() =
+        runTest {
+            val before = seedPreviousSyncHistory()
+            downloads.failure = IOException("replace preflight failed")
+            assertFailsWith<IOException> {
+                merger.mergeLibrary(stagedOf(podcasts = emptyList()), MergePolicy.LINK_REPLACE, ALL_CATEGORIES)
+            }
+            assertEquals(before, db.syncStateDao().get())
+            assertEquals(1, db.syncOutboxDao().rows().size)
+            assertEquals(1, db.syncClockDao().all().size)
+            assertEquals(1, db.syncParkedDao().all().size)
+            assertEquals(1, db.syncHeldDao().all().size)
+        }
+
+    private suspend fun seedPreviousSyncHistory(): SyncStateEntity {
+        val profile =
+            SyncStateEntity(
+                enabled = true,
+                serverUrl = "https://sync.example",
+                accountId = "account",
+                deviceId = "device",
+                nodeId = "0000000000000001",
+                linkedAt = clock.now() - 100,
+                hlc = clock.now() shl 16,
+                clockOffsetMs = 33,
+                cursor = "old-cursor",
+            )
+        db.withWriteTransaction {
+            db.syncStateDao().upsert(profile)
+            db.syncClockDao().upsert(SyncClockEntity("group", "old-record", "{}"))
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity("group", "old-record", "name", profile.hlc, profile.nodeId!!, value = "\"Discarded\""),
+            )
+            db.syncParkedDao().park(
+                SyncParkedEntity(
+                    podcastSyncId = "old-podcast",
+                    identityKey = "g:old",
+                    record = "{}",
+                    receivedAt = clock.now(),
+                ),
+            )
+            db.syncHeldDao().insert(SyncHeldEntity(batch = "{}", summary = "{}", heldAt = clock.now()))
+        }
+        return profile
+    }
 
     /** A linked fixture: capture enabled, a node id, a non-zero clock. */
     private suspend fun link() {
