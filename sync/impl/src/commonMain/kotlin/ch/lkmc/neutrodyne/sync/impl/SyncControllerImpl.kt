@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
@@ -133,6 +134,7 @@ class SyncControllerImpl(
     private val credentials: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
+    private val identity: SyncIdentityLock = SyncIdentityLock(),
     private val diagnosticsReader: SyncDiagnosticsReader =
         SyncDiagnosticsReader(db, address, gate, engine.diagnosticsRuntime, io),
 ) : SyncController {
@@ -197,7 +199,7 @@ class SyncControllerImpl(
     private val statusMutex = Mutex()
 
     // Authorization and an admitted disconnect must not replace each other's account or token.
-    private val identityMutex = Mutex()
+    private val identityMutex = identity
 
     private data class DisconnectIdentity(
         val serverUrl: String?,
@@ -404,7 +406,7 @@ class SyncControllerImpl(
             } catch (failure: Throwable) {
                 val problem = classify(failure)
                 if (problem == SyncProblem.Revoked) {
-                    markRevoked()
+                    markRevoked((failure as? SyncOwnedRevocationException)?.profile)
                 } else {
                     lastRoundProblem.value = problem
                 }
@@ -416,10 +418,12 @@ class SyncControllerImpl(
     }
 
     override suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem> {
-        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val (server, token) = context
         refreshGateVerdict()
         return try {
-            val response = client.linkApprove(server, token, normaliseUserCode(userCode))
+            val response = context.transport.linkApprove(server, token, normaliseUserCode(userCode))
+            verifyControlProfile(context.profile)
             val purpose =
                 when (response.purpose) {
                     "device" -> LinkPurpose.DEVICE
@@ -444,7 +448,7 @@ class SyncControllerImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(mapApprovalFailure(failure))
+            Outcome.Failure(mapApprovalFailure(failure, context.profile))
         }
     }
 
@@ -452,25 +456,27 @@ class SyncControllerImpl(
         userCode: String,
         approve: Boolean,
     ): Outcome<Unit, SyncProblem> {
-        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val (server, token) = context
         refreshGateVerdict()
         return try {
-            client.linkConfirm(server, token, normaliseUserCode(userCode), approve)
+            context.transport.linkConfirm(server, token, normaliseUserCode(userCode), approve)
+            verifyControlProfile(context.profile)
             Outcome.Success(Unit)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(mapApprovalFailure(failure))
+            Outcome.Failure(mapApprovalFailure(failure, context.profile))
         }
     }
 
     override suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem> {
-        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
         refreshGateVerdict()
         return try {
-            val current = db.syncStateDao().get()?.deviceId
+            val current = context.profile.deviceId
             Outcome.Success(
-                client.devices().map { device ->
+                context.transport.devices().also { verifyControlProfile(context.profile) }.map { device ->
                     SyncDevice(
                         id = device.id,
                         name = device.name,
@@ -485,7 +491,7 @@ class SyncControllerImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(tracked(failure))
+            Outcome.Failure(tracked(failure, context.profile))
         }
     }
 
@@ -520,15 +526,13 @@ class SyncControllerImpl(
 
     override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
         if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
-        val expected =
-            identityMutex.withLock {
-                if (linkedContext() == null) null else disconnectIdentity()
-            } ?: return Outcome.Failure(SyncProblem.Revoked)
-        val url = expected.serverUrl ?: return Outcome.Failure(SyncProblem.Revoked)
+        val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val expected = context.disconnectIdentity
+        val url = context.serverUrl
         refreshGateVerdict()
         return admittedDisconnect(expected, SyncProblem.Revoked) {
             try {
-                client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+                context.transport.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
                 db.syncStateDao().unlink()
                 settingsCapture.clear()
                 tokenStore.clear(hostOf(url))
@@ -540,7 +544,7 @@ class SyncControllerImpl(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Throwable) {
-                Outcome.Failure(tracked(failure))
+                Outcome.Failure(tracked(failure, context.profile))
             }
         }
     }
@@ -631,28 +635,30 @@ class SyncControllerImpl(
         deviceId: String,
         name: String,
     ): Outcome<Unit, SyncProblem> {
-        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
         refreshGateVerdict()
         return try {
-            client.renameDevice(deviceId, name.trim())
+            context.transport.renameDevice(deviceId, name.trim())
+            verifyControlProfile(context.profile)
             Outcome.Success(Unit)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(mapDeviceFailure(failure))
+            Outcome.Failure(mapDeviceFailure(failure, context.profile))
         }
     }
 
     override suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem> {
-        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
         refreshGateVerdict()
         return try {
-            client.revokeDevice(deviceId)
+            context.transport.revokeDevice(deviceId)
+            verifyControlProfile(context.profile)
             Outcome.Success(Unit)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(mapDeviceFailure(failure))
+            Outcome.Failure(mapDeviceFailure(failure, context.profile))
         }
     }
 
@@ -866,37 +872,43 @@ class SyncControllerImpl(
             // The identity is the session the submit belongs to: a superseded or cancelled job must
             // never write it into a newer session's state.
             coroutineContext.ensureActive()
+            // Disable capture durably before replacing credentials: a partial secret/address
+            // write must never leave the previous account active with the replacement token.
+            val changedAccount =
+                db.withWriteTransaction {
+                    val existing = db.syncStateDao().get()
+                    val changed =
+                        existing == null || existing.serverUrl != server.serverUrl ||
+                            existing.accountId != token.accountId
+                    // Raw clocks, parked records and pending captures belong to the account.
+                    // The visible library stays for the explicit first-link choice to seed anew.
+                    // Same-account reauthentication retains its complete accepted history.
+                    if (changed) db.syncStateDao().unlink()
+                    val baseline = if (changed) SyncStateEntity() else existing ?: SyncStateEntity()
+                    db.syncStateDao().upsert(
+                        baseline.copy(
+                            enabled = false,
+                            applying = false,
+                            serverUrl = server.serverUrl,
+                            accountId = token.accountId,
+                            deviceId = deviceId,
+                            nodeId = nodeId.value,
+                            protocol = PROTOCOL_VERSION,
+                            cursor = null,
+                            hlc = baseline.hlc,
+                            linkedAt = null,
+                            lastSyncAt = null,
+                            lastError = null,
+                        ),
+                    )
+                    changed
+                }
+            if (changedAccount) settingsCapture.clear()
+            // The persisted pending link is inert even if a later secret/address write fails.
+            events.reevaluate()
             tokenStore.save(hostOf(server.serverUrl), token.token)
             address.setServerUrl(server.serverUrl)
             token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
-            db.withWriteTransaction {
-                val existing = db.syncStateDao().get()
-                // A different server or account is a different profile: the old profile's
-                // staged, held and deferred removals must never run against this library.
-                // A same-profile reauth — new device id, node id or token — keeps them.
-                if (existing == null ||
-                    existing.serverUrl != server.serverUrl ||
-                    existing.accountId != token.accountId
-                ) {
-                    db.syncHeldDao().deleteAll()
-                }
-                db.syncStateDao().upsert(
-                    (existing ?: SyncStateEntity()).copy(
-                        enabled = false,
-                        applying = false,
-                        serverUrl = server.serverUrl,
-                        accountId = token.accountId,
-                        deviceId = deviceId,
-                        nodeId = nodeId.value,
-                        protocol = PROTOCOL_VERSION,
-                        cursor = null,
-                        hlc = existing?.hlc ?: 0,
-                        linkedAt = null,
-                        lastSyncAt = null,
-                        lastError = null,
-                    ),
-                )
-            }
             lastRoundProblem.value = null
             accountName = token.username
             refreshStatus()
@@ -936,32 +948,36 @@ class SyncControllerImpl(
         refreshStatus()
     }
 
-    private suspend fun beginMerge(choice: FirstLinkChoice) {
-        _syncing.value = true
-        try {
-            linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
-            when (
-                val result =
-                    merger.merge(choice) { phase, done, total -> linkFlow.merging(phase, done, total) }
-            ) {
-                is FirstLinkResult.Completed -> {
-                    // 10 Settings capture: install through the same reconcile as the switch —
-                    // the merge left the link durable and any remote values already drained.
-                    settingsCapture.reconcile()
-                    linkFlow.linked(accountName.orEmpty(), deviceName())
-                    scheduler.onLinked()
-                    refreshStatus()
-                }
+    private suspend fun beginMerge(choice: FirstLinkChoice) =
+        identityMutex.withLock {
+            // A cancelled choice must finish its writes before a replacement authorisation
+            // clears the previous account's namespace. Structured calls can re-enter this hold.
+            coroutineContext.ensureActive()
+            _syncing.value = true
+            try {
+                linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
+                when (
+                    val result =
+                        merger.merge(choice) { phase, done, total -> linkFlow.merging(phase, done, total) }
+                ) {
+                    is FirstLinkResult.Completed -> {
+                        // 10 Settings capture: install through the same reconcile as the switch —
+                        // the merge left the link durable and any remote values already drained.
+                        settingsCapture.reconcile()
+                        linkFlow.linked(accountName.orEmpty(), deviceName())
+                        scheduler.onLinked()
+                        refreshStatus()
+                    }
 
-                is FirstLinkResult.Failed -> {
-                    linkFlow.failed(SyncProblem.MergeFailed)
-                    refreshStatus()
+                    is FirstLinkResult.Failed -> {
+                        linkFlow.failed(SyncProblem.MergeFailed)
+                        refreshStatus()
+                    }
                 }
+            } finally {
+                _syncing.value = false
             }
-        } finally {
-            _syncing.value = false
         }
-    }
 
     private suspend fun disclosure(server: DiscoveredServer): ch.lkmc.neutrodyne.sync.api.SyncDisclosure =
         ch.lkmc.neutrodyne.sync.api.SyncDisclosure(
@@ -1052,27 +1068,61 @@ class SyncControllerImpl(
         gate.onPermissionResult(gate.hasPermission())
     }
 
-    /** The linked server's URL and device token, or `null` when this device cannot act. */
-    private suspend fun linkedContext(): Pair<String, String>? {
-        val url = address.serverUrl() ?: return null
-        val state = db.syncStateDao().get()
-        val token = tokenStore.load(hostOf(url))
-        return if (token != null && state.isActuallyLinked(hasToken = true)) url to token else null
+    private data class LinkedRequestContext(
+        val serverUrl: String,
+        val token: String,
+        val profile: SyncStateEntity,
+        val transport: SyncClient,
+    ) {
+        val disconnectIdentity =
+            DisconnectIdentity(serverUrl, profile.accountId, profile.deviceId, profile.nodeId, token)
+
+        override fun toString(): String = "LinkedRequestContext(redacted)"
     }
 
-    /** Maps a transport failure and remembers a revocation. */
-    private suspend fun tracked(failure: Throwable): SyncProblem {
+    /** Snapshot the identity and fixed transport together before a direct control RPC. */
+    private suspend fun linkedContext(): LinkedRequestContext? =
+        identityMutex.withLock {
+            val url = address.serverUrl() ?: return@withLock null
+            val state = db.syncStateDao().get() ?: return@withLock null
+            val token = tokenStore.load(hostOf(url)) ?: return@withLock null
+            if (state.serverUrl != url || !state.isActuallyLinked(hasToken = true)) return@withLock null
+            LinkedRequestContext(url, token, state, client.withCredentials(url, token) ?: client)
+        }
+
+    private suspend fun verifyControlProfile(expected: SyncStateEntity) =
+        identityMutex.withLock {
+            requireSyncProfile(expected, db.syncStateDao().get())
+            check(address.serverUrl() == expected.serverUrl) { "Sync profile changed during control request" }
+        }
+
+    /** A failure belongs to the link that sent the request, including an already-marked round. */
+    private suspend fun tracked(
+        failure: Throwable,
+        expected: SyncStateEntity,
+    ): SyncProblem {
         val problem = classify(failure)
-        if (problem == SyncProblem.Revoked) markRevoked()
+        if (problem == SyncProblem.Revoked) {
+            markRevoked((failure as? SyncOwnedRevocationException)?.profile ?: expected)
+        }
         return problem
     }
 
-    private suspend fun markRevoked() {
-        db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
-        settingsCapture.clear()
-        // 10 Scheduling: a revoked token cancels every sync work name, as an unlink does.
-        scheduler.onUnlinked()
-        refreshStatus()
+    private suspend fun markRevoked(expected: SyncStateEntity?) {
+        if (expected == null) return
+        identityMutex.withLock {
+            if (expected.serverUrl != null && address.serverUrl() != expected.serverUrl) return@withLock
+            val owned =
+                db.withWriteTransaction {
+                    if (!sameSyncIdentity(expected, db.syncStateDao().get())) return@withWriteTransaction false
+                    db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
+                    true
+                }
+            if (!owned) return@withLock
+            settingsCapture.clear()
+            scheduler.onUnlinked()
+            refreshStatus()
+        }
     }
 
     private suspend fun clearTransientError() {
@@ -1081,6 +1131,9 @@ class SyncControllerImpl(
 
     /** Transport failure → [SyncProblem]; expected failures never throw (10 Errors). */
     private fun classify(failure: Throwable): SyncProblem {
+        if (failure is SyncReplayRejectedException) {
+            return if (failure.code == SyncErrorCode.CLOCK_SKEW.wire) SyncProblem.ClockSkew else SyncProblem.Server(400)
+        }
         if (failure is SyncTransportException) {
             return when (failure.status) {
                 401 -> SyncProblem.Revoked
@@ -1117,15 +1170,21 @@ class SyncControllerImpl(
      * unknown, expired or already-used code — never the server address. The unauthenticated
      * `link/start`/`link/token` poll keeps [mapAuthFailure]'s `LINK` reading (401 = bad code state).
      */
-    private suspend fun mapApprovalFailure(failure: Throwable): SyncProblem {
+    private suspend fun mapApprovalFailure(
+        failure: Throwable,
+        expected: SyncStateEntity,
+    ): SyncProblem {
         if (failure is SyncTransportException && failure.status == 404) return SyncProblem.InvalidCode
-        return tracked(failure)
+        return tracked(failure, expected)
     }
 
     /** A 404 on `PATCH`/`DELETE /devices/{id}` is the gone row, not a wrong server (10 Errors). */
-    private suspend fun mapDeviceFailure(failure: Throwable): SyncProblem {
+    private suspend fun mapDeviceFailure(
+        failure: Throwable,
+        expected: SyncStateEntity,
+    ): SyncProblem {
         if (failure is SyncTransportException && failure.status == 404) return SyncProblem.DeviceGone
-        return tracked(failure)
+        return tracked(failure, expected)
     }
 
     /** A 401 means different things on the three unauthenticated entry points (10 Errors). */
