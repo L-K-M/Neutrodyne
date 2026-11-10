@@ -31,6 +31,9 @@ class FakeSyncServerAddress(
     /** Suspends after the durable share value is read, before the read returns to its caller. */
     var afterShareRead: (suspend (Boolean) -> Unit)? = null
 
+    /** Suspends inside the committed identity clear, before both values are dropped. */
+    var onIdentityClear: (suspend () -> Unit)? = null
+
     private var storedShareFeedPasswords: Boolean = false
     private var storedSyncPlaybackSettings: Boolean = true
 
@@ -38,6 +41,7 @@ class FakeSyncServerAddress(
     val writtenSyncPlaybackSettings = mutableListOf<Boolean>()
     val writtenServerUrls = mutableListOf<String?>()
     val writtenUsernames = mutableListOf<String?>()
+    val identityClears = mutableListOf<Unit>()
 
     fun updateServerUrl(value: String?) {
         serverUrl = value
@@ -81,6 +85,18 @@ class FakeSyncServerAddress(
     override suspend fun setUsername(username: String?) {
         writtenUsernames += username
         this.username = username
+    }
+
+    override suspend fun clearServerIdentity(): Outcome<Unit, SettingsError> {
+        nextPreferenceError?.let {
+            nextPreferenceError = null
+            return Outcome.Failure(it)
+        }
+        identityClears += Unit
+        onIdentityClear?.invoke()
+        serverUrl = null
+        username = null
+        return Outcome.Success(Unit)
     }
 
     override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SettingsError> {

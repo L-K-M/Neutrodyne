@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.root.LocalRootScope
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.SyncActivity
@@ -412,6 +413,7 @@ internal class GatedSyncController(
     var renameGate: CompletableDeferred<Unit>? = null
     var revokeGate: CompletableDeferred<Unit>? = null
     var unlinkGate: CompletableDeferred<Unit>? = null
+    var forgetGate: CompletableDeferred<Unit>? = null
     var deleteServerDataGate: CompletableDeferred<Unit>? = null
     var playbackSettingsGate: CompletableDeferred<Unit>? = null
     var sharePasswordsGate: CompletableDeferred<Unit>? = null
@@ -456,6 +458,11 @@ internal class GatedSyncController(
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
         unlinkGate?.await()
         return fake.unlink()
+    }
+
+    override suspend fun forgetServer(): Outcome<Unit, ForgetServerError> {
+        forgetGate?.await()
+        return fake.forgetServer()
     }
 
     override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
