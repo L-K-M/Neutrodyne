@@ -10,13 +10,18 @@
   <string name="sync_activity_syncing">Synchronisierung läuft…</string>
   <string name="sync_activity_live">Live-Updates verbunden</string>
   <string name="sync_what_syncs">Synchronisiert: Abos, Gruppen, Wiedergabestatus, Positionen, Favoriten, Warteschlange und synchronisierte Einstellungen. Nie synchronisiert: Downloads, Bilder und Feed-Inhalte.</string>
-  <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
+  <string name="sync_reconnect">Erneut mit %1$s verbinden</string>
+  <string name="sync_reconnect_body">Diese Kopie von Neutrodyne ist noch nicht verknüpft. Seit der Wiederherstellung oder dem Kopieren wurde nichts synchronisiert.</string>
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
   <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
   <string name="sync_server_address">Serveradresse</string>
   <string name="sync_run_server">So betreibst du einen Server</string>
   <string name="sync_reconnect_action">Erneut verbinden</string>
   <string name="sync_link_again">Erneut verknüpfen</string>
+  <string name="sync_forget_server">Server vergessen</string>
+  <string name="sync_forget_stale">Die gespeicherte Verknüpfung hat sich geändert, während der Server vergessen wurde. Nichts wurde entfernt; prüfe den Status oben.</string>
+  <string name="sync_forget_failed">Der Server konnte nicht vergessen werden. Die gespeicherten Sync-Daten sind unverändert.</string>
+  <string name="sync_forget_unexpected">Beim Vergessen des Servers ist etwas schiefgelaufen. Prüfe den Status oben und versuche es erneut.</string>
 
   <string name="sync_setup_title">Gerät verknüpfen</string>
   <string name="sync_setup_address_hint">sync.example.org</string>

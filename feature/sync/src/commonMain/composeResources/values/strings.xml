@@ -10,13 +10,18 @@
   <string name="sync_activity_syncing">Syncing…</string>
   <string name="sync_activity_live">Live updates connected</string>
   <string name="sync_what_syncs">Synced: subscriptions, groups, played state, positions, favourites, Up next and synced settings. Never synced: downloads, artwork and feed contents.</string>
-  <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
+  <string name="sync_reconnect">Reconnect to %1$s</string>
+  <string name="sync_reconnect_body">This copy of Neutrodyne isn't linked yet. Nothing has been synced since it was restored or copied.</string>
   <string name="sync_finish_link">Finish linking to %1$s.</string>
   <string name="sync_revoked">This device was unlinked from %1$s.</string>
   <string name="sync_server_address">Server address</string>
   <string name="sync_run_server">How to run a server</string>
   <string name="sync_reconnect_action">Reconnect</string>
   <string name="sync_link_again">Link again</string>
+  <string name="sync_forget_server">Forget server</string>
+  <string name="sync_forget_stale">The saved link changed while the server was being forgotten. Nothing was cleared; check the status above.</string>
+  <string name="sync_forget_failed">The server couldn't be forgotten. The saved sync data is unchanged.</string>
+  <string name="sync_forget_unexpected">Something went wrong while forgetting the server. Check the status above, then try again.</string>
 
   <string name="sync_setup_title">Link a device</string>
   <string name="sync_setup_address_hint">sync.example.org</string>

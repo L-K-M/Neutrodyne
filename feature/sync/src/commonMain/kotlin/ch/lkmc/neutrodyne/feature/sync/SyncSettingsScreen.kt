@@ -73,6 +73,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_playback_settings_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_pref_save_failed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect_action
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_reconnect_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_rename_this_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_revoked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_run_server
@@ -102,7 +103,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
  * entry affordance pushes `SyncSetupKey`: with the typed address while unconfigured, with the
  * known `serverUrl` for `Reconnect`, `LinkUnfinished` (which resumes whatever step the existing
  * `LinkFlow` holds — it is never cancelled or restarted here) and `Revoked`. `Linked` stays
- * read-only for linking: a replacement link is the separate confirmed unlink flow.
+ * read-only for linking: a replacement link is the separate confirmed unlink flow. The
+ * `Reconnect` and `Revoked` cards additionally offer the local-only "Forget server" clear
+ * ([ForgetServerAction]).
  */
 @Composable
 fun SyncSettingsScreen(
@@ -171,9 +174,19 @@ fun SyncSettingsScreen(
                 }
 
                 is SyncStatus.Reconnect -> {
-                    Text(stringResource(Res.string.sync_reconnect, current.serverUrl))
+                    Text(
+                        stringResource(Res.string.sync_reconnect, hostOf(current.serverUrl)),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(Res.string.sync_reconnect_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     Button(onClick = { navigator.push(SyncSetupKey(current.serverUrl)) }) {
                         Text(stringResource(Res.string.sync_reconnect_action))
+                    }
+                    key(current) {
+                        ForgetServerAction(controller, current)
                     }
                 }
 
@@ -185,9 +198,12 @@ fun SyncSettingsScreen(
                 }
 
                 is SyncStatus.Revoked -> {
-                    Text(stringResource(Res.string.sync_revoked, current.serverUrl))
+                    Text(stringResource(Res.string.sync_revoked, hostOf(current.serverUrl)))
                     Button(onClick = { navigator.push(SyncSetupKey(current.serverUrl)) }) {
                         Text(stringResource(Res.string.sync_link_again))
+                    }
+                    key(current) {
+                        ForgetServerAction(controller, current)
                     }
                 }
             }
