@@ -240,11 +240,13 @@ internal fun ApplicationScope.NeutrodyneWindow(
 
     // 10's held-batch desktop notification (08's "Sync is waiting for you"): hidden means
     // the Compose-side hide or an iconified window — an unfocused but visible one is not.
-    // The collector lives and dies with this window and only touches the lazy thunks
-    // behind the database-open gate.
-    LaunchedEffect(syncController, syncHeldNotifier) {
-        val resolveController = syncController ?: return@LaunchedEffect
-        val resolveNotifier = syncHeldNotifier ?: return@LaunchedEffect
+    // One collector for the window's life: it lives and dies with the composition and only
+    // touches the lazy thunks behind the database-open gate.
+    val syncControllerThunk by rememberUpdatedState(syncController)
+    val syncHeldThunk by rememberUpdatedState(syncHeldNotifier)
+    LaunchedEffect(Unit) {
+        val resolveController = syncControllerThunk ?: return@LaunchedEffect
+        val resolveNotifier = syncHeldThunk ?: return@LaunchedEffect
         observeSyncHeldNotifications(
             gate = snapshotFlow { openState is DatabaseOpenState.Opened },
             hidden = snapshotFlow { hidden || state.isMinimized },

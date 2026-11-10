@@ -21,6 +21,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
@@ -31,13 +33,23 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
  * 10 Scheduling on the desktop's held-batch notice and 08's "Sync is waiting for you" row:
  * while the main window is hidden a held batch of the mass-change guard posts
  * `NotificationKind.SYNC_HELD` through the bound [DesktopNotifier]; the click applies
- * `neutrodyne://open/settings/sync`, the same destination as the banner's Review.
+ * `neutrodyne://open/settings/sync`, 08's route for Settings › Sync (`SyncSettingsKey`).
  *
  * The holder lives in the [AppScope] so the dedupe survives window recreation (11: the
  * shell may recompose its window); the posted state itself is never persisted. The single
- * [ID] slot follows the other posters' replace/cancel contract. [onSyncState] marks
- * delivery only after [DesktopNotifier.post] returns — a thrown post leaves the batch
- * unnotified so a later emission retries.
+ * [ID] slot follows the other posters' replace/cancel contract.
+ *
+ * Generations: a window collector takes a [newOwner] serial per gate-open iteration, and
+ * every decision plus the notifier effects behind it is serialized by [lock] — the narrow
+ * local mutex the shared slot needs because `LaunchedEffect` cancellation does not join a
+ * superseded collector before the next one starts. The lock guards in-process calls only
+ * (`OsDesktopNotifier` and the banner fallback — no network), so post, record and retract
+ * are atomic across generations: a torn-down [clear] either runs before a newer post
+ * reserved or after it committed, never in between; a superseded [clear] never retracts at
+ * all. A post attempt reserves its slot content up front because `post()` is the delivery
+ * boundary (the OS channel and the fallback report delivery on return): a cancelled or
+ * failed attempt may still have landed, so only a `settled` post may be adopted, and a
+ * failed one frees its reservation so a later emission retries.
  */
 @SingleIn(AppScope::class)
 class DesktopSyncHeldNotifier
@@ -45,15 +57,13 @@ class DesktopSyncHeldNotifier
     internal constructor(
         private val notifier: DesktopNotifier,
     ) {
-        /** The notice the [ID] slot currently shows, per this holder's best knowledge. */
-        private var shown: HeldNotice? = null
+        private val lock = Mutex()
 
-        /**
-         * Owners with a [DesktopNotifier.post] attempt whose outcome is unknown (cancelled
-         * or failed mid-call). [clear] retracts the slot for them because the attempt may
-         * have raced actual delivery.
-         */
-        private val attempted = mutableSetOf<Long>()
+        /** Owner -> notice that may occupy the [ID] slot, in attempt order. */
+        private val posted = LinkedHashMap<Long, HeldNotice>()
+
+        /** Owners whose post call returned (success or failure); unset = outcome unknown. */
+        private val settled = HashSet<Long>()
         private val nextOwner = AtomicLong()
 
         /**
@@ -69,24 +79,29 @@ class DesktopSyncHeldNotifier
             status: SyncStatus,
             prompts: List<MassChangePrompt>,
             windowHidden: Boolean,
-        ) {
+        ) = lock.withLock {
             val profile = (status as? SyncStatus.Linked)?.let(::HeldProfile)
             val ids = prompts.mapTo(LinkedHashSet()) { it.id }
-            val stale = shown
+            val stale = posted.values.lastOrNull()
             if (stale != null && (profile == null || stale.profile != profile || ids.isEmpty())) {
-                // Unlink, a profile switch or a fully resolved batch withdraws the notice.
+                // Unlink, a profile switch or a fully resolved batch withdraws the notice;
+                // retracting the slot covers every reserved-or-delivered attempt so far.
                 notifier.cancel(ID)
-                shown = null
+                posted.clear()
             }
-            if (profile == null || ids.isEmpty() || !windowHidden) return
-            val current = shown
-            if (current != null && current.profile == profile && current.ids == ids) {
-                // Same batch set as posted: adopt the still-shown notice so an older
-                // generation's clear() cannot retract it, and never repost.
-                shown = current.copy(owner = owner)
-                return
+            if (profile == null || ids.isEmpty() || !windowHidden) return@withLock
+            val current = posted.values.lastOrNull()
+            if (current != null && current.owner in settled && current.profile == profile && current.ids == ids) {
+                // Same batch set as a confirmed post: adopt the still-shown notice so an
+                // older generation's clear() leaves it alone, and never repost.
+                posted.remove(current.owner)
+                posted[owner] = current.copy(owner = owner)
+                return@withLock
             }
-            attempted += owner
+            val notice = HeldNotice(owner, profile, ids)
+            // Reserve the slot content before suspending: a post cancelled past the point of
+            // no return may still have delivered, and the record keeps it retractable.
+            posted[owner] = notice
             suspendRunCatching {
                 notifier.post(
                     DesktopNotification(
@@ -98,26 +113,27 @@ class DesktopSyncHeldNotifier
                     ),
                 )
             }.onSuccess {
-                attempted -= owner
-                // An older generation's late post must not overwrite a newer record.
-                if (owner >= (shown?.owner ?: Long.MIN_VALUE)) {
-                    shown = HeldNotice(owner, profile, ids)
-                }
+                settled += owner
+            }.onFailure {
+                // A non-cancellation failure means no delivery was reported: free the
+                // reservation so the next emission retries.
+                settled += owner
+                posted.remove(owner, notice)
             }
         }
 
         /**
-         * End of one collector generation (gate close or window dispose): withdraw the
-         * notice this generation posted — or may still be posting — without touching a
-         * newer generation's notice.
+         * End of one collector generation (gate close or window dispose): withdraw whatever
+         * this slot may show — a committed post or a reserved attempt whose delivery is
+         * uncertain. A superseded owner retracts nothing: the live generation owns the slot
+         * now and re-derives its content from its own emissions.
          */
-        internal fun clear(owner: Long) {
-            val posted = shown?.owner == owner
-            val inFlight = shown == null && owner in attempted
-            attempted -= owner
-            if (posted) shown = null
-            if (posted || inFlight) notifier.cancel(ID)
-        }
+        internal suspend fun clear(owner: Long) =
+            lock.withLock {
+                if (owner != nextOwner.get() || posted.isEmpty()) return@withLock
+                notifier.cancel(ID)
+                posted.clear()
+            }
 
         private suspend fun heldBody(prompt: MassChangePrompt): String {
             val device = prompt.deviceName ?: getString(UiRes.string.held_changes_unknown_device)
@@ -153,9 +169,11 @@ class DesktopSyncHeldNotifier
 /**
  * The window's owned collector: waits for the database gate before touching the lazy
  * [syncController] or [notifier] (both are database-backed constructions), then feeds every
- * combined change of `status` + `heldChanges` + window visibility into the holder. A gate
- * close cancels the inner collection, and its `finally` — under [NonCancellable] — joins
- * the cleanup so no orphan job or stale notice survives a database close.
+ * combined change of `status` + `heldChanges` + window visibility into the holder. New
+ * emissions cancel the in-flight one ([collectLatest]) so an unlink or a profile switch
+ * retracts a suspended old-profile post instead of queuing behind it; a gate close cancels
+ * the inner collection, and its `finally` — under [NonCancellable] — joins the cleanup so
+ * no orphan job or stale notice survives a database close.
  */
 internal suspend fun observeSyncHeldNotifications(
     gate: Flow<Boolean>,
@@ -170,7 +188,7 @@ internal suspend fun observeSyncHeldNotifications(
         val owner = held.newOwner()
         try {
             combine(controller.status, controller.heldChanges, hidden, ::HeldInputs)
-                .collect { (status, prompts, windowHidden) ->
+                .collectLatest { (status, prompts, windowHidden) ->
                     held.onSyncState(owner, status, prompts, windowHidden)
                 }
         } finally {

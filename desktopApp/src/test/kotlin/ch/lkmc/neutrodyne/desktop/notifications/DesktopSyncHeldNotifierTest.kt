@@ -248,6 +248,78 @@ class DesktopSyncHeldNotifierTest {
         }
 
     @Test
+    fun anOldGenerationsClearCannotEraseANewPost() =
+        runTest {
+            val h = Harness()
+            val held = h.held
+            val o1 = held.newOwner()
+            val o2 = held.newOwner()
+            held.onSyncState(o1, LINKED, listOf(PROMPT), windowHidden = true)
+            assertThat(h.posted).hasSize(1)
+
+            // The newer generation's post delivers at the notifier, then suspends before
+            // returning — the "committed at the slot but not yet resumed" window.
+            h.postDeliverGate = CompletableDeferred()
+            val newPost = launch { held.onSyncState(o2, LINKED, listOf(PROMPT.copy(id = 8)), true) }
+            await { h.posted.size == 2 }
+
+            // A superseded generation's teardown races the delivery: it must not retract
+            // the newer notice, and the late bookkeeping must not ghost-record a loss.
+            val oldClear = launch { held.clear(o1) }
+            runCurrent()
+            assertThat(h.ops).containsExactly("post:sync-held", "post:sync-held").inOrder()
+            h.postDeliverGate!!.complete(Unit)
+            newPost.join()
+            oldClear.join()
+            assertThat(h.posted).hasSize(2)
+            assertThat(h.cancelled).isEmpty()
+        }
+
+    @Test
+    fun aProfileSwitchWithdrawsAnInFlightPost() =
+        runTest {
+            val h = Harness()
+            h.postGate = CompletableDeferred()
+            val job = h.collectOn(this)
+            h.gate.value = true
+            h.hidden.value = true
+            h.sync.status.value = LINKED
+            h.sync.heldChanges.value = listOf(PROMPT)
+            await { h.postStarted.isCompleted }
+
+            // The link switches to another profile while the first post is still suspended:
+            // the queued emission must retract the in-flight old-profile post, not queue
+            // behind it.
+            h.postGate = null
+            h.sync.status.value = OTHER_PROFILE
+            await { h.posted.isNotEmpty() }
+            assertThat(h.ops)
+                .containsExactly("post:sync-held", "cancel:sync-held", "post:sync-held")
+                .inOrder()
+            job.cancel()
+        }
+
+    @Test
+    fun anUnlinkWithdrawsAnInFlightPost() =
+        runTest {
+            val h = Harness()
+            h.postGate = CompletableDeferred()
+            val job = h.collectOn(this)
+            h.gate.value = true
+            h.hidden.value = true
+            h.sync.status.value = LINKED
+            h.sync.heldChanges.value = listOf(PROMPT)
+            await { h.postStarted.isCompleted }
+
+            h.postGate = null
+            h.sync.status.value = SyncStatus.Revoked(LINKED.serverUrl)
+            await { h.cancelled.isNotEmpty() }
+            assertThat(h.ops).containsExactly("post:sync-held", "cancel:sync-held").inOrder()
+            assertThat(h.posted).isEmpty()
+            job.cancel()
+        }
+
+    @Test
     fun aFailedPostCountsNothingAndRetries() =
         runTest {
             val h = Harness()
@@ -287,6 +359,7 @@ class DesktopSyncHeldNotifierTest {
         val cancelled = mutableListOf<String>()
         val postStarted = CompletableDeferred<Unit>()
         var postGate: CompletableDeferred<Unit>? = null
+        var postDeliverGate: CompletableDeferred<Unit>? = null
         var postFailure: Throwable? = null
         var syncCalls = 0
         var notifierCalls = 0
@@ -299,6 +372,7 @@ class DesktopSyncHeldNotifierTest {
                     postGate?.await()
                     postFailure?.let { throw it }
                     posted += n
+                    postDeliverGate?.await()
                 }
 
                 override fun cancel(id: String) {
