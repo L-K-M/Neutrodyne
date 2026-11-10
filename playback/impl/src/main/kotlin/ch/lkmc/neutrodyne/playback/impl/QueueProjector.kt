@@ -318,7 +318,7 @@ internal class QueueProjector(
                     )
                 }
             }
-            if (currentChanged) tracker.startPositionApplied()
+            if (currentChanged) tracker.startPositionApplied(player?.currentPosition?.coerceAtLeast(0) ?: 0)
             planner.appliedOwnGeneration(pending.revision.generation)
             // The external set's session write committed when Media3 installed this timeline.
             if (currentChanged) {
@@ -481,7 +481,7 @@ internal class QueueProjector(
                     it.media?.measuredDurationMs ?: it.media?.durationMs,
                     allowed = saverAllowed(it.item.episodeId),
                 )
-                tracker.startPositionApplied()
+                tracker.startPositionApplied(startMs)
                 applier.applyFor(it.item.episodeId)
             }
             if (playback != WindowPlayback.LOAD_PAUSED) live.prepare()
@@ -632,7 +632,7 @@ internal class QueueProjector(
                         smartResume = resumePolicy() == SmartResumePolicy.ENABLED,
                     )
                 tracker.coreSeek { live.seekTo(startMs) }
-                tracker.startPositionApplied()
+                tracker.startPositionApplied(startMs)
                 applier.applyFor(arrivalId)
                 if (live.playerError != null || live.playbackState == Player.STATE_IDLE) live.prepare()
             } finally {
@@ -801,7 +801,7 @@ internal class QueueProjector(
         if (!isCompletedBoundary(id)) return
         completedBoundary = null
         tracker.load(id, replay = true, durationMs = live.knownDuration(), allowed = saverAllowed(id))
-        tracker.startPositionApplied()
+        tracker.startPositionApplied(0)
     }
 
     /** A boundary pause completes this item, not the session or the next queued item. */

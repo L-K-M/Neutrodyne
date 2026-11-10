@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
+import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
@@ -61,7 +62,7 @@ class FakeSyncController(
     /** Scripted results; the defaults succeed (UI tests rarely exercise failures). */
     var devicesResult: Outcome<List<SyncDevice>, SyncProblem> = Outcome.Success(emptyList())
     var approveResult: Outcome<PendingDevice, SyncProblem> =
-        Outcome.Success(PendingDevice("", "", "", "", 0))
+        Outcome.Success(PendingDevice("", "", "", "", 0, LinkPurpose.DEVICE, sameNetwork = true))
     var confirmResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var unlinkResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var deleteServerDataResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)

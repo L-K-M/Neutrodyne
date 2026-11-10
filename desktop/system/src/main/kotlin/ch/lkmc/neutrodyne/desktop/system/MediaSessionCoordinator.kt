@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import kotlinx.coroutines.CoroutineScope
@@ -60,7 +61,7 @@ class MediaSessionCoordinator(
     private suspend fun dispatch(command: RemoteCommand) {
         when (command) {
             RemoteCommand.Play -> {
-                controller.play()
+                controller.play(PlayOrigin.SYSTEM)
             }
 
             RemoteCommand.Pause -> {
@@ -68,7 +69,7 @@ class MediaSessionCoordinator(
             }
 
             RemoteCommand.Toggle -> {
-                controller.togglePlayPause()
+                controller.togglePlayPause(PlayOrigin.SYSTEM)
             }
 
             RemoteCommand.Next -> {

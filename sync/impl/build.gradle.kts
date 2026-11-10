@@ -19,6 +19,9 @@ kotlin {
             // KtorSyncClientTest: the real SYNC client stack against a scripted server.
             implementation(libs.okhttp.mockwebserver3)
             implementation(libs.okio)
+            // TwoClientWireTest runs the production DesktopJobRunner; a test edge does not
+            // widen :sync:impl's production surface (rule 13: test edges are not asserted).
+            implementation(project(":core:data"))
         }
         findByName("androidMain")?.dependencies {
             implementation(libs.androidx.work.runtime)
@@ -51,4 +54,17 @@ kotlin {
             implementation(libs.okio)
         }
     }
+}
+
+// The two-client wire suite launches the packaged server as a loopback child JVM. The task edge
+// and declared input hand it the fat JAR's path without a :sync:impl -> :sync:server compile edge;
+// a missing JAR fails the test rather than skipping it.
+tasks.named<org.gradle.api.tasks.testing.Test>("desktopTest") {
+    dependsOn(":sync:server:fatJar")
+    val serverJar =
+        rootProject.layout.projectDirectory.file(
+            "sync/server/build/libs/neutrodyne-server-${providers.gradleProperty("neutrodyne.versionName").get()}.jar",
+        )
+    inputs.files(serverJar)
+    systemProperty("neutrodyne.serverJar", serverJar.asFile.absolutePath)
 }

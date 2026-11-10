@@ -45,6 +45,9 @@ sealed interface SyncProblem {
     /** The first-link merge failed; the library is unchanged and linking stays unfinished. */
     data object MergeFailed : SyncProblem
 
+    /** The addressed device row is already gone (`PATCH`/`DELETE /devices/{id}` → 404; 10 Errors: refresh the device list). */
+    data object DeviceGone : SyncProblem
+
     /** A server response the client could not interpret (`Server(status)` in diagnostics). */
     data class Server(
         val status: Int,

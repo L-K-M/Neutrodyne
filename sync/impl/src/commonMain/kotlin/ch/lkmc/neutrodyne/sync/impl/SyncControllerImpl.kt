@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
+import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
@@ -394,6 +395,16 @@ class SyncControllerImpl(
         refreshGateVerdict()
         return try {
             val response = client.linkApprove(server, token, normaliseUserCode(userCode))
+            val purpose =
+                when (response.purpose) {
+                    "device" -> LinkPurpose.DEVICE
+
+                    "web" -> LinkPurpose.WEB
+
+                    // The server knows only `device`/`web` (10 Link codes): an unknown purpose
+                    // can never be rendered as a device grant — fail closed instead.
+                    else -> return Outcome.Failure(SyncProblem.Server(400))
+                }
             Outcome.Success(
                 PendingDevice(
                     userCode = normaliseUserCode(userCode),
@@ -401,12 +412,14 @@ class SyncControllerImpl(
                     platform = response.platform,
                     appVersion = response.appVersion,
                     requestedAtMs = parseEpochMilliseconds(response.requestedAt),
+                    purpose = purpose,
+                    sameNetwork = response.sameNetwork,
                 ),
             )
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(mapAuthFailure(failure, LinkAuthKind.LINK))
+            Outcome.Failure(mapApprovalFailure(failure))
         }
     }
 
@@ -422,7 +435,7 @@ class SyncControllerImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(mapAuthFailure(failure, LinkAuthKind.LINK))
+            Outcome.Failure(mapApprovalFailure(failure))
         }
     }
 
@@ -554,7 +567,7 @@ class SyncControllerImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(tracked(failure))
+            Outcome.Failure(mapDeviceFailure(failure))
         }
     }
 
@@ -567,7 +580,7 @@ class SyncControllerImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Outcome.Failure(tracked(failure))
+            Outcome.Failure(mapDeviceFailure(failure))
         }
     }
 
@@ -609,7 +622,7 @@ class SyncControllerImpl(
     }
 
     override suspend fun setSyncPlaybackSettings(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
-        preferenceMutex.withLock {
+        flags.withPreferenceCommit {
             kotlin.coroutines.coroutineContext.ensureActive()
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                 if (address.setSyncPlaybackSettings(enabled) is Outcome.Failure) {
@@ -624,7 +637,7 @@ class SyncControllerImpl(
         }
 
     override suspend fun setShareFeedPasswords(enabled: Boolean): Outcome<Unit, SyncPreferenceError> =
-        preferenceMutex.withLock {
+        flags.withPreferenceCommit {
             kotlin.coroutines.coroutineContext.ensureActive()
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                 if (address.setShareFeedPasswords(enabled) is Outcome.Failure) {
@@ -999,6 +1012,23 @@ class SyncControllerImpl(
             NetError.Cancelled -> SyncProblem.Unreachable("cancelled")
             is NetError.Other -> SyncProblem.Unreachable(netError.type)
         }
+    }
+
+    /**
+     * `link/approve` and `link/confirm` are authenticated calls: a 401 is the dead token like on
+     * every other endpoint (10 Errors: `Revoked`, persisted via [tracked]), while their 404 is the
+     * unknown, expired or already-used code — never the server address. The unauthenticated
+     * `link/start`/`link/token` poll keeps [mapAuthFailure]'s `LINK` reading (401 = bad code state).
+     */
+    private suspend fun mapApprovalFailure(failure: Throwable): SyncProblem {
+        if (failure is SyncTransportException && failure.status == 404) return SyncProblem.InvalidCode
+        return tracked(failure)
+    }
+
+    /** A 404 on `PATCH`/`DELETE /devices/{id}` is the gone row, not a wrong server (10 Errors). */
+    private suspend fun mapDeviceFailure(failure: Throwable): SyncProblem {
+        if (failure is SyncTransportException && failure.status == 404) return SyncProblem.DeviceGone
+        return tracked(failure)
     }
 
     /** A 401 means different things on the three unauthenticated entry points (10 Errors). */
