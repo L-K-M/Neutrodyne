@@ -109,6 +109,9 @@
   <string name="sync_share_passwords_body">Die Passwörter deiner privaten Feeds werden auf %1$s lesbar gespeichert, damit deine anderen Geräte sie verwenden können. Wer die Daten des Servers lesen kann, kann sie lesen.</string>
   <string name="sync_share_passwords_confirm">Teilen</string>
   <string name="sync_pref_save_failed">Die Einstellung konnte nicht gespeichert werden</string>
+  <string name="sync_server_stores">Was der Server speichert</string>
+  <string name="sync_disclosure_title">Was %1$s speichert</string>
+  <string name="sync_disclosure_load_failed">Die gespeicherten Serverdaten konnten nicht gelesen werden.</string>
   <string name="sync_unlink_device">Dieses Gerät trennen</string>
   <string name="sync_unlink_title">Dieses Gerät trennen?</string>
   <string name="sync_unlink_body">Es synchronisiert dann nicht mehr; seine Bibliothek bleibt wie sie ist, und deine anderen Geräte synchronisieren weiter.</string>

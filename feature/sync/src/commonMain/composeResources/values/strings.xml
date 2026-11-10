@@ -109,6 +109,9 @@
   <string name="sync_share_passwords_body">The passwords of your private feeds are stored on %1$s in readable form so your other devices can use them. Anyone who can read the server's data can read them.</string>
   <string name="sync_share_passwords_confirm">Share</string>
   <string name="sync_pref_save_failed">Couldn't save the setting</string>
+  <string name="sync_server_stores">What the server stores</string>
+  <string name="sync_disclosure_title">What %1$s stores</string>
+  <string name="sync_disclosure_load_failed">Couldn't read what the server stores.</string>
   <string name="sync_unlink_device">Unlink this device</string>
   <string name="sync_unlink_title">Unlink this device?</string>
   <string name="sync_unlink_body">It stops syncing; its library stays as it is, and your other devices keep syncing.</string>

@@ -189,7 +189,6 @@ class SyncControllerImpl(
         override fun toString(): String = "DisconnectIdentity(redacted)"
     }
 
-
     init {
         scope.launch { refreshStatus() }
         // 10 Live updates: the status card's activity line follows the round counter and the
@@ -460,6 +459,42 @@ class SyncControllerImpl(
             Outcome.Failure(tracked(failure))
         }
     }
+
+    /**
+     * The linked server's disclosure (08 "What the server stores"). Local reads only — the host
+     * and transport come from the configured `sync.server_url`, the private-feed count from the
+     * same podcast query the pre-link card uses. The identity is re-read after the count
+     * suspends: an unlink/relink committed in between makes the first identity's host a lie, so
+     * the call answers `null` and the caller retries.
+     */
+    override suspend fun disclosure(): ch.lkmc.neutrodyne.sync.api.SyncDisclosure? {
+        val before = identityMutex.withLock { linkedIdentity() } ?: return null
+        val privateFeeds = privateFeedLinkCount()
+        val after = identityMutex.withLock { linkedIdentity() }
+        if (after != before) return null
+        return ch.lkmc.neutrodyne.sync.api.SyncDisclosure(
+            host = hostOf(before.serverUrl),
+            privateFeedLinks = privateFeeds,
+            encrypted = before.serverUrl.startsWith("https://"),
+        )
+    }
+
+    /** The (server, account, device) of the current link; read only under [identityMutex]. */
+    private suspend fun linkedIdentity(): LinkedIdentity? {
+        val state = db.syncStateDao().get()
+        val url = address.serverUrl() ?: return null
+        return if (state?.enabled == true && state.linkedAt != null) {
+            LinkedIdentity(url, state.accountId.orEmpty(), state.deviceId.orEmpty())
+        } else {
+            null
+        }
+    }
+
+    private data class LinkedIdentity(
+        val serverUrl: String,
+        val accountId: String,
+        val deviceId: String,
+    )
 
     override suspend fun unlink(): Outcome<Unit, SyncProblem> {
         val expected = identityMutex.withLock { disconnectIdentity() }
@@ -866,13 +901,16 @@ class SyncControllerImpl(
     private suspend fun disclosure(server: DiscoveredServer): ch.lkmc.neutrodyne.sync.api.SyncDisclosure =
         ch.lkmc.neutrodyne.sync.api.SyncDisclosure(
             host = hostOf(server.serverUrl),
-            privateFeedLinks =
-                db
-                    .podcastDao()
-                    .allForExport()
-                    .count { it.needsCredentials || it.credentialId != null },
+            privateFeedLinks = privateFeedLinkCount(),
             encrypted = server.serverUrl.startsWith("https://"),
         )
+
+    /** Feeds whose refresh needs credentials — the count both disclosures name (10 Privacy). */
+    private suspend fun privateFeedLinkCount(): Int =
+        db
+            .podcastDao()
+            .allForExport()
+            .count { it.needsCredentials || it.credentialId != null }
 
     private suspend fun deviceInfo(): DeviceInfoDto {
         val nodeId = checkNotNull(pendingNodeId) { "no link in progress" }
