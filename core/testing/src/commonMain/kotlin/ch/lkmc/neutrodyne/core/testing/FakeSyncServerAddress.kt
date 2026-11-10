@@ -31,6 +31,9 @@ class FakeSyncServerAddress(
     /** Suspends after the durable share value is read, before the read returns to its caller. */
     var afterShareRead: (suspend (Boolean) -> Unit)? = null
 
+    /** Suspends after the durable server URL is read, before the read returns to its caller. */
+    var afterServerUrlRead: (suspend (String?) -> Unit)? = null
+
     /** Suspends inside the committed identity clear, before both values are dropped. */
     var onIdentityClear: (suspend () -> Unit)? = null
 
@@ -63,7 +66,11 @@ class FakeSyncServerAddress(
         storedSyncPlaybackSettings = value
     }
 
-    override suspend fun serverUrl(): String? = serverUrl
+    override suspend fun serverUrl(): String? {
+        val value = serverUrl
+        afterServerUrlRead?.invoke(value)
+        return value
+    }
 
     override suspend fun username(): String? = username
 

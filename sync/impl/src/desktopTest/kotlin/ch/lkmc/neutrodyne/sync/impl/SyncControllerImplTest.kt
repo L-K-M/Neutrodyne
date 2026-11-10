@@ -1596,6 +1596,107 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun disclosureAnswersNothingWhileNotLinked() =
+        runTest {
+            val h = harness(this)
+            try {
+                assertNull(h.controller.disclosure())
+                // The read is fully local — the client must never see a request.
+                assertTrue(h.client.calls.isEmpty())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun disclosureNamesTheConfiguredServerAndCountsCredentialFeeds() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.db.withWriteTransaction {
+                    val credentialId =
+                        h.db.credentialDao().putByOrigin(
+                            ch.lkmc.neutrodyne.core.database.CredentialEntity(
+                                origin = "https://private.example",
+                                username = "member",
+                                secretCipher = byteArrayOf(1),
+                                iv = null,
+                                createdAt = 1,
+                            ),
+                        )
+                    h.db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(syncId = PODCAST_SYNC_ID) { copy(needsCredentials = true) },
+                        )
+                    h.db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(syncId = OTHER_PODCAST_SYNC_ID) { copy(credentialId = credentialId) },
+                        )
+                    h.db
+                        .podcastDao()
+                        .insertPodcast(podcastEntity())
+                }
+                val disclosure = h.controller.disclosure()
+                assertEquals(
+                    ch.lkmc.neutrodyne.sync.api
+                        .SyncDisclosure(host, 2, encrypted = true),
+                    disclosure,
+                )
+                assertTrue(h.client.calls.isEmpty(), "the disclosure never reaches the client")
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun disclosureReportsAnUnencryptedConfiguredServer() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.address.updateServerUrl("http://192.168.1.50")
+                assertEquals(
+                    ch.lkmc.neutrodyne.sync.api
+                        .SyncDisclosure("192.168.1.50", 0, encrypted = false),
+                    h.controller.disclosure(),
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aRelinkMidReadAnswersNullRatherThanTheOldAccount() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                // `serverUrl()` fires inside every identity read; flipping `accountId` on each
+                // read models a relink committed between the read and the suspend count, so the
+                // second identity read must never equal the first — whoever calls in between.
+                var flips = 0
+                h.address.afterServerUrlRead = {
+                    flips += 1
+                    val state = h.db.syncStateDao().get()
+                    if (state != null) {
+                        h.db.withWriteTransaction {
+                            h.db.syncStateDao().upsert(state.copy(accountId = "other-account-$flips"))
+                        }
+                    }
+                }
+
+                // Answering with the first identity's host would describe the old account.
+                assertNull(h.controller.disclosure())
+                assertTrue(flips >= 2, "both identity reads must run")
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun aReconnectForgetClearsThePairTheLinkMetadataAndKeepsTheLibrary() =
         runTest {
             val h = harness(this)
