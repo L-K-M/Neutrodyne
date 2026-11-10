@@ -636,6 +636,34 @@ class QueueProjectorTest {
             }
         }
 
+    /**
+     * [NowPlaying.loadId]'s source (08 Sync notices): an install mints once, every real
+     * current-item transition mints again, and pause/play keeps the occurrence.
+     */
+    @Test fun loadBoundaryMintsPerInstallAndTransitionNotOnPause() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids)
+                awaitAdapter { f.player.ids() == ids }
+                assertEquals(1, f.loadBoundaries.get())
+                f.player.pause()
+                f.player.play()
+                awaitAdapter { f.loadBoundaries.get() == 1 }
+                f.player.seekToNextMediaItem()
+                awaitAdapter { f.loadBoundaries.get() == 2 && f.player.episodeIdOrNull() == ids[1] }
+                f.player.seekToNextMediaItem()
+                awaitAdapter { f.loadBoundaries.get() == 3 && f.player.episodeIdOrNull() == ids[2] }
+                // A restart of the same episode is a new load occurrence too.
+                f.start(listOf(ids[2]))
+                awaitAdapter { f.loadBoundaries.get() == 4 }
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun failedTransitionKeepsPlayingAndNextTransitionRepairsSession() =
         runTest {
             var attempts = 0

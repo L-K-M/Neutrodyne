@@ -665,7 +665,7 @@ flowchart TB
   pc --> pa & dom
   di --> da & dom & ya & art & db & dsx & net
   yi --> ya & net
-  si --> sa & sp & dom & db & dsx & net & feeds
+  si --> sa & sp & pa & dom & db & dsx & net & feeds
   art --> db & net & ya
   art -.-> nok
   pi --> pc & da & ya & art & db & dsx & nok
@@ -1584,6 +1584,7 @@ validation depend on CI. Implementation details and deviations are recorded in
 - **Deliverables:**
   - The stdio host on the existing JVM island `:youtube:engine` (in place since M9a, amended 2026-10-05: no extraction): its client, resolver, enricher, channel search and lookup, mappers, verifiers, `EngineStore`, `EngineUpdater`, `EngineRollbackMonitor` and their tests run unchanged against `StdioYtxTransport`; Android's behaviour and tests unchanged.
   - `:youtube:ytdlp-desktop`: `YtxProcess`, `StdioYtxTransport`, `DesktopEngineStorePaths`, `DesktopEngineUpdateLane`, `PythonRuntimeLocator`, `QuickJsBridge` (only if the JS provider shipped in M9b); the shim's stdio host adapter `host_stdio.py`; python-build-standalone fetch, trim and check in build-logic with `youtube/ytdlp-desktop/python-components.lock`; the bundled yt-dlp checked by `verifyBundledYtDlp`; `:desktopApp`'s bindings switch to the engine; Settings › YouTube on the desktop; the engine canary runs the stdio host as well.
+  - **Implementation note (2026-11-10):** `scripts/ci/youtube-engine-canary.py` now runs the stdio host as a second, independently reported leg (same pinned bundle hash check, same probe content, failure exit when either leg fails). Live nightly execution of the stdio leg is unverified until the workflow is next dispatched; no live success is claimed.
 - **Acceptance criteria:**
   1. The recorded-response vectors of M9 AC1 pass through the stdio host on the JVM (`StdioYtxTransportTest`).
   2. On each target the packaged app resolves and plays a recorded YouTube item in its smoke test (`ReplayRH`), and a 10-MiB-chunked download completes; a live check per OS is recorded.

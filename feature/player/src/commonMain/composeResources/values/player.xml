@@ -1,6 +1,7 @@
 <resources>
     <string name="player_skipped">Skipped %1$s: %2$s</string>
     <string name="player_marked_played">Marked played</string>
+    <string name="player_marked_played_elsewhere">Marked played on %1$s</string>
     <string name="player_no_group">Only possible while playing from a group</string>
     <string name="player_invalid_presets">Enter 2–8 speeds from 0.5 to 3.0 in steps of 0.05</string>
     <string name="player_nothing_to_play">Nothing to play</string>

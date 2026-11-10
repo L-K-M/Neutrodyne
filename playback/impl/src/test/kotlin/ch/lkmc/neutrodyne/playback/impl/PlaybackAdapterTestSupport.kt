@@ -217,6 +217,9 @@ internal class AdapterFixture(
     val planner =
         QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), StartPositionRule(), PlayedRule())
     var resumePolicy = SmartResumePolicy.DISABLED
+    val loadBoundaries =
+        java.util.concurrent.atomic
+            .AtomicInteger()
     val projector =
         QueueProjector(
             planner,
@@ -242,6 +245,7 @@ internal class AdapterFixture(
             resumePolicy = { resumePolicy },
             afterTransition = sync::transitioned,
             afterSessionEnd = sync::stopped,
+            onLoadBoundary = loadBoundaries::incrementAndGet,
             localChanges = local,
         )
 

@@ -19,8 +19,23 @@
     <string name="settings_sync_linked">Linked</string>
     <string name="settings_sync_linked_at">Linked · synced %1$s</string>
     <string name="settings_sync_revoked">This device was unlinked</string>
-    <!-- 08 Sync notices: the MarkedPlayedElsewhere snackbar on the shell's message flow. -->
+    <!-- 08 Sync notices: the shell snackbars on the message flow. -->
     <string name="sync_marked_played_elsewhere">Marked played on %1$s. It keeps playing here.</string>
+    <string name="sync_resynced">Sync started over with the server</string>
+    <string name="sync_resynced_added"> · %1$d changes from this device were sent again</string>
+    <string name="sync_password_set">A password was set for your sync account on %1$s</string>
+    <string name="sync_not_you">Not you?</string>
+    <string name="sync_show">Show</string>
+    <plurals name="sync_feed_password_needed">
+        <item quantity="one">%1$d podcast from your other devices needs a password here</item>
+        <item quantity="other">%1$d podcasts from your other devices need a password here</item>
+    </plurals>
+    <string name="sync_account_help_title">Sync account help</string>
+    <string name="sync_account_help_intro">A password was set for your sync account. If this wasn’t you, secure the account on your sync server.</string>
+    <string name="sync_account_help_open">Open your sync server’s address in a browser. You can see it in Settings › Sync on this device.</string>
+    <string name="sync_account_help_account">Sign in and open the account page.</string>
+    <string name="sync_account_help_sessions">Review the active web sessions and revoke any you don’t recognize.</string>
+    <string name="sync_account_help_password">Change the account password. Changing it signs out every other web session.</string>
 
     <!-- Settings › Appearance (M0a rows of 08 Settings screen structure). -->
     <string name="appearance_theme">Theme</string>

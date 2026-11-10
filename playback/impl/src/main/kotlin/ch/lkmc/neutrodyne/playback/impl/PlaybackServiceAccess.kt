@@ -74,6 +74,15 @@ public class PlaybackServiceAccess internal constructor(
     internal val streams: ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver,
     private val application: android.app.Application,
 ) {
+    /**
+     * Minted once per window install or external start commit — the [NowPlaying.loadId] source
+     * shared by every bridge this service hosts, so a reattach keeps the loaded item's identity.
+     * Main-thread load paths only.
+     */
+    internal val currentLoadId =
+        java.util.concurrent.atomic
+            .AtomicLong()
+
     internal fun audioPref() =
         prefs.current.value.audioPref(
             application.resources.configuration.locales[0]

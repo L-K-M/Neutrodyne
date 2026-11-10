@@ -3,13 +3,20 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.navigation.AppNavigator
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.SyncAccountHelpKey
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.playerTime
@@ -18,7 +25,13 @@ import ch.lkmc.neutrodyne.core.ui.root.ReconnectBanner
 import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
 import ch.lkmc.neutrodyne.core.ui.root.RemoteSessionCard
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_feed_password_needed
 import ch.lkmc.neutrodyne.feature.settings.resources.sync_marked_played_elsewhere
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_not_you
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_password_set
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_resynced
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_resynced_added
+import ch.lkmc.neutrodyne.feature.settings.resources.sync_show
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
@@ -38,10 +51,10 @@ import kotlinx.coroutines.launch
 /**
  * The MS3 shell bridge over `SyncController` (08 Continue on this device / Sync notices): the
  * offer mapped onto [RootUiState.remoteSession], its two actions, the one-shot notices
- * mapped into [RootSlots.userMessages], and the oldest held batch projected onto
- * [RootUiState.heldChanges] (MS2's banner, 08 priority 3). UI-only — eligibility, staleness,
- * adoption and the playing boundary stay with `SessionAdopter` and the playback gates;
- * nothing here decides what plays or when.
+ * mapped into [RootSlots.userMessages] and the snackbar actions those notices carry, and
+ * the oldest held batch projected onto [RootUiState.heldChanges] (MS2's banner, 08
+ * priority 3). UI-only — eligibility, staleness, adoption and the playing boundary stay
+ * with `SessionAdopter` and the playback gates; nothing here decides what plays or when.
  */
 public class SyncRootPresentation internal constructor(
     public val remoteSession: RemoteSessionCard?,
@@ -52,13 +65,26 @@ public class SyncRootPresentation internal constructor(
     public val dismissReconnect: (ReconnectBanner) -> Unit,
     public val isReconnectTargetLive: (ReconnectBanner) -> Boolean,
     public val userMessages: Flow<UserMessage>,
+    /**
+     * Dispatches a snackbar action by message id. Returns true when [id] is a sync notice (even one
+     * without an action), false for a foreign id — the desktop's banner notifier owns the
+     * nonnegative ids. Only the active message's action runs; a stale or foreign id is inert.
+     */
+    public val messageAction: (Long) -> Boolean,
+    /**
+     * Attaches the root's [AppNavigator] so a notice's action can push its destination. The shells
+     * call this inside the player slot, the only composition under `NeutrodyneRoot` where
+     * navigation exists; it is the small UI-only bridge, not a router.
+     */
+    public val feedback: @Composable () -> Unit,
 )
 
 /**
  * [syncController] and [playbackController] are thunks resolved only when needed: the graph's
  * sync service dereferences the database at construction, so the collectors below park inside
  * `snapshotFlow` until [enabled] (the shells' database-open gate) turns on. `false` renders the
- * inert pre-open frame — no offer, no messages and no service resolution.
+ * inert pre-open frame — no offer, no messages, no actions and no service resolution. After
+ * the gate closes again, no notice is emitted and no action is dispatched.
  * [reconnectDismissals] is the app-scoped in-memory "Not now" record (08 priority 4); it is
  * cheap and resolved once per composition, never through the database-backed service.
  *
@@ -75,6 +101,11 @@ public class SyncRootPresentation internal constructor(
  * inert, so Continue cannot resume an unrelated session and Dismiss cannot retract an offer it
  * was never rendered for. The gate is checked before the thunk, so stale actions never resolve
  * the service after close.
+ *
+ * Sync notice ids are negative and monotonic, so they never collide with the desktop banner
+ * notifier's nonnegative ids. A notice is mapped to an immutable [ActiveSyncMessage] at collection
+ * time; the flow keeps only the active message's action and clears it in a `finally` once the
+ * upstream `emit` returns (the snackbar was dismissed) or the collection is cancelled.
  *
  * The reconnect banner follows the same staleness rule by profile identity: `Reconnect` checks
  * the live status before the root pushes `SyncSetupKey`, and "Not now" dismisses only the exact
@@ -171,6 +202,39 @@ public fun rememberSyncRootPresentation(
                 }
             }
         }
+
+    // The navigator arrives from `feedback` (composed in the root's player slot). The action
+    // lambdas read it at invoke time, so a queued tap navigates with the live host.
+    val navigatorState = remember { mutableStateOf<AppNavigator?>(null) }
+    val navigator = remember(navigatorState) { { navigatorState.value } }
+    val active = remember { ActiveSyncMessageState() }
+
+    // Stable across recomposition: the shells key their `RootActions`/`RootSlots` on it, and an
+    // unstable lambda would cancel and re-show the in-flight snackbar.
+    val messageAction: (Long) -> Boolean =
+        remember(active) {
+            { id ->
+                if (!gate) {
+                    false
+                } else {
+                    val current = active.get()
+                    if (current == null || current.id != id) {
+                        false
+                    } else {
+                        val action = current.action
+                        if (action == null) {
+                            true
+                        } else {
+                            // Idempotent: a second tap before the snackbar is dismissed is inert.
+                            action.invoke()
+                            active.clear(id)
+                            true
+                        }
+                    }
+                }
+            }
+        }
+
     // "Not now" hides only the profile this frame rendered, and only while it is still the live
     // status: a queued tap from a replaced banner is inert and can never dismiss another server.
     val dismissReconnect: (ReconnectBanner) -> Unit =
@@ -201,27 +265,36 @@ public fun rememberSyncRootPresentation(
                     !dismissals.isDismissed(banner.profile)
             }
         }
+
     val userMessages =
         remember {
             flow {
                 snapshotFlow { gate }.first { it }
-                var nextId = 0L
+                var nextId = -1L
                 controller().notices.collect { notice ->
-                    if (notice is SyncNotice.MarkedPlayedElsewhere) {
-                        emit(
-                            UserMessage(
-                                id = nextId++,
-                                text =
-                                    UiText.Res(
-                                        Res.string.sync_marked_played_elsewhere,
-                                        listOf(notice.deviceName),
-                                    ),
-                            ),
-                        )
+                    if (!gate) return@collect
+                    val current = notice.toActiveMessage(nextId--, navigator)
+                    active.set(current)
+                    try {
+                        emit(current.message)
+                    } finally {
+                        active.clear(current.id)
                     }
                 }
             }
         }
+
+    val feedback: @Composable () -> Unit =
+        remember(navigatorState) {
+            {
+                val host = LocalAppNavigator.current
+                DisposableEffect(host) {
+                    navigatorState.value = host
+                    onDispose { navigatorState.value = null }
+                }
+            }
+        }
+
     return SyncRootPresentation(
         remoteSession = rendered?.toCard(),
         heldChanges = held?.toBanner(),
@@ -231,6 +304,8 @@ public fun rememberSyncRootPresentation(
         dismissReconnect = dismissReconnect,
         isReconnectTargetLive = isReconnectTargetLive,
         userMessages = userMessages,
+        messageAction = messageAction,
+        feedback = feedback,
     )
 }
 
@@ -262,6 +337,94 @@ public fun serialUserMessages(vararg upstreams: Flow<UserMessage>): Flow<UserMes
             }
         }
     }
+
+/** One snackbar-bound notice plus the action its id dispatches; immutable once mapped. */
+private class ActiveSyncMessage(
+    val message: UserMessage,
+    val action: (() -> Unit)?,
+) {
+    val id: Long
+        get() = message.id
+}
+
+/** The active notice's action, guarded because the collector and the snackbar run on different threads. */
+private class ActiveSyncMessageState {
+    private val lock = Any()
+    private var value: ActiveSyncMessage? = null
+
+    fun set(message: ActiveSyncMessage) {
+        synchronized(lock) { value = message }
+    }
+
+    fun get(): ActiveSyncMessage? = synchronized(lock) { value }
+
+    fun clear(id: Long) {
+        synchronized(lock) {
+            if (value?.id == id) value = null
+        }
+    }
+}
+
+private fun SyncNotice.toActiveMessage(
+    id: Long,
+    navigator: () -> AppNavigator?,
+): ActiveSyncMessage {
+    val text: UiText
+    val actionLabel: UiText?
+    val action: (() -> Unit)?
+    when (this) {
+        is SyncNotice.Resynced -> {
+            text =
+                if (added > 0) {
+                    UiText.Joined(
+                        listOf(
+                            UiText.Res(Res.string.sync_resynced),
+                            UiText.Res(Res.string.sync_resynced_added, listOf(added)),
+                        ),
+                        separator = "",
+                        suffix = "",
+                    )
+                } else {
+                    UiText.Res(Res.string.sync_resynced)
+                }
+            actionLabel = null
+            action = null
+        }
+
+        is SyncNotice.PasswordSet -> {
+            text = UiText.Res(Res.string.sync_password_set, listOf(date))
+            actionLabel = UiText.Res(Res.string.sync_not_you)
+            action = { navigator()?.push(SyncAccountHelpKey) }
+        }
+
+        is SyncNotice.FeedPasswordNeeded -> {
+            text =
+                UiText.Plural(
+                    Res.plurals.sync_feed_password_needed,
+                    podcastIds.size,
+                    listOf(podcastIds.size),
+                )
+            actionLabel = if (podcastIds.isEmpty()) null else UiText.Res(Res.string.sync_show)
+            // An empty id list has no first podcast to open, so the action is omitted entirely.
+            action =
+                if (podcastIds.isEmpty()) {
+                    null
+                } else {
+                    { navigator()?.push(PodcastKey(podcastIds.first())) }
+                }
+        }
+
+        is SyncNotice.MarkedPlayedElsewhere -> {
+            text = UiText.Res(Res.string.sync_marked_played_elsewhere, listOf(deviceName))
+            actionLabel = null
+            action = null
+        }
+    }
+    return ActiveSyncMessage(
+        message = UserMessage(id = id, text = text, action = actionLabel),
+        action = action,
+    )
+}
 
 internal fun MassChangePrompt.toBanner(): HeldChangesBanner =
     HeldChangesBanner(

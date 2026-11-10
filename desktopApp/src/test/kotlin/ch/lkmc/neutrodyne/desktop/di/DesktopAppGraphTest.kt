@@ -706,6 +706,8 @@ class DesktopAppGraphTest {
                 .single()
                 .order
         assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
+        // 08's marked-played latch arms before the open; every notice producer sits behind it.
+        assertThat(orders.getValue("MarkedPlayedElsewhereInitializer")).isLessThan(dbOrder)
         // 10 Parked state: the start-up recovery (191) runs after the database open and before
         // the sync scheduling arm (210).
         assertThat(dbOrder).isLessThan(orders.getValue("SyncParkedRecoveryInitializer"))

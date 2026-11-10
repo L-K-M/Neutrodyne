@@ -52,6 +52,8 @@ import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
+import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.SyncAccountHelpKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.testing.FakeDesktopIntegration
@@ -79,7 +81,9 @@ import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.stringResource
 import java.util.Locale
@@ -579,6 +583,20 @@ class SettingsScreensTest {
             }
         }
 
+    /** 08 Sync notices: "Not you?" opens this static help entry with its steps and back affordance. */
+    @Test
+    fun theSyncAccountHelpEntryRendersItsStepsAndBack() =
+        runComposeUiTest {
+            setSettingsRoot(routes = flowOf(Route.Push(SyncAccountHelpKey)))
+            waitUntil("the help page shows", TIMEOUT_MS) {
+                onAllNodesWithText("Sync account help").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText(
+                "Review the active web sessions and revoke any you don’t recognize.",
+            ).assertExists()
+            onNodeWithContentDescription("Back").assertExists()
+        }
+
     private fun ComposeUiTest.openSettings() {
         onAllNodesWithContentDescription("Settings").onFirst().performClick()
         onNodeWithText("About").assertExists()
@@ -591,6 +609,7 @@ class SettingsScreensTest {
         platformInfo: PlatformInfo = FakePlatformInfo.DESKTOP,
         platformActions: PlatformActions = TestPlatformActions,
         desktopIntegration: DesktopIntegration? = null,
+        routes: Flow<Route> = emptyFlow(),
     ) {
         setContent {
             CompositionLocalProvider(
@@ -610,6 +629,7 @@ class SettingsScreensTest {
                             playbackKey = { false },
                         ),
                     slots = RootSlots(player = {}, userMessages = emptyFlow()),
+                    routes = routes,
                     installers =
                         StubInstallers +
                             SettingsNavigation.entries(
