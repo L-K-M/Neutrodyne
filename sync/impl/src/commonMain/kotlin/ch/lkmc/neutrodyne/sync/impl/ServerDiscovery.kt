@@ -22,12 +22,14 @@ sealed interface DiscoveryResult {
  */
 class ServerDiscovery(
     private val client: SyncClient,
+    private val diagnosticsRuntime: SyncRuntimeDiagnostics = SyncRuntimeDiagnostics(),
 ) {
     suspend fun discover(address: String): DiscoveryResult {
         val normalized = normalise(address)
         if (normalized == null) return DiscoveryResult.Failure(SyncProblem.Server(400))
         return try {
             val document = client.discover(normalized)
+            diagnosticsRuntime.rememberVersion(normalized, document.serverVersion)
             when {
                 PROTOCOL_VERSION < document.protocol.min -> {
                     DiscoveryResult.Failure(SyncProblem.AppTooOld)
@@ -59,11 +61,22 @@ class ServerDiscovery(
     fun normalise(address: String): String? {
         val trimmed = address.trim()
         if (trimmed.isEmpty()) return null
+        // Canonicalise the scheme alone: `HTTP://host` must reach the preflight checks as plain
+        // `http` (so it is refused or confirmed), while the authority's and path's case — a path
+        // prefix, a query token — stays exactly as typed.
         val withScheme =
-            if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
-                trimmed
-            } else {
-                "https://$trimmed"
+            when {
+                trimmed.startsWith("https://", ignoreCase = true) -> {
+                    "https://" + trimmed.substring("https://".length)
+                }
+
+                trimmed.startsWith("http://", ignoreCase = true) -> {
+                    "http://" + trimmed.substring("http://".length)
+                }
+
+                else -> {
+                    "https://$trimmed"
+                }
             }
         val path = withScheme.substringAfter("://", "").dropWhile { it == '/' }
         if (path.isEmpty()) return null

@@ -4,10 +4,12 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * 10 Durable apply effects / Settings capture: the at-each-start drain, on both platforms
@@ -24,6 +26,9 @@ class SyncStartupDrainInitializer
         private val address: Provider<SyncServerAddress>,
         private val effects: Provider<SyncApplyEffects>,
         private val capture: Provider<SettingsCapture>,
+        // Lazy for the same reason: the settler's collector only starts after band 100.
+        private val deferred: Provider<DeferredRemovalSettler>,
+        @ApplicationScope private val scope: CoroutineScope,
     ) : AppInitializer {
         override val order: Int = 160
 
@@ -35,5 +40,8 @@ class SyncStartupDrainInitializer
             val addr = address()
             if (addr.serverUrl() != null) flags.refreshFromStore(addr)
             effects().drainAtStart(capture())
+            // 10 Mass-change guard 4: arm the player-state settle — one app-scope collector,
+            // idempotent across re-runs, local only and inert while unlinked or unplayed.
+            deferred().start(scope)
         }
     }

@@ -328,10 +328,12 @@ class SyncApplyEffects(
     suspend fun acknowledge(
         changes: List<ChangeDto>,
         results: List<ChangeResultDto>,
+        expectedProfile: ch.lkmc.neutrodyne.core.database.SyncStateEntity? = null,
     ) {
         if (changes.isEmpty() || results.isEmpty()) return
         credentials.withCredentialCommit {
             val state = db.syncStateDao().get()
+            if (expectedProfile != null) requireSyncProfile(expectedProfile, state)
             val account = state?.accountId ?: "local"
             val deviceId = state?.deviceId
             changes.forEachIndexed { index, change ->
@@ -352,6 +354,7 @@ class SyncApplyEffects(
                 if (secrets.get(key) == null) secrets.put(key, user, pass)
             }
             db.withWriteTransaction {
+                if (expectedProfile != null) requireSyncProfile(expectedProfile, db.syncStateDao().get())
                 changes.forEachIndexed { index, change ->
                     val result = results.getOrNull(index) ?: return@forEachIndexed
                     if (result.status !in setOf("applied", "stale", "merged")) return@forEachIndexed

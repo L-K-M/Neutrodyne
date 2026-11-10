@@ -262,61 +262,6 @@ internal class SalvageOpmlScanner(
             return map
         }
 
-        /**
-         * The five predefined entities plus numeric references, one left-to-right pass so a decoded
-         * `&` never re-decodes. An unterminated or malformed reference stays literal.
-         */
-        private fun unescapeEntities(value: String): String {
-            if ('&' !in value) return value
-            val out = StringBuilder(value.length)
-            var i = 0
-            while (i < value.length) {
-                val c = value[i]
-                if (c != '&') {
-                    out.append(c)
-                    i++
-                    continue
-                }
-                // The `;` search stays inside the entity window: an unbounded indexOf would
-                // rescan the tail per `&`, quadratic CPU on a `&`-dense value inside the cap.
-                val end = minOf(i + 1 + MAX_ENTITY_CHARS, value.length)
-                var semi = i + 1
-                while (semi < end && value[semi] != ';') semi++
-                if (semi == end) {
-                    out.append(c)
-                    i++
-                    continue
-                }
-                val decoded = decodeEntity(value.substring(i + 1, semi))
-                if (decoded == null) {
-                    out.append(value, i, semi + 1)
-                } else {
-                    out.append(decoded)
-                }
-                i = semi + 1
-            }
-            return out.toString()
-        }
-
-        private fun decodeEntity(token: String): String? {
-            when (token) {
-                "amp" -> return "&"
-                "lt" -> return "<"
-                "gt" -> return ">"
-                "quot" -> return "\""
-                "apos" -> return "'"
-            }
-            if (!token.startsWith('#')) return null
-            val hex = token.length > 1 && (token[1] == 'x' || token[1] == 'X')
-            val digits = token.substring(if (hex) 2 else 1)
-            if (digits.isEmpty()) return null
-            if (digits.any { it !in '0'..'9' && (!hex || (it !in 'a'..'f' && it !in 'A'..'F')) }) return null
-
-            val codePoint = digits.toIntOrNull(if (hex) 16 else 10) ?: return null
-            if (!isXmlChar(codePoint)) return null
-            return String(Character.toChars(codePoint))
-        }
-
         private fun fill(reader: Reader): Boolean {
             if (eof) return false
             val n = reader.read(chunk)
@@ -367,10 +312,6 @@ internal class SalvageOpmlScanner(
 
         private fun isNameStart(c: Char): Boolean = c.isLetter() || c == '_' || c == ':' || c.code >= 0x80
 
-        /** A strict parser rejects a reference to anything else, so salvage keeps it literal. */
-        private fun isXmlChar(codePoint: Int): Boolean =
-            codePoint in XML_CHAR_CONTROLS || XML_CHAR_RANGES.any { codePoint in it }
-
         private fun isNameChar(c: Char): Boolean =
             c.isLetterOrDigit() || c == '_' || c == '-' || c == ':' || c == '.' || c.code >= 0x80
     }
@@ -386,13 +327,6 @@ internal class SalvageOpmlScanner(
 
         /** Dead text allowed to linger ahead of the cursor before it is dropped. */
         const val COMPACT_AT = 64 * 1024
-
-        /** Longest spelled-out entity name the unescape scan looks back at (`&…;` is short). */
-        const val MAX_ENTITY_CHARS = 16
-
-        /** XML 1.0 `Char` production (§2.2): tab, LF and CR, then three ranges. */
-        val XML_CHAR_CONTROLS = setOf('\t'.code, '\n'.code, '\r'.code)
-        val XML_CHAR_RANGES = listOf(0x20..0xD7FF, 0xE000..0xFFFD, 0x10000..0x10FFFF)
 
         val TAG_ATTR = Regex("""(\w[\w:.-]*)\s*=\s*("([^"]*)"|'([^']*)')""")
     }

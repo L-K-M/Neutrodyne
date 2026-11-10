@@ -41,6 +41,14 @@ class BareHostOfTest {
     }
 
     @Test
+    fun schemeCaseDoesNotDefeatTheHost() {
+        assertEquals("sync.example", bareHostOf("HTTP://sync.example"))
+        assertEquals("sync.example", bareHostOf("HtTpS://sync.example"))
+        assertEquals("192.168.1.5", bareHostOf("HTTP://192.168.1.5:8080/nd"))
+        assertEquals("fe80::1", bareHostOf("HTTPS://[fe80::1]:8443"))
+    }
+
+    @Test
     fun malformedAuthoritiesAreRejected() {
         assertNull(bareHostOf("https://"))
         assertNull(bareHostOf("https://:8080"))

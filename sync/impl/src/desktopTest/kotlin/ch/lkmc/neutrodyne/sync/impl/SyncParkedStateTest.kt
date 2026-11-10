@@ -940,6 +940,7 @@ class SyncParkedStateTest {
             db = db,
             client = client,
             applier = applier(db, settingsPort),
+            playback = NoPlaybackSync,
             clock = TestClock(now),
             secrets = FakeSecretStore(),
             sharePasswords = { false },
@@ -958,6 +959,8 @@ class SyncParkedStateTest {
                     override suspend fun setServerUrl(url: String?) = Unit
 
                     override suspend fun setUsername(username: String?) = Unit
+
+                    override suspend fun clearServerIdentity() = Outcome.Success(Unit)
 
                     override suspend fun setShareFeedPasswords(enabled: Boolean) = Outcome.Success(Unit)
 

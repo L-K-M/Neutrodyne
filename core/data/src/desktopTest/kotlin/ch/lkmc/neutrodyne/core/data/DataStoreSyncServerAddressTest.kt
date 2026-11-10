@@ -43,4 +43,41 @@ class DataStoreSyncServerAddressTest {
                 assertEquals(before, address.syncPlaybackSettings())
             }
         }
+
+    /** "Forget server" clears the address pair in one batched write, never two resets. */
+    @Test
+    fun clearServerIdentityClearsBothInOneWrite() =
+        runTest {
+            val repository = FakeSettingsRepository()
+            repository.set(SyncSettingKeys.SERVER_URL, "https://sync.example")
+            repository.set(SyncSettingKeys.USERNAME, "alice")
+            val address = DataStoreSyncServerAddress(repository)
+
+            val result: Any? = address.clearServerIdentity()
+
+            assertEquals<Any?>(Outcome.Success(Unit), result)
+            assertEquals(null, address.serverUrl())
+            assertEquals(null, address.username())
+            assertEquals(
+                listOf("resetAll(sync.server_url,sync.username)"),
+                repository.calls.filter { it.startsWith("resetAll") },
+            )
+        }
+
+    /** A failed batched write keeps both stored values — no partial forget. */
+    @Test
+    fun clearServerIdentityFailureKeepsBothValues() =
+        runTest {
+            val repository = FakeSettingsRepository()
+            repository.set(SyncSettingKeys.SERVER_URL, "https://sync.example")
+            repository.set(SyncSettingKeys.USERNAME, "alice")
+            val address = DataStoreSyncServerAddress(repository)
+            repository.failNextSet = SettingsError.WriteFailed
+
+            val result: Any? = address.clearServerIdentity()
+
+            assertEquals<Any?>(Outcome.Failure(SettingsError.WriteFailed), result)
+            assertEquals("https://sync.example", address.serverUrl())
+            assertEquals("alice", address.username())
+        }
 }

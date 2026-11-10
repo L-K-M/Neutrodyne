@@ -11,10 +11,13 @@ import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.sync.api.SyncStreamState
 import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
 import ch.lkmc.neutrodyne.sync.protocol.dto.ProtocolRange
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -203,6 +206,132 @@ class SyncEventsClientTest {
         }
 
     @Test
+    fun aStaleOpen401CannotRevokeAReplacementAccount() =
+        runTest {
+            val deps = deps()
+            deps.beforeOpen = {
+                deps.beforeOpen = null
+                // The response can arrive between committing B and notifying the scheduler.
+                deps.link(accountId = "replacement", token = "replacement-token", notify = false)
+                throw SyncTransportException(401, null, "old token revoked")
+            }
+            deps.start()
+            deps.link()
+            runCurrent()
+
+            val state = deps.db.syncStateDao().get()!!
+            assertEquals("replacement", state.accountId)
+            assertTrue(state.enabled, "The old stream must not disable the replacement link")
+            assertFalse(state.lastError == SYNC_ERROR_REVOKED)
+            assertFalse(deps.revoked, "Old responses must not cancel the replacement's scheduled work")
+        }
+
+    @Test
+    fun aStaleRead401CannotRevokeAReplacementAccount() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val oldSession = deps.transport.sessions.single()
+
+            deps.link(accountId = "replacement", token = "replacement-token", notify = false)
+            oldSession.fail(SyncTransportException(401, null, "old token revoked"))
+            runCurrent()
+
+            val state = deps.db.syncStateDao().get()!!
+            assertTrue(state.enabled)
+            assertEquals("replacement", state.accountId)
+            assertFalse(deps.revoked)
+            assertEquals(
+                "replacement-token",
+                deps.transport.opens
+                    .last()
+                    .token,
+            )
+        }
+
+    @Test
+    fun aCurrentRead401RevokesItsOwnLinkAndClosesTheSession() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val session = deps.transport.sessions.single()
+
+            session.fail(SyncTransportException(401, null, "token revoked"))
+            runCurrent()
+
+            assertFalse(
+                deps.db
+                    .syncStateDao()
+                    .get()!!
+                    .enabled,
+            )
+            assertEquals(
+                SYNC_ERROR_REVOKED,
+                deps.db
+                    .syncStateDao()
+                    .get()!!
+                    .lastError,
+            )
+            assertTrue(deps.revoked)
+            val closed = backgroundScope.async { session.awaitClosed() }
+            runCurrent()
+            assertTrue(closed.isCompleted)
+            assertFalse(deps.client.connected.value)
+        }
+
+    @Test
+    fun revocationCleanupFinishesWhenItsGateClosesTheCurrentStream() =
+        runTest {
+            val deps = deps()
+            deps.beforeRevokedComplete = {
+                deps.client.reevaluate()
+                kotlinx.coroutines.delay(10)
+            }
+            deps.start()
+            deps.link()
+            runCurrent()
+
+            deps.transport.sessions
+                .single()
+                .fail(SyncTransportException(401, null, "revoked"))
+            runCurrent()
+            advanceTimeBy(10)
+            runCurrent()
+
+            assertTrue(deps.revoked, "Closing the stream gate must not interrupt its owned cleanup")
+            assertFalse(deps.client.connected.value)
+        }
+
+    @Test
+    fun replacingALiveAccountClosesItsStreamAndUsesTheNewToken() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val oldSession = deps.transport.sessions.single()
+
+            deps.link(accountId = "replacement", token = "replacement-token")
+            runCurrent()
+
+            assertEquals(2, deps.transport.opens.size, "A link identity change must replace the open stream")
+            assertEquals(
+                "replacement-token",
+                deps.transport.opens
+                    .last()
+                    .token,
+            )
+            val closed = backgroundScope.async { oldSession.awaitClosed() }
+            runCurrent()
+            assertTrue(closed.isCompleted, "The previous account's stream must be closed")
+            assertTrue(deps.client.connected.value)
+        }
+
+    @Test
     fun `the allowed gate closes the stream and reopening reconnects`() =
         runTest {
             val deps = deps()
@@ -301,6 +430,67 @@ class SyncEventsClientTest {
 
     // --- plumbing --------------------------------------------------------------------------------
 
+    @Test
+    fun discoveryAndStreamStateReachTheLocalDiagnosticsWithoutAnotherRequest() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val profile =
+                deps.db
+                    .syncStateDao()
+                    .get()
+                    .diagnosticProfile("https://sync.example")
+            val snapshot = deps.runtime.snapshot(profile)
+            assertEquals("1.0", snapshot.serverVersion)
+            assertEquals(SyncStreamState.CONNECTED, snapshot.streamState)
+            assertEquals(0, snapshot.reconnectCount)
+            assertEquals(1, deps.transport.opens.size)
+            assertEquals(1, deps.discoveries)
+        }
+
+    @Test
+    fun reconnectsAndGateClosureHaveDistinctDiagnostics() =
+        runTest {
+            val deps = deps()
+            deps.start()
+            deps.link()
+            runCurrent()
+            val profile =
+                deps.db
+                    .syncStateDao()
+                    .get()
+                    .diagnosticProfile("https://sync.example")
+            deps.transport.sessions
+                .single()
+                .end()
+            runCurrent()
+            assertEquals(SyncStreamState.WAITING, deps.runtime.snapshot(profile).streamState)
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertEquals(1, deps.runtime.snapshot(profile).reconnectCount)
+            assertEquals(SyncStreamState.CONNECTED, deps.runtime.snapshot(profile).streamState)
+            deps.allowed.value = false
+            runCurrent()
+            assertEquals(SyncStreamState.STOPPED, deps.runtime.snapshot(profile).streamState)
+        }
+
+    @Test
+    fun cancellationFromTheInitialPokeClosesTheOpenedSession() =
+        runTest {
+            val deps = deps()
+            deps.pokeFailure = CancellationException("cancel initial poke")
+            deps.start()
+            deps.link()
+            runCurrent()
+            val session = deps.transport.sessions.single()
+            val closed = backgroundScope.async { session.awaitClosed() }
+            runCurrent()
+            assertTrue(closed.isCompleted, "the session must close even when the initial callback cancels")
+            assertFalse(deps.client.connected.value)
+        }
+
     private class Deps(
         scope: TestScope,
         val db: NeutrodyneDatabase,
@@ -314,12 +504,28 @@ class SyncEventsClientTest {
         val allowed = MutableStateFlow(false)
         val pokes = mutableListOf<Unit>()
         var revoked = false
+        val runtime = SyncRuntimeDiagnostics()
+        var discoveries = 0
+        var pokeFailure: CancellationException? = null
+        var beforeOpen: (suspend () -> Unit)? = null
+        var beforeRevokedComplete: (suspend () -> Unit)? = null
 
         val client =
             SyncEventsClient(
                 db = db,
-                transport = transport.transport(),
+                transport =
+                    object : SyncEventTransport by transport.transport() {
+                        override suspend fun open(
+                            baseUrl: String,
+                            token: String,
+                            heartbeatSeconds: Int,
+                        ): SyncEventSession {
+                            beforeOpen?.invoke()
+                            return transport.transport().open(baseUrl, token, heartbeatSeconds)
+                        }
+                    },
                 discover = { _ ->
+                    discoveries++
                     DiscoveryDocument(
                         name = "test",
                         serverVersion = "1.0",
@@ -334,9 +540,16 @@ class SyncEventsClientTest {
                 tokens = tokens,
                 network = network,
                 scope = scope.backgroundScope,
-                onRemoteChanged = { pokes += Unit },
-                onRevoked = { revoked = true },
+                onRemoteChanged = {
+                    pokeFailure?.let { throw it }
+                    pokes += Unit
+                },
+                onRevoked = {
+                    beforeRevokedComplete?.invoke()
+                    revoked = true
+                },
                 random = Random(1),
+                diagnosticsRuntime = runtime,
             )
 
         fun start(heartbeatSeconds: Int = 60) {
@@ -345,21 +558,26 @@ class SyncEventsClientTest {
         }
 
         /** Writes the live-link row + token the supervisor's gate reads, then wakes it. */
-        suspend fun link() {
+        suspend fun link(
+            accountId: String = "acc",
+            token: String = "tok",
+            notify: Boolean = true,
+        ) {
             db.withWriteTransaction {
                 db.syncStateDao().upsert(
                     SyncStateEntity(
                         enabled = true,
                         serverUrl = "https://sync.example",
-                        accountId = "acc",
+                        accountId = accountId,
                         deviceId = "dev-1",
                         nodeId = "0000000000000001",
                         linkedAt = 1_791_072_000_000L,
                     ),
                 )
             }
-            tokens.save(hostOf("https://sync.example"), "tok")
-            client.reevaluate()
+            tokens.save(hostOf("https://sync.example"), token)
+            runtime.activate(db.syncStateDao().get().diagnosticProfile("https://sync.example"))
+            if (notify) client.reevaluate()
         }
     }
 

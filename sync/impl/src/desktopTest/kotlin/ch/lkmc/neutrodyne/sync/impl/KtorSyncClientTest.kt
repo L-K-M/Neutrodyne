@@ -245,6 +245,28 @@ class KtorSyncClientTest {
             assertFailsWith<Exception> { fixture.client.login(fixture.baseUrl, "a", "s", device) }
         }
 
+    @Test
+    fun discoveryCanonicalisesAnUppercaseSchemeAndKeepsThePathCase() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(
+                json(
+                    """{"name":"Home","serverVersion":"1.0.0","protocol":{"min":1,"max":1},""" +
+                        """"features":["link"],"maxBatch":1000,"maxSkewMs":300000,""" +
+                        """"serverTime":"2026-11-04T10:00:00Z"}""",
+                ),
+            )
+
+            val result =
+                ServerDiscovery(fixture.client)
+                    .discover("HTTP://" + fixture.baseUrl.removePrefix("http://") + "Prefix")
+
+            assertIs<DiscoveryResult.Success>(result)
+            assertEquals(fixture.baseUrl.trimEnd('/') + "/Prefix", result.server.serverUrl)
+            val request = fixture.take()
+            assertEquals("/Prefix/.well-known/neutrodyne-sync", request.url.encodedPath)
+        }
+
     // --- fixture -----------------------------------------------------------------------------
 
     private class Fixture(

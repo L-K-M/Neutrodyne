@@ -145,6 +145,38 @@ class SettingStoresTest {
         }
 
     @Test
+    fun resetAllRemovesEveryEntryAndItsReceiptInOneEdit() =
+        runTest(dispatcher) {
+            val (portable, device) = newStores()
+            portable.set(portableText, "https://sync.example.org")
+            portable.setWithReceipt(portableLong, 30_000L, "r1")
+            portable.set(portableBool, true)
+            device.set(deviceText, "ungrouped")
+
+            portable.resetAll(listOf(SettingReset(portableText, null), SettingReset(portableLong, "r2")))
+
+            assertEquals("", portable.get(portableText))
+            assertEquals(10_000L, portable.get(portableLong))
+            assertEquals(null, portable.readWithReceipt(portableText).receipt)
+            assertEquals("r2", portable.readWithReceipt(portableLong).receipt)
+            assertEquals(true, portable.get(portableBool))
+            assertEquals("ungrouped", device.get(deviceText))
+        }
+
+    @Test
+    fun deviceResetAllRemovesEveryListedKey() =
+        runTest(dispatcher) {
+            val (_, device) = newStores()
+            device.set(deviceText, "ungrouped")
+            device.set(deviceInt, 42)
+
+            device.resetAll(listOf(deviceText, deviceInt))
+
+            assertEquals("all", device.get(deviceText))
+            assertEquals(0, device.get(deviceInt))
+        }
+
+    @Test
     fun observeEmitsTheDefaultThenEveryChange() =
         runTest(dispatcher) {
             val (portable, _) = newStores()
