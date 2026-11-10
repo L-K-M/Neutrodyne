@@ -23,7 +23,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -42,12 +44,15 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdOutlinedButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
+import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_continue
+import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.backup_err_corrupt
 import ch.lkmc.neutrodyne.core.ui.resources.backup_err_expired
 import ch.lkmc.neutrodyne.core.ui.resources.backup_err_io
@@ -81,6 +86,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_disclosure_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_disclosure_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_get_code
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_identity_read_failed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_insecure_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_insecure_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_invite_label
@@ -135,14 +141,19 @@ internal fun SyncSetupScreen(
     controller: SyncController,
     serverUrl: String,
     backup: BackupRepository,
+    addressPort: SyncServerAddress? = null,
 ) {
     val link = controller.link ?: return
     val state by link.state.collectAsStateWithLifecycle()
     var address by remember { mutableStateOf(serverUrl) }
     var method by remember { mutableStateOf(LinkMethod.CODE) }
+    var methodTouched by remember { mutableStateOf(false) }
     var inviteCode by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
+    var usernameTouched by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
+    var identityReadFailed by remember { mutableStateOf(false) }
+    var identityReadAttempt by remember { mutableIntStateOf(0) }
     var choice by remember { mutableStateOf(FirstLinkChoice.MERGE) }
     val awaiting = state as? LinkState.AwaitingInput
     val host = hostOf(awaiting?.server?.serverUrl ?: address)
@@ -156,6 +167,31 @@ internal fun SyncSetupScreen(
     var backupJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
     val actions = LocalPlatformActions.current
+
+    // The stored username is a convenience, never a credential: read it beside the configured
+    // address and preselect PASSWORD only for the same server URL, path included. A method or
+    // username the user already chose wins over a late answer, and leaving the screen cancels
+    // the read. A failed read keeps the manual form; Retry runs it again.
+    LaunchedEffect(serverUrl, addressPort, identityReadAttempt) {
+        val port = addressPort ?: return@LaunchedEffect
+        try {
+            val storedUrl = port.serverUrl()?.trim().orEmpty()
+            val storedUsername = port.username()?.trim()
+            if (address.trim() == serverUrl.trim() &&
+                storedUrl.isNotEmpty() &&
+                storedUrl == serverUrl.trim() &&
+                !storedUsername.isNullOrBlank()
+            ) {
+                if (!methodTouched) method = LinkMethod.PASSWORD
+                if (!usernameTouched) username = storedUsername
+            }
+            identityReadFailed = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            identityReadFailed = true
+        }
+    }
 
     fun dismissConfirmation() {
         backupJob?.cancel()
@@ -285,17 +321,29 @@ internal fun SyncSetupScreen(
             }
 
             is LinkState.AwaitingInput -> {
+                if (identityReadFailed) {
+                    IdentityReadFailure(onRetry = { identityReadAttempt++ })
+                }
                 AwaitingInputStep(
                     method = method,
-                    onMethod = { method = it },
+                    onMethod = {
+                        methodTouched = true
+                        method = it
+                    },
                     inviteCode = inviteCode,
                     onInviteCode = { inviteCode = it },
                     username = username,
-                    onUsername = { username = it },
+                    onUsername = {
+                        usernameTouched = true
+                        username = it
+                    },
                     password = password,
                     onPassword = { password = it },
                     disclosure = (state as LinkState.AwaitingInput).disclosure,
-                    onGetCode = { controller.startLink(serverUrl = address, method = LinkMethod.CODE) },
+                    onGetCode = {
+                        methodTouched = true
+                        controller.startLink(serverUrl = address, method = LinkMethod.CODE)
+                    },
                     onSubmitInvite = { controller.submitInvite(inviteCode) },
                     onSubmitPassword = {
                         controller.submitPassword(username, password.toCharArray())
@@ -501,6 +549,24 @@ private fun AwaitingInputStep(
                 )
             }
         }
+    }
+}
+
+/** The stored-username read failed; the manual methods stay usable and Retry runs it again. */
+@Composable
+private fun IdentityReadFailure(onRetry: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            stringResource(Res.string.sync_setup_identity_read_failed),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f),
+        )
+        NdTextButton(label = stringResource(UiRes.string.action_retry), onClick = onRetry)
     }
 }
 
