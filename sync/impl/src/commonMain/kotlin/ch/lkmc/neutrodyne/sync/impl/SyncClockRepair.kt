@@ -3,10 +3,14 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncClockKey
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import okio.IOException
 
 /** Caller owns the profile-checked Room writer; accepted wire clocks are immutable. */
@@ -32,11 +36,45 @@ internal suspend fun repairSyncClock(
         check(current < max) { "Corrected sync clock has exhausted its admission window" }
         val next = maxOf(current + 1, adjustedNowMs shl Hlc.COUNTER_BITS)
         db.syncStateDao().raiseHlc(next)
+        discardUnacceptedRawClocks(db, old, node, min, max)
         restampSettingReceipts(db, old, next, node)
         db.syncOutboxDao().restampLocalClock(old, next, node)
         old = db.syncOutboxDao().nextLocalClockOutside(min, max, node, old)
     }
     return hadInvalidIntents || db.syncStateDao().get()?.hlc != state.hlc
+}
+
+/** Remove poisoned optimistic fields, leaving projections and queued local literals intact. */
+private suspend fun discardUnacceptedRawClocks(
+    db: NeutrodyneDatabase,
+    clock: Long,
+    node: String,
+    min: Long,
+    max: Long,
+) {
+    val store = SyncClockStore(db)
+    var after =
+        ch.lkmc.neutrodyne.core.database
+            .SyncClockKey("", "")
+    while (true) {
+        val keys = db.syncOutboxDao().localRecordKeysAtClock(clock, node, after.coll, after.rid, CLOCK_SCAN_PAGE)
+        if (keys.isEmpty()) return
+        for (key in keys) {
+            val raw = store.get(key.coll, key.rid) ?: continue
+            if (raw.accepted == null) continue // Legacy provenance cannot prove a field unaccepted.
+            val accepted = raw.confirmed()
+            val fields = raw.state.fields.toMutableMap()
+            for ((name, field) in raw.state.fields) {
+                val stamp = field.c ?: continue
+                if (stamp.nodeId.value != node || stamp.packed in min..max) continue
+                if (accepted.state.fields[name] == field) continue
+                val confirmed = accepted.state.fields[name]
+                if (confirmed == null) fields.remove(name) else fields[name] = confirmed
+            }
+            store.put(key.coll, key.rid, raw.copy(state = raw.state.copy(fields = fields)).withConfirmed(accepted))
+        }
+        after = keys.last()
+    }
 }
 
 /** Remap only a matching unaccepted intent; accepted fields and remote effects stay intact. */
@@ -77,13 +115,29 @@ private suspend fun greatestAcceptedClock(db: NeutrodyneDatabase): Long {
     var greatest = 0L
     while (true) {
         val page = db.syncClockDao().keysAfter(coll, rid, CLOCK_SCAN_PAGE)
-        if (page.isEmpty()) return greatest
+        if (page.isEmpty()) break
         for (key in page) {
             val raw = store.get(key.coll, key.rid) ?: throw IOException("Sync clock metadata is unreadable")
-            greatest = maxOf(greatest, raw.state.maxClock?.packed ?: 0)
+            greatest = maxOf(greatest, raw.confirmed().maxClockPacked)
         }
         coll = page.last().coll
         rid = page.last().rid
+    }
+    // Parked wire records are accepted too, even before their projection can be materialized.
+    var after = 0L
+    while (true) {
+        val ids = db.syncParkedDao().idsAfter(after, CLOCK_SCAN_PAGE)
+        if (ids.isEmpty()) return greatest
+        for (id in ids) {
+            val record = db.syncParkedDao().byId(id)?.record ?: continue
+            if (record.trim() == "{}") continue // The first-link unmatched-identity placeholder.
+            val state =
+                runCatching {
+                    ProtocolValidation.record(SyncJson.decodeFromString<RecordDto>(record))
+                }.getOrElse { throw IOException("Parked sync clock metadata is unreadable") }
+            greatest = maxOf(greatest, state.maxClock?.packed ?: 0L)
+        }
+        after = ids.last()
     }
 }
 

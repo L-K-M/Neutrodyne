@@ -384,6 +384,19 @@ abstract class SyncOutboxDao(
         limit: Int,
     ): List<String>
 
+    @Query(
+        "SELECT DISTINCT coll, rid FROM sync_outbox WHERE captureKind = 'LOCAL' AND nodeId = :nodeId" +
+            " AND hlc = :clock AND (coll > :coll OR (coll = :coll AND rid > :rid))" +
+            " ORDER BY coll, rid LIMIT :limit",
+    )
+    abstract suspend fun localRecordKeysAtClock(
+        clock: Long,
+        nodeId: String,
+        coll: String,
+        rid: String,
+        limit: Int,
+    ): List<SyncClockKey>
+
     /** The caller owns the writer and updates setting receipt metadata in the same transaction. */
     @Query(
         "UPDATE sync_outbox SET hlc = :replacement WHERE captureKind = 'LOCAL'" +
@@ -539,6 +552,12 @@ interface SyncParkedDao {
     /** 10's start-up recovery: every row, ordered for a deterministic retry pass. */
     @Query("SELECT * FROM sync_parked ORDER BY podcastSyncId, identityKey, id")
     suspend fun all(): List<SyncParkedEntity>
+
+    @Query("SELECT id FROM sync_parked WHERE id > :after ORDER BY id LIMIT :limit")
+    suspend fun idsAfter(
+        after: Long,
+        limit: Int,
+    ): List<Long>
 
     /** Applied rows leave the table (10). */
     @Query("DELETE FROM sync_parked WHERE id IN (:ids)")

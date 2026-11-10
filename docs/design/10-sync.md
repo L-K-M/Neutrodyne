@@ -1198,8 +1198,14 @@ while the gate has set `LocalNetworkAccess.syncAllowed`.
 **Implementation note (2026-11-10, clock correction).** Each sync and changes
 request samples local time around the RPC. The owning profile stores the offset
 and repairs its unaccepted local clock groups in one writer transaction, seeded
-after the accepted field and match clocks. Accepted state and replay clocks stay
-unchanged. Settings keep their original physical receipt while the pending wire
+after the accepted field and match clocks. Raw state may include pending local
+values, so its envelope retains a separate confirmed snapshot while those values
+differ. Pulls and acknowledgements advance that snapshot without secret bytes;
+its frontier includes stripped credential clocks and parked wire records. Repair
+removes invalid unaccepted raw overlays while preserving their materialized values
+and queued literals. Legacy envelopes without provenance keep their clocks
+conservatively. Accepted state and replay clocks stay unchanged. Settings keep
+their original physical receipt while the pending wire
 clock and matching materialization baseline advance together, including a late
 post-write callback or recovery that started before correction.
 
