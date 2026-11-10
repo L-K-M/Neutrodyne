@@ -178,7 +178,15 @@ class SyncInertTest {
         val runner =
             RestoreRunner(
                 db = db,
-                stager = BackupStager(db, ZipGuard(), merger, FileSystem.SYSTEM, Dispatchers.IO),
+                stager =
+                    BackupStager(
+                        db,
+                        ZipGuard(),
+                        merger,
+                        FileSystem.SYSTEM,
+                        Dispatchers.IO,
+                        ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
+                    ),
                 merger = merger,
                 episodes =
                     RestoreEpisodeMerger(

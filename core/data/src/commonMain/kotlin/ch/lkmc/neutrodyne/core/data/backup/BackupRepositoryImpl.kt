@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.ImportError
+import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BackupPreview
@@ -102,6 +103,7 @@ internal class BackupRepositoryImpl(
     storagePaths: StoragePaths,
     private val fileSystem: FileSystem,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
+    private val linkedSync: LinkedRestoreCoordinator,
 ) : BackupRepository {
     /** Serialises the whole manual write → destination copy → cache cleanup (05 Writing step 5). */
     private val backupMutex = Mutex()
@@ -294,6 +296,19 @@ internal class BackupRepositoryImpl(
         if (busy) return Outcome.Failure(BackupError.RestoreRunning)
 
         currentCoroutineContext().ensureActive()
+        // 05/08: a new ALL_DEVICES Replace is admitted only on an actually linked device. The
+        // eligibility read runs before the durable intent and the claim's `linkedAt` clear, so
+        // a stale `linkedAt` (copied database, revoked token, disabled switch or missing token)
+        // can never capture the account. The stored reach of an already-claimed ALL_DEVICES
+        // restore keeps its authority in the runner.
+        if (request.mode == RestoreMode.REPLACE &&
+            request.linkedReach == LinkedRestoreReach.ALL_DEVICES
+        ) {
+            when (val link = linkedSync.actualLinkedHost()) {
+                is Outcome.Failure -> return Outcome.Failure(link.error)
+                is Outcome.Success -> if (link.value == null) return Outcome.Failure(BackupError.Unsupported)
+            }
+        }
         return withContext(NonCancellable) {
             val claimed: Outcome<ClaimedRestore, BackupError> =
                 try {

@@ -693,6 +693,10 @@ class DesktopAppGraphTest {
             .isLessThan(orders.getValue("DesktopRunnerInitializer"))
         assertThat(orders.getValue("SyncStartupDrainInitializer"))
             .isLessThan(orders.getValue("DesktopSyncSchedulingInitializer"))
+        assertThat(orders.getValue("SyncStartupDrainInitializer"))
+            .isLessThan(orders.getValue("SessionAdoptionInitializer"))
+        assertThat(orders.getValue("SessionAdoptionInitializer"))
+            .isLessThan(orders.getValue("DesktopSyncSchedulingInitializer"))
     }
 
     /**

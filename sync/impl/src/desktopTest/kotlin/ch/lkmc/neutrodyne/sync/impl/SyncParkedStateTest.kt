@@ -876,7 +876,7 @@ class SyncParkedStateTest {
             syncIngestHook = SyncIngestHook.None,
             channelSync = NoGroupChannelSync,
             notices = SyncNoticeBus(),
-            deviceNames = DeviceNames { emptyList() },
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { false },
             coordinator =
                 ch.lkmc.neutrodyne.core.testing
@@ -940,6 +940,7 @@ class SyncParkedStateTest {
             db = db,
             client = client,
             applier = applier(db, settingsPort),
+            playback = NoPlaybackSync,
             clock = TestClock(now),
             secrets = FakeSecretStore(),
             sharePasswords = { false },

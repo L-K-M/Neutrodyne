@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -65,6 +66,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -106,7 +108,8 @@ class BackupStagerTest {
                 },
         )
 
-    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
+    private val linkedSync = FakeLinkedRestoreCoordinator()
+    private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO, linkedSync)
 
     @AfterTest
     fun close() {
@@ -582,11 +585,48 @@ class BackupStagerTest {
                     lastSyncAt = 1_700_000_000_000L,
                 ),
             )
+            linkedSync.linkedHost = "sync.example.com:8443"
             val payloads = payloads()
             val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
 
             assertSuccess(stager.inspect(archive, stage)).use {
                 assertEquals("sync.example.com:8443", it.preview.linkedServerHost)
+            }
+        }
+
+    /** A stale `linkedAt` row alone (copied database, revoked token, disabled switch, no token)
+     *  must not offer the linked Replace question. */
+    @Test
+    fun anUnreadableLinkFailsPreviewInsteadOfClaimingItIsUnlinked() =
+        runTest {
+            linkedSync.linkReadError = BackupError.Io
+            val payloads = payloads()
+            val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
+
+            assertEquals(Outcome.Failure(BackupError.Io), stager.inspect(archive, stage))
+        }
+
+    @Test
+    fun staleLinkedAtRowDoesNotSurfaceServerHost() =
+        runTest {
+            db.syncStateDao().upsert(
+                SyncStateEntity(
+                    enabled = true,
+                    serverUrl = "https://sync.example.com:8443",
+                    accountId = "a",
+                    deviceId = "d",
+                    cursor = "c",
+                    nodeId = "5eed5eed5eed5eed",
+                    protocol = 1,
+                    linkedAt = 1_700_000_000_000L,
+                    lastSyncAt = 1_700_000_000_000L,
+                ),
+            )
+            val payloads = payloads()
+            val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
+
+            assertSuccess(stager.inspect(archive, stage)).use {
+                assertNull(it.preview.linkedServerHost)
             }
         }
 
@@ -680,7 +720,7 @@ class BackupStagerTest {
                 )
             val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
             val before = fileSystem.read(archive) { readByteArray() }
-            val failingStager = BackupStager(db, ZipGuard(), merger, failing, Dispatchers.IO)
+            val failingStager = BackupStager(db, ZipGuard(), merger, failing, Dispatchers.IO, linkedSync)
 
             assertFailsWith<IllegalStateException> { failingStager.inspect(archive, stage) }
 
@@ -700,7 +740,7 @@ class BackupStagerTest {
                         return super.source(file)
                     }
                 }
-            val cancellable = BackupStager(db, ZipGuard(), merger, cancelling, Dispatchers.IO)
+            val cancellable = BackupStager(db, ZipGuard(), merger, cancelling, Dispatchers.IO, linkedSync)
             val payloads = payloads()
             val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
 

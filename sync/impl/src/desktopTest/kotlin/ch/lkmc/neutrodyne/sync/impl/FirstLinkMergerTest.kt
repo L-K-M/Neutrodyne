@@ -1922,6 +1922,7 @@ class FirstLinkMergerTest {
             db = db,
             client = client,
             applier = applier(db),
+            playback = NoPlaybackSync,
             clock = TestClock(now),
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },
@@ -1961,7 +1962,7 @@ class FirstLinkMergerTest {
                     override suspend fun onDeleted(uuid: String) = Unit
                 },
             notices = SyncNoticeBus(),
-            deviceNames = DeviceNames { emptyList() },
+            deviceNames = ClientDeviceNames { emptyList() },
             sharePasswords = { false },
             coordinator = FakeCredentialCommitCoordinator(),
         )

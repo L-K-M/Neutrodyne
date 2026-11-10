@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.player
 
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.ui.playerTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
