@@ -113,7 +113,7 @@ internal class ShellJourney(
         }
     }
 
-    /** Stops graph jobs, closes the database, then removes the throwaway root. */
+    /** Stops jobs and OS surfaces, closes the database, then removes the throwaway root. */
     fun cleanUp() {
         val startedGraph = graph
         if (startedGraph != null) {
@@ -121,6 +121,7 @@ internal class ShellJourney(
                 // Collectors and lanes must finish before Room closes or its files disappear.
                 val opened = startedGraph.databaseOpener.openState.value is DatabaseOpenState.Opened
                 if (opened) startedGraph.jobRunner.stop(RUNNER_GRACE)
+                runCatching { startedGraph.osSurfaces.close() }
                 startedGraph.appScope.coroutineContext[Job]?.cancelAndJoin()
                 if (opened) startedGraph.databaseOpener.requireDatabase().close()
             }
