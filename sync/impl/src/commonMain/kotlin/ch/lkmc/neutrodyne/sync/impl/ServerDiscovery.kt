@@ -22,12 +22,14 @@ sealed interface DiscoveryResult {
  */
 class ServerDiscovery(
     private val client: SyncClient,
+    private val diagnosticsRuntime: SyncRuntimeDiagnostics = SyncRuntimeDiagnostics(),
 ) {
     suspend fun discover(address: String): DiscoveryResult {
         val normalized = normalise(address)
         if (normalized == null) return DiscoveryResult.Failure(SyncProblem.Server(400))
         return try {
             val document = client.discover(normalized)
+            diagnosticsRuntime.rememberVersion(normalized, document.serverVersion)
             when {
                 PROTOCOL_VERSION < document.protocol.min -> {
                     DiscoveryResult.Failure(SyncProblem.AppTooOld)
