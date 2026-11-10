@@ -64,10 +64,11 @@ object DesktopPlaybackBindings {
         routeMonitor: AudioRouteMonitor,
         runtime: Provider<DesktopPlaybackRuntime>,
         remoteGuard: RemotePlayedGuard,
+        starter: Provider<PlayStarter>,
     ): DesktopPlaybackController =
         DesktopPlaybackController(scope, clock, {
             runtime()
-        }, network, remoteGuard, routeMonitor = routeMonitor)
+        }, network, remoteGuard, { starter() }, routeMonitor = routeMonitor)
 
     /** MD2 binds the per-OS monitor; until then there is no route event. */
     @Provides fun routeMonitor(): AudioRouteMonitor = NoOpAudioRouteMonitor

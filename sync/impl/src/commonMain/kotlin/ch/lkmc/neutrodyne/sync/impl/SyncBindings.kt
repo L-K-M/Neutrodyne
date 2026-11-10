@@ -150,6 +150,7 @@ object SyncBindings {
             // A committed session record re-evaluates the durable offer after the page's
             // commit — the adopter never runs inside the apply transaction.
             onSessionApplied = { adopter.evaluate() },
+            refreshPreferences = { flags.refreshFromStore(address) },
         )
 
     /**
@@ -284,6 +285,8 @@ object SyncBindings {
         activity: SyncActivityState,
         secrets: SecretStore,
         coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+        flags: SyncFlags,
+        address: SyncServerAddress,
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -297,5 +300,6 @@ object SyncBindings {
             activity = activity,
             secrets = secrets,
             coordinator = coordinator,
+            beforeMerge = { flags.refreshFromStore(address) },
         )
 }

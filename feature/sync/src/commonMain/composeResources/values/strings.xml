@@ -85,4 +85,47 @@
   <string name="sync_error_clock_skew">This device's date and time are off, so its changes can't be ordered. Set the clock automatically, then sync again.</string>
   <string name="sync_error_quota">Your account on %1$s is full. Ask its administrator.</string>
   <string name="sync_error_not_a_server">%1$s isn\'t a Neutrodyne Sync server. Check the address.</string>
+  <string name="sync_error_device_gone">That device is already gone.</string>
+
+  <!-- Linked settings rows (08 Settings › Sync "Rows while linked"). -->
+  <string name="sync_link_another">Link another device</string>
+  <string name="sync_link_another_hint">Approve a new phone or computer with the code it shows</string>
+  <string name="sync_devices">Devices</string>
+  <plurals name="sync_devices_linked">
+    <item quantity="one">%1$d linked</item>
+    <item quantity="other">%1$d linked</item>
+  </plurals>
+
+  <!-- "Link another device" sheet (08 Link another device). -->
+  <string name="sync_approve_code_label">Code shown on the new device</string>
+  <string name="sync_approve_code_hint">XXXX-XXXX</string>
+  <string name="sync_approve_link_question">Link %1$s?</string>
+  <string name="sync_approve_sign_in_question">Sign %1$s in?</string>
+  <string name="sync_approve_pending_detail">%1$s · Neutrodyne %2$s · requested %3$s</string>
+  <string name="sync_approve_purpose_device">%1$s gets your whole library.</string>
+  <string name="sync_approve_purpose_web">This signs a browser in to your account.</string>
+  <string name="sync_approve_other_network">Requested from a different network. Only approve a device you are holding.</string>
+  <string name="sync_approve_link">Link</string>
+  <string name="sync_approve_dont_link">Don't link</string>
+  <string name="sync_approve_linked">%1$s is linked</string>
+  <string name="sync_approve_declined">Link declined</string>
+  <string name="sync_approve_rate_limited">Too many attempts. Ask the new device for a new code.</string>
+
+  <!-- Devices list (08 Devices). -->
+  <string name="sync_device_this">This device</string>
+  <string name="sync_device_last_seen">Last seen %1$s</string>
+  <string name="sync_device_never_seen">Not seen for 6 months</string>
+  <string name="sync_device_version">Neutrodyne %1$s</string>
+  <string name="sync_device_rename">Rename</string>
+  <string name="sync_device_remove">Remove</string>
+  <string name="sync_device_rename_title">Rename %1$s</string>
+  <string name="sync_device_name_label">Device name</string>
+  <string name="sync_device_name_hint">1–40 characters</string>
+  <string name="sync_device_remove_title">Remove %1$s?</string>
+  <string name="sync_device_remove_body">It stops syncing. Its library stays on it.</string>
+  <string name="sync_device_removed">%1$s removed</string>
+  <string name="sync_device_renamed">Renamed to %1$s</string>
+  <string name="sync_devices_empty">No devices are linked.</string>
+  <string name="sync_devices_manage_link">You can also manage devices on %1$s</string>
+  <string name="sync_device_menu">Device actions</string>
 </resources>

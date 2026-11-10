@@ -17,11 +17,13 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
+import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -45,6 +47,7 @@ internal class PlaybackControllerImpl(
     private val opener: DatabaseOpener,
     private val queues: Provider<QueueRepository>,
     private val sessions: Provider<PlaySessionStore>,
+    private val starter: Provider<PlayStarter>,
     private val clock: Clock,
     @ApplicationScope private val scope: CoroutineScope,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
@@ -67,15 +70,30 @@ internal class PlaybackControllerImpl(
         startEpisodeId: Long?,
     ): PlayResult = start(StartRequest.Feed(source, filters, order, startEpisodeId))
 
-    override suspend fun play(): PlayResult = start(StartRequest.Resume)
+    override suspend fun play(origin: PlayOrigin): PlayResult = start(StartRequest.Resume, origin)
 
-    private suspend fun start(request: StartRequest): PlayResult {
+    private suspend fun start(
+        request: StartRequest,
+        origin: PlayOrigin = PlayOrigin.UI,
+    ): PlayResult {
         val intent = hub.newPlaybackIntent()
         return withContext(Dispatchers.Main.immediate) {
             requireCurrentIntent(intent)
             val controller = connection.awaitController()
             requireCurrentIntent(intent)
             if (controller == null) return@withContext PlayResult.ServiceUnavailable
+            if (origin == PlayOrigin.UI) {
+                // MS3 pull before play (10): the newest synced position lands before PLAY_CONTEXT
+                // reads it. The pull is caller-cancellable; other failures never block the start.
+                try {
+                    starter().beforeUiStart()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // A pull failure is not a playback failure.
+                }
+                requireCurrentIntent(intent)
+            }
             val response = command(CustomCommands.PLAY_CONTEXT, CustomCommands.encode(request))
             requireCurrentIntent(intent)
             val result = response?.let(CustomCommands::playResult) ?: PlayResult.ServiceUnavailable
@@ -95,13 +113,13 @@ internal class PlaybackControllerImpl(
         hub.bridge?.pause() ?: connection.controller?.pause()
     }
 
-    override fun togglePlayPause() {
+    override fun togglePlayPause(origin: PlayOrigin) {
         if (hub.bridge?.isPlaying == true) {
             pause()
             return
         }
         scope.launch(Dispatchers.Main.immediate) {
-            val result = play()
+            val result = play(origin)
             if (result != PlayResult.Started) hub.event(PlaybackEvent.StartRefused(result))
         }
     }
