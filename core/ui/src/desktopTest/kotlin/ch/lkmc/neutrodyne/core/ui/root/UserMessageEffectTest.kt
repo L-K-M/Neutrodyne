@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui.root
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,8 +29,10 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * `ShowUserMessages` against a real `SnackbarHostState` (08's serial acknowledge model): each
@@ -52,6 +55,62 @@ class UserMessageEffectTest {
             runCurrent()
             assertEquals(androidx.compose.material3.SnackbarResult.Dismissed, result.await())
             assertNull(host.currentSnackbarData)
+        }
+
+    @Test fun aQueuedUndoGetsFiveSecondsAfterItBecomesVisible() =
+        runTest {
+            val host = SnackbarHostState()
+            val earlier = async { host.showSnackbar("Earlier message", duration = SnackbarDuration.Indefinite) }
+            runCurrent()
+            val earlierData = assertNotNull(host.currentSnackbarData)
+            val undo =
+                async {
+                    host.showUserMessage(UserMessage(2, UiText.Raw("Played"), UiText.Raw("Undo"), durationMs = 5_000))
+                }
+            runCurrent()
+
+            advanceTimeBy(6_000)
+            runCurrent()
+            assertFalse(undo.isCompleted, "Waiting for the host must not consume the Undo window")
+            assertSame(earlierData, host.currentSnackbarData)
+
+            earlierData.dismiss()
+            runCurrent()
+            assertEquals(SnackbarResult.Dismissed, earlier.await())
+            assertEquals("Undo", host.currentSnackbarData?.visuals?.actionLabel)
+            // Apply the state changes that Compose normally delivers with a frame.
+            androidx.compose.runtime.snapshots.Snapshot
+                .sendApplyNotifications()
+            runCurrent()
+            advanceTimeBy(4_999)
+            assertFalse(undo.isCompleted)
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(SnackbarResult.Dismissed, undo.await())
+            assertNull(host.currentSnackbarData)
+        }
+
+    @Test fun performingUndoCompletesImmediatelyAndLeavesTheNextTimerAlone() =
+        runTest {
+            val host = SnackbarHostState()
+            val message = UserMessage(1, UiText.Raw("Played"), UiText.Raw("Undo"), durationMs = 5_000)
+            val first = async { host.showUserMessage(message) }
+            runCurrent()
+            val displayed = assertNotNull(host.currentSnackbarData)
+            advanceTimeBy(1_000)
+            displayed.performAction()
+            runCurrent()
+            assertTrue(first.isCompleted, "The first timer must stop when Undo is tapped")
+            assertEquals(SnackbarResult.ActionPerformed, first.await())
+
+            val second = async { host.showUserMessage(message.copy(id = 2)) }
+            runCurrent()
+            advanceTimeBy(4_000)
+            runCurrent()
+            assertFalse(second.isCompleted, "An earlier timer must not dismiss the next message")
+            advanceTimeBy(1_000)
+            runCurrent()
+            assertEquals(SnackbarResult.Dismissed, second.await())
         }
 
     @Test
