@@ -796,6 +796,10 @@ pull-before-play timing remains S17's manual checklist.
 
 - Unsubscribe pushes `subscribed = false`; group delete `deleted = true`; removing a member or an Up next item `in = false`. Receivers apply them through the normal local paths ([Pull and apply](#pull-and-apply)), guarded by the mass-change rule.
 - The server keeps tombstoned `podcast`, `group`, `member` and `upnext` records for 365 days and the `episode` records of unsubscribed podcasts for 180 days ([PO-45](../PLAN.md#48-further-product-owner-decisions)), so a re-subscription within that time restores history ([Same podcast on two devices](#same-podcast-on-two-devices)). Purges advance `min_cursor` ([Garbage collection and retention](#garbage-collection-and-retention)).
+- A linked unsubscribe removes local Up next rows and retains their sync clocks
+  on both the sender and the receiver. Approval can occur after the receiver
+  has applied the server's Up next tombstones; keeping those clocks prevents an
+  older add from recreating a removed queue entry after re-subscription.
 - Local storage housekeeping never propagates: episode retention ([D23](../PLAN.md#3-key-decisions)) and stub cleanup run with `applying = 1`, and the triggers ignore every `DELETE` on `episode_state` and `episode_position` ([Capture rules](#capture-rules)).
 - There is no cross-device undo, and none is needed for R2.1's 10-s local undo of a group delete: `OutboxReader` holds back a group's `deleted = true` row and the `member` `in = false` rows of that group until the deletion is 10 s old, on both platforms ([Outbox and coalescing](#outbox-and-coalescing)). An undo inside the window re-inserts the group, whose captures (every field, `in = true`) replace the held rows with newer clocks before anything leaves the device.
 

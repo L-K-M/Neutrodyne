@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.useWriterConnection
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.ImportFormat
@@ -34,6 +35,40 @@ import kotlin.test.assertTrue
  * its own clock stays as tombstone.
  */
 class UnsubscribeCascadeTest {
+    @Test
+    fun linkedUnsubscribeKeepsQueueClocksButMergeLoserDoesNot() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val dao = db.podcastDao()
+                val removed = dao.insertPodcast(podcastEntity(feedKey = "k-1", syncId = SYNC_1))
+                val loser = dao.insertPodcast(podcastEntity(feedKey = "k-2", syncId = SYNC_2))
+                db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+                val clocks = db.syncClockDao()
+                val queueClock = SyncClockEntity(coll = "upnext", rid = "${SYNC_1}g:one", clocks = "{}")
+                val loserClock = queueClock.copy(rid = "${SYNC_2}g:one")
+                val episodeClock = queueClock.copy(coll = "episode")
+                clocks.upsert(queueClock)
+                clocks.upsert(loserClock)
+                clocks.upsert(episodeClock)
+
+                dao.deleteCascade(removed, now = 9)
+                assertNull(dao.byId(removed))
+                assertEquals(queueClock, clocks.get(queueClock.coll, queueClock.rid))
+                assertNull(clocks.get(episodeClock.coll, episodeClock.rid))
+                assertEquals(loserClock, clocks.get(loserClock.coll, loserClock.rid))
+
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying { dao.deleteMergeLoserCascade(loser, now = 10) }
+                }
+                assertNull(dao.byId(loser))
+                assertNull(clocks.get(loserClock.coll, loserClock.rid))
+                assertEquals(queueClock, clocks.get(queueClock.coll, queueClock.rid))
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun deleteCascadeRemovesThePodcastAndEverythingItOwns() =
         runTest {
