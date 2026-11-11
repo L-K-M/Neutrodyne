@@ -1190,6 +1190,37 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual([], self.index_patch())
         self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
 
+    def test_owner_waiver_accepts_verified_snapshot_without_github_lock(self):
+        for immutable in (False, None):
+            with self.subTest(immutable=immutable):
+                fake = FakeGitHub(immutable=immutable)
+                result = ar.SnapshotPublisher(fake, require_immutable=False).publish(
+                    self.files, 4242, 3, SHA
+                )
+                self.assertTrue(result.published)
+                self.assertEqual("engine-approvals-4242-3", fake.index_body_tag())
+                self.assertEqual([], fake.violations)
+
+    def test_owner_waiver_still_rejects_changed_snapshot_bytes(self):
+        self.fake.immutable = False
+        self.fake.corrupt_assets.add("ytdlp-approved.json")
+        with self.assertRaises(ar.SnapshotStateError):
+            ar.SnapshotPublisher(self.fake, require_immutable=False).publish(
+                self.files, 4242, 3, SHA
+            )
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_owner_waiver_still_rejects_wrong_tag_commit(self):
+        self.fake.immutable = False
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "0" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            ar.SnapshotPublisher(self.fake, require_immutable=False).publish(
+                self.files, 4242, 3, SHA
+            )
+        self.assertEqual([], self.uploads())
+        self.assertEqual([], self.index_patch())
+
     def _draft_discovery_requests(self):
         return [
             request
@@ -2742,6 +2773,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertIn("published", self.stdout.getvalue())
         self.assertIn("engine-approvals-4242-3", self.stdout.getvalue())
+        self.assertEqual([], self.fake.violations)
+
+    def test_cli_owner_waiver_is_explicit_and_logged(self):
+        self.fake.immutable = False
+        self.env["GITHUB_TOKEN"] = "token"
+        code = self.run_cli(
+            "publish", "--run-id", "4242", "--run-attempt", "3",
+            "--commit-sha", SHA, "--snapshot-dir", str(self.directory),
+            "--allow-mutable",
+        )
+        self.assertEqual(0, code, self.stderr.getvalue())
+        self.assertIn("WAIVED GitHub release locking", self.stderr.getvalue())
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
         self.assertEqual([], self.fake.violations)
 
     def test_publish_via_main_with_deep_release_history(self):

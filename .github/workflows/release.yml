@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Unlicense
 #
-# release.yml — tag → published immutable GitHub release (09 release.yml).
+# release.yml — tag → published GitHub release (09 release.yml).
 #
 # The job graph of D79: verify-tag decides the version, the asset set and the
 # macOS kind; android, desktop (one job per target), sources, server-jar and
 # server-sources build the assets; server-image builds and pushes the image by
 # digest and server-image-manifest assembles and attests the multi-arch index;
 # publish verifies every asset, attests them, creates the draft, uploads and
-# publishes the immutable normal release; image-tags moves the GHCR tags only
+# publishes the normal release; image-tags moves the GHCR tags only
 # after the release is published.
 #
 # Build jobs read no secret and need no approval, so they run while the
@@ -173,7 +173,7 @@ jobs:
           # shellcheck disable=SC2086 # the package list is one word per package
           sudo apt-get install -y -qq $pkgs
       # The build, the packaged smoke starts and the checks run in a two-attempt
-      # loop — an immutable release cannot gain assets later, so a runner flake
+      # loop — a published release cannot gain assets later, so a runner flake
       # gets one retry while a deterministic failure fails twice (09 release.yml
       # step 3, risk P15).
       - name: Build, smoke and check the target's packages
@@ -526,17 +526,19 @@ jobs:
           gh release create "$TAG" --draft --verify-tag --title "Neutrodyne ${TAG#v}" --notes-file body.md
           gh release upload "$TAG" dist/*
           gh release edit "$TAG" --draft=false --latest="$make_latest"
-      - name: Verify the immutable release
+      - name: Verify the published release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SOURCE_DIGEST: ${{ github.sha }}
         run: |
-          gh release verify "$TAG"
-          for f in dist/*; do
-            # verify-asset hashes the local file — it needs the real path under dist/,
-            # not the basename relative to the repository root
-            gh release verify-asset "$TAG" "$f"
-          done
+          scripts/ci/verify-published-release.py \
+            --tag "$TAG" \
+            --dist dist \
+            --repo "$REPO" \
+            --source-digest "$SOURCE_DIGEST" \
+            --signer-workflow "$REPO/.github/workflows/release.yml"
       - name: The latest release serves this tag's update manifest
         if: steps.publish.outputs.make_latest == 'true'
         env:

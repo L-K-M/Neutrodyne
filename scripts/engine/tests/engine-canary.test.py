@@ -667,7 +667,7 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn('--max-filesize 4096', detect)
 
     def test_deploy_states_the_verified_index_precondition(self):
-        step = self.step_block('deploy', 'Publish the immutable snapshot and advance the index')
+        step = self.step_block('deploy', 'Publish the signed snapshot and advance the index')
         self.assertIn('PRESENT: ${{ needs.detect.outputs.present }}', step)
         self.assertIn('--expected-index-tag', step)
         self.assertIn('--expect-no-index', step)

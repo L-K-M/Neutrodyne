@@ -1494,6 +1494,13 @@ Interactions: downloads wait (`BACKOFF` until the gate reopens); auto-download p
 
 ## Engine updates
 
+**Owner amendment, 2026-11-11:** GitHub release locking is waived. The
+protected publisher uses `--allow-mutable`; unique snapshot tags, its policy
+of never editing published snapshot assets, exact byte/tag checks and the
+signed-manifest trust chain remain required. Earlier references to immutable
+snapshots describe this write-once publication policy rather than a required
+GitHub repository setting.
+
 **Implementation boundary (2026-11-08).** The protocol below describes the
 M9b updater and canary slices; their Android production wiring landed the
 same day (M9b Android host adapter): `AndroidEngineStorePaths`,
