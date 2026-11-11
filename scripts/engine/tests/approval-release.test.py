@@ -9,6 +9,7 @@ fake index and snapshot documents.  The production HTTPS adapter is exercised
 through an injected opener, never a live endpoint.
 """
 
+import contextlib
 import email.message
 import hashlib
 import io
@@ -1424,6 +1425,54 @@ class PublisherTests(unittest.TestCase):
     def test_matching_expected_index_tag_advances(self):
         self.publish(expected_index_tag="engine-approvals-1-1")
         self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_legacy_publish_without_precondition_advances_existing_index(self):
+        # Preserved legacy behavior: a caller that states neither precondition
+        # still advances whatever index exists.  The canary workflow never
+        # uses this path; it always states the verified index state.
+        result = self.publish()
+        self.assertFalse(result.index_created)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_expect_no_index_creates_a_missing_index(self):
+        fake = FakeGitHub()
+        result = ar.SnapshotPublisher(fake).publish(
+            self.files, 4242, 3, SHA, expect_no_index=True
+        )
+        self.assertTrue(result.index_created)
+        self.assertEqual("engine-approvals-4242-3", fake.index_body_tag())
+
+    def test_expect_no_index_refuses_an_existing_index_without_patch(self):
+        with self.assertRaises(ar.IndexChangedError):
+            self.publish(expect_no_index=True)
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+        # The preflight refused before any snapshot was created: no orphan.
+        self.assertIsNone(self.fake.find_by_tag("engine-approvals-4242-3"))
+        self.assertEqual([], self.uploads())
+
+    def test_expect_no_index_refuses_a_moved_index_without_patch(self):
+        # A bootstrap detect output reused after the index appeared must fail
+        # closed, not repoint the live index at the stale snapshot.
+        self.fake.install_index("engine-approvals-7-7")
+        with self.assertRaises(ar.IndexChangedError):
+            self.publish(expect_no_index=True)
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-7-7", self.fake.index_body_tag())
+
+    def test_stale_expected_index_tag_fails_before_snapshot_creation(self):
+        with self.assertRaises(ar.IndexChangedError):
+            self.publish(expected_index_tag="engine-approvals-9-9")
+        self.assertIsNone(self.fake.find_by_tag("engine-approvals-4242-3"))
+        self.assertEqual([], self.uploads())
+        self.assertEqual([], self.index_patch())
+
+    def test_expected_and_expect_no_index_are_mutually_exclusive(self):
+        with self.assertRaises(ar.ValidationError):
+            self.publish(
+                expected_index_tag="engine-approvals-1-1", expect_no_index=True
+            )
+        self.assertEqual([], self.fake.requests)
 
     def test_no_success_until_the_new_pointer_is_visible(self):
         old_body = self.fake.releases[self.fake.index_id]["body"]
@@ -2876,6 +2925,66 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(1, code)
         self.assertIn("timeout", self.stderr.getvalue())
+
+    def test_publish_with_expect_no_index_creates_a_missing_index(self):
+        self.fake = FakeGitHub()
+        self.env["GITHUB_TOKEN"] = "token"
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+            "--expect-no-index",
+        )
+        self.assertEqual(0, code)
+        self.assertIn("published", self.stdout.getvalue())
+        self.assertIsNotNone(self.fake.index_id)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_publish_with_expect_no_index_refuses_an_existing_index(self):
+        self.env["GITHUB_TOKEN"] = "token"
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+            "--expect-no-index",
+        )
+        self.assertEqual(1, code)
+        self.assertIn("index exists", self.stderr.getvalue())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_expected_index_tag_and_expect_no_index_are_mutually_exclusive(self):
+        self.env["GITHUB_TOKEN"] = "token"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as context:
+            self.run_cli(
+                "publish",
+                "--run-id",
+                "4242",
+                "--run-attempt",
+                "3",
+                "--commit-sha",
+                SHA,
+                "--snapshot-dir",
+                str(self.directory),
+                "--expected-index-tag",
+                "engine-approvals-1-1",
+                "--expect-no-index",
+            )
+        self.assertEqual(2, context.exception.code)
+        self.assertIn("not allowed with argument", stderr.getvalue())
+        self.assertEqual([], self.fake.requests)
 
     def test_publish_error_exits_nonzero(self):
         self.fake.failure = (

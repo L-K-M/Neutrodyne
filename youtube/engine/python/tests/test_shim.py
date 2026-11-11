@@ -2,6 +2,7 @@
 import concurrent.futures
 import io
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -51,7 +52,9 @@ class FakeYdl:
 
 class ReplayTests(unittest.TestCase):
     def setUp(self):
-        ReplayRH.configure(FIXTURES / 'resolve')
+        # Strict-by-default probes pin their mode; the generated scenario cases
+        # (test_replay_*) take the ND_REPLAY_MODE default the canary gate sets.
+        ReplayRH.configure(FIXTURES / 'resolve', Mode.STRICT)
         install(ReplayRH)
 
     def tearDown(self):
@@ -76,6 +79,17 @@ class ReplayTests(unittest.TestCase):
         b = Request('https://www.youtube.com/youtubei/v1/browse?x=1', data=b'{"continuation":"b"}')
         self.assertNotEqual(request_key(a), request_key(b))
         self.assertEqual(request_key(a, Mode.CONTRACT), request_key(b, Mode.CONTRACT))
+
+    def test_default_mode_reads_nd_replay_mode(self):
+        # The canary's contract gate runs the same scenario cases without editing call sites.
+        with patch.dict(os.environ, {'ND_REPLAY_MODE': 'contract'}):
+            ReplayRH.configure(FIXTURES / 'ping')
+            self.assertEqual(ReplayRH._mode, Mode.CONTRACT)
+        env = dict(os.environ)
+        env.pop('ND_REPLAY_MODE', None)
+        with patch.dict(os.environ, env, clear=True):
+            ReplayRH.configure(FIXTURES / 'ping')
+            self.assertEqual(ReplayRH._mode, Mode.STRICT)
 
     def test_contract_unrecorded_is_404(self):
         ReplayRH.configure(FIXTURES / 'ping', Mode.CONTRACT)
@@ -147,6 +161,13 @@ def replay_case(scenario):
             result = invoke(bridge, request['method'], **{k: v for k, v in request['payload'].items() if k != 'ctx'})
             if scenario == 'version':
                 expected['python'] = result['python']
+                if os.environ.get('ND_REPLAY_MODE') == Mode.CONTRACT.value:
+                    # The canary stages a new hash-verified bundle. Check its
+                    # identity against that input, not the old replay recording.
+                    bundle = Path(__file__).resolve().parents[4] / 'youtube/ytdlp/engine/bundled.json'
+                    metadata = json.loads(bundle.read_text())
+                    expected['ytDlp'] = metadata['version']
+                    expected['ejs'] = metadata['ejsVersion']
             self.assertEqual(result, expected)
     return test
 
@@ -284,16 +305,20 @@ class CursorTests(unittest.TestCase):
                 yield {'id': VIDEO_ID, 'channel_id': CHANNEL_ID, 'title': 'Synthetic'}
         self.bridge = Bridge(ydl_factory=lambda _: FakeYdl({'entries': entries()}), clock=lambda: self.now)
 
+    def invoke(self, method, **fields):
+        # The bridge compares this absolute deadline with the same fake clock.
+        return json.loads(self.bridge.call(method, payload(**fields), self.now + 30, 1))
+
     def page(self, kind='tab'):
         fields = {'channelId': CHANNEL_ID, 'tab': 'videos'} if kind == 'tab' else {'query': 'synthetic'}
-        return invoke(self.bridge, kind + '_open', **fields)
+        return self.invoke(kind + '_open', **fields)
 
     def test_lazy_bounded_page_and_cross_worker_continuation(self):
         first = self.page()
         self.assertEqual(self.pulled, 30)
         self.assertEqual(len(first['cursor']), 32)
         with concurrent.futures.ThreadPoolExecutor(1) as executor:
-            next_page = executor.submit(invoke, self.bridge, 'tab_next', cursor=first['cursor']).result()
+            next_page = executor.submit(self.invoke, 'tab_next', cursor=first['cursor']).result()
         self.assertEqual(self.pulled, 60)
         self.assertEqual(len(next_page['items']), 30)
 
@@ -301,19 +326,19 @@ class CursorTests(unittest.TestCase):
         first = self.page('search')
         self.assertEqual(self.pulled, 20)
         with self.assertRaisesRegex(ShimError, 'CURSOR_EXPIRED'):
-            invoke(self.bridge, 'tab_next', cursor=first['cursor'])
-        self.assertEqual(len(invoke(self.bridge, 'search_next', cursor=first['cursor'])['hits']), 20)
+            self.invoke('tab_next', cursor=first['cursor'])
+        self.assertEqual(len(self.invoke('search_next', cursor=first['cursor'])['hits']), 20)
 
     def test_ttl_and_lru_16(self):
         tokens = [self.page()['cursor'] for _ in range(16)]
-        invoke(self.bridge, 'tab_next', cursor=tokens[0])
+        self.invoke('tab_next', cursor=tokens[0])
         self.page()
         with self.assertRaisesRegex(ShimError, 'CURSOR_EXPIRED'):
-            invoke(self.bridge, 'tab_next', cursor=tokens[1])
-        invoke(self.bridge, 'tab_next', cursor=tokens[0])
+            self.invoke('tab_next', cursor=tokens[1])
+        self.invoke('tab_next', cursor=tokens[0])
         self.now = 600
         with self.assertRaisesRegex(ShimError, 'CURSOR_EXPIRED'):
-            invoke(self.bridge, 'tab_next', cursor=tokens[0])
+            self.invoke('tab_next', cursor=tokens[0])
         self.assertFalse(self.bridge._cursors)
 
     def test_unknown_restart_and_locale_mismatch(self):

@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -256,6 +257,10 @@ class SmokeTest {
         }
 
     private fun assertDestinations() {
+        // Compose can be idle while the database opens on IO, including after recreation.
+        compose.waitUntil(STARTUP_TIMEOUT_MS) {
+            compose.onAllNodes(hasTestTag(TAG_FEEDS)).fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+        }
         for ((tag, label) in DESTINATIONS) {
             // The label must belong to the destination itself; the selected tab's title repeats it in the top bar
             compose.onNodeWithTag(tag).assertIsDisplayed().assert(hasText(text(label)))

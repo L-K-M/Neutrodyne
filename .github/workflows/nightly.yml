@@ -30,6 +30,7 @@ on:
       scope:
         description: >-
           full
+          | instrumented-full (the complete device suite without the other nightly jobs)
           | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg)
           | reboot (the API 37 release leg with the host-driven boot resumption driver)
           | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path)
@@ -74,11 +75,11 @@ env:
 jobs:
   instrumented-full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 210
     permissions:
       contents: read
       issues: write # report-nightly.sh
-    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'downloads' || inputs.scope == 'playback-class'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'instrumented-full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'downloads' || inputs.scope == 'playback-class'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,7 +108,8 @@ jobs:
       # (09). youtube-smoke narrows it to the YouTube smoke tests on api36.
       # Step timeout: a hung test still leaves time to report and upload (see ci.yml).
       - name: GMD nightly group (debug)
-        timeout-minutes: 90
+        # The sequential device group includes the real 30-minute API 34 playback soak.
+        timeout-minutes: ${{ (inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'instrumented-full') && 150 || 90 }}
         env:
           PLAYBACK_CLASSES: ${{ inputs.classes }}
         run: |
