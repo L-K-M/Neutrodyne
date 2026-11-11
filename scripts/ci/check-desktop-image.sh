@@ -984,7 +984,10 @@ extract_and_scan() {
                 rm -rf "$tmp"
                 return
             fi
-            if ! hdiutil attach -nobrowse -readonly -mountpoint "$tmp" "$pkg" >/dev/null; then
+            # The project-bundled 1.0 DMG shows its licence and hdiutil cancels
+            # attach on EOF; supply a finite Y confirmation for unattended CI.
+            if ! hdiutil attach -nobrowse -readonly -mountpoint "$tmp" "$pkg" >/dev/null \
+                <<< $'Y\n'; then
                 fail "hdiutil could not attach $pkg read-only"
                 rm -rf "$tmp"
                 return
