@@ -2,6 +2,7 @@
 """Exercise a real store-extracted bundle through the host adapter, without live traffic."""
 
 import json
+import os
 from pathlib import Path
 import socket
 import sys
@@ -30,7 +31,7 @@ print(host_chaquopy.call('version', payload, 5000, 3))
 
 # The store's extracted files must also serve the same recorded method corpus.
 from unittest.mock import patch
-from neutrodyne_ytx.replay import ReplayRH
+from neutrodyne_ytx.replay import Mode, ReplayRH
 
 fixtures = ROOT / 'youtube/engine/src/test/resources/recorded'
 for directory in sorted(path for path in fixtures.iterdir() if path.is_dir()):
@@ -42,6 +43,11 @@ for directory in sorted(path for path in fixtures.iterdir() if path.is_dir()):
         actual = json.loads(host_chaquopy.call(request['method'], json.dumps(request['payload']), 5000, 4))
     if directory.name == 'version':
         expected['python'] = sys.version.split()[0]
+        if os.environ.get('ND_REPLAY_MODE') == Mode.CONTRACT.value:
+            bundle = ROOT / 'youtube/ytdlp/engine/bundled.json'
+            metadata = json.loads(bundle.read_text())
+            expected['ytDlp'] = metadata['version']
+            expected['ejs'] = metadata['ejsVersion']
     assert actual == expected, directory.name
     assert ReplayRH.misses == 0
     assert not host_chaquopy._calls

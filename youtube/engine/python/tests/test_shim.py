@@ -2,6 +2,7 @@
 import concurrent.futures
 import io
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -51,7 +52,9 @@ class FakeYdl:
 
 class ReplayTests(unittest.TestCase):
     def setUp(self):
-        ReplayRH.configure(FIXTURES / 'resolve')
+        # Strict-by-default probes pin their mode; the generated scenario cases
+        # (test_replay_*) take the ND_REPLAY_MODE default the canary gate sets.
+        ReplayRH.configure(FIXTURES / 'resolve', Mode.STRICT)
         install(ReplayRH)
 
     def tearDown(self):
@@ -76,6 +79,17 @@ class ReplayTests(unittest.TestCase):
         b = Request('https://www.youtube.com/youtubei/v1/browse?x=1', data=b'{"continuation":"b"}')
         self.assertNotEqual(request_key(a), request_key(b))
         self.assertEqual(request_key(a, Mode.CONTRACT), request_key(b, Mode.CONTRACT))
+
+    def test_default_mode_reads_nd_replay_mode(self):
+        # The canary's contract gate runs the same scenario cases without editing call sites.
+        with patch.dict(os.environ, {'ND_REPLAY_MODE': 'contract'}):
+            ReplayRH.configure(FIXTURES / 'ping')
+            self.assertEqual(ReplayRH._mode, Mode.CONTRACT)
+        env = dict(os.environ)
+        env.pop('ND_REPLAY_MODE', None)
+        with patch.dict(os.environ, env, clear=True):
+            ReplayRH.configure(FIXTURES / 'ping')
+            self.assertEqual(ReplayRH._mode, Mode.STRICT)
 
     def test_contract_unrecorded_is_404(self):
         ReplayRH.configure(FIXTURES / 'ping', Mode.CONTRACT)
@@ -147,6 +161,13 @@ def replay_case(scenario):
             result = invoke(bridge, request['method'], **{k: v for k, v in request['payload'].items() if k != 'ctx'})
             if scenario == 'version':
                 expected['python'] = result['python']
+                if os.environ.get('ND_REPLAY_MODE') == Mode.CONTRACT.value:
+                    # The canary stages a new hash-verified bundle. Check its
+                    # identity against that input, not the old replay recording.
+                    bundle = Path(__file__).resolve().parents[4] / 'youtube/ytdlp/engine/bundled.json'
+                    metadata = json.loads(bundle.read_text())
+                    expected['ytDlp'] = metadata['version']
+                    expected['ejs'] = metadata['ejsVersion']
             self.assertEqual(result, expected)
     return test
 

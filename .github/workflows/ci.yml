@@ -157,6 +157,7 @@ jobs:
           python3 scripts/ci/tests/assert-selected-tests.test.py
           python3 scripts/ci/tests/youtube-feed-canary.test.py
           python3 scripts/engine/tests/approval-release.test.py
+          python3 scripts/engine/tests/engine-canary.test.py
           python3 scripts/ci/tests/release-nightly-gate.test.py
           python3 scripts/ci/tests/youtube-engine-canary.test.py
           python3 scripts/ci/tests/trace-instrumentation-abi.test.py
