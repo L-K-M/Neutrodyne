@@ -1,205 +1,220 @@
 {
-  "schema": 1,
-  "source": "8482ab677d2c3c30ba95008b52fc3bc309372704",
-  "equivalentMergedRuntime": "4bc613308eff0848c8cb72057a8e470efd594373",
-  "versionName": "0.1.0",
-  "versionCode": 10095,
+  "source": "021bf89afb4c226784e6b0265fa2af5772b3d1de",
+  "packagingScriptsSource": "fdd9cb5c6de1fb47e0c8a309c077d014bebdfd77",
+  "versionName": "1.0.0",
+  "versionCode": 1000095,
+  "apkSha256": "ad138aa885be9afceb8489d69a4f9292c5d472ee7954b4059454fac4258683e1",
+  "api": 36,
+  "abi": "arm64-v8a",
+  "serial": "emulator-5590",
   "buildType": "release",
-  "device": {
-    "kind": "emulator",
-    "api": 36,
-    "abi": "arm64-v8a",
-    "image": "google_apis;arm64-v8a"
-  },
-  "selection": "ch.lkmc.neutrodyne.core.testing.ReleaseSmoke",
   "isolation": "clear target app package before each case, new instrumentation process",
   "cases": [
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
       "method": "notificationTransportAndLocalArtwork",
       "passed": true,
-      "seconds": 11.439
+      "seconds": 21.299,
+      "output": "01-notificationTransportAndLocalArtwork.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
       "method": "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
       "passed": true,
-      "seconds": 4.189
+      "seconds": 4.387,
+      "output": "02-sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
       "method": "videoRequestsAudioAlternateAndKeepsVideoMetadata",
       "passed": true,
-      "seconds": 3.291
+      "seconds": 3.426,
+      "output": "03-videoRequestsAudioAlternateAndKeepsVideoMetadata.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
       "method": "muxedH264AacAdvancesAudioWithScreenOffAndNoVideoDecoder",
       "passed": true,
-      "seconds": 10.185
+      "seconds": 10.233,
+      "output": "04-muxedH264AacAdvancesAudioWithScreenOffAndNoVideoDecoder.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
       "method": "fyydAndIndexFields",
       "passed": true,
-      "seconds": 0.241
+      "seconds": 0.252,
+      "output": "05-fyydAndIndexFields.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
       "method": "modernAndLegacyChartOrder",
       "passed": true,
-      "seconds": 0.213
+      "seconds": 0.21,
+      "output": "06-modernAndLegacyChartOrder.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
       "method": "appleSearchAndLookup",
       "passed": true,
-      "seconds": 0.211
+      "seconds": 0.218,
+      "output": "07-appleSearchAndLookup.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
       "method": "allRecordedCandidatesMatch",
       "passed": true,
-      "seconds": 0.216
+      "seconds": 0.231,
+      "output": "08-allRecordedCandidatesMatch.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
       "method": "htmlReadStopsAtTwoMiB",
       "passed": true,
-      "seconds": 0.245
+      "seconds": 0.315,
+      "output": "09-htmlReadStopsAtTwoMiB.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.DownloadJourneyTest",
       "method": "downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete",
       "passed": true,
-      "seconds": 22.338
+      "seconds": 22.858,
+      "output": "10-downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.ExternalYouTubeModeTest",
       "method": "browserFailureSuccessfulOpenUndoAndSettings",
       "passed": true,
-      "seconds": 2.442
+      "seconds": 4.468,
+      "output": "11-browserFailureSuccessfulOpenUndoAndSettings.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.ExternalYouTubeModeTest",
       "method": "recordedSharedHandleAndImportedChannelsStayExternal",
       "passed": true,
-      "seconds": 8.331
+      "seconds": 12.558,
+      "output": "12-recordedSharedHandleAndImportedChannelsStayExternal.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.M10AccessibilityTest",
       "method": "episodeRowsStayOperableAtNormalAndLargeText",
       "passed": true,
-      "seconds": 19.733
+      "seconds": 20.965,
+      "output": "13-episodeRowsStayOperableAtNormalAndLargeText.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SmokeTest",
       "method": "fiveLabelledDestinations",
       "passed": true,
-      "seconds": 1.116
+      "seconds": 1.224,
+      "output": "14-fiveLabelledDestinations.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SmokeTest",
       "method": "licencesListsLibraries",
       "passed": true,
-      "seconds": 3.12
+      "seconds": 3.127,
+      "output": "15-licencesListsLibraries.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SmokeTest",
       "method": "aboutShowsVersionAndAbi",
       "passed": true,
-      "seconds": 1.531
+      "seconds": 1.522,
+      "output": "16-aboutShowsVersionAndAbi.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SmokeTest",
       "method": "settingsOpensAndBackReturnsToTheTab",
       "passed": true,
-      "seconds": 1.464
+      "seconds": 1.445,
+      "output": "17-settingsOpensAndBackReturnsToTheTab.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SmokeTest",
       "method": "destinationsSurviveRotationAndDarkMode",
       "passed": true,
-      "seconds": 1.564
+      "seconds": 1.484,
+      "output": "18-destinationsSurviveRotationAndDarkMode.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
       "method": "externalSubscribeWrapperWaitsForSubscribe",
       "passed": true,
-      "seconds": 2.417
+      "seconds": 2.559,
+      "output": "19-externalSubscribeWrapperWaitsForSubscribe.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
       "method": "directFeedSchemeWaitsForSubscribe",
       "passed": true,
-      "seconds": 3.313
+      "seconds": 2.499,
+      "output": "20-directFeedSchemeWaitsForSubscribe.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
       "method": "sharedTextWaitsForSubscribe",
       "passed": true,
-      "seconds": 3.207
+      "seconds": 2.749,
+      "output": "21-sharedTextWaitsForSubscribe.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
       "method": "sharedAppleLinkResolvesWithoutWritingUntilConfirmation",
       "passed": true,
-      "seconds": 2.41
+      "seconds": 2.146,
+      "output": "22-sharedAppleLinkResolvesWithoutWritingUntilConfirmation.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.UpdateNavigationDeviceTest",
       "method": "updateNotificationRouteAndHelpSurviveRecreation",
       "passed": true,
-      "seconds": 1.434
+      "seconds": 1.583,
+      "output": "23-updateNotificationRouteAndHelpSurviveRecreation.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest",
       "method": "resolvesAndDownloadsRecordedAudioThroughYtx",
       "passed": true,
-      "seconds": 5.064
+      "seconds": 4.281,
+      "output": "24-resolvesAndDownloadsRecordedAudioThroughYtx.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.YtxReleaseSmokeTest",
       "method": "selftestAnswersThroughYtxServiceInTheApp",
       "passed": true,
-      "seconds": 0.389
+      "seconds": 0.391,
+      "output": "25-selftestAnswersThroughYtxServiceInTheApp.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
       "method": "legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances",
       "passed": true,
-      "seconds": 2.291
+      "seconds": 2.328,
+      "output": "26-legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
       "method": "legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime",
       "passed": true,
-      "seconds": 1.264
+      "seconds": 1.099,
+      "output": "27-legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
       "method": "legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext",
       "passed": true,
-      "seconds": 1.241
+      "seconds": 1.38,
+      "output": "28-legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext.txt"
     },
     {
       "class": "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
       "method": "chaptersAndTimestampSeekThroughRealSession",
       "passed": true,
-      "seconds": 2.919
+      "seconds": 3.281,
+      "output": "29-chaptersAndTimestampSeekThroughRealSession.txt"
     }
   ],
-  "total": 29,
-  "failures": 0,
-  "skips": 0,
-  "apks": [
-    {
-      "file": "app-arm64-v8a-release.apk",
-      "sha256": "d4e2ddad0b269fc76b322b7a41b9793adba8e15b7c49bc305a3ec288f59543c5"
-    },
-    {
-      "file": "app-release-androidTest.apk",
-      "sha256": "138dd90c91dab0fa74b5ae5b699148b9056b0448d8d33d0611b17eb7a70e19ac"
-    }
-  ]
+  "complete": true,
+  "schema": 1,
+  "testApkSha256": "990b8c2a693276afd468aa157614601141bdff3c20e61c853663679f5a730159"
 }
