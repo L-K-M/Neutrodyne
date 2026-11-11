@@ -898,6 +898,11 @@ without changing main's issues.
 | `youtube-canary` | M9a (04) | 04's subscribe-resolve-chunk smoke through the shim on a host CPython, plus a fetch of the control feeds of 04's small-library outage check (live; runner IPs are bot-checked, so it is noisy by design); from MD3 also through the stdio host | no |
 | `engine-nightly-canary` | M9a (04) | `shimTest` and, from MD3, `shimTestStdio` with yt-dlp's latest nightly build (`yt-dlp/yt-dlp-nightly-builds`, signature checked with the same pinned key) in place of the bundled version: the early warning for plugin or internal API drift (risk M8r). Informational; it never approves anything ([D76](../PLAN.md#3-key-decisions): nightlies are never shipped) | no |
 
+The complete `instrumented-full` device run includes the real 30-minute
+API 34 screen-off playback journey. The debug group has 150 minutes within
+the 210-minute job budget, including the separate out-of-process smoke.
+The `instrumented-full` dispatch scope runs this same job on its own.
+
 Removed 2026-10-05 (scope revision): `dev-tools-build` (developer tooling lives in `debug`, which `assemble` builds on every PR) and the `instrumented-full` leg against the `benchmark` build type (the published `release` build is tested directly). The former `mirror` job was removed with [PO-34](../PLAN.md#48-further-product-owner-decisions) ([GitHub takedown](#github-takedown)).
 
 ### `release.yml`
