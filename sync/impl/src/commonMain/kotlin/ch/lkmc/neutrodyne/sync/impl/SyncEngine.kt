@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.sync.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
@@ -20,7 +21,10 @@ import ch.lkmc.neutrodyne.sync.protocol.ChangeStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
+import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -304,6 +308,8 @@ class SyncEngine(
 
         // Reasons that never pull on their own: a round with nothing to push is a no-op.
         val noPullReasons = setOf(SyncRoundReason.OUTBOX, SyncRoundReason.PLAYBACK)
+        var pullPending = reason !in noPullReasons
+        var batchLimit = ProtocolLimits.MAX_CHANGES
         var rounds = 0
         while (rounds < MAX_ROUNDS) {
             rounds++
@@ -313,18 +319,38 @@ class SyncEngine(
                     emptyList()
                 } else {
                     capture.prepareForPush(
-                        reader.next(),
+                        reader.next(batchLimit),
                         reason == SyncRoundReason.FIRST_LINK,
                     )
                 }
             val changes = builder.build(rows)
-            if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons) && !pushBlocked) break
+            if (changes.isEmpty() && !pullPending && !pushBlocked) break
             val state = db.syncStateDao().get()
             verifyRound(snapshot)
             val sentAt = clock.now()
-            val response = markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
+            val response =
+                try {
+                    markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
+                } catch (failure: SyncTransportException) {
+                    if (failure.status != STATUS_PAYLOAD_TOO_LARGE || changes.isEmpty()) throw failure
+                    // A failed request accepted nothing. Rebuild a smaller batch from the live
+                    // outbox; do not acknowledge any field or advance the pull cursor.
+                    verifyRound(snapshot)
+                    if (changes.size > 1) {
+                        batchLimit = (changes.size / 2).coerceAtLeast(1)
+                    } else {
+                        discardOversizeChange(changes.single(), rows, snapshot.state)
+                        rejected++
+                        // A full resync must not announce success after dropping a replay.
+                        if (purpose == RoundPurpose.RECOVERY_PUSH) {
+                            throw SyncReplayRejectedException(SyncErrorCode.INVALID.wire)
+                        }
+                    }
+                    continue
+                }
             val receivedAt = clock.now()
             verifyRound(snapshot)
+            pullPending = false
             pushed += changes.size
             val rejectedResults = response.results.filter { it.status == ChangeStatus.REJECTED.wire }
             rejected += rejectedResults.size
@@ -412,6 +438,32 @@ class SyncEngine(
             db.syncStateDao().recordSyncAt(clock.now())
         }
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+    }
+
+    /** Retire only the immutable rows actually sent; a concurrent edit remains pending. */
+    private suspend fun discardOversizeChange(
+        change: ChangeDto,
+        rows: List<SyncOutboxEntity>,
+        profile: SyncStateEntity?,
+    ) {
+        val rid = RecordId.fromWire(SyncCollection.fromWire(change.coll), change.id).rid
+        db.withWriteTransaction {
+            if (profile != null) requireSyncProfile(profile, db.syncStateDao().get())
+            for (row in rows) {
+                if (row.coll != change.coll || row.rid != rid) continue
+                val clock = outboxClock(row)?.toString() ?: continue
+                val sent =
+                    when {
+                        change.op == "rekey" -> row.field == "~rekey"
+                        row.field == "*" -> change.fields.values.any { it.c == clock }
+                        else -> change.fields[row.field]?.let { it.c == null || it.c == clock } == true
+                    }
+                if (!sent || db.syncOutboxDao().get(row.coll, row.rid, row.field) != row) continue
+                capture.rejectOversizeSetting(row)
+                db.syncOutboxDao().deleteIfUnchanged(row.coll, row.rid, row.field, row.hlc, row.nodeId)
+            }
+            // In particular, do not merge a setting/auth snapshot into accepted raw state.
+        }
     }
 
     /** Settle full-pull removals through the same guard as an incremental round. */
@@ -528,5 +580,6 @@ class SyncEngine(
     private companion object {
         const val STATUS_REVOKED = 401
         const val STATUS_CURSOR_EXPIRED = 410
+        const val STATUS_PAYLOAD_TOO_LARGE = 413
     }
 }

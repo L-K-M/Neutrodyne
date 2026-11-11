@@ -1209,6 +1209,14 @@ their original physical receipt while the pending wire
 clock and matching materialization baseline advance together, including a late
 post-write callback or recovery that started before correction.
 
+**Implementation note (2026-11-10, oversized pushes).** HTTP 413 halves the
+next outbox batch without acknowledging the failed request. If one change still
+cannot fit, only its unchanged rows that were actually sent are retired and
+reported as rejected. Newer edits and withheld credentials remain pending. A
+rejected setting receipt is remembered separately from confirmed state so the
+same physical write is not captured again; a later explicit write can retry.
+Recovery replay reports the rejection instead of announcing a completed resync.
+
 The first clock rejection persists until its pending writes are acknowledged;
 an empty successful pull does not clear it. A second rejection pauses pushes
 across restarts while empty sync requests continue pulling and sampling time.
