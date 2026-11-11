@@ -26,7 +26,9 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
  */
 @Composable
 public fun rememberAndroidSystemUiState(): SystemUiState {
-    val context = LocalContext.current
+    // Android 14's UiModeManager keeps a Binder callback for the service's lifetime.
+    // Its context must outlive activities even after their contrast listeners are removed.
+    val context = LocalContext.current.applicationContext
     val dark = isSystemInDarkTheme()
 
     var reducedMotion by remember { mutableStateOf(readAnimatorOff(context)) }
