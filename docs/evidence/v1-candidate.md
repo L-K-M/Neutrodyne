@@ -73,8 +73,9 @@ The first main-only [engine bootstrap](https://github.com/L-K-M/Neutrodyne/actio
 is queued. Hosted production signing and publication remain unverified
 until that run completes. The candidate's [four-target package run](https://github.com/L-K-M/Neutrodyne/actions/runs/43088177382)
 is also in progress or queued; local macOS acceptance does not replace its
-Windows and Linux results. Repository release immutability requires owner
-confirmation because the available credentials lack admin read access.
+Windows and Linux results. The owner waived repository release immutability on 2026-11-11. Publication
+therefore verifies downloaded assets and build attestations without requiring
+GitHub locking; this waiver does not describe locking as enabled.
 
 After the candidate's remaining checks and operational acceptance, the
 release must contain the APKs, all desktop packages, server JAR, exact

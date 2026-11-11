@@ -30,8 +30,7 @@ neutrodyne-server-image-sources-{{v}}.tar.xz.
 {% endif %}
 Download only from this page and check the file:
   sha256sum --check --ignore-missing SHA256SUMS        (macOS: shasum -a 256 <file>; Windows: Get-FileHash -Algorithm SHA256 <file>)
-  gh release verify-asset {{tag}} <file> -R {{owner}}/Neutrodyne
-  gh attestation verify <file> -R {{owner}}/Neutrodyne
+  gh attestation verify <file> -R {{owner}}/Neutrodyne --signer-workflow {{owner}}/Neutrodyne/.github/workflows/release.yml --source-ref refs/tags/{{tag}} --source-digest <commit-sha>
 {% if server %}  gh attestation verify oci://ghcr.io/{{registry_owner}}/neutrodyne-server@{{digest}} -R {{owner}}/Neutrodyne
 {% endif %}
 {% if android %}Obtainium (Android): add https://github.com/{{owner}}/Neutrodyne with the APK filter

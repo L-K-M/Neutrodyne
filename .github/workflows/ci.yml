@@ -179,6 +179,7 @@ jobs:
           python3 scripts/ci/tests/release-assets.test.py
           python3 scripts/ci/tests/release-body.test.py
           python3 scripts/ci/tests/release-workflow.test.py
+          python3 scripts/ci/tests/verify-published-release.test.py
           python3 scripts/ci/tests/check-apk-published.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/release-ffmpeg-source.test.py
