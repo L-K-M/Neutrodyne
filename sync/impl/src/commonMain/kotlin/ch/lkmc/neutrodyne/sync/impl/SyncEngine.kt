@@ -314,7 +314,7 @@ class SyncEngine(
         while (rounds < MAX_ROUNDS) {
             rounds++
             val pushBlocked = db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED
-            val rows =
+            val capturedRows =
                 if (pushBlocked) {
                     emptyList()
                 } else {
@@ -323,6 +323,7 @@ class SyncEngine(
                         reason == SyncRoundReason.FIRST_LINK,
                     )
                 }
+            val rows = effects.discardRemovedSourceFields(capturedRows, snapshot.state)
             val changes = builder.build(rows)
             if (changes.isEmpty() && !pullPending && !pushBlocked) break
             val state = db.syncStateDao().get()
