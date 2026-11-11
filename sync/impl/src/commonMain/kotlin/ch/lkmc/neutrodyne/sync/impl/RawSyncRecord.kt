@@ -34,6 +34,8 @@ data class RawSyncRecord(
     val pendingSetting: PendingSetting? = null,
     /** A winning remote credential awaiting its `SecretStore.put` and `credentialId` write. */
     val pendingAuth: PendingAuth? = null,
+    /** Present only while optimistic values differ from the server-confirmed record. */
+    val accepted: AcceptedSyncRecord? = null,
 )
 
 /** A protected `SecretStore` staging entry (`sync:pending:<account>:<rid>:<clock>`). */
@@ -148,8 +150,48 @@ data class SettingIntent(
     val priorReceipt: String? = null,
     val priorHash: String,
     val kind: SettingIntentKind = SettingIntentKind.LOCAL,
+    /** The immutable DataStore receipt may predate repair of this unaccepted wire clock. */
+    val receiptClock: String? = null,
 )
 
 /** A historical restore may precede an already accepted clock while being the next physical write. */
 @Serializable
 enum class SettingIntentKind { LOCAL, RESTORE }
+
+/** Confirmed wire state, excluding secret bytes; [maxClockPacked] includes stripped auth clocks. */
+@Serializable
+data class AcceptedSyncRecord(
+    val state: RecordState,
+    val maxClockPacked: Long,
+)
+
+/** Legacy envelopes had no provenance. Preserve their clocks conservatively. */
+internal fun RawSyncRecord.confirmed(): AcceptedSyncRecord {
+    val referenceClock = authReference?.clock?.let { Hlc.parse(it).packed } ?: 0L
+    val result =
+        accepted
+            ?: AcceptedSyncRecord(
+                state.copy(fields = state.fields - "auth"),
+                maxOf(state.maxClock?.packed ?: 0L, referenceClock),
+            )
+    if (result.state.coll != state.coll || result.maxClockPacked < (result.state.maxClock?.packed ?: 0L) ||
+        "auth" in result.state.fields
+    ) {
+        throw okio.IOException("Accepted sync clock metadata is unreadable")
+    }
+    return result
+}
+
+internal fun RawSyncRecord?.confirm(incoming: RecordState): AcceptedSyncRecord {
+    val previous = this?.confirmed()
+    return AcceptedSyncRecord(
+        ch.lkmc.neutrodyne.sync.protocol.RecordMerger
+            .merge(previous?.state, incoming.copy(fields = incoming.fields - "auth"))
+            .record,
+        maxOf(previous?.maxClockPacked ?: 0L, incoming.maxClock?.packed ?: 0L),
+    )
+}
+
+/** Omit the duplicate steady-state snapshot, while retaining clocks of stripped fields. */
+internal fun RawSyncRecord.withConfirmed(confirmed: AcceptedSyncRecord): RawSyncRecord =
+    copy(accepted = confirmed.takeUnless { it.state == state && it.maxClockPacked == (state.maxClock?.packed ?: 0L) })

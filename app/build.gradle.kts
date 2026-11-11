@@ -78,6 +78,10 @@ android {
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["androidTest"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
+    // E12's Android driver delegates its password, status and sync-barrier decisions to these
+    // shared helpers so the host regressions exercise the exact code the driver calls.
+    sourceSets["androidTest"].kotlin.srcDir("src/crossDeviceTest/kotlin")
+    sourceSets["test"].kotlin.srcDir("src/crossDeviceTest/kotlin")
 }
 
 // The profile generator runs against nonMinifiedRelease, which the baseline-profile plugin creates
