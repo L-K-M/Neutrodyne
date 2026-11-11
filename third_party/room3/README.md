@@ -29,7 +29,10 @@ retries. The patch keeps an owner-visible reference across each uncommitted span
 closes it on any throw until registration commits (the readers' `PRAGMA query_only`
 factory step gets the same treatment, since a failure there would drop the connection
 inside the factory). Caller-visible semantics are unchanged: the original throwable,
-permit accounting and the pool-closed error are preserved. Regression coverage:
+permit accounting and the pool-closed error are preserved. A replacement
+private `:memory:` connection also performs initial configuration: its schema
+cannot survive the cancelled opener's native connection closing. File-backed
+retries still reuse the configured on-disk schema. Regression coverage:
 `core/database/.../RoomConnectionHandoffTest.kt`.
 
 `patches/0003` fixes `SchemaInfoUtil.readIndex` misreading `PRAGMA index_xinfo` on WITHOUT
