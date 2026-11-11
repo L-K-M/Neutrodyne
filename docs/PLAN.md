@@ -558,6 +558,16 @@ Context: Media3 Cast pulls `play-services-cast-framework`, which is proprietary;
 | PO-51 | Print the setup token in the start banner instead? (2026-11-01, MS1) | Retain the file default or authorize a narrow N13 exception | Implemented default superseding PO-38's banner: one-time token only in `<data>/setup-token` (`0600`), print only its path; N13 unchanged ([10](design/10-sync.md#first-administrator)) | MS1 |
 
 
+**Acceptance environment amendment (owner instruction, 2026-11-11):** use
+simulators and hosted virtual machines for the remaining v1.0 acceptance
+instead of waiting for physical reference devices. Record the actual API,
+OS, architecture, package and source revision. This substitutes the
+acceptance environment; it does not turn virtualized timings into measured
+physical-device budgets. Physical-only observations remain unmeasured.
+The owner also waived required GitHub CI for this task; failed, missing and
+skipped checks must retain their actual status in the candidate record.
+
+
 ### Radio home owner decisions (2026-11-04)
 
 | ID | Decision | Resolution | Scope |

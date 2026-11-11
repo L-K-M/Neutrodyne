@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "source": "8482ab677d2c3c30ba95008b52fc3bc309372704",
+  "equivalentMergedRuntime": "4bc613308eff0848c8cb72057a8e470efd594373",
+  "versionName": "0.1.0",
+  "versionCode": 10095,
+  "buildType": "release",
+  "device": {
+    "kind": "emulator",
+    "api": 36,
+    "abi": "arm64-v8a",
+    "image": "google_apis;arm64-v8a"
+  },
+  "selection": "ch.lkmc.neutrodyne.core.testing.ReleaseSmoke",
+  "isolation": "clear target app package before each case, new instrumentation process",
+  "cases": [
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
+      "method": "notificationTransportAndLocalArtwork",
+      "passed": true,
+      "seconds": 11.439
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
+      "method": "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
+      "passed": true,
+      "seconds": 4.189
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
+      "method": "videoRequestsAudioAlternateAndKeepsVideoMetadata",
+      "passed": true,
+      "seconds": 3.291
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
+      "method": "muxedH264AacAdvancesAudioWithScreenOffAndNoVideoDecoder",
+      "passed": true,
+      "seconds": 10.185
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
+      "method": "fyydAndIndexFields",
+      "passed": true,
+      "seconds": 0.241
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
+      "method": "modernAndLegacyChartOrder",
+      "passed": true,
+      "seconds": 0.213
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
+      "method": "appleSearchAndLookup",
+      "passed": true,
+      "seconds": 0.211
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
+      "method": "allRecordedCandidatesMatch",
+      "passed": true,
+      "seconds": 0.216
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.DiscoveryFixtureDeviceTest",
+      "method": "htmlReadStopsAtTwoMiB",
+      "passed": true,
+      "seconds": 0.245
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.DownloadJourneyTest",
+      "method": "downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete",
+      "passed": true,
+      "seconds": 22.338
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.ExternalYouTubeModeTest",
+      "method": "browserFailureSuccessfulOpenUndoAndSettings",
+      "passed": true,
+      "seconds": 2.442
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.ExternalYouTubeModeTest",
+      "method": "recordedSharedHandleAndImportedChannelsStayExternal",
+      "passed": true,
+      "seconds": 8.331
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.M10AccessibilityTest",
+      "method": "episodeRowsStayOperableAtNormalAndLargeText",
+      "passed": true,
+      "seconds": 19.733
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SmokeTest",
+      "method": "fiveLabelledDestinations",
+      "passed": true,
+      "seconds": 1.116
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SmokeTest",
+      "method": "licencesListsLibraries",
+      "passed": true,
+      "seconds": 3.12
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SmokeTest",
+      "method": "aboutShowsVersionAndAbi",
+      "passed": true,
+      "seconds": 1.531
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SmokeTest",
+      "method": "settingsOpensAndBackReturnsToTheTab",
+      "passed": true,
+      "seconds": 1.464
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SmokeTest",
+      "method": "destinationsSurviveRotationAndDarkMode",
+      "passed": true,
+      "seconds": 1.564
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
+      "method": "externalSubscribeWrapperWaitsForSubscribe",
+      "passed": true,
+      "seconds": 2.417
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
+      "method": "directFeedSchemeWaitsForSubscribe",
+      "passed": true,
+      "seconds": 3.313
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
+      "method": "sharedTextWaitsForSubscribe",
+      "passed": true,
+      "seconds": 3.207
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.SubscribeJourneyTest",
+      "method": "sharedAppleLinkResolvesWithoutWritingUntilConfirmation",
+      "passed": true,
+      "seconds": 2.41
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.UpdateNavigationDeviceTest",
+      "method": "updateNotificationRouteAndHelpSurviveRecreation",
+      "passed": true,
+      "seconds": 1.434
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest",
+      "method": "resolvesAndDownloadsRecordedAudioThroughYtx",
+      "passed": true,
+      "seconds": 5.064
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.YtxReleaseSmokeTest",
+      "method": "selftestAnswersThroughYtxServiceInTheApp",
+      "passed": true,
+      "seconds": 0.389
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
+      "method": "legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances",
+      "passed": true,
+      "seconds": 2.291
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
+      "method": "legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime",
+      "passed": true,
+      "seconds": 1.264
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
+      "method": "legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext",
+      "passed": true,
+      "seconds": 1.241
+    },
+    {
+      "class": "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
+      "method": "chaptersAndTimestampSeekThroughRealSession",
+      "passed": true,
+      "seconds": 2.919
+    }
+  ],
+  "total": 29,
+  "failures": 0,
+  "skips": 0,
+  "apks": [
+    {
+      "file": "app-arm64-v8a-release.apk",
+      "sha256": "d4e2ddad0b269fc76b322b7a41b9793adba8e15b7c49bc305a3ec288f59543c5"
+    },
+    {
+      "file": "app-release-androidTest.apk",
+      "sha256": "138dd90c91dab0fa74b5ae5b699148b9056b0448d8d33d0611b17eb7a70e19ac"
+    }
+  ]
+}
