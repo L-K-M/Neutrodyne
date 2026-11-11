@@ -672,18 +672,66 @@ class SyncControllerImplTest {
     @Test
     fun aPasswordLoginStoresTheTokenAndClearsThePassword() =
         runTest {
-            val h = harness(this)
+            val password = "s3cret".toCharArray()
+            val clearedBeforeStorage = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            val backing = FakeSecretStore()
+            val store =
+                object : SecretStore by backing {
+                    override suspend fun put(
+                        origin: String,
+                        username: String,
+                        secret: CharArray,
+                        attributes: Map<String, String>,
+                    ): Long? {
+                        if (origin == syncOrigin(host)) clearedBeforeStorage.complete(password.all { it == '\u0000' })
+                        return backing.put(origin, username, secret, attributes)
+                    }
+                }
+            val h = harness(this, store)
             try {
                 h.addLocalPodcast()
-                val password = "s3cret".toCharArray()
                 h.controller.discover(serverUrl)
                 await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
                 h.controller.submitPassword("alice", password)
                 await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
                 assertTrue(h.tokenStoreContains(host))
+                assertTrue(clearedBeforeStorage.await(), "Clear the password before storing the token")
                 assertEquals("alice", h.address.username())
                 assertTrue(password.all { it == '\u0000' })
                 assertTrue(h.client.calls.contains("login:alice"))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aPasswordWithoutAnActiveLinkIsCleared() =
+        runTest {
+            val h = harness(this)
+            try {
+                val password = "fixture".toCharArray()
+                h.controller.submitPassword("alice", password)
+                assertTrue(password.all { it == '\u0000' })
+                assertFalse(h.client.calls.any { it.startsWith("login:") })
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun cancellingBeforeThePasswordJobStartsStillClearsIt() =
+        runTest {
+            val h =
+                Harness(this, now, controllerDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+            try {
+                h.controller.discover(serverUrl)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                val password = "fixture".toCharArray()
+                h.controller.submitPassword("alice", password)
+                h.controller.link?.cancel()
+                h.tick()
+                assertTrue(password.all { it == '\u0000' })
+                assertFalse(h.client.calls.any { it.startsWith("login:") })
             } finally {
                 h.close()
             }

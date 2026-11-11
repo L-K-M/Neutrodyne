@@ -1,0 +1,412 @@
+# SPDX-License-Identifier: Unlicense
+#
+# engine-canary.yml — the scheduled approval pipeline for YouTube engine
+# updates (09 engine-canary.yml, 04 Engine canary). detect resolves the
+# candidate and verifies the trusted index/manifest first, gate stages the
+# candidate and runs the full verification leg against it (upstream signature
+# and sums, licence inventory, contract-mode recorded replay, the vendored
+# trust-chain test and the existing live canary through both host adapters),
+# approve writes and signs the manifest and heartbeat, deploy publishes them
+# as one immutable engine-approvals-<run>-<attempt> snapshot and advances the
+# stable index through the existing approval_release.py publisher.
+#
+# Implementation note 2026-11-10: the design's deploy target is the immutable
+# snapshot/index trust chain already landed in scripts/engine/approval_release.py
+# (never a mutable rolling release asset); detect and approve resolve the index
+# through that module's `resolve` API. A run whose signing secret is absent ends
+# as a dry run: everything up to the signature still runs, nothing is published,
+# and the run stays green so forks and not-yet-configured environments see the
+# pipeline work.
+#
+# Trust boundary: gate/approve/deploy each require github.ref ==
+# refs/heads/main, so a workflow_dispatch on another branch runs only the
+# read-only detect job and never reaches the engine-approval environment or its
+# secret. That code guard is defense in depth, not the primary control: the
+# engine-approval environment MUST carry GitHub's deployment-branch
+# restriction to main before the owner installs the signing key, because an
+# edit to this workflow could remove the guards.
+
+name: engine-canary
+
+on:
+  schedule:
+    - cron: '23 */6 * * *' # every 6 h (09; time budget upstream→approved ≤ 6 h)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Approve this yt-dlp stable tag instead of the latest'
+        required: false
+        type: string
+      revoke:
+        description: 'Version to add to revoked[] (with tag = last good version)'
+        required: false
+        type: string
+      bootstrap:
+        description: 'First run: no current manifest, sequence starts at 1'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: engine-canary
+  cancel-in-progress: false # two runs never race on `sequence`
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      candidate: ${{ steps.candidate.outputs.tag }}
+      changed: ${{ steps.decide.outputs.changed }}
+      sequence: ${{ steps.decide.outputs.sequence }}
+      floor: ${{ steps.floor.outputs.version }}
+      present: ${{ steps.current.outputs.present }}
+      snapshot_tag: ${{ steps.current.outputs.snapshot_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve the candidate tag
+        id: candidate
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -e
+          if [ -n "$TAG_INPUT" ]; then
+              tag="$TAG_INPUT"
+          else
+              tag=$(python3 scripts/engine/latest-ytdlp-tag.py)
+          fi
+          case "$tag" in
+              20[0-9][0-9].[0-9][0-9].[0-9][0-9]) ;;
+              *) echo "candidate '$tag' is not a stable yyyy.mm.dd tag" >&2; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Bundled floor
+        id: floor
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('youtube/ytdlp/engine/bundled.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Resolve and verify the current manifest
+        id: current
+        run: |
+          set -e
+          mkdir -p current
+          # The existing publisher's resolve API validates the index (bounded
+          # response, exact release identity, snapshot-tag grammar) and names
+          # the one snapshot whose documents may be fetched.
+          python3 scripts/engine/approval_release.py resolve > current/index.json
+          status=$(python3 -c "import json;print(json.load(open('current/index.json'))['status'])")
+          if [ "$status" = missing ]; then
+              echo 'present=false' >> "$GITHUB_OUTPUT"
+              echo 'snapshot_tag=' >> "$GITHUB_OUTPUT"
+              echo 'no approved manifest yet'
+              exit 0
+          fi
+          base=$(python3 -c "import json;print(json.load(open('current/index.json'))['snapshot_base_url'])")
+          snapshot=$(python3 -c "import json;print(json.load(open('current/index.json'))['snapshot_tag'])")
+          # The caps match the publisher's ASSET_LIMITS (64 KiB manifest,
+          # 4 KiB signature); an oversized document fails before verification.
+          curl -fsSL --max-filesize 65536 -o current/ytdlp-approved.json "$base/ytdlp-approved.json"
+          curl -fsSL --max-filesize 4096 -o current/ytdlp-approved.json.sig "$base/ytdlp-approved.json.sig"
+          python3 - <<'EOF'
+          import json, sys
+          sys.path.insert(0, 'scripts/engine')
+          import edsig
+          doc = open('current/ytdlp-approved.json', 'rb').read()
+          sig = open('current/ytdlp-approved.json.sig').read()
+          if not edsig.verify_detached(doc, sig, 'youtube/ytdlp/keys'):
+              sys.exit('current manifest signature does not verify; refusing to trust its state')
+          m = json.loads(doc)
+          with open('current/state.json', 'w') as out:
+              json.dump({'sequence': m['sequence'], 'version': m['ytdlp']['version'],
+                         'revoked': m['revoked']}, out)
+          print(f"current sequence={m['sequence']} version={m['ytdlp']['version']}")
+          EOF
+          echo 'present=true' >> "$GITHUB_OUTPUT"
+          echo "snapshot_tag=$snapshot" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.current.outputs.present == 'true'
+        with:
+          name: engine-current
+          path: current/
+      - name: Decide whether anything changed
+        id: decide
+        env:
+          REVOKE: ${{ inputs.revoke }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          PRESENT: ${{ steps.current.outputs.present }}
+          CANDIDATE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          set -e
+          python3 - "$GITHUB_OUTPUT" <<'EOF'
+          import json, os, sys
+          out = sys.argv[1]
+          present = os.environ['PRESENT'] == 'true'
+          bootstrap = os.environ['BOOTSTRAP'] == 'true'
+          candidate = os.environ['CANDIDATE_TAG']
+          revoke = os.environ['REVOKE'].strip()
+          sequence = 0
+          changed = True
+          if present:
+              state = json.load(open('current/state.json'))
+              sequence = state['sequence']
+              changed = candidate != state['version'] or bool(revoke)
+          elif not bootstrap:
+              sys.exit('no approved manifest: dispatch with bootstrap=true for the first run')
+          with open(out, 'a') as fh:
+              fh.write(f"changed={'true' if changed else 'false'}\nsequence={sequence}\n")
+          print(f"changed={changed} sequence={sequence}")
+          EOF
+
+  gate:
+    needs: detect
+    # Main-only: a branch dispatch must never run the privileged leg, and a
+    # changed candidate may only be gated on main.
+    if: needs.detect.outputs.changed == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh files the engine-canary issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+      - name: Stage and gate the candidate
+        id: candidate
+        env:
+          CANDIDATE: ${{ needs.detect.outputs.candidate }}
+        run: scripts/engine/canary.sh --tag "$CANDIDATE" --out "$GITHUB_OUTPUT"
+      # The staged metadata, not the checkout's, is what approve may sign:
+      # approve works on a clean checkout where bundled.json is the old floor.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: engine-candidate
+          path: youtube/ytdlp/engine/bundled.json
+      - name: Strict replay report (non-blocking)
+        id: strict
+        continue-on-error: true
+        run: ./gradlew :youtube:ytdlp:shimTest
+      - name: Record the strict-mode drift
+        # Informational only: a gh failure must not fail the gate or block
+        # approval, and branch dispatches must not file issues.
+        if: steps.strict.outcome == 'failure' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue list --label engine-canary --state open --limit 5 --json number,title > /tmp/issues.json
+          python3 - <<'EOF'
+          import json, os, subprocess
+          issues = json.load(open('/tmp/issues.json'))
+          marker = 'strict replay drift'
+          run = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          body = (f"Contract mode approved the candidate but strict replay mismatched — "
+                  f"recordings need a refresh ({run}).\n\n<!-- engine-canary:strict-drift -->")
+          existing = next((i['number'] for i in issues if 'strict replay' in i['title']), None)
+          if existing:
+              subprocess.run(['gh', 'issue', 'comment', str(existing), '--body', body], check=True)
+          else:
+              subprocess.run(['gh', 'issue', 'create', '--title', 'engine-canary: strict replay drift — recordings need re-recording',
+                              '--label', 'engine-canary', '--body', body], check=True)
+          EOF
+      - name: Compare the pinned upstream key fingerprint
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -fsSL -o /tmp/upstream-public.key 'https://github.com/yt-dlp/yt-dlp/raw/master/public.key' || exit 0
+          GNUPGHOME=$(mktemp -d); export GNUPGHOME; chmod 700 "$GNUPGHOME"
+          gpg --batch --quiet --import /tmp/upstream-public.key 2>/dev/null || exit 0
+          found=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr:/ {print $10}' | sort -u)
+          case "$found" in
+              *AC0CBBE6848D6A873464AF4E57CF65933B5A7581*) echo 'upstream release key unchanged' ;;
+              *)
+                  if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+                      gh issue create --title 'engine-canary: upstream yt-dlp release key changed' \
+                          --label engine-canary \
+                          --body "the pinned fingerprint no longer appears in upstream's public.key; review before the next bump." \
+                          || true
+                  else
+                      echo 'upstream release key fingerprint changed (issue filing is main-only)'
+                  fi ;;
+          esac
+      - name: Open the gate-failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh engine-canary --label engine-canary
+      - name: Close the gate-failure issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh engine-canary --label engine-canary --close
+    outputs:
+      version: ${{ steps.candidate.outputs.version }}
+      tag: ${{ steps.candidate.outputs.tag }}
+
+  approve:
+    needs: [detect, gate]
+    # Main-only. A changed candidate requires a real green gate; a no-op run
+    # requires the explicitly skipped gate and the verified current manifest.
+    # A red or cancelled gate never reaches the key, and a branch dispatch
+    # never reaches the engine-approval environment.
+    if: >-
+      always() && needs.detect.result == 'success' &&
+      ((needs.detect.outputs.changed == 'true' && needs.gate.result == 'success') ||
+      (needs.detect.outputs.changed == 'false' && needs.gate.result == 'skipped')) &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: engine-approval
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.detect.outputs.changed == 'true'
+        with:
+          name: engine-candidate
+          path: candidate
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.detect.outputs.present == 'true'
+        with:
+          name: engine-current
+          path: current
+      # A no-op run (gate skipped) republishes the unchanged manifest pair with
+      # a fresh heartbeat, so the verified current manifest is the base document.
+      - name: Stage the current manifest pair
+        if: needs.detect.outputs.present == 'true'
+        run: |
+          set -e
+          mkdir -p approved
+          cp current/ytdlp-approved.json approved/ytdlp-approved.json
+          cp current/ytdlp-approved.json.sig approved/ytdlp-approved.json.sig
+      - name: Write the new manifest
+        if: needs.detect.outputs.changed == 'true'
+        env:
+          REVOKE: ${{ inputs.revoke }}
+          FLOOR: ${{ needs.detect.outputs.floor }}
+          DETECT_TAG: ${{ needs.detect.outputs.candidate }}
+          GATE_TAG: ${{ needs.gate.outputs.tag }}
+        run: |
+          set -e
+          args=(--out approved/ytdlp-approved.json)
+          if [ -f current/ytdlp-approved.json ]; then
+              args+=(--current current/ytdlp-approved.json --current-sig current/ytdlp-approved.json.sig)
+          else
+              args+=(--bootstrap)
+          fi
+          # A green gate's staged metadata is the only thing approve may sign,
+          # and it must be the candidate detect resolved. A changed run with
+          # no gate candidate fails closed: there is no --keep-candidate
+          # fallback (that path belongs to the skipped-gate no-op above).
+          if [ -z "$GATE_TAG" ]; then
+              echo "changed run without a gate candidate; refusing to sign" >&2
+              exit 1
+          fi
+          if [ "$GATE_TAG" != "$DETECT_TAG" ]; then
+              echo "gate candidate '$GATE_TAG' does not match detected candidate '$DETECT_TAG'" >&2
+              exit 1
+          fi
+          args+=(--bundled candidate/bundled.json --floor "$FLOOR")
+          if [ -n "$REVOKE" ]; then
+              args+=(--revoke "$REVOKE")
+          fi
+          python3 scripts/engine/make-engine-manifest.py "${args[@]}"
+      - name: Write the heartbeat
+        run: |
+          set -e
+          mkdir -p approved
+          sequence=$(python3 -c "import json;print(json.load(open('approved/ytdlp-approved.json'))['sequence'])")
+          python3 scripts/engine/make-engine-manifest.py --heartbeat --sequence "$sequence" \
+              --out approved/ytdlp-heartbeat.json
+      - name: Sign (or dry-run without the secret)
+        id: sign
+        env:
+          NEUTRODYNE_ENGINE_MANIFEST_KEY: ${{ secrets.NEUTRODYNE_ENGINE_MANIFEST_KEY }}
+        run: |
+          set -e
+          signed=true
+          for doc in ytdlp-approved.json ytdlp-heartbeat.json; do
+              rc=0
+              python3 scripts/engine/sign-engine-manifest.py "approved/$doc" || rc=$?
+              if [ "$rc" = 77 ]; then signed=false; elif [ "$rc" != 0 ]; then exit "$rc"; fi
+          done
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          echo "signed=$signed"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.sign.outputs.signed == 'true'
+        with:
+          name: engine-approvals
+          path: approved/
+
+  deploy:
+    needs: [detect, approve]
+    # Main-only: a branch dispatch never holds contents: write or the engine
+    # approval environment, even if an approve job somehow produced a signature.
+    if: needs.approve.outputs.signed == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: engine-approval
+    permissions:
+      contents: write # the immutable publisher creates the snapshot and advances the index
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: engine-approvals
+          path: approved
+      # The publisher must receive verified artifacts: re-check both detached
+      # signatures against the committed keys before anything leaves the job.
+      - name: Verify the signed snapshot documents
+        run: |
+          set -e
+          python3 - <<'EOF'
+          import sys
+          sys.path.insert(0, 'scripts/engine')
+          import edsig
+          for doc in ('approved/ytdlp-approved.json', 'approved/ytdlp-heartbeat.json'):
+              document = open(doc, 'rb').read()
+              signature = open(doc + '.sig').read()
+              if not edsig.verify_detached(document, signature, 'youtube/ytdlp/keys'):
+                  sys.exit(f'{doc}: signature does not verify against the committed keys')
+              print(f'{doc}: signature verifies')
+          EOF
+      - name: Publish the immutable snapshot and advance the index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRESENT: ${{ needs.detect.outputs.present }}
+          EXPECTED_INDEX_TAG: ${{ needs.detect.outputs.snapshot_tag }}
+        run: |
+          set -e
+          args=(--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" --commit-sha "$GITHUB_SHA" --snapshot-dir approved)
+          # detect verified the index state: a resolved index pins the pointer
+          # this run may advance, and a verified bootstrap requires its absence.
+          # A reused bootstrap output therefore fails closed instead of
+          # repointing a live index at a stale snapshot.
+          if [ "$PRESENT" = 'true' ]; then
+              if [ -z "$EXPECTED_INDEX_TAG" ]; then
+                  echo "detect reported an index without a snapshot tag" >&2
+                  exit 1
+              fi
+              args+=(--expected-index-tag "$EXPECTED_INDEX_TAG")
+          else
+              args+=(--expect-no-index)
+          fi
+          python3 scripts/engine/approval_release.py publish "${args[@]}"
+      - name: Record the published snapshot
+        run: |
+          echo "engine snapshot published from run ${GITHUB_RUN_ID} attempt ${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_STEP_SUMMARY"
