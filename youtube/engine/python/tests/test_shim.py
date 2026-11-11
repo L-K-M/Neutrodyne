@@ -284,16 +284,20 @@ class CursorTests(unittest.TestCase):
                 yield {'id': VIDEO_ID, 'channel_id': CHANNEL_ID, 'title': 'Synthetic'}
         self.bridge = Bridge(ydl_factory=lambda _: FakeYdl({'entries': entries()}), clock=lambda: self.now)
 
+    def invoke(self, method, **fields):
+        # The bridge compares this absolute deadline with the same fake clock.
+        return json.loads(self.bridge.call(method, payload(**fields), self.now + 30, 1))
+
     def page(self, kind='tab'):
         fields = {'channelId': CHANNEL_ID, 'tab': 'videos'} if kind == 'tab' else {'query': 'synthetic'}
-        return invoke(self.bridge, kind + '_open', **fields)
+        return self.invoke(kind + '_open', **fields)
 
     def test_lazy_bounded_page_and_cross_worker_continuation(self):
         first = self.page()
         self.assertEqual(self.pulled, 30)
         self.assertEqual(len(first['cursor']), 32)
         with concurrent.futures.ThreadPoolExecutor(1) as executor:
-            next_page = executor.submit(invoke, self.bridge, 'tab_next', cursor=first['cursor']).result()
+            next_page = executor.submit(self.invoke, 'tab_next', cursor=first['cursor']).result()
         self.assertEqual(self.pulled, 60)
         self.assertEqual(len(next_page['items']), 30)
 
@@ -301,19 +305,19 @@ class CursorTests(unittest.TestCase):
         first = self.page('search')
         self.assertEqual(self.pulled, 20)
         with self.assertRaisesRegex(ShimError, 'CURSOR_EXPIRED'):
-            invoke(self.bridge, 'tab_next', cursor=first['cursor'])
-        self.assertEqual(len(invoke(self.bridge, 'search_next', cursor=first['cursor'])['hits']), 20)
+            self.invoke('tab_next', cursor=first['cursor'])
+        self.assertEqual(len(self.invoke('search_next', cursor=first['cursor'])['hits']), 20)
 
     def test_ttl_and_lru_16(self):
         tokens = [self.page()['cursor'] for _ in range(16)]
-        invoke(self.bridge, 'tab_next', cursor=tokens[0])
+        self.invoke('tab_next', cursor=tokens[0])
         self.page()
         with self.assertRaisesRegex(ShimError, 'CURSOR_EXPIRED'):
-            invoke(self.bridge, 'tab_next', cursor=tokens[1])
-        invoke(self.bridge, 'tab_next', cursor=tokens[0])
+            self.invoke('tab_next', cursor=tokens[1])
+        self.invoke('tab_next', cursor=tokens[0])
         self.now = 600
         with self.assertRaisesRegex(ShimError, 'CURSOR_EXPIRED'):
-            invoke(self.bridge, 'tab_next', cursor=tokens[0])
+            self.invoke('tab_next', cursor=tokens[0])
         self.assertFalse(self.bridge._cursors)
 
     def test_unknown_restart_and_locale_mismatch(self):
