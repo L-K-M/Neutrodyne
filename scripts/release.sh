@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Unlicense
 #
-# release.sh <patch|minor|major|X.Y.Z> [--hotfix] [--dry-run]
+# release.sh <patch|minor|major|X.Y.Z> [--hotfix] [--dry-run] [--waive-ci]
 #
 # The release procedure of 09 (Versioning and signing): bumps the two version
 # lines in gradle.properties (the single source of truth, D63), commits
@@ -16,6 +16,9 @@
 #   --dry-run           print the computed version and stop before changing
 #                       anything (use it to name changelogs/<versionCode>.txt)
 #
+# --waive-ci records the owner's one-release GitHub CI waiver for v1.0.0
+# in its annotated tag. Build, asset and publication checks are unchanged.
+#
 # Equal versionCode without an existing tag is the "tag the prepared version"
 # case: `release.sh 0.1.0` for the very first release tags HEAD without a
 # release commit. A versionCode is never reused.
@@ -29,17 +32,20 @@ cd "$REPO_ROOT"
 OP=""
 HOTFIX=0
 DRY=0
+WAIVE_CI=0
+CI_WAIVER="CI-WAIVER: owner-approved required GitHub CI waived; no CI success claimed."
 for arg in "$@"; do
     case "$arg" in
         --hotfix) HOTFIX=1 ;;
         --dry-run) DRY=1 ;;
+        --waive-ci) WAIVE_CI=1 ;;
         -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         patch|minor|major) OP="$arg" ;;
         [0-9]*.[0-9]*.[0-9]*) OP="$arg" ;;
-        *) echo "usage: $0 <patch|minor|major|X.Y.Z> [--hotfix] [--dry-run]" >&2; exit 2 ;;
+        *) echo "usage: $0 <patch|minor|major|X.Y.Z> [--hotfix] [--dry-run] [--waive-ci]" >&2; exit 2 ;;
     esac
 done
-[ -n "$OP" ] || { echo "usage: $0 <patch|minor|major|X.Y.Z> [--hotfix] [--dry-run]" >&2; exit 2; }
+[ -n "$OP" ] || { echo "usage: $0 <patch|minor|major|X.Y.Z> [--hotfix] [--dry-run] [--waive-ci]" >&2; exit 2; }
 
 fail() { echo "release: FAIL  $*" >&2; exit 1; }
 prop() { grep -E "^$1=" gradle.properties | tail -1 | cut -d= -f2-; }
@@ -58,6 +64,9 @@ NEW_NAME="$NV_MAJOR.$NV_MINOR.$NV_PATCH"
 [ "$NV_MINOR" -le 99 ] && [ "$NV_PATCH" -le 99 ] || fail "MINOR and PATCH must be <= 99 (D63)"
 NEW_CODE=$((NV_MAJOR * 1000000 + NV_MINOR * 10000 + NV_PATCH * 100 + 95))
 NEW_TAG="v$NEW_NAME"
+if [ "$WAIVE_CI" -eq 1 ] && [ "$NEW_TAG" != v1.0.0 ]; then
+    fail "the owner CI waiver applies only to v1.0.0"
+fi
 
 if [ "$DRY" -eq 1 ]; then
     echo "release: $CUR_NAME ($CUR_CODE) -> $NEW_NAME ($NEW_CODE), tag $NEW_TAG"
@@ -86,9 +95,11 @@ command -v gh >/dev/null 2>&1 || fail "gh is needed for the preconditions"
 REPO="$(prop neutrodyne.repoUrl | sed 's|https://github.com/||')"
 # --commit is forwarded to the API as head_sha, which does not resolve ref names —
 # the literal "HEAD" would never match a run.
-ci_ok="$(gh run list --repo "$REPO" --branch "$BRANCH" --workflow ci.yml --commit "$HEAD_SHA" --limit 5 \
-    --json conclusion --jq '[.[] | select(.conclusion == "success")] | length' 2>/dev/null || echo 0)"
-[ "$ci_ok" -ge 1 ] || fail "no green ci.yml run for HEAD (09 release.sh step 1)"
+if [ "$WAIVE_CI" -eq 0 ]; then
+    ci_ok="$(gh run list --repo "$REPO" --branch "$BRANCH" --workflow ci.yml --commit "$HEAD_SHA" --limit 5 \
+        --json conclusion --jq '[.[] | select(.conclusion == "success")] | length' 2>/dev/null || echo 0)"
+    [ "$ci_ok" -ge 1 ] || fail "no green ci.yml run for HEAD (09 release.sh step 1)"
+fi
 blockers="$(gh issue list --repo "$REPO" --label release-blocker --state open --json number --jq length 2>/dev/null || echo '?')"
 [ "$blockers" = "0" ] || fail "open release-blocker issues: $blockers"
 
@@ -99,54 +110,58 @@ blockers="$(gh issue list --repo "$REPO" --label release-blocker --state open --
 # Judged per job: repro, the feed-only canary and the M11b emulator benchmark are
 # report-only, so none of them can block a tag or supply successful gating
 # evidence. Other jobs must succeed or skip.
-nightly=""
-nightly_id="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 5 \
-    --json databaseId,conclusion,event \
-    --jq '[.[] | select(.event == "schedule" and .conclusion != null)] | .[0].databaseId // empty' 2>/dev/null || echo '')"
-if [ -n "$nightly_id" ]; then
-    jobs_url="repos/$REPO/actions/runs/$nightly_id/jobs?per_page=100"
-    failed_jobs="$(gh api "$jobs_url" \
-        --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .name != "benchmark" and .conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")' \
-        2>/dev/null || echo 'unknown')"
-    # A run whose gating jobs were all skipped (or that listed no jobs) proves nothing.
-    ok_jobs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .name != "benchmark" and .conclusion == "success")] | length' \
-        2>/dev/null || echo 0)"
-    server_proofs="$(gh api "$jobs_url" --jq '[.jobs[] | select((.name == "server-image-smoke" or .name == "server-convergence-report") and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
-    cross_device_proofs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name == "sync-convergence" and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
-    if [ "$server_proofs" -ne 2 ]; then
-        failed_jobs="missing MS1 image/convergence proof"
-    elif [ "$cross_device_proofs" -ne 1 ]; then
-        failed_jobs="missing cross-device convergence proof"
+if [ "$WAIVE_CI" -eq 1 ]; then
+    echo "release: WAIVED required GitHub CI/nightly proof for v1.0.0 by owner instruction; no CI success claimed"
+else
+    nightly=""
+    nightly_id="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 5 \
+        --json databaseId,conclusion,event \
+        --jq '[.[] | select(.event == "schedule" and .conclusion != null)] | .[0].databaseId // empty' 2>/dev/null || echo '')"
+    if [ -n "$nightly_id" ]; then
+        jobs_url="repos/$REPO/actions/runs/$nightly_id/jobs?per_page=100"
+        failed_jobs="$(gh api "$jobs_url" \
+            --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .name != "benchmark" and .conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")' \
+            2>/dev/null || echo 'unknown')"
+        # A run whose gating jobs were all skipped (or that listed no jobs) proves nothing.
+        ok_jobs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name != "repro" and .name != "youtube-canary" and .name != "benchmark" and .conclusion == "success")] | length' \
+            2>/dev/null || echo 0)"
+        server_proofs="$(gh api "$jobs_url" --jq '[.jobs[] | select((.name == "server-image-smoke" or .name == "server-convergence-report") and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
+        cross_device_proofs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name == "sync-convergence" and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
+        if [ "$server_proofs" -ne 2 ]; then
+            failed_jobs="missing MS1 image/convergence proof"
+        elif [ "$cross_device_proofs" -ne 1 ]; then
+            failed_jobs="missing cross-device convergence proof"
+        fi
+        if [ -z "$failed_jobs" ] && [ "$ok_jobs" -gt 0 ]; then
+            nightly="success"
+        else
+            nightly="failed: ${failed_jobs:-no gating job succeeded}"
+        fi
     fi
-    if [ -z "$failed_jobs" ] && [ "$ok_jobs" -gt 0 ]; then
-        nightly="success"
-    else
-        nightly="failed: ${failed_jobs:-no gating job succeeded}"
-    fi
-fi
-if [ "$nightly" != "success" ]; then
-    smoke_ok=0
-    if [ "$HOTFIX" -eq 1 ]; then
-        # nightly.yml checks out github.sha, so a dispatched run tests exactly
-        # its head_sha; --commit keeps runs dispatched from another ref (or
-        # green on an older, pre-rebase HEAD) out of this gate
-        dispatched="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" \
-            --commit "$HEAD_SHA" --limit 10 --json databaseId,conclusion,event \
-            --jq '[.[] | select(.event == "workflow_dispatch" and .conclusion == "success")] | .[].databaseId' \
-            2>/dev/null || true)"
-        for run_id in $dispatched; do
-            jobs="$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" \
-                --jq '[.jobs[] | select(.conclusion == "success") | .name] | join(" ")' 2>/dev/null || echo '')"
-            if grep -qw "instrumented-full" <<< "$jobs" && grep -qw "release-build-smoke" <<< "$jobs"; then
-                smoke_ok=1
-                break
-            fi
-        done
-    fi
-    if [ "$smoke_ok" -eq 1 ]; then
-        echo "release: no scheduled green nightly; accepting dispatched youtube-smoke green on $HEAD_SHA"
-    else
-        fail "latest scheduled nightly.yml on $BRANCH is not green (${nightly:-none})"
+    if [ "$nightly" != "success" ]; then
+        smoke_ok=0
+        if [ "$HOTFIX" -eq 1 ]; then
+            # nightly.yml checks out github.sha, so a dispatched run tests exactly
+            # its head_sha; --commit keeps runs dispatched from another ref (or
+            # green on an older, pre-rebase HEAD) out of this gate
+            dispatched="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" \
+                --commit "$HEAD_SHA" --limit 10 --json databaseId,conclusion,event \
+                --jq '[.[] | select(.event == "workflow_dispatch" and .conclusion == "success")] | .[].databaseId' \
+                2>/dev/null || true)"
+            for run_id in $dispatched; do
+                jobs="$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" \
+                    --jq '[.jobs[] | select(.conclusion == "success") | .name] | join(" ")' 2>/dev/null || echo '')"
+                if grep -qw "instrumented-full" <<< "$jobs" && grep -qw "release-build-smoke" <<< "$jobs"; then
+                    smoke_ok=1
+                    break
+                fi
+            done
+        fi
+        if [ "$smoke_ok" -eq 1 ]; then
+            echo "release: no scheduled green nightly; accepting dispatched youtube-smoke green on $HEAD_SHA"
+        else
+            fail "latest scheduled nightly.yml on $BRANCH is not green (${nightly:-none})"
+        fi
     fi
 fi
 
@@ -187,7 +202,11 @@ PYEOF
     echo "release: committed the version bump (single file, two lines — the diff verify-tag.sh accepts)"
 fi
 # Annotated; signed when the maintainer's git config signs tags (09).
-git tag -a "$NEW_TAG" -m "Neutrodyne $NEW_NAME"
+if [ "$WAIVE_CI" -eq 1 ]; then
+    git tag -a "$NEW_TAG" -m "Neutrodyne $NEW_NAME" -m "$CI_WAIVER"
+else
+    git tag -a "$NEW_TAG" -m "Neutrodyne $NEW_NAME"
+fi
 
 # --- 5. push ----------------------------------------------------------------------
 
