@@ -20,18 +20,24 @@ class SystemUiActivityLifetimeTest {
 
     @Test fun systemUiObserversReleaseRecreatedActivities() {
         val destroyed = captureRecreatedActivities()
+        // Closing a scenario cancels composition effects on the test dispatcher. Drain
+        // those continuations before testing reachability instead of retaining them here.
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
         val deadline = SystemClock.uptimeMillis() + 10_000
-        while (destroyed.any { it.get() != null } && SystemClock.uptimeMillis() < deadline) {
+        while (SystemClock.uptimeMillis() < deadline) {
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             Runtime.getRuntime().gc()
             System.runFinalization()
+            if (allReleased(destroyed)) return
             SystemClock.sleep(100)
         }
-        assertTrue(
-            "Destroyed activities remain reachable after their scenarios close",
-            destroyed.all { it.get() == null },
-        )
+        assertTrue("Destroyed activities remain reachable after their scenarios close", allReleased(destroyed))
     }
+
+    // Keep temporary strong references returned by get() off the frame that runs GC.
+    private fun allReleased(activities: List<WeakReference<MainActivity>>): Boolean =
+        activities.all { it.get() == null }
 
     private fun captureRecreatedActivities(): List<WeakReference<MainActivity>> {
         val destroyed = mutableListOf<WeakReference<MainActivity>>()
