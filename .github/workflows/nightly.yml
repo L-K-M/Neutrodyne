@@ -54,6 +54,7 @@ on:
           | api37-subscribe (API 37 ATF diagnostic on the api37-16k job: SubscribeJourneyTest only)
           | playback-class (diagnostic: only the classes input's instrumented selection on the api36 debug GMD)
           | youtube-canary (live reports only)
+          | sync-convergence (E12: owned API 36 emulator, desktop JVM and real server)
         default: full
       classes:
         description: "instrumentation class filter for scope=playback-class; Class#method narrows to one test"
@@ -2038,6 +2039,70 @@ jobs:
         with:
           name: screenshots-full-diffs
           path: '**/build/outputs/roborazzi/'
+          retention-days: 14
+
+  sync-convergence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'sync-convergence'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Install owned-runtime prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb dbus-x11 dbus-daemon libegl1
+          sudo chmod a+rw /dev/kvm
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools 'system-images;android-36;google_apis;x86_64' > /dev/null
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+      - name: Offline harness controls
+        run: |
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-fixtures.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-clients.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-state.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-post-removal.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-coordinator.test.py
+      - name: Real cross-device journey
+        timeout-minutes: 160
+        run: |
+          dbus-run-session -- xvfb-run -a python3 scripts/ci/cross-device-sync.py \
+            --system-image 'system-images;android-36;google_apis;x86_64' \
+            --workspace-parent "$RUNNER_TEMP" \
+            --report build/reports/cross-device-summary.json
+          python3 scripts/ci/assert-cross-device-report.py build/reports/cross-device-summary.json
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh sync-convergence
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh sync-convergence --close
+      # Only the fixed-schema aggregate is public. The throwaway workspace has
+      # passwords, tokens and private logs and must never enter an artifact.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sync-convergence-summary
+          path: build/reports/cross-device-summary.json
+          if-no-files-found: error
           retention-days: 14
 
   server-convergence:

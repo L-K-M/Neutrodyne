@@ -155,6 +155,11 @@ jobs:
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-discovery-tests.test.py
           python3 scripts/ci/tests/assert-selected-tests.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-fixtures.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-clients.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-state.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-post-removal.test.py
+          python3 -W error::ResourceWarning scripts/ci/tests/cross-device-coordinator.test.py
           python3 scripts/ci/tests/youtube-feed-canary.test.py
           python3 scripts/engine/tests/approval-release.test.py
           python3 scripts/engine/tests/engine-canary.test.py
