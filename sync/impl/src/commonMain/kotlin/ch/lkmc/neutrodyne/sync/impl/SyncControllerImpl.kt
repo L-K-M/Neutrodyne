@@ -372,24 +372,35 @@ class SyncControllerImpl(
         username: String,
         password: CharArray,
     ) {
-        val server = pendingServer ?: return
-        val nodeId = pendingNodeId ?: return
-        val deviceId = pendingDeviceId ?: return
+        val server = pendingServer
+        val nodeId = pendingNodeId
+        val deviceId = pendingDeviceId
+        if (server == null || nodeId == null || deviceId == null) {
+            password.fill('\u0000')
+            return
+        }
         linkJob?.cancel()
         linkJob =
-            scope.launch {
-                linkFlow.authorising()
-                try {
-                    val token = client.login(server.serverUrl, username, password.concatToString(), deviceInfo())
-                    authorised(server, token, nodeId, deviceId)
-                } catch (failure: CancellationException) {
-                    throw failure
-                } catch (failure: Throwable) {
-                    linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LOGIN))
-                } finally {
-                    password.fill('\u0000')
+            scope
+                .launch {
+                    linkFlow.authorising()
+                    try {
+                        val token =
+                            try {
+                                client.login(server.serverUrl, username, password.concatToString(), deviceInfo())
+                            } finally {
+                                password.fill('\u0000')
+                            }
+                        authorised(server, token, nodeId, deviceId)
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (failure: Throwable) {
+                        linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LOGIN))
+                    }
+                }.also { job ->
+                    // The launch can be cancelled before it reaches the login block.
+                    job.invokeOnCompletion { password.fill('\u0000') }
                 }
-            }
     }
 
     override fun chooseFirstLink(choice: FirstLinkChoice) {
