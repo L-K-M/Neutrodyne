@@ -1,12 +1,13 @@
 # v1.0 candidate acceptance
 
-Status: candidate preparation, 2026-11-11. Version 1.0.0, Android version
+Status: tagged, publication blocked on GitHub Actions, 2026-11-11. Version 1.0.0, Android version
 code 1000095. Runtime implementation base:
 `1b9c276a89bb2035f28cdef621a7e314d5acc067`. The versioned APKs and DMG
 were built at `021bf89afb4c226784e6b0265fa2af5772b3d1de`; packaging scripts
 from [#508](https://github.com/L-K-M/Neutrodyne/pull/508) are integrated at
-`fdd9cb5c6de1fb47e0c8a309c077d014bebdfd77`. No release tag or production
-deployment has been made. First engine-approval publication is queued.
+`fdd9cb5c6de1fb47e0c8a309c077d014bebdfd77`. Tag `v1.0.0` points to
+`449b8bf68bea81fb5445302149e3a092ea69bf4e`; its annotation records the CI
+waiver. No normal release or production deployment has been published.
 
 ## Owner decisions
 
@@ -28,6 +29,7 @@ deployment has been made. First engine-approval publication is queued.
 |---|---|---|
 | Android 14 recreation | The final activity-lifetime regression fails with the original activity context and passes using the application context. Ten cases pass on each of API 34 and API 36 ARM64 emulators. StrictMode detection and fatal handling are unchanged. | [#506](https://github.com/L-K-M/Neutrodyne/pull/506), tested head `8482ab677d2c3c30ba95008b52fc3bc309372704` |
 | Android, desktop and server sync | Real Android, desktop JVM and server converge after 40 offline edits per client; held removals and persisted position are checked. | [E12](https://github.com/L-K-M/Neutrodyne/actions/runs/42925529282), `a8a0d6029`; a local repeat on runtime `b5324cfa` also passes. [Current main nightly](https://github.com/L-K-M/Neutrodyne/actions/runs/42994268514) passes sync-convergence on `a63458d4e`. |
+| Windows 1.0 packages | Hosted Windows x64 MSI and ZIP builds, installed/extracted media smokes, image scans and runtime source checks pass. Downloaded source bundles also pass an independent check against the locks. | [Candidate package run](https://github.com/L-K-M/Neutrodyne/actions/runs/43088177382), `fdd9cb5c6`, Windows 2025 VM; this is the completed Windows job, not an overall preflight pass. |
 | Desktop native matrix | Windows x64, macOS ARM64, Linux x64 and Linux ARM64 pass their native matrix jobs. | [Current main nightly](https://github.com/L-K-M/Neutrodyne/actions/runs/42994268514), `a63458d4e` |
 | macOS 1.0 DMG | Real read-only-mounted DMG passes the image scan; extracted app resolves through bundled Python, plays recorded audio past 500 ms and downloads 22,020,219 bytes with exact ranges and digest. Child exit, AOT use, runtime source and deep signature checks pass. Installed size 377 MiB; package 183,732,525 bytes. | Artifact source `021bf89af`, verifier `fdd9cb5c6`; macOS 27.0.1 ARM64 on a Mac Studio M4 Max. These are not reference-laptop measurements. |
 | Android 1.0 packages | All three ABI release APKs pass published-mode checks, including signing, non-debuggable flags, 16 KB alignment, notices and size limits. All 29 release smoke cases pass with per-case isolation, without skips. | Artifact source `021bf89af`; [API 36 ARM64 receipt](v1-release-smoke-api36.json) |
@@ -69,11 +71,28 @@ chat, logs and commits. [#507](https://github.com/L-K-M/Neutrodyne/pull/507)
 corrected the public pin's raw-base64 format without changing its value;
 43 canary tests pass, including the regression against the committed pin.
 
-The first main-only [engine bootstrap](https://github.com/L-K-M/Neutrodyne/actions/runs/43083187019)
-is queued. Hosted production signing and publication remain unverified
-until that run completes. The candidate's [four-target package run](https://github.com/L-K-M/Neutrodyne/actions/runs/43088177382)
-is also in progress or queued; local macOS acceptance does not replace its
-Windows and Linux results. The owner waived repository release immutability on 2026-11-11. Publication
+The original main-only [engine bootstrap](https://github.com/L-K-M/Neutrodyne/actions/runs/43083187019)
+passed detection and is queued at its canary gate. An updated
+[bootstrap using the owner waiver](https://github.com/L-K-M/Neutrodyne/actions/runs/43097362607)
+failed before creating jobs with GitHub's internal Actions error, also after
+a bounded rerun request. Its public error reports request ID
+`a999835f-de10-11f1-8797-2ab439ba296d`. Local workflow validation passes.
+Hosted production signing and publication remain unverified.
+
+The [v1.0.0 release workflow](https://github.com/L-K-M/Neutrodyne/actions/runs/43092763622)
+is queued at `verify-tag`. The actual pushed tag passes local tag, branch,
+version, changelog and asset-list verification. Its CI waiver is recognized
+without claiming GitHub CI success. The release must build and verify all
+products before publication.
+
+The superseded [candidate package preflight](https://github.com/L-K-M/Neutrodyne/actions/runs/43088177382)
+completed Windows successfully. macOS and Linux ARM64 completed their
+functional package checks without failures before artifact uploads stalled;
+no overall success is claimed. Cancellation was requested to reduce
+superseded work, but GitHub has not finalized it and its job-log APIs return
+server errors. Main CI and the production release remain uncancelled.
+
+The owner waived repository release immutability on 2026-11-11. Publication
 therefore verifies downloaded assets and build attestations without requiring
 GitHub locking; this waiver does not describe locking as enabled.
 

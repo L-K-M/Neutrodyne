@@ -2,9 +2,24 @@
 
 **Current status, 2026-11-11:** the Android, desktop and sync implementation
 tracks are merged. The Android 14 activity-retention fix is merged through
-[#506](https://github.com/L-K-M/Neutrodyne/pull/506), runtime source
-`4bc613308eff0848c8cb72057a8e470efd594373`. Version 1.0.0 (code 1000095)
-is being prepared as a candidate. No release tag or publication has been made.
+[#506](https://github.com/L-K-M/Neutrodyne/pull/506). The version 1.0.0
+candidate (code 1000095) and owner waivers are merged through
+[#510](https://github.com/L-K-M/Neutrodyne/pull/510) and
+[#511](https://github.com/L-K-M/Neutrodyne/pull/511). Annotated tag `v1.0.0`
+points to `449b8bf68bea81fb5445302149e3a092ea69bf4e`; its annotation records
+the required-CI waiver. The [release workflow](https://github.com/L-K-M/Neutrodyne/actions/runs/43092763622)
+is queued at `verify-tag`. Tag checks pass locally, but no release has been
+published. The current blocker is GitHub Actions startup and runner allocation.
+
+The owner waived GitHub release locking. Published assets must still match
+the build and pass provenance verification. The main-only `engine-approval`
+environment and matching signing secret are configured. Its updated
+[bootstrap](https://github.com/L-K-M/Neutrodyne/actions/runs/43097362607)
+returned GitHub's internal startup error before creating jobs, including
+a bounded rerun. Local workflow validation passes. Resume by inspecting
+these runs; address actual build failures before publishing, then verify
+the complete release and image and record the released status. Do not mark
+queued, failed or waived checks as successful.
 
 The owner waived required GitHub CI and extended the waiver for two
 consecutive reviewer-integration failures. Waived checks are never reported
