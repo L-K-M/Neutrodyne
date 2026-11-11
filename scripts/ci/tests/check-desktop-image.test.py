@@ -548,9 +548,12 @@ class DesktopImageGatesTest(unittest.TestCase):
         # attach requires -nobrowse and -readonly (the gate's read-only mount);
         # the 'volume' is the sibling <dmg>.payload/ tree, copied into the
         # mountpoint so no real DMG is ever mounted by the fixture.
+        # FAKE_HDIUTIL_REQUIRE_LICENSE=1 prints a bundled licence notice and
+        # requires a Y confirmation on stdin (EOF/cancel exits 1), modelling the
+        # project-bundled Neutrodyne 1.0 DMG's unattended attach behaviour.
         self.fake(
             "hdiutil",
-            """
+            r"""
 log="${FAKE_HDIUTIL_LOG:?}"
 case "${1:-}" in
     attach)
@@ -568,6 +571,18 @@ case "${1:-}" in
         [ "$ro" = 1 ] && [ "$nb" = 1 ] || { echo "attach without -readonly/-nobrowse" >&2; exit 1; }
         [ -n "${FAKE_HDIUTIL_FAIL_ATTACH:-}" ] && exit 1
         [ -n "$mnt" ] && [ -d "$dmg.payload" ] || exit 1
+        if [ -n "${FAKE_HDIUTIL_REQUIRE_LICENSE:-}" ]; then
+            echo "SOFTWARE LICENCE AGREEMENT"
+            if IFS= read -r answer; then
+                case "$answer" in
+                    [Yy]|[Yy][Ee][Ss]) echo "attach-accepted" >>"$log" ;;
+                    *) echo "attach canceled" >&2; exit 1 ;;
+                esac
+            else
+                echo "attach canceled" >&2
+                exit 1
+            fi
+        fi
         cp -Rp "$dmg.payload/." "$mnt/"
         echo "attach $mnt" >>"$log"
         ;;
@@ -1223,6 +1238,25 @@ for image; do :; done
         )
         self.assertNotEqual(0, r.returncode)
         self.assertIn("attach", r.stderr)
+
+    def test_dmg_licence_prompt_requires_confirmation(self):
+        """The project-bundled DMG shows its licence and hdiutil exits 1 on EOF;
+        the script must supply finite Y confirmation on stdin and still scan and
+        detach the mounted payload (real callsite: extract_and_scan)."""
+        app = self.mac_app()
+        self.fx.write_manifest()
+        dmg = self.dmg(payload_app=app)
+        self.fake_hdiutil()
+        self.fake_codesign_ok()
+        log = self.root / "hdiutil.log"
+        r = self.fx.image_check(
+            dmg, env_extra={"FAKE_HDIUTIL_LOG": str(log), "FAKE_HDIUTIL_REQUIRE_LICENSE": "1"}
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        entries = log.read_text(encoding="utf-8").splitlines()
+        self.assertIn("attach-accepted", entries)
+        self.assertTrue(any(e.startswith("attach ") for e in entries), entries)
+        self.assertTrue(any(e.startswith("detach ") for e in entries), entries)
 
     # ----- 11 AOT cache: the .cfg classpath's fixed epoch ----------------------
     # The archive binds only its classpath inputs (the JARs app.classpath
