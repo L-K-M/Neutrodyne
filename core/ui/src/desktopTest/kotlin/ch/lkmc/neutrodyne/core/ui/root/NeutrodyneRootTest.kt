@@ -375,16 +375,21 @@ class NeutrodyneRootTest {
                     slots =
                         RootSlots(player = {
                             SideEffect { it.onExpandedSettled(expanded) }
-                            if (expanded) Text("full-player")
+                            if (expanded) NdButton("full-player", onClick = {})
                         }, userMessages = emptyFlow()),
                 )
             }
             onNodeWithText("open-podcast").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             runOnIdle { expanded = true }
             onNodeWithText("full-player").assertIsDisplayed()
+            onNodeWithText("full-player").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             onNodeWithTag("root-box").performKeyInput {
-                keyDown(Key.Enter)
-                keyUp(Key.Enter)
+                repeat(8) {
+                    keyDown(Key.Tab)
+                    keyUp(Key.Tab)
+                    keyDown(Key.Enter)
+                    keyUp(Key.Enter)
+                }
             }
             runOnIdle { expanded = false }
             onNodeWithText("podcast-3").assertDoesNotExist()

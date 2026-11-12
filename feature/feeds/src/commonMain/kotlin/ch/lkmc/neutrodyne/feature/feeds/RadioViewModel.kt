@@ -467,13 +467,7 @@ public class RadioViewModel(
                     undo = Removal(playlistId, row, before.episodes.indexOf(row))
                     if (state.value.playlistId == playlistId) {
                         val selected =
-                            if (before.episodes.size ==
-                                1
-                            ) {
-                                null
-                            } else {
-                                radioSelectionAfterRemoval(before.episodes.map { it.id }, before.selectedId, id)
-                            }
+                            radioSelectionAfterRemoval(before.episodes.map { it.id }, before.selectedId, id)
                         mutableState.value =
                             state.value.copy(
                                 episodes = before.episodes.filterNot { it.id == id },
@@ -492,7 +486,9 @@ public class RadioViewModel(
                                     before.playing && selected != null,
                             )
                         if (selected == null) {
-                            controller.dismiss()
+                            // A paused or followed session can belong to another screen.
+                            val loadedId = playbackStates.nowPlaying.value?.episodeId
+                            if (loadedId == null || loadedId == id) controller.dismiss()
                         } else if (before.selectedId == id) {
                             if (before.playing) start(selected) else controller.pause()
                         }

@@ -141,6 +141,25 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun removingTheLastProgrammeRowKeepsUnrelatedPlayback() =
+        runTest {
+            withRadio { model, id ->
+                model.onRows(id, rows.take(1))
+                controller.state.nowPlaying.value = testNowPlaying(999).copy(isPlaying = true)
+                runCurrent()
+                val calls = controller.calls.toList()
+                model.discard(1)
+                runCurrent()
+                assertEquals(calls, controller.calls)
+                assertEquals(999L, model.state.value.selectedId)
+                assertTrue(model.state.value.playing)
+                assertTrue(
+                    model.state.value.episodes
+                        .isEmpty(),
+                )
+            }
+        }
+
     @Test fun removingLastStopsAndUndoLeavesSelectionEmpty() =
         runTest {
             withRadio { model, id ->
