@@ -25,6 +25,11 @@ node tools/doccheck/mmdcheck.mjs .             # every Mermaid diagram
 `npm i mermaid@11 jsdom@25` inside `tools/doccheck/` (or anywhere on Node's
 module path).
 
+`scripts/build.sh` builds every host-feasible development target (debug APK,
+desktop app image, server JAR) into `dist/`; `--install` also puts the app on
+the machine or connected device. Release artifacts come from
+`scripts/release.sh` and the release workflow.
+
 ## Standing owner conventions — apply them without asking
 
 - **Scope of v1.0:** the Android app, the desktop app (Windows, macOS on
