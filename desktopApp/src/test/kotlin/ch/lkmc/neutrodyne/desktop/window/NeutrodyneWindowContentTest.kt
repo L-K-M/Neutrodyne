@@ -8,6 +8,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -292,7 +294,7 @@ class NeutrodyneWindowContentTest {
             }
             onNodeWithText("Episode 7 · 23:14 · from Pixel 8").assertExists()
 
-            onNodeWithText("Play").performClick()
+            onNode(hasText("Play") and isEnabled()).performClick()
             waitUntil("the resume reached play()", TIMEOUT_MS) {
                 playback.calls.contains(
                     FakePlaybackController.Call.Transport(FakePlaybackController.Action.PLAY),
@@ -343,6 +345,9 @@ class NeutrodyneWindowContentTest {
 
             waitUntil("the notices flow is subscribed", TIMEOUT_MS) {
                 sync.noticeSubscriptions.value > 0
+            }
+            waitUntil("the preceding snackbar finishes", 10_000) {
+                onAllNodesWithText("Import finished — 3 added").fetchSemanticsNodes().isEmpty()
             }
             runOnIdle { sync.post(SyncNotice.MarkedPlayedElsewhere(42, "Episode 7", "Pixel 8")) }
             waitUntil("the sync notice shows", TIMEOUT_MS) {
@@ -524,6 +529,7 @@ class NeutrodyneWindowContentTest {
             val sync = FakeSyncController()
             sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
             setWindowContent(sync = sync)
+            onNodeWithTag("radio_menu").performClick()
             onNodeWithTag("nav_library").performClick()
             waitUntil("the reconnect banner shows", TIMEOUT_MS) {
                 onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
@@ -544,6 +550,7 @@ class NeutrodyneWindowContentTest {
             sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
             val generation = mutableIntStateOf(0)
             setWindowContent(sync = sync, generation = { generation.intValue })
+            onNodeWithTag("radio_menu").performClick()
             onNodeWithTag("nav_library").performClick()
             waitUntil("the reconnect banner shows", TIMEOUT_MS) {
                 onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
@@ -552,6 +559,7 @@ class NeutrodyneWindowContentTest {
             assertThat(graph.reconnectDismissals.isDismissed(ReconnectProfile(RECONNECT_URL, "anna"))).isTrue()
 
             runOnIdle { generation.intValue++ }
+            onNodeWithTag("radio_menu").performClick()
             onNodeWithTag("nav_library").performClick()
             onNodeWithText(RECONNECT_MESSAGE).assertDoesNotExist()
             assertThat(sync.status.value).isEqualTo(SyncStatus.Reconnect(RECONNECT_URL, "anna"))

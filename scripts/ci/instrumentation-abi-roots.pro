@@ -54,3 +54,11 @@
     @org.junit.After <methods>;
     @org.junit.Test <methods>;
 }
+
+# The radio journey exercises the real release graph and swipe/Undo contract.
+-keep class ch.lkmc.neutrodyne.RadioHomeDeviceTest {
+    public <init>();
+    @org.junit.Before <methods>;
+    @org.junit.After <methods>;
+    @org.junit.Test <methods>;
+}

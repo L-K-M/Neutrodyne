@@ -247,7 +247,13 @@ internal fun PlayerSheet(
     LaunchedEffect(slot.expandRequest, now?.episodeId) {
         if (slot.expandRequest > consumedExpand && now != null) {
             consumedExpand = slot.expandRequest
-            if (slot.presentation != PlayerPresentation.RADIO_HOME && slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP) updatePanelHidden(false) else state.expand(motion)
+            if (slot.presentation != PlayerPresentation.RADIO_HOME &&
+                slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP
+            ) {
+                updatePanelHidden(false)
+            } else {
+                state.expand(motion)
+            }
         }
     }
     var consumedCollapse by rememberSaveable { mutableIntStateOf(0) }
@@ -271,7 +277,9 @@ internal fun PlayerSheet(
             }
 
             PlayerSheetValue.Expanded -> {
-                if (slot.presentation != PlayerPresentation.RADIO_HOME && slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP && !slot.layout.playerPanel) {
+                if (slot.presentation != PlayerPresentation.RADIO_HOME &&
+                    slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP && !slot.layout.playerPanel
+                ) {
                     // Dragging uses the anchors directly, so it must make the same
                     // panel choice as the mini player's Expand action.
                     updatePanelHidden(false)

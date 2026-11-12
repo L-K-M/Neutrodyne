@@ -214,13 +214,14 @@ class NeutrodyneRootTest {
             setContent {
                 TestRoot(
                     state = RootUiState.READY.copy(hasNowPlaying = true),
-                    slots = RootSlots(player = {
-                        SideEffect { slot = it }
-                        DisposableEffect(Unit) {
-                            starts++
-                            onDispose { disposals++ }
-                        }
-                    }, userMessages = emptyFlow()),
+                    slots =
+                        RootSlots(player = {
+                            SideEffect { slot = it }
+                            DisposableEffect(Unit) {
+                                starts++
+                                onDispose { disposals++ }
+                            }
+                        }, userMessages = emptyFlow()),
                 )
             }
             runOnIdle {

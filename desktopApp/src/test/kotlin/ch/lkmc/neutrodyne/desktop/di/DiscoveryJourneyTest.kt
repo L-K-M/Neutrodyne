@@ -248,7 +248,7 @@ class DiscoveryJourneyTest {
                     if (entry == Entry.PREVIEW) {
                         onNodeWithText("Add by URL").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                         repeat(2) {
-                            onNodeWithTag("nav_discover").performKeyInput { pressKey(Key.Escape) }
+                            onRoot().performKeyInput { pressKey(Key.Escape) }
                             waitForIdle()
                         }
                         onNodeWithText("history").assertDoesNotExist()
@@ -259,7 +259,7 @@ class DiscoveryJourneyTest {
                             keyUp(Key.CtrlLeft)
                         }
                         onNode(hasSetTextAction()).assertIsFocused()
-                        onNodeWithTag("nav_discover").performKeyInput { pressKey(Key.Tab) }
+                        onRoot().performKeyInput { pressKey(Key.Tab) }
                         onNodeWithText("Add by URL").assertIsFocused()
                     }
                 }
