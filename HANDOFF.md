@@ -1,5 +1,15 @@
 # Handoff — state of the Neutrodyne work
 
+**Radio integration correction, 2026-11-12:** the earlier completion claim
+missed the production radio integration. PR #301 supplied shared materials
+and components, but the playback adapter and home navigation remained on
+`impl/radio-home`. The app therefore opened the superseded Feeds interface.
+The repair restores the radio as the home, its playlist chooser and creation,
+and the unplayed-only programme feed with swipe discard and Undo under
+PO-51–PO-54. Marking played in an unfiltered legacy feed was never an
+acceptable substitute for removing the row from the programme list.
+The `v1.0.0` tag predates this correction. Its artifacts do not contain it.
+
 **Current status, 2026-11-11:** the Android, desktop and sync implementation
 tracks are merged. The Android 14 activity-retention fix is merged through
 [#506](https://github.com/L-K-M/Neutrodyne/pull/506). The version 1.0.0

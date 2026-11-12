@@ -127,6 +127,7 @@ class NeutrodyneRootTest {
             setContent {
                 TestRoot(
                     routes = pending.receiveAsFlow(),
+                    initialTab = LibraryKey,
                     state = RootUiState.READY.copy(hasNowPlaying = true),
                     slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
                 )
@@ -153,6 +154,7 @@ class NeutrodyneRootTest {
             var disposals = 0
             setContent {
                 TestRoot(
+                    initialTab = LibraryKey,
                     state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
                     slots =
                         RootSlots(player = { slot ->
@@ -190,6 +192,7 @@ class NeutrodyneRootTest {
             var hidden by mutableStateOf(true)
             setContent {
                 TestRoot(
+                    initialTab = LibraryKey,
                     state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
                     slots =
                         RootSlots(player = { slot ->
@@ -197,9 +200,40 @@ class NeutrodyneRootTest {
                         }, userMessages = emptyFlow()),
                 )
             }
-            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            onNodeWithText("count:0").assertDoesNotExist()
             runOnIdle { hidden = false }
-            onNodeWithTag("nav_feeds").assertExists()
+            onNodeWithText("count:0").assertExists()
+        }
+
+    @Test
+    fun wideRadioKeepsOnePlayerAliveWithoutASidePanel() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            var slot: PlayerSlotState? = null
+            var starts = 0
+            var disposals = 0
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = {
+                        SideEffect { slot = it }
+                        DisposableEffect(Unit) {
+                            starts++
+                            onDispose { disposals++ }
+                        }
+                    }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle {
+                kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation)
+                kotlin.test.assertFalse(requireNotNull(slot).layout.playerPanel)
+            }
+            openMenuDestination("nav_library")
+            runOnIdle {
+                assertTrue(requireNotNull(slot).layout.playerPanel)
+                kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation)
+                kotlin.test.assertEquals(1, starts)
+                kotlin.test.assertEquals(0, disposals)
+            }
         }
 
     @Test
@@ -230,6 +264,7 @@ class NeutrodyneRootTest {
         runComposeUiTest {
             val count = kotlinx.coroutines.flow.MutableStateFlow(3)
             setContent { TestRoot(failedDownloads = count) }
+            onNodeWithTag("radio_menu").performClick()
             onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
             count.value = 0
             waitForIdle()
@@ -911,10 +946,10 @@ class NeutrodyneRootTest {
             onNodeWithText("Pixel 8 removed 2 podcasts and 1 group. Apply here too?").assertExists()
             onNodeWithText("Review").assertExists()
 
-            onNodeWithTag("nav_discover").performClick()
+            openMenuDestination("nav_discover")
             onNodeWithText("Review").assertDoesNotExist()
 
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("Review").assertExists()
             onNodeWithText("Review").performClick()
             onNodeWithText("held-dialog-7").assertExists()
@@ -1049,10 +1084,12 @@ private fun TestRoot(
     slots: RootSlots = TestSlots,
     state: RootUiState = RootUiState.READY.copy(startup = startup),
     failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
+    initialTab: ch.lkmc.neutrodyne.core.navigation.TopLevelKey = FeedsKey,
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
             state = state,
+            initialTab = initialTab,
             failedDownloads = failedDownloads,
             routes = routes,
             actions = testActions(selectFeedSource),

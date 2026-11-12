@@ -94,6 +94,7 @@ public data class ReconnectBanner(
     public val profile: ReconnectProfile
         get() = ReconnectProfile(serverUrl, username)
 }
+
 public enum class PlayerPresentation { STANDARD, RADIO_HOME }
 
 /** What the `player` slot needs: the current pane layout and how to navigate from the player. */

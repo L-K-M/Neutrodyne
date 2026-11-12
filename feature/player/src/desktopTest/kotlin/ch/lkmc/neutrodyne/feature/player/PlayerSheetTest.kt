@@ -231,6 +231,15 @@ class PlayerSheetTest {
             onNodeWithTag("mini_player").assertIsDisplayed()
         }
 
+    @Test fun wideRadioStillHonoursExternalExpandRequests() =
+        runComposeUiTest {
+            val fixture = SheetFixture().apply { presentation = PlayerPresentation.RADIO_HOME }
+            setContent { fixture.Content(windowWidthDp = 1200) }
+            onNodeWithTag("mini_player").assertIsNotDisplayed()
+            runOnIdle { fixture.expandToken++ }
+            onNodeWithTag("full_player").assertIsDisplayed()
+        }
+
     @Test fun radioHidesCollapsedMiniButExternalExpandAndOtherScreensStillWork() =
         runComposeUiTest {
             val fixture = SheetFixture().apply { presentation = PlayerPresentation.RADIO_HOME }

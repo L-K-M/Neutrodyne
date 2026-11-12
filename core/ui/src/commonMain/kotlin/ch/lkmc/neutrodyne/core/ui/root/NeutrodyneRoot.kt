@@ -80,6 +80,7 @@ import ch.lkmc.neutrodyne.core.model.WindowRectDp
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
+import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
@@ -92,6 +93,7 @@ import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
+import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
 import ch.lkmc.neutrodyne.core.ui.navigation.NeutrodyneNavHost
@@ -298,7 +300,7 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            hasNowPlaying = state.hasNowPlaying,
+            hasNowPlaying = state.hasNowPlaying && !radioHome,
             panelHidden = state.playerPanelHidden,
         )
     val posture =
@@ -407,6 +409,7 @@ private fun ReadyRoot(
     val miniInset = if (!radioHome && !layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalDiscoverSearchFocus provides discoverSearchFocus,
+        ch.lkmc.neutrodyne.core.ui.radio.LocalFailedDownloadCount provides failedDownloadCount,
         LocalPaneLayout provides layout,
         LocalMiniPlayerInset provides miniInset,
         LocalTextFieldFocusState provides textFieldFocus,

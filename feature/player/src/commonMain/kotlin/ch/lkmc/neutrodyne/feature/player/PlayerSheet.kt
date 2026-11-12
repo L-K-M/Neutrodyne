@@ -247,7 +247,7 @@ internal fun PlayerSheet(
     LaunchedEffect(slot.expandRequest, now?.episodeId) {
         if (slot.expandRequest > consumedExpand && now != null) {
             consumedExpand = slot.expandRequest
-            if (slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP) updatePanelHidden(false) else state.expand(motion)
+            if (slot.presentation != PlayerPresentation.RADIO_HOME && slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP) updatePanelHidden(false) else state.expand(motion)
         }
     }
     var consumedCollapse by rememberSaveable { mutableIntStateOf(0) }
@@ -271,7 +271,7 @@ internal fun PlayerSheet(
             }
 
             PlayerSheetValue.Expanded -> {
-                if (slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP && !slot.layout.playerPanel) {
+                if (slot.presentation != PlayerPresentation.RADIO_HOME && slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP && !slot.layout.playerPanel) {
                     // Dragging uses the anchors directly, so it must make the same
                     // panel choice as the mini player's Expand action.
                     updatePanelHidden(false)
@@ -290,12 +290,14 @@ internal fun PlayerSheet(
         ui.colors?.seedArgb,
         if (expanded || slot.layout.playerPanel) ArtworkSurface.FULL else ArtworkSurface.MINI,
     ) {
-        Box(modifier.fillMaxSize().layout { measurable, constraints ->
-            val measured = measurable.measure(constraints)
-            layout(measured.width, measured.height) {
-                if (slot.presentation != PlayerPresentation.RADIO_HOME || state.canCollapse) measured.place(0, 0)
-            }
-        }) {
+        Box(
+            modifier.fillMaxSize().layout { measurable, constraints ->
+                val measured = measurable.measure(constraints)
+                layout(measured.width, measured.height) {
+                    if (slot.presentation != PlayerPresentation.RADIO_HOME || state.canCollapse) measured.place(0, 0)
+                }
+            },
+        ) {
             // Only the frontmost player layer owns Back.
             PlayerBackHandler(
                 state,
@@ -348,7 +350,7 @@ internal fun PlayerSheet(
             val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
             val nowPlayingLabel = stringResource(Res.string.player_now)
             val expand: () -> Unit = {
-                if (slot.windowWidthDp >=
+                if (slot.presentation != PlayerPresentation.RADIO_HOME && slot.windowWidthDp >=
                     SIDE_PANEL_MIN_WINDOW_DP
                 ) {
                     setPanelHidden(false)
