@@ -589,7 +589,12 @@ skipped checks must retain their actual status in the candidate record.
 
 Production playback, saved positions, queue and automatic advance remain governed
 by the existing specification. Selection shows saved resume positions rather
-than resetting the prototype timer. See [Radio home](design/08-ui-ux.md#radio-home).
+than resetting the prototype timer. See [Radio home](design/08-ui-ux.md#radio-home). D54 implementation note
+(2026-11-04): deleting the selected group falls back to the first remaining
+playlist, or an empty radio. Undo does not reselect a restored group; the old
+All-feed screen remains available to existing All-feed routes. The radio
+transport follows active sessions from other screens. Incoming feed routes
+only navigate; explicit playlist choices own the pause behavior.
 
 ---
 

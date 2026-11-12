@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -43,11 +44,13 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -57,6 +60,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -64,6 +68,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -96,6 +102,16 @@ import org.jetbrains.compose.resources.stringResource
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+internal enum class RadioRows(
+    val minimumHeight: Dp,
+    val titleSize: Int,
+    val coverSize: Dp,
+) {
+    COMPACT(64.dp, 13, 22.dp),
+    STANDARD(68.dp, 13, 22.dp),
+    WIDE(78.dp, 14, 24.dp),
+}
+
 @Composable
 internal fun RadioProgramme(
     state: RadioState,
@@ -103,6 +119,7 @@ internal fun RadioProgramme(
     form: RadioProgrammeState,
     scroll: LazyListState,
     compact: Boolean,
+    rows: RadioRows,
     modifier: Modifier = Modifier,
 ) {
     var bounds by remember { mutableStateOf(Rect.Zero) }
@@ -144,11 +161,16 @@ internal fun RadioProgramme(
     )
     val pickerFocus = remember { FocusRequester() }
     val newFocus = remember { FocusRequester() }
-    LaunchedEffect(form.restoreFocus) {
-        if (form.restoreFocus) {
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    val inputMode = LocalInputModeManager.current
+    LaunchedEffect(form.restoreFocus, windowFocused, inputMode) {
+        if (form.restoreFocus && windowFocused) {
+            // Android returns from a modal in touch mode; click targets need keyboard focus restored explicitly.
+            inputMode.requestInputMode(InputMode.Keyboard)
             withFrameNanos { }
-            (if (form.launcher == RadioInsert.CHOOSER) pickerFocus else newFocus).requestFocus()
-            form.restoreFocus = false
+            if ((if (form.launcher == RadioInsert.CHOOSER) pickerFocus else newFocus).requestFocus()) {
+                form.restoreFocus = false
+            }
         }
     }
     LaunchedEffect(state.playlistId) {
@@ -158,14 +180,26 @@ internal fun RadioProgramme(
             form.playlistId = id
         }
     }
+    val undoFocus = remember { FocusRequester() }
+    var restoreRowFocus by remember { mutableStateOf<Long?>(null) }
+    var previousPlaylist by remember { mutableStateOf(state.playlistId) }
     var previousRemoval by remember { mutableStateOf<RadioEpisode?>(null) }
-    LaunchedEffect(state.removed) {
-        val restored = previousRemoval
+    LaunchedEffect(state.playlistId, state.removed) {
+        val samePlaylist = previousPlaylist == state.playlistId
+        val restored = previousRemoval.takeIf { samePlaylist }
+        previousRemoval = state.removed
+        previousPlaylist = state.playlistId
         if (state.removed == null && restored != null) {
             val index = state.episodes.indexOfFirst { it.id == restored.id }
-            if (index >= 0) scroll.scrollToItem(index)
+            if (index >= 0) {
+                scroll.scrollToItem(index)
+                restoreRowFocus = restored.id
+            }
+        } else if (state.removed != null && restored?.id != state.removed.id && samePlaylist) {
+            inputMode.requestInputMode(InputMode.Keyboard)
+            withFrameNanos { }
+            undoFocus.requestFocus()
         }
-        previousRemoval = state.removed
     }
     MaterialPlate(
         RadioMaterial.METAL,
@@ -192,6 +226,7 @@ internal fun RadioProgramme(
                             .fillMaxWidth()
                             .recess()
                             .focusRequester(pickerFocus)
+                            .focusProperties { canFocus = true }
                             .clickable {
                                 form.open(
                                     RadioInsert.CHOOSER,
@@ -208,6 +243,7 @@ internal fun RadioProgramme(
                                 if (compact) 17 else 19,
                                 modifier = Modifier.weight(1f),
                                 bold = true,
+                                maxLines = 2,
                             )
                             Icon(NdIcons.ArrowForwardIos, null, Modifier.size(16.dp).rotate(90f), tint = Ink)
                         }
@@ -255,7 +291,16 @@ internal fun RadioProgramme(
                         LazyColumn(Modifier.weight(1f).testTag("radio_episodes"), state = scroll) {
                             itemsIndexed(state.episodes, key = { _, episode -> episode.id }) { index, episode ->
                                 LaunchedEffect(index) { actions.loadEpisode(index) }
-                                RadioSlip(episode, state.selectedId == episode.id, compact, actions)
+                                RadioSlip(
+                                    episode,
+                                    state.selectedId == episode.id,
+                                    state.selectedId.takeIf { state.playing },
+                                    rows,
+                                    actions,
+                                    restoreRowFocus,
+                                ) {
+                                    restoreRowFocus = null
+                                }
                             }
                         }
                     }
@@ -279,7 +324,15 @@ internal fun RadioProgramme(
                                 RadioText(state.removed.title, 11, bold = true, mono = false)
                                 RadioText(stringResource(Res.string.radio_removed), 11, mono = false)
                             }
-                            TextButton(onClick = actions.undo, modifier = Modifier.testTag("radio_undo")) {
+                            TextButton(
+                                onClick = actions.undo,
+                                modifier =
+                                    Modifier
+                                        .focusRequester(
+                                            undoFocus,
+                                        ).focusProperties { canFocus = true }
+                                        .testTag("radio_undo"),
+                            ) {
                                 RadioText(stringResource(Res.string.action_undo), 12, bold = true)
                             }
                         }
@@ -315,9 +368,23 @@ internal fun RadioProgramme(
 private fun RadioSlip(
     episode: RadioEpisode,
     selected: Boolean,
-    compact: Boolean,
+    playingEpisodeId: Long?,
+    rows: RadioRows,
     actions: RadioActions,
+    restoreRowFocus: Long?,
+    onFocusRestore: () -> Unit,
 ) {
+    val focus = remember { FocusRequester() }
+    val focusRestored by rememberUpdatedState(onFocusRestore)
+    val inputMode = LocalInputModeManager.current
+    LaunchedEffect(restoreRowFocus, inputMode) {
+        if (restoreRowFocus == episode.id) {
+            inputMode.requestInputMode(InputMode.Keyboard)
+            withFrameNanos { }
+            focus.requestFocus()
+            focusRestored()
+        }
+    }
     val monogram = rememberMonogram(episode.podcast).initials
     val initials = if ('&' in episode.podcast && monogram.length == 2) monogram.toList().joinToString("/") else monogram
     BoxWithConstraints(Modifier.fillMaxWidth().clipToBounds().background(Color(0xFF38291B))) {
@@ -341,6 +408,8 @@ private fun RadioSlip(
             Modifier
                 .fillMaxWidth()
                 .testTag("radio_episode_${episode.id}")
+                .focusRequester(focus)
+                .focusProperties { canFocus = true }
                 .onKeyEvent {
                     if (it.type == KeyEventType.KeyDown && it.key == Key.Delete) {
                         actions.discard(episode.id)
@@ -384,23 +453,27 @@ private fun RadioSlip(
         ) {
             if (selected) Box(Modifier.matchParentSize().background(Color(0x22E4BF71)))
             Row(
-                Modifier.heightIn(min = if (compact) 64.dp else 68.dp).padding(horizontal = 9.dp, vertical = 9.dp),
+                Modifier.heightIn(min = rows.minimumHeight).padding(horizontal = 9.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(
-                    Modifier.size(22.dp).border(1.dp, Color(0xFF806447), CircleShape),
+                    Modifier.size(rows.coverSize).border(1.dp, Color(0xFF806447), CircleShape).clearAndSetSemantics {},
                     contentAlignment = Alignment.Center,
                 ) {
-                    RadioText(
+                    // Printed cover marks are decorative, like an icon; only the episode copy scales.
+                    Text(
                         initials,
-                        9,
-                        bold = true,
+                        color = Ink,
+                        fontFamily = courier(),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (9f / density.fontScale).sp,
+                        lineHeight = (10.8f / density.fontScale).sp,
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        RadioText(episode.podcast, 11, modifier = Modifier.weight(1f))
+                        RadioText(episode.podcast, 11, modifier = Modifier.weight(1f), maxLines = 1)
                         episode.durationMs?.let {
                             RadioText(
                                 stringResource(Res.string.date_duration_minutes, it / 60000),
@@ -408,9 +481,16 @@ private fun RadioSlip(
                             )
                         }
                     }
-                    RadioText(episode.title, 13, bold = true)
+                    RadioText(episode.title, rows.titleSize, bold = true, maxLines = 2)
                 }
-                if (selected) Icon(NdIcons.Check, null, Modifier.size(15.dp), tint = Color(0xFFA65332))
+                if (selected) {
+                    Icon(
+                        if (playingEpisodeId == episode.id) NdIcons.PlayArrow else NdIcons.Check,
+                        null,
+                        Modifier.size(15.dp),
+                        tint = Color(0xFFA65332),
+                    )
+                }
             }
         }
     }
@@ -424,10 +504,12 @@ internal fun SmallRadioKey(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val labelWidth = (48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)).coerceAtMost(64.dp)
     Column(
         modifier
-            .width(48.dp)
+            .width(labelWidth)
             .heightIn(min = 48.dp)
+            .focusProperties { canFocus = true }
             .clickable(onClick = onClick)
             .testTag(tag)
             .padding(vertical = 3.dp),
@@ -464,6 +546,7 @@ internal fun RadioText(
     color: Color = Ink,
     bold: Boolean = false,
     mono: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
 ) {
     Text(
         text,
@@ -472,6 +555,8 @@ internal fun RadioText(
         fontSize = size.sp,
         fontFamily = if (mono) courier() else barlow(),
         fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
         lineHeight =
             (
                 size *

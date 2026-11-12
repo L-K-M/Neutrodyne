@@ -58,6 +58,12 @@ public fun radioElapsed(positionMs: Long): String {
     return "${capped / 60}H:${(capped % 60).toString().padStart(2, '0')}"
 }
 
+/** The printed needle scale retains full minutes beyond the four-tube counter's limit. */
+internal fun radioTimeline(positionMs: Long): String {
+    val seconds = positionMs.coerceAtLeast(0) / 1000
+    return "${(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
+}
+
 public fun radioDiscardThreshold(widthDp: Float): Float = minOf(80f, maxOf(48f, widthDp * 0.28f))
 
 /** Undo never rewinds selection, elapsed time or transport. */

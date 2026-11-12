@@ -204,6 +204,9 @@
   public long unbox-impl();
   androidx.compose.ui.geometry.Offset$Companion Companion;
 }
+-keep class androidx.compose.ui.geometry.OffsetKt {
+  public static long lerp-Wko1d7g(long, long, float);
+}
 -keep class androidx.compose.ui.geometry.Rect {
   public <init>(float, float, float, float);
   public float getBottom();
@@ -388,9 +391,11 @@
 -keep class androidx.compose.ui.semantics.SemanticsProperties {
   public androidx.compose.ui.semantics.SemanticsPropertyKey getContentDescription();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getEditableText();
+  public androidx.compose.ui.semantics.SemanticsPropertyKey getFocused();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getHorizontalScrollAxisRange();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getInputText();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getRole();
+  public androidx.compose.ui.semantics.SemanticsPropertyKey getSelected();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getTestTag();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getText();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getVerticalScrollAxisRange();
@@ -449,12 +454,21 @@
 -keep enum androidx.compose.ui.unit.LayoutDirection {
   androidx.compose.ui.unit.LayoutDirection Rtl;
 }
+-keep class androidx.compose.ui.util.MathHelpersKt {
+  public static long lerp(long, long, float);
+}
 -keep class androidx.core.os.BuildCompat {
   public static boolean isAtLeastU();
 }
 -keep class androidx.core.view.ViewConfigurationCompat {
   public static float getScaledHorizontalScrollFactor(android.view.ViewConfiguration, android.content.Context);
   public static float getScaledVerticalScrollFactor(android.view.ViewConfiguration, android.content.Context);
+}
+-keep class androidx.core.view.WindowCompat {
+  public static androidx.core.view.WindowInsetsControllerCompat getInsetsController(android.view.Window, android.view.View);
+}
+-keep class androidx.core.view.WindowInsetsControllerCompat {
+  public boolean isAppearanceLightStatusBars();
 }
 -keep enum androidx.lifecycle.Lifecycle$Event {
   androidx.lifecycle.Lifecycle$Event ON_RESUME;
@@ -2398,6 +2412,7 @@
 -keep class ch.lkmc.neutrodyne.core.database.PodcastGroupEntity {
   public <init>(long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.Integer, java.lang.String, ch.lkmc.neutrodyne.core.model.GroupKind, ch.lkmc.neutrodyne.core.model.FeedOrder, ch.lkmc.neutrodyne.core.model.FeedOrder, int, ch.lkmc.neutrodyne.core.model.MediaFilter, java.lang.Integer, boolean, java.lang.Long, long, long, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public java.lang.String getName();
+  public java.lang.String getUuid();
 }
 -keep class ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity {
   public <init>(long, long, java.lang.String, long, ch.lkmc.neutrodyne.core.model.MemberSource, int, kotlin.jvm.internal.DefaultConstructorMarker);
@@ -2659,6 +2674,12 @@
 }
 -keep interface ch.lkmc.neutrodyne.core.model.FeedSource {
 }
+-keep class ch.lkmc.neutrodyne.core.model.FeedSourceRef$Group {
+  public <init>(java.lang.String);
+  public java.lang.String encode();
+}
+-keep interface ch.lkmc.neutrodyne.core.model.FeedSourceRef {
+}
 -keep enum ch.lkmc.neutrodyne.core.model.GroupKind {
 }
 -keep class ch.lkmc.neutrodyne.core.model.ImportSource {
@@ -2718,6 +2739,11 @@
   public java.util.List getList();
   ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys INSTANCE;
 }
+-keep class ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys {
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Text getFEEDS_SELECTED_SOURCE();
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice getTHEME();
+  ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys INSTANCE;
+}
 -keep class ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys {
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Bool getAUTO_SNAPSHOT_ENABLED();
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Text getINSTALLATION_ID();
@@ -2761,6 +2787,7 @@
   ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered NEVER;
 }
 -keep enum ch.lkmc.neutrodyne.core.model.settings.ThemeMode {
+  ch.lkmc.neutrodyne.core.model.settings.ThemeMode LIGHT;
 }
 -keep enum ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality {
 }
@@ -2939,7 +2966,6 @@
   public static org.jetbrains.compose.resources.StringResource getNav_downloads(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
 -keep class ch.lkmc.neutrodyne.core.ui.resources.String6_commonMainKt {
-  public static org.jetbrains.compose.resources.StringResource getNav_feeds(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_library(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_up_next(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
@@ -3597,6 +3623,18 @@
 }
 -keep class ch.lkmc.neutrodyne.feature.feeds.FeedsViewModelContributions {
 }
+-keep class ch.lkmc.neutrodyne.feature.feeds.RadioViewModel {
+}
+-keep class ch.lkmc.neutrodyne.feature.feeds.RadioViewModelContributions$ToAppScope$ProvideIntoMapRadioViewModelMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.feature.feeds.RadioViewModelContributions$ToAppScope$ProvideIntoMapRadioViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.feature.feeds.RadioViewModelContributions$ToAppScope$ProvideIntoMapRadioViewModelMetroFactory {
+  ch.lkmc.neutrodyne.feature.feeds.RadioViewModelContributions$ToAppScope$ProvideIntoMapRadioViewModelMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.feature.feeds.RadioViewModelContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.feature.feeds.RadioViewModelContributions {
+}
 -keep class ch.lkmc.neutrodyne.feature.groups.AddToGroupsViewModel$Factory$Impl$Companion {
   public dev.zacsweers.metro.Provider create(ch.lkmc.neutrodyne.feature.groups.AddToGroupsViewModel$MetroFactory);
 }
@@ -4202,9 +4240,11 @@
   public kotlinx.coroutines.flow.StateFlow getCurrentChapter();
   public kotlinx.coroutines.flow.Flow getEvents();
   public kotlinx.coroutines.flow.StateFlow getNowPlaying();
+  public kotlinx.coroutines.flow.Flow getPositionTicks();
   public kotlinx.coroutines.flow.StateFlow getSleepTimer();
 }
 -keep class ch.lkmc.neutrodyne.playback.api.PositionSnapshot {
+  public long getPositionMs();
   public long positionAt(long);
 }
 -keep enum ch.lkmc.neutrodyne.playback.api.StreamKind {
@@ -5513,6 +5553,7 @@
 -keep class kotlin.Result$Companion {
 }
 -keep class kotlin.Result {
+  public static kotlin.Result box-impl(java.lang.Object);
   public static java.lang.Object constructor-impl(java.lang.Object);
   public static java.lang.Throwable exceptionOrNull-impl(java.lang.Object);
   public static boolean isFailure-impl(java.lang.Object);
@@ -5570,6 +5611,7 @@
   public static boolean addAll(java.util.Collection, java.lang.Iterable);
 }
 -keep class kotlin.collections.CollectionsKt___CollectionsKt {
+  public static kotlin.sequences.Sequence asSequence(java.lang.Iterable);
   public static int count(java.lang.Iterable);
   public static java.util.List distinct(java.lang.Iterable);
   public static java.util.List drop(java.lang.Iterable, int);
@@ -5844,6 +5886,7 @@
   public static java.lang.String joinToString$default(kotlin.sequences.Sequence, java.lang.CharSequence, java.lang.CharSequence, java.lang.CharSequence, int, java.lang.CharSequence, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public static kotlin.sequences.Sequence map(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
   public static java.util.List toList(kotlin.sequences.Sequence);
+  public static kotlin.sequences.Sequence zipWithNext(kotlin.sequences.Sequence, kotlin.jvm.functions.Function2);
 }
 -keep class kotlin.text.CharsKt {
 }

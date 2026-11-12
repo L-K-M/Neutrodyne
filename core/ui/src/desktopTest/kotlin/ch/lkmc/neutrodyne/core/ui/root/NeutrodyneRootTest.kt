@@ -60,6 +60,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
+import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
@@ -76,6 +77,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import ch.lkmc.neutrodyne.core.ui.radio.RadioDestinationMenu
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
@@ -125,6 +127,7 @@ class NeutrodyneRootTest {
             setContent {
                 TestRoot(
                     routes = pending.receiveAsFlow(),
+                    initialTab = LibraryKey,
                     state = RootUiState.READY.copy(hasNowPlaying = true),
                     slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
                 )
@@ -151,6 +154,7 @@ class NeutrodyneRootTest {
             var disposals = 0
             setContent {
                 TestRoot(
+                    initialTab = LibraryKey,
                     state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
                     slots =
                         RootSlots(player = { slot ->
@@ -188,6 +192,7 @@ class NeutrodyneRootTest {
             var hidden by mutableStateOf(true)
             setContent {
                 TestRoot(
+                    initialTab = LibraryKey,
                     state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
                     slots =
                         RootSlots(player = { slot ->
@@ -195,33 +200,64 @@ class NeutrodyneRootTest {
                         }, userMessages = emptyFlow()),
                 )
             }
-            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            onNodeWithText("count:0").assertDoesNotExist()
             runOnIdle { hidden = false }
-            onNodeWithTag("nav_feeds").assertExists()
+            onNodeWithText("count:0").assertExists()
         }
 
     @Test
-    fun playerAnchorStaysAboveNavigationWhileTheSuiteIsHidden() =
-        runDesktopComposeUiTest(width = 400, height = 800) {
+    fun wideRadioKeepsOnePlayerAliveWithoutASidePanel() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
             var slot: PlayerSlotState? = null
-            var current by mutableStateOf(true)
+            var starts = 0
+            var disposals = 0
             setContent {
                 TestRoot(
-                    state = RootUiState.READY.copy(hasNowPlaying = current),
-                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(player = {
+                            SideEffect { slot = it }
+                            DisposableEffect(Unit) {
+                                starts++
+                                onDispose { disposals++ }
+                            }
+                        }, userMessages = emptyFlow()),
                 )
             }
-            waitForIdle()
-            val bottom = requireNotNull(slot).contentBottomPx
-            val navTop = onNodeWithTag("nav_feeds").fetchSemanticsNode().boundsInRoot.top
-            assertTrue(bottom > 0f && bottom <= navTop, "Player anchor $bottom overlaps navigation $navTop")
-            runOnIdle { requireNotNull(slot).onExpandedSettled(true) }
-            onNodeWithTag("nav_feeds").assertDoesNotExist()
-            runOnIdle { kotlin.test.assertEquals(bottom, slot?.contentBottomPx) }
+            runOnIdle {
+                kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation)
+                kotlin.test.assertFalse(requireNotNull(slot).layout.playerPanel)
+            }
+            openMenuDestination("nav_library")
+            runOnIdle {
+                assertTrue(requireNotNull(slot).layout.playerPanel)
+                kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation)
+                kotlin.test.assertEquals(1, starts)
+                kotlin.test.assertEquals(0, disposals)
+            }
+        }
 
-            // A cleared current must restore navigation even before the player's disposal callback.
-            runOnIdle { current = false }
-            onNodeWithTag("nav_feeds").assertExists()
+    @Test
+    fun homeHidesTheMiniPlayerAndOtherScreensKeepItsAnchor() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            var slot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(player = {
+                            slot =
+                                it
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation) }
+            openMenuDestination("nav_library")
+            runOnIdle {
+                kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation)
+                assertTrue(requireNotNull(slot).contentBottomPx > 0f)
+            }
+            onNodeWithTag("nav_feeds").assertDoesNotExist()
         }
 
     @Test
@@ -229,6 +265,7 @@ class NeutrodyneRootTest {
         runComposeUiTest {
             val count = kotlinx.coroutines.flow.MutableStateFlow(3)
             setContent { TestRoot(failedDownloads = count) }
+            onNodeWithTag("radio_menu").performClick()
             onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
             count.value = 0
             waitForIdle()
@@ -309,6 +346,25 @@ class NeutrodyneRootTest {
             onNodeWithText("open-podcast").assertIsDisplayed()
         }
 
+    @Test fun disappearingFocusedActionKeepsEscapeWorking() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            var visible by mutableStateOf(true)
+            setContent {
+                TestRoot(
+                    slots =
+                        RootSlots(player = {
+                            if (visible) NdButton("temporary-action", onClick = { visible = false })
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            onNodeWithText("open-podcast").performClick()
+            onNodeWithText("temporary-action").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            runOnIdle { visible = false }
+            pressEscape()
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
     @Test
     fun expandedPlayerReleasesUnderlyingKeyboardFocus() =
         runDesktopComposeUiTest(width = 400, height = 800) {
@@ -319,16 +375,21 @@ class NeutrodyneRootTest {
                     slots =
                         RootSlots(player = {
                             SideEffect { it.onExpandedSettled(expanded) }
-                            if (expanded) Text("full-player")
+                            if (expanded) NdButton("full-player", onClick = {})
                         }, userMessages = emptyFlow()),
                 )
             }
             onNodeWithText("open-podcast").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             runOnIdle { expanded = true }
             onNodeWithText("full-player").assertIsDisplayed()
+            onNodeWithText("full-player").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             onNodeWithTag("root-box").performKeyInput {
-                keyDown(Key.Enter)
-                keyUp(Key.Enter)
+                repeat(8) {
+                    keyDown(Key.Tab)
+                    keyUp(Key.Tab)
+                    keyDown(Key.Enter)
+                    keyUp(Key.Enter)
+                }
             }
             runOnIdle { expanded = false }
             onNodeWithText("podcast-3").assertDoesNotExist()
@@ -378,7 +439,7 @@ class NeutrodyneRootTest {
             runOnIdle { assertTrue(requireNotNull(slot).collapseRequest > 0) }
             runOnIdle { requireNotNull(slot).navigate(DiscoverKey) }
             onAllNodesWithText("discover-content").onFirst().assertIsDisplayed()
-            onNodeWithTag("nav_feeds").performClick()
+            pressEscape()
             onNodeWithText("podcast-3").assertIsDisplayed()
         }
 
@@ -463,7 +524,7 @@ class NeutrodyneRootTest {
                     true
                 })
             }
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("count:0").assertIsDisplayed()
             val route =
                 ch.lkmc.neutrodyne.core.navigation.IntentRouter.route(
@@ -496,6 +557,8 @@ class NeutrodyneRootTest {
 
             runOnIdle { pending.trySend(Route.SelectFeed(null)) }
             onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("all-feed-content").assertIsDisplayed()
+            pressEscape()
             onNodeWithText("feeds-content").assertIsDisplayed()
             runOnIdle { kotlin.test.assertEquals<List<String?>>(listOf(null), selected) }
         }
@@ -505,7 +568,7 @@ class NeutrodyneRootTest {
         runComposeUiTest {
             val pending = Channel<Route>(Channel.UNLIMITED)
             setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
 
             runOnIdle { pending.trySend(Route.SelectFeed("tech")) }
             onNodeWithText("count:0").assertIsDisplayed()
@@ -518,11 +581,11 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun snackbarStaysAboveCompactNavigationTargets() =
+    fun snackbarStaysInsideTheCompactContent() =
         runDesktopComposeUiTest(width = 400, height = 800) {
             val pending = Channel<Route>(Channel.UNLIMITED)
             setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             runOnIdle { pending.trySend(Route.SelectFeed("missing")) }
 
             val message = "Couldn't save the change"
@@ -530,8 +593,8 @@ class NeutrodyneRootTest {
                 onAllNodesWithText(message).fetchSemanticsNodes().size == 1 && onNodeWithText(message).isDisplayed()
             }
             val notice = onNodeWithText(message).fetchSemanticsNode().boundsInRoot
-            val navigation = onNodeWithTag("nav_feeds").fetchSemanticsNode().boundsInRoot
-            assertTrue(notice.bottom <= navigation.top, "Snackbar $notice covers navigation $navigation")
+            val content = onNodeWithTag("root-box").fetchSemanticsNode().boundsInRoot
+            assertTrue(notice.bottom <= content.bottom, "Snackbar $notice leaves content $content")
         }
 
     @Test
@@ -539,7 +602,7 @@ class NeutrodyneRootTest {
         runComposeUiTest {
             val pending = Channel<Route>(Channel.UNLIMITED)
             setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
 
             mainClock.autoAdvance = false
             try {
@@ -576,13 +639,16 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun fiveDestinationsAreLabelled() =
+    fun radioMenuLabelsEveryExistingDestination() =
         runComposeUiTest {
             setRootContent()
-            // The labels appear in the rail items (tagged nav_*) and again in the stubs' top bars.
-            for (tag in listOf("nav_feeds", "nav_library", "nav_up_next", "nav_downloads", "nav_discover")) {
+            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            onNodeWithTag("nav_library").assertDoesNotExist()
+            onNodeWithTag("radio_menu").performClick()
+            for (tag in listOf("nav_library", "nav_up_next", "nav_downloads", "nav_discover", "nav_settings")) {
                 onNodeWithTag(tag).assertIsDisplayed()
             }
+            pressEscape()
             onNodeWithText("feeds-content").assertIsDisplayed()
         }
 
@@ -590,15 +656,15 @@ class NeutrodyneRootTest {
     fun tabSwitchKeepsEntryState() =
         runComposeUiTest {
             setRootContent()
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("inc").performClick()
             onNodeWithText("count:1").assertIsDisplayed()
 
             // Library's entries leave composition entirely; rememberSaveable must restore the count.
-            onNodeWithTag("nav_feeds").performClick()
+            pressEscape()
             onNodeWithText("count:1").assertDoesNotExist()
 
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("count:1").assertIsDisplayed()
         }
 
@@ -644,7 +710,7 @@ class NeutrodyneRootTest {
             onNodeWithText("podcast-3").assertIsDisplayed()
 
             // 08 Re-tap: the second tap on the shown destination pops its stack to the root.
-            onNodeWithTag("nav_feeds").performClick()
+            pressEscape()
             waitForIdle()
             onNodeWithText("podcast-3").assertDoesNotExist()
             onNodeWithText("feeds-content").assertIsDisplayed()
@@ -720,7 +786,7 @@ class NeutrodyneRootTest {
         runComposeUiTest {
             setRootContent()
             mainClock.autoAdvance = false
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             repeat(3) { mainClock.advanceTimeByFrame() }
 
             onNodeWithText("feeds-content").assertDoesNotExist()
@@ -737,11 +803,11 @@ class NeutrodyneRootTest {
     fun tappingFeedsFromAnotherTabIsImmediate() =
         runComposeUiTest {
             setRootContent()
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             waitForIdle()
 
             mainClock.autoAdvance = false
-            onNodeWithTag("nav_feeds").performClick()
+            pressEscape()
             repeat(3) { mainClock.advanceTimeByFrame() }
 
             onNodeWithText("count:0").assertDoesNotExist()
@@ -776,18 +842,21 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun localeSwitchRelabelsTheSuite() =
+    fun localeSwitchRelabelsTheMenu() =
         runComposeUiTest {
             var localeTag by mutableStateOf("")
             setContent {
                 key(localeTag) { TestRoot() }
             }
+            onNodeWithTag("radio_menu").performClick()
             onNodeWithText("Library").assertIsDisplayed()
+            pressEscape()
 
             runOnIdle {
                 Locale.setDefault(Locale.GERMAN)
                 localeTag = "de"
             }
+            onNodeWithTag("radio_menu").performClick()
             onNodeWithText("Bibliothek").assertIsDisplayed()
             onNodeWithText("Als Nächstes").assertIsDisplayed()
         }
@@ -808,14 +877,14 @@ class NeutrodyneRootTest {
                 })
             setContent { TestRoot(slots = slots) }
             onNodeWithText("review-import").assertExists()
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("review-import").assertExists()
             onNodeWithText("review-import").performClick()
             onNodeWithText("import-1").assertExists()
             onNodeWithText("review-import").assertDoesNotExist()
             pressEscape()
             onNodeWithText("review-import").assertExists()
-            onNodeWithTag("nav_discover").performClick()
+            openMenuDestination("nav_discover")
             onNodeWithText("review-import").assertDoesNotExist()
         }
 
@@ -883,10 +952,10 @@ class NeutrodyneRootTest {
             onNodeWithText("Pixel 8 removed 2 podcasts and 1 group. Apply here too?").assertExists()
             onNodeWithText("Review").assertExists()
 
-            onNodeWithTag("nav_discover").performClick()
+            openMenuDestination("nav_discover")
             onNodeWithText("Review").assertDoesNotExist()
 
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("Review").assertExists()
             onNodeWithText("Review").performClick()
             onNodeWithText("held-dialog-7").assertExists()
@@ -909,9 +978,9 @@ class NeutrodyneRootTest {
             }
             onNodeWithText("Turn off").assertExists()
             onAllNodesWithContentDescription("Settings, update available").onFirst().assertExists()
-            onNodeWithTag("nav_discover").performClick()
+            openMenuDestination("nav_discover")
             onNodeWithText("Turn off").assertDoesNotExist()
-            onNodeWithTag("nav_library").performClick()
+            openMenuDestination("nav_library")
             onNodeWithText("Turn off").assertExists()
         }
 
@@ -953,6 +1022,16 @@ class NeutrodyneRootTest {
                 kotlin.test.assertEquals(1, notices)
             }
         }
+
+    private fun ComposeUiTest.openMenuDestination(tag: String) {
+        // Only home owns a Menu key. Leave destination/detail screens through Back.
+        repeat(6) {
+            if (!runCatching { onNodeWithTag("radio_menu").isDisplayed() }.getOrDefault(false)) pressEscape()
+        }
+        onNodeWithTag("radio_menu").performClick()
+        mainClock.advanceTimeBy(500)
+        onNodeWithTag(tag).performClick()
+    }
 
     private fun ComposeUiTest.setRootContent() {
         setContent { TestRoot() }
@@ -1011,10 +1090,12 @@ private fun TestRoot(
     slots: RootSlots = TestSlots,
     state: RootUiState = RootUiState.READY.copy(startup = startup),
     failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
+    initialTab: ch.lkmc.neutrodyne.core.navigation.TopLevelKey = FeedsKey,
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
             state = state,
+            initialTab = initialTab,
             failedDownloads = failedDownloads,
             routes = routes,
             actions = testActions(selectFeedSource),
@@ -1028,7 +1109,8 @@ private fun TestRoot(
 
 private val TestInstallers: Set<EntryProviderInstaller> =
     buildSet {
-        add { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsStub() } }
+        add { entry<FeedsKey> { FeedsStub() } }
+        add { entry<FeedBrowserKey>(metadata = NdSceneMetadata.paneList()) { Text("all-feed-content") } }
         add { entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryStub() } }
         add {
             entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) {
@@ -1090,7 +1172,10 @@ private fun PlayerBackProbe(onBack: () -> Unit) {
 @Composable
 private fun FeedsStub() {
     val navigator = LocalAppNavigator.current
+    var menu by remember { mutableStateOf(false) }
+    if (menu) RadioDestinationMenu(onDismiss = { menu = false })
     Column(Modifier.fillMaxSize()) {
+        NdButton("radio-menu-launcher", onClick = { menu = true }, modifier = Modifier.testTag("radio_menu"))
         TestTopBar(Res.string.nav_feeds)
         Text("feeds-content")
         NdButton(label = "open-sheet", onClick = { navigator.push(AddPodcastKey(null)) })
