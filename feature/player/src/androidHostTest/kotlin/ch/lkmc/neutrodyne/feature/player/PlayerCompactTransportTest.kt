@@ -60,13 +60,10 @@ class PlayerCompactTransportTest {
             }
         }
         rule.waitForIdle()
-        val minimum =
-            with(
-                rule
-                    .onRoot()
-                    .fetchSemanticsNode()
-                    .layoutInfo.density,
-            ) { MINIMUM_TOUCH_TARGET.toPx() }
+        val root = rule.onRoot().fetchSemanticsNode()
+        val density = root.layoutInfo.density
+        assertEquals(COMPACT_WINDOW_WIDTH.value, root.boundsInRoot.width / density.density)
+        val minimum = with(density) { MINIMUM_TOUCH_TARGET.toPx() }
         val targets =
             TRANSPORT_LABELS.map { label ->
                 val node = rule.onNodeWithContentDescription(label, useUnmergedTree = true).fetchSemanticsNode()
