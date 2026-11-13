@@ -501,33 +501,7 @@ internal fun PlayerSheet(
                                 ),
                             )
                         }
-                        TextButton(
-                            onClick = previous,
-                            modifier =
-                                Modifier.widthIn(min = 48.dp).semantics {
-                                    contentDescription =
-                                        previousLabel
-                                },
-                        ) { Text(stringResource(Res.string.player_previous_symbol)) }
                         PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
-                        TextButton(
-                            onClick = next,
-                            // With chapters the button is nextChapter, a no-op past the
-                            // last one; a null current sits before the first chapter or
-                            // in a gap, where a next target still exists.
-                            enabled =
-                                if (ui.chapters.isEmpty()) {
-                                    now.hasNext
-                                } else {
-                                    val current = ui.currentChapter
-                                    current == null || current.index < ui.chapters.lastIndex
-                                },
-                            modifier =
-                                Modifier.widthIn(min = 48.dp).semantics {
-                                    contentDescription =
-                                        nextLabel
-                                },
-                        ) { Text(stringResource(Res.string.player_next_symbol)) }
                         TextButton(
                             onClick = forward,
                             modifier =
@@ -632,7 +606,6 @@ internal fun PlayerSheet(
                         navigate,
                         markPlayed,
                         stop,
-                        ui.chapters.isNotEmpty(),
                         nextEpisode,
                         previousEpisode,
                     )
@@ -1068,7 +1041,6 @@ internal fun PlayerSheet(
                                         navigate,
                                         markPlayed,
                                         stop,
-                                        ui.chapters.isNotEmpty(),
                                         nextEpisode,
                                         previousEpisode,
                                     )
@@ -1149,7 +1121,6 @@ private fun PlayerMenu(
     navigate: (NavKey) -> Unit,
     markPlayed: () -> Unit,
     stop: () -> Unit,
-    hasChapters: Boolean,
     nextEpisode: () -> Unit,
     previousEpisode: () -> Unit,
 ) {
@@ -1157,23 +1128,21 @@ private fun PlayerMenu(
     Box {
         NdIconButton({ open = true }, NdIcons.MoreVert, stringResource(Res.string.player_more))
         DropdownMenu(open, { open = false }) {
-            if (hasChapters) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.player_previous)) },
-                    onClick = {
-                        open = false
-                        previousEpisode()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.player_next)) },
-                    enabled = now.hasNext,
-                    onClick = {
-                        open = false
-                        nextEpisode()
-                    },
-                )
-            }
+            DropdownMenuItem(
+                text = { Text(stringResource(Res.string.player_previous)) },
+                onClick = {
+                    open = false
+                    previousEpisode()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(Res.string.player_next)) },
+                enabled = now.hasNext,
+                onClick = {
+                    open = false
+                    nextEpisode()
+                },
+            )
             DropdownMenuItem(text = { Text(stringResource(Res.string.player_episode)) }, onClick = {
                 open = false
                 navigate(EpisodeKey(now.episodeId))

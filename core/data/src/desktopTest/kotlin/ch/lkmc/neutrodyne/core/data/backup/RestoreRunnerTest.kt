@@ -1056,7 +1056,7 @@ class RestoreRunnerTest {
             assertEquals(1.5f, settings.get(PlaybackSettingKeys.SPEED))
             assertEquals(true, settings.get(PlaybackSettingKeys.SKIP_SILENCE))
             assertEquals("0.75,1.25,2.5", settings.get(PlaybackSettingKeys.SPEED_PRESETS))
-            assertEquals(10_000L, settings.get(PlaybackSettingKeys.SKIP_BACK_MS)) // 7_000 rejected
+            assertEquals(30_000L, settings.get(PlaybackSettingKeys.SKIP_BACK_MS)) // 7_000 rejected
             assertEquals(45_000L, settings.get(PlaybackSettingKeys.SKIP_FORWARD_MS))
             assertEquals(StreamOnMetered.ASK, settings.get(PlaybackSettingKeys.STREAM_ON_METERED))
             assertEquals(500, settings.get(PlaybackSettingKeys.STREAM_CACHE_MB)) // 333 rejected

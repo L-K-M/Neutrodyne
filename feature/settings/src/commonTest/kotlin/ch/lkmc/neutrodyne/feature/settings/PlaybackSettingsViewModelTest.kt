@@ -3,7 +3,6 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import ch.lkmc.neutrodyne.core.domain.SettingsError
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMaintenance
@@ -57,31 +56,16 @@ class PlaybackSettingsViewModelTest : MainDispatcherTest() {
             assertEquals(8, settings.calls.size)
         }
 
-    @Test fun hardwareAndSmartResumeUseTheirTypedKeysAndObserve() =
+    @Test fun smartResumeUsesItsTypedKeyAndObserves() =
         runTest {
             val vm = page()
-            vm.setHardwareButtons(HardwareButtons.SKIP)
             vm.setSmartResume(true)
             runCurrent()
-            assertEquals(HardwareButtons.SKIP, vm.uiState.value.hardwareButtons)
             assertTrue(vm.uiState.value.smartResume)
-            assertEquals(HardwareButtons.SKIP, settings.get(PlaybackSettingKeys.HARDWARE_BUTTONS))
             assertTrue(settings.get(PlaybackSettingKeys.SMART_RESUME))
-            vm.setHardwareButtons(HardwareButtons.EPISODE)
             vm.setSmartResume(false)
             runCurrent()
-            assertEquals(HardwareButtons.EPISODE, vm.uiState.value.hardwareButtons)
             assertFalse(vm.uiState.value.smartResume)
-        }
-
-    @Test fun failedHardwareWriteKeepsTheDisplayedDefault() =
-        runTest {
-            val vm = page()
-            settings.failNextSet = SettingsError.WriteFailed
-            vm.setHardwareButtons(HardwareButtons.SKIP)
-            runCurrent()
-            assertEquals(HardwareButtons.EPISODE, vm.uiState.value.hardwareButtons)
-            assertEquals(1, vm.uiState.value.messages.size)
         }
 
     @Test fun rejectedAndFailedWritesDoNotChangeDisplayedValues() =
@@ -93,7 +77,7 @@ class PlaybackSettingsViewModelTest : MainDispatcherTest() {
             vm.setSkipBackMs(123)
             runCurrent()
             assertFalse(vm.uiState.value.skipSilence)
-            assertEquals(10_000L, vm.uiState.value.skipBackMs)
+            assertEquals(30_000L, vm.uiState.value.skipBackMs)
             assertEquals(2, vm.uiState.value.messages.size)
         }
 

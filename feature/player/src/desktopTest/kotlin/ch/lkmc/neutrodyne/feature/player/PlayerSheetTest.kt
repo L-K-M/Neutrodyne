@@ -260,11 +260,14 @@ class PlayerSheetTest {
             onNodeWithTag("mini_player").assertIsDisplayed().performClick()
             onNodeWithTag("full_player").assertIsDisplayed()
             onNodeWithContentDescription("Play").performClick()
-            onNodeWithContentDescription("Previous episode").performClick()
-            onNodeWithContentDescription("Next episode").performClick()
-            onNodeWithContentDescription("Back 10 seconds").performClick()
+            onNodeWithContentDescription("Back 30 seconds").performClick()
             onNodeWithContentDescription("Forward 30 seconds").performClick()
-            assertEquals(listOf("toggle", "previous", "next", "back", "forward"), fixture.calls)
+            assertEquals(listOf("toggle", "back", "forward"), fixture.calls)
+            onNodeWithContentDescription("More options").performClick()
+            onNodeWithText("Previous episode").performClick()
+            onNodeWithContentDescription("More options").performClick()
+            onNodeWithText("Next episode").performClick()
+            assertEquals(listOf("toggle", "back", "forward", "previous", "next"), fixture.calls)
             onNodeWithContentDescription("Collapse player").performClick()
             onNodeWithTag("mini_player").assertIsDisplayed()
         }
@@ -704,7 +707,7 @@ class PlayerSheetTest {
             onNode(hasText("Up next (0)").and(hasAnyAncestor(hasTestTag("player_tabs_panel")))).assertIsDisplayed()
         }
 
-    @Test fun chapterStepsTakeTheTransportWhileEpisodeStepsMoveToTheMenu() =
+    @Test fun chapterPlayerKeepsSeekControlsAndEpisodeMenu() =
         runComposeUiTest {
             val chapter = EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
             val fixture = SheetFixture(PlayerSheetValue.Expanded)
@@ -715,36 +718,13 @@ class PlayerSheetTest {
                     previousEpisode = { fixture.calls += "previousEpisode" },
                 )
             }
-            onNodeWithContentDescription("Previous chapter").performClick()
-            onNodeWithContentDescription("Next chapter").performClick()
+            onNodeWithContentDescription("Back 30 seconds").performClick()
+            onNodeWithContentDescription("Forward 30 seconds").performClick()
             onNodeWithContentDescription("More options").performClick()
             onNodeWithText("Previous episode").performClick()
             onNodeWithContentDescription("More options").performClick()
             onNodeWithText("Next episode").performClick()
-            assertEquals(
-                listOf("previous", "next", "previousEpisode", "nextEpisode"),
-                fixture.calls,
-            )
-        }
-
-    @Test fun nextChapterDisablesOnTheLastChapterAndANullCurrentEnables() =
-        runComposeUiTest {
-            val opening = EpisodeChapter(0, 30_000, "Opening", null, null, ChapterSource.PSC, false)
-            val interview = EpisodeChapter(30_000, 60_000, "Interview", null, null, ChapterSource.PSC, false)
-            val fixture = SheetFixture(PlayerSheetValue.Expanded)
-            fixture.chapters = listOf(opening, interview)
-            fixture.currentChapter = CurrentChapter(1, 0, 2, opening)
-            setContent { fixture.Content() }
-            onNodeWithContentDescription("Next chapter").assertIsEnabled()
-            runOnIdle { fixture.currentChapter = CurrentChapter(1, 1, 2, interview) }
-            onNodeWithContentDescription("Next chapter").assertIsNotEnabled()
-            runOnIdle { fixture.currentChapter = null }
-            onNodeWithContentDescription("Next chapter").assertIsEnabled()
-            runOnIdle {
-                fixture.chapters = emptyList()
-                fixture.now = sampleNow().copy(hasNext = false)
-            }
-            onNodeWithContentDescription("Next episode").assertIsNotEnabled()
+            assertEquals(listOf("back", "forward", "previousEpisode", "nextEpisode"), fixture.calls)
         }
 
     /** 08 Context menus: the mini player's menu offers the catalogue's Expand and Dismiss. */

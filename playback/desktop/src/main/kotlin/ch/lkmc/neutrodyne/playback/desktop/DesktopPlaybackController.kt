@@ -1754,7 +1754,7 @@ class DesktopPlaybackController(
         const val EVENT_CAPACITY = 8
         const val TICK_MS = 1_000L
         const val BYTES_PER_MB = 1_000_000L
-        const val DEFAULT_SKIP_BACK_MS = 10_000L
+        const val DEFAULT_SKIP_BACK_MS = 30_000L
         const val DEFAULT_SKIP_FORWARD_MS = 30_000L
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_RANGE_NOT_SATISFIABLE = 416
