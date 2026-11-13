@@ -29,6 +29,7 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -152,11 +153,23 @@ class PlayerSheetTest {
             onNodeWithText("Episode 3").assertDoesNotExist()
         }
 
-    @Test fun hidingMiniSkipKeepsFullPlayerSkip() =
+    @Test fun miniPlayerSeeksWithVisibleButtonsAndConfiguredAccessibilityActions() =
         runComposeUiTest {
-            val fixture = SheetFixture(PlayerSheetValue.Expanded).apply { miniSkip = false }
+            val fixture =
+                SheetFixture().apply {
+                    skipBackMs = 15_000L
+                    skipForwardMs = 45_000L
+                }
             setContent { fixture.Content() }
-            onNodeWithContentDescription("Forward 30 seconds").assertIsDisplayed()
+            val mini = onNodeWithTag("mini_player")
+            mini.performCustomAccessibilityActionWithLabel("Back 15 seconds")
+            mini.performCustomAccessibilityActionWithLabel("Forward 45 seconds")
+            mini.performTouchInput {
+                click(Offset(center.x * 2 - 120.dp.toPx(), center.y))
+                click(Offset(center.x * 2 - 24.dp.toPx(), center.y))
+            }
+            assertEquals(listOf("back", "forward", "back", "forward"), fixture.calls)
+            mini.assertIsDisplayed()
         }
 
     @Test fun openPlayerPanelHidesTransportUntilCollapsed() =
@@ -707,6 +720,15 @@ class PlayerSheetTest {
             onNode(hasText("Up next (0)").and(hasAnyAncestor(hasTestTag("player_tabs_panel")))).assertIsDisplayed()
         }
 
+    @Test fun episodeMenuDisablesNextWhenThereIsNoNextEpisode() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded).apply { now = sampleNow().copy(hasNext = false) }
+            setContent { fixture.Content() }
+            onNodeWithContentDescription("More options").performClick()
+            onNodeWithText("Previous episode").assertIsEnabled()
+            onNodeWithText("Next episode").assertIsNotEnabled()
+        }
+
     @Test fun chapterPlayerKeepsSeekControlsAndEpisodeMenu() =
         runComposeUiTest {
             val chapter = EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
@@ -801,7 +823,8 @@ private class SheetFixture(
     var expandToken by mutableIntStateOf(0)
     var collapseToken by mutableIntStateOf(0)
     var contentBottomPx = 0f
-    var miniSkip = true
+    var skipBackMs = 30_000L
+    var skipForwardMs = 30_000L
     var systemUi = SystemUiState.DEFAULT.copy(reducedMotion = true)
     val calls = mutableListOf<String>()
     val navigated = mutableListOf<androidx.navigation3.runtime.NavKey>()
@@ -847,7 +870,8 @@ private class SheetFixture(
                                     ch.lkmc.neutrodyne.core.ui
                                         .MeteredConsent(it.episodeId)
                                 },
-                            miniSkip = miniSkip,
+                            skipBackMs = skipBackMs,
+                            skipForwardMs = skipForwardMs,
                             sleepTimer = sleepTimer,
                             chapters = chapters,
                             currentChapter = currentChapter,

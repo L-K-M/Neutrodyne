@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -845,6 +846,12 @@ internal fun PlayerSheet(
                                                         },
                                                     )
                                                     add(
+                                                        CustomAccessibilityAction(backLabel) {
+                                                            back()
+                                                            true
+                                                        },
+                                                    )
+                                                    add(
                                                         CustomAccessibilityAction(forwardLabel) {
                                                             forward()
                                                             true
@@ -883,23 +890,30 @@ internal fun PlayerSheet(
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
+                                    TextButton(
+                                        onClick = back,
+                                        modifier = Modifier.size(48.dp).semantics { contentDescription = backLabel },
+                                        contentPadding = PaddingValues(0.dp),
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                Res.string.player_back_value,
+                                                ui.skipBackMs / MILLIS_PER_SECOND,
+                                            ),
+                                        )
+                                    }
                                     PlayButton(now, toggle, playLabel)
-                                    if (ui.miniSkip) {
-                                        TextButton(
-                                            onClick = forward,
-                                            modifier =
-                                                Modifier.semantics {
-                                                    contentDescription =
-                                                        forwardLabel
-                                                },
-                                        ) {
-                                            Text(
-                                                stringResource(
-                                                    Res.string.player_forward_value,
-                                                    ui.skipForwardMs / MILLIS_PER_SECOND,
-                                                ),
-                                            )
-                                        }
+                                    TextButton(
+                                        onClick = forward,
+                                        modifier = Modifier.size(48.dp).semantics { contentDescription = forwardLabel },
+                                        contentPadding = PaddingValues(0.dp),
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                Res.string.player_forward_value,
+                                                ui.skipForwardMs / MILLIS_PER_SECOND,
+                                            ),
+                                        )
                                     }
                                 }
                                 val snapshot = position?.takeIf { it.episodeId == now.episodeId } ?: now.position
