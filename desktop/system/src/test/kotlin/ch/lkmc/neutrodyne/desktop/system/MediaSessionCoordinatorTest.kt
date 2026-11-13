@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.system
 
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
@@ -20,15 +19,15 @@ import org.junit.Test
 
 /**
  * [MediaSessionCoordinator]: the shared state reaches the session as publishes, every remote
- * command maps to the shared controller's action with `playback.hardware_buttons` read live,
- * and seeks are rate-limited to 10 per second (11 Remote commands).
+ * command maps to the shared controller's action (next/previous always seek the configured
+ * increments, ignoring the stored `playback.hardware_buttons` mode), and seeks are rate-limited
+ * to 10 per second (11 Remote commands).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MediaSessionCoordinatorTest {
     private val controller = FakePlaybackController()
     private val state = FakePlaybackStateSource()
     private val session = FakeSystemMediaSession()
-    private val hardware = MutableStateFlow(HardwareButtons.EPISODE)
 
     private fun TestScope.coordinator(
         nanos: () -> Long = { 0L },
@@ -42,7 +41,6 @@ class MediaSessionCoordinatorTest {
         skipBackMs = MutableStateFlow(10_000L),
         skipForwardMs = MutableStateFlow(30_000L),
         speedPresets = MutableStateFlow(listOf(1f, 2f)),
-        hardwareButtons = hardware,
         setExternalRate = setRate,
         artworkPath = artworkPath,
         nanos = nanos,
@@ -101,8 +99,8 @@ class MediaSessionCoordinatorTest {
                     FakePlaybackController.Action.PLAY,
                     FakePlaybackController.Action.PAUSE,
                     FakePlaybackController.Action.TOGGLE,
-                    FakePlaybackController.Action.NEXT,
-                    FakePlaybackController.Action.PREVIOUS,
+                    FakePlaybackController.Action.FORWARD,
+                    FakePlaybackController.Action.BACK,
                     FakePlaybackController.Action.FORWARD,
                     FakePlaybackController.Action.BACK,
                     FakePlaybackController.Action.SEEK,
@@ -140,17 +138,13 @@ class MediaSessionCoordinatorTest {
         }
 
     @Test
-    fun nextAndPreviousFollowTheHardwareButtonsSettingLive() =
+    fun nextAndPreviousAlwaysSeekTheConfiguredIncrements() =
         runTest {
             coordinator().start()
             runCurrent()
 
-            hardware.value = HardwareButtons.SKIP
             session.emit(RemoteCommand.Next)
             session.emit(RemoteCommand.Previous)
-            runCurrent()
-
-            hardware.value = HardwareButtons.EPISODE
             session.emit(RemoteCommand.Next)
             session.emit(RemoteCommand.Previous)
             runCurrent()
@@ -160,8 +154,8 @@ class MediaSessionCoordinatorTest {
                 .containsExactly(
                     FakePlaybackController.Action.FORWARD,
                     FakePlaybackController.Action.BACK,
-                    FakePlaybackController.Action.NEXT,
-                    FakePlaybackController.Action.PREVIOUS,
+                    FakePlaybackController.Action.FORWARD,
+                    FakePlaybackController.Action.BACK,
                 ).inOrder()
         }
 

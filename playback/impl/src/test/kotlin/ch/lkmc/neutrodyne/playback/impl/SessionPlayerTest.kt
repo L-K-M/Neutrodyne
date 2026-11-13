@@ -14,7 +14,6 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.media3.session.legacy.MediaSessionCompat
 import androidx.media3.session.legacy.MediaSessionManager.RemoteUserInfo
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -40,7 +39,6 @@ class SessionPlayerTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     private val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
     private var accepted = true
-    private var hardware = HardwareButtons.EPISODE
     private var currentSession: MediaSession? = null
     private var previous = 0
     private val calls = mutableListOf<String>()
@@ -52,7 +50,7 @@ class SessionPlayerTest {
             calls += "flush"
             exo.stop()
             calls += "stop"
-        }, {}, hardwareButtons = { hardware }, transportProtocol = { currentSession.transportProtocol() })
+        }, {}, transportProtocol = { currentSession.transportProtocol() })
 
     @After fun close() {
         player.release()
@@ -108,13 +106,20 @@ class SessionPlayerTest {
         assertFalse(player.isCommandAvailable(Player.COMMAND_SET_SHUFFLE_MODE))
     }
 
-    @Test fun bothNextCommandsSelectEpisodesAndPreviousUsesHistory() {
+    @Test fun explicitEpisodeCommandsRemainSeparateFromSeeking() {
         load()
+        exo.setSeekBackIncrementMs(30_000)
+        exo.setSeekForwardIncrementMs(30_000)
+        exo.seekTo(5_000)
+        player.seekToPrevious()
+        assertEquals(0L, exo.currentPosition)
         player.seekToNext()
+        assertEquals(30_000L, exo.currentPosition)
+        assertEquals(0, exo.currentMediaItemIndex)
+        player.seekToNextMediaItem()
         assertEquals(1, exo.currentMediaItemIndex)
         player.seekToPreviousMediaItem()
-        player.seekToPrevious()
-        assertEquals(2, previous)
+        assertEquals(1, previous)
     }
 
     @Test fun pauseArrivingDuringBeforePlayWinsOverTheLatePlay() {
@@ -152,7 +157,6 @@ class SessionPlayerTest {
     @Test fun liveSkipMappingWorksWithOneItemAndExplicitEpisodeCommandsStaySeparate() {
         exo.setMediaItem(MediaItem.fromUri("https://synthetic.test/1.mp3"), 60_000)
         shadowOf(Looper.getMainLooper()).idle()
-        hardware = HardwareButtons.SKIP
         exo.setSeekBackIncrementMs(20_000)
         exo.setSeekForwardIncrementMs(45_000)
         player.seekToNext()
@@ -163,11 +167,11 @@ class SessionPlayerTest {
         assertEquals(85_000L, exo.currentPosition)
         player.seekToPreviousMediaItem()
         assertEquals(1, previous)
-        hardware = HardwareButtons.EPISODE
         player.seekToNext()
-        assertEquals(85_000L, exo.currentPosition)
+        assertEquals(130_000L, exo.currentPosition)
         player.seekToPrevious()
-        assertEquals(2, previous)
+        assertEquals(110_000L, exo.currentPosition)
+        assertEquals(1, previous)
     }
 
     @Test
@@ -206,7 +210,6 @@ class SessionPlayerTest {
                         putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, code))
                     },
                 )
-            hardware = HardwareButtons.SKIP
             exo.setSeekBackIncrementMs(PlaybackSettingKeys.SKIP_BACK_MS.default)
             exo.setSeekForwardIncrementMs(PlaybackSettingKeys.SKIP_FORWARD_MS.default)
             exo.seekTo(60_000)
@@ -215,12 +218,12 @@ class SessionPlayerTest {
             assertEquals(90_000L, exo.currentPosition, "index=${exo.currentMediaItemIndex}")
             assertEquals(0, exo.currentMediaItemIndex)
             legacy.onSkipToPrevious()
-            pumpUntil { exo.currentPosition == 80_000L }
-            hardware = HardwareButtons.EPISODE
+            pumpUntil { exo.currentPosition == 60_000L }
             legacy.onSkipToNext()
-            pumpUntil { exo.currentMediaItemIndex == 1 }
+            pumpUntil { exo.currentPosition == 90_000L }
             key(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-            pumpUntil { previous == 1 }
+            pumpUntil { exo.currentPosition == 60_000L }
+            assertEquals(0, exo.currentMediaItemIndex)
         } finally {
             MediaController.releaseFuture(notification)
             session.release()

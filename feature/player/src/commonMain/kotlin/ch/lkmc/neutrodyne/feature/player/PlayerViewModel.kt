@@ -91,7 +91,6 @@ internal data class PlayerUiState(
     val presets: String = PlaybackSettingKeys.DEFAULT_SPEED_PRESETS,
     val consent: MeteredConsent? = null,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
-    val miniSkip: Boolean = true,
     val timeDisplay: PlayerTimeDisplay = PlayerTimeDisplay.REMAINING,
     val upNextCount: Int = 0,
     val sleepTimer: SleepTimerState = SleepTimerState.Off,
@@ -190,9 +189,6 @@ internal class PlayerViewModel(
             settings.observe(PlaybackSettingKeys.SPEED_PRESETS),
             ::PlayerUiState,
         ).combine(playbackActions.meteredConsent) { state, consent -> state.copy(consent = consent) }
-            .combine(
-                settings.observe(AppearanceSettingKeys.MINI_PLAYER_SKIP),
-            ) { state, show -> state.copy(miniSkip = show) }
             .combine(
                 settings.observe(AppearanceSettingKeys.PLAYER_TIME),
             ) { state, time -> state.copy(timeDisplay = time) }

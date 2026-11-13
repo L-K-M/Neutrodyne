@@ -31,7 +31,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
@@ -47,9 +46,6 @@ import ch.lkmc.neutrodyne.feature.settings.resources.playback_clear
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_clear_cache
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_clear_cache_confirm
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_default_speed
-import ch.lkmc.neutrodyne.feature.settings.resources.playback_hardware_buttons
-import ch.lkmc.neutrodyne.feature.settings.resources.playback_hardware_episode
-import ch.lkmc.neutrodyne.feature.settings.resources.playback_hardware_skip
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_metered_allow
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_metered_ask
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_metered_never
@@ -144,15 +140,6 @@ internal fun PlaybackPage(
                 viewModel::setSmartResume,
             )
             if (platform == PlatformKind.ANDROID) {
-                SettingsRow(
-                    NdIcons.Schedule,
-                    stringResource(Res.string.playback_hardware_buttons),
-                    stringResource(hardwareLabel(state.hardwareButtons)),
-                    {
-                        dialog =
-                            PlaybackDialog.HARDWARE.name
-                    },
-                )
                 SettingsSwitchRow(
                     stringResource(Res.string.playback_pause_for_navigation),
                     null,
@@ -259,21 +246,6 @@ internal fun PlaybackPage(
             )
         }
 
-        PlaybackDialog.HARDWARE -> {
-            SettingsChoiceDialog(
-                icon = NdIcons.Schedule,
-                title = stringResource(Res.string.playback_hardware_buttons),
-                options = HardwareButtons.entries,
-                selected = state.hardwareButtons,
-                label = { stringResource(hardwareLabel(it)) },
-                onSelect = {
-                    viewModel.setHardwareButtons(it)
-                    dialog = null
-                },
-                onDismissRequest = { dialog = null },
-            )
-        }
-
         PlaybackDialog.SPEED -> {
             var draft by rememberSaveable { mutableStateOf(state.speed) }
             NdDialog(
@@ -368,13 +340,7 @@ private fun meteredLabel(policy: StreamOnMetered): StringResource =
         StreamOnMetered.NEVER -> Res.string.playback_metered_never
     }
 
-private fun hardwareLabel(mode: HardwareButtons): StringResource =
-    when (mode) {
-        HardwareButtons.EPISODE -> Res.string.playback_hardware_episode
-        HardwareButtons.SKIP -> Res.string.playback_hardware_skip
-    }
-
-private enum class PlaybackDialog { HARDWARE, SPEED, PRESETS, BACK, FORWARD, METERED, CACHE, CLEAR }
+private enum class PlaybackDialog { SPEED, PRESETS, BACK, FORWARD, METERED, CACHE, CLEAR }
 
 private const val MILLIS_PER_SECOND = 1_000L
 private const val BYTES_PER_MB = 1_000_000L

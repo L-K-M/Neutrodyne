@@ -32,9 +32,9 @@ import kotlin.test.assertTrue
 private val COMPACT_WINDOW_WIDTH = 320.dp
 private val MINIMUM_TOUCH_TARGET = 48.dp
 
-/** Stable en-US fixture labels; Next remains enabled. */
+/** Stable en-US fixture labels. */
 private val TRANSPORT_LABELS =
-    listOf("Back 10 seconds", "Previous episode", "Play", "Next episode", "Forward 30 seconds")
+    listOf("Back 30 seconds", "Play", "Forward 30 seconds")
 private val TRANSPORT_TEXT_LABELS = TRANSPORT_LABELS - "Play"
 
 /** At 320dp, transport targets must stay large enough and disjoint. */
@@ -46,6 +46,40 @@ class PlayerCompactTransportTest {
 
     @Before fun fakeImages() {
         installFakeImageLoader()
+    }
+
+    @Test fun miniPlayerTransportKeepsDisjoint48DpTouchTargets() {
+        rule.setContent {
+            NeutrodyneTheme(
+                AppearancePrefs(dynamicColor = false),
+                SystemUiState.DEFAULT.copy(reducedMotion = true),
+            ) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    PlayerVisualContent(PlayerVisual.MINI_PAUSED)
+                }
+            }
+        }
+        rule.waitForIdle()
+        val root = rule.onRoot().fetchSemanticsNode()
+        val density = root.layoutInfo.density
+        assertEquals(COMPACT_WINDOW_WIDTH.value, root.boundsInRoot.width / density.density)
+        val minimum = with(density) { MINIMUM_TOUCH_TARGET.toPx() }
+        val targets =
+            TRANSPORT_LABELS.map { label ->
+                val node = rule.onNodeWithContentDescription(label, useUnmergedTree = true).fetchSemanticsNode()
+                checkNotNull(node.clickableOrDescendant() ?: node.parent?.clickableOrAncestor()) {
+                    "$label has no clickable node"
+                }.touchBoundsInRoot
+            }
+        targets.forEach { bounds ->
+            assertTrue(
+                bounds.width >= minimum && bounds.height >= minimum,
+                "Touch bounds $bounds under $MINIMUM_TOUCH_TARGET",
+            )
+        }
+        targets.forEachIndexed { index, first ->
+            targets.drop(index + 1).forEach { other -> assertTrue(!first.overlaps(other), "$first overlaps $other") }
+        }
     }
 
     @Test fun fullPlayerTransportKeepsDisjoint48DpTouchTargets() {
@@ -111,3 +145,6 @@ private fun SemanticsNode.clickableOrDescendant(): SemanticsNode? =
     } else {
         children.firstNotNullOfOrNull { it.clickableOrDescendant() }
     }
+
+private fun SemanticsNode.clickableOrAncestor(): SemanticsNode? =
+    if (config.contains(SemanticsActions.OnClick)) this else parent?.clickableOrAncestor()

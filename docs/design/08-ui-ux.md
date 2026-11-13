@@ -1942,7 +1942,7 @@ With "Remove animations" on, flings settle instantly (snap spec) and the colour 
 
 ### Mini player
 
-64 dp high, 8 dp side insets, 8 dp above the navigation bar (or the window bottom inset when a rail is used), 16 dp corners (`NeutrodyneShapes`). Contents: 48 dp `CoverArt` (10 dp corners; YouTube: centre crop of the 16:9 art), episode title `titleSmall` and podcast title `bodySmall` (one line each, ellipsis, no marquee), play/pause 48 dp, skip forward 48 dp (hidden when `appearance.mini_player_skip` is off), 2 dp `primary` progress line on the bottom edge. Phases: `BUFFERING` → a 2 dp ring around the play button; `ERROR` or a non-null `issue` → an 8 dp `error` dot on the art; `NOT_LOADED` (service stopped, 06) → play resumes via `play()`. TalkBack: one node "Now playing: {title}, {podcast}. {Playing|Paused}." with actions Play/Pause, Skip forward {n} seconds, Expand player, Dismiss (paused only).
+64 dp high, 8 dp side insets, 8 dp above the navigation bar (or the window bottom inset when a rail is used), 16 dp corners (`NeutrodyneShapes`). Contents: 48 dp `CoverArt` (10 dp corners; YouTube: centre crop of the 16:9 art), episode title `titleSmall` and podcast title `bodySmall` (one line each, ellipsis, no marquee), skip back, play/pause and skip forward, each 48 dp, 2 dp `primary` progress line on the bottom edge. Phases: `BUFFERING` → a 2 dp ring around the play button; `ERROR` or a non-null `issue` → an 8 dp `error` dot on the art; `NOT_LOADED` (service stopped, 06) → play resumes via `play()`. TalkBack: one node "Now playing: {title}, {podcast}. {Playing|Paused}." with actions Play/Pause, Skip back {n} seconds, Skip forward {n} seconds, Expand player, Dismiss (paused only).
 
 ### Full player
 
@@ -1962,7 +1962,7 @@ Compact portrait layout; other layouts in [Side panel, medium widths and tableto
 |  Ch. 3 · The interview                  (list)   |  current chapter (M5)
 |  |------o------|----|---------|--------------|   |  NdSlider with chapter ticks
 |  12:04                                  -33:10   |  tap right label: remaining <-> total
-|   (-10)   (|<)   ((  >||  ))   (>|)   (+30)      |  72 dp play; |< >| = chapter, else episode
+|       (-30)         ((  >||  ))        (+30)      |  72 dp play; seek by configured intervals
 |  (1.2x)      (sleep 23m)      (Up next 3)  (share)|
 |  1.5x from group 'news'                          |  attribution when not the app default
 +--------------------------------------------------+
@@ -1970,11 +1970,11 @@ Compact portrait layout; other layouts in [Side panel, medium widths and tableto
 +--------------------------------------------------+
 ```
 
-- Transport: skip back/forward labels and a11y use `playback.skip_back_ms`/`skip_forward_ms` ("Back 10 seconds"); `|<`/`>|` are `previousChapter`/`nextChapter` when the episode has chapters (labels "Previous chapter"/"Next chapter"), else `skipToPrevious`/`skipToNext` ("Previous episode"/"Next episode"; `>|` disabled when `!hasNext`); with chapters, the overflow's "Next episode" (`skipToNext()`) keeps episode skipping one tap away. The play button morphs between a rounded square and a circle (`graphics-shapes` 1.1.0) only when animations are enabled.
-- Compact transport: reserve the 72 dp Play button first, then cap the four actions equally without stretching their preferred widths. At 320 dp, their 48 dp touch targets must remain disjoint; the final action must not expand over Next.
+- Transport: back and forward seek by the configured intervals (30 seconds by default), with matching accessibility labels. Episode navigation remains in the overflow and chapters remain accessible through the chapter UI. The play button morphs between a rounded square and a circle (`graphics-shapes` 1.1.0) only when animations are enabled.
+- Compact transport: keep the 72 dp Play button and two seek actions disjoint with at least 48 dp touch targets at 320 dp.
 - Scrubber: `NdSlider`, chapter start ticks drawn in `drawBehind`; dragging shows the target time in a bubble and seeks on release (`seekTo`); `stateDescription` "12 minutes 4 seconds of 45 minutes"; custom actions Back/Forward {n} seconds; no live-region announcements of the position.
 - Secondary row: speed (label "1.2×" → `SpeedKey`), sleep (icon, or "23 min" while running → `SleepTimerKey`), Up next (count → opens the tabs panel), share (episode web link or YouTube watch URL; "Copy link" on the desktop). Desktop only: a volume button (`volume_up`, the level as `stateDescription`) that opens a vertical `NdSlider` popup (0–100 %, wheel and ↑/↓ adjust, the in-app volume of 11's `GainStage`, also Ctrl/Cmd+↑/↓ and the Playback menu); Android has no in-app volume (the system's volume keys) — the API for it is [Open questions](#open-questions) 24. No cast button: Chromecast is not planned ([PO-6](../PLAN.md#po-6-chromecast); Cast needs proprietary Play services).
-- Overflow: Go to episode (`EpisodeKey`), Go to podcast, Next episode (only when chapters own `>|`), Mark played and skip (`EpisodeRepository.setPlayed(listOf(id), true)` **only**: 06's projector advances when the current item is marked played, so an extra `skipToNext()` would skip two episodes, 06 open question 12), Download / Delete download (per [`RowCaps`](#episoderow); results through `DownloadRequestHandler`), Watch on YouTube (YouTube items, which play only with the engine; with `&t=` per 04), Stop and close (`dismiss()`).
+- Overflow: Previous episode, Next episode (when available), Go to episode (`EpisodeKey`), Go to podcast, Mark played and skip (`EpisodeRepository.setPlayed(listOf(id), true)` **only**: 06's projector advances when the current item is marked played, so an extra `skipToNext()` would skip two episodes, 06 open question 12), Download / Delete download (per [`RowCaps`](#episoderow); results through `DownloadRequestHandler`), Watch on YouTube (YouTube items, which play only with the engine; with `&t=` per 04), Stop and close (`dismiss()`).
 - Colours: the whole sheet is wrapped in `ArtworkTheme(colors?.seedArgb)` (M10; app scheme before).
 
 ### Tabs panel
@@ -2922,7 +2922,7 @@ Serves N4, R5 (all), R8.10. Delivered with every UI milestone; audit and the ful
 | Cover tile | Open; Select; Add to groups; Unsubscribe |
 | Group tile and tab | Open feed; Play; Refresh; Edit |
 | Feeds pager | Next group; Previous group |
-| Mini player | Play/Pause; Skip forward {n} seconds; Expand player; Dismiss (paused) |
+| Mini player | Play/Pause; Skip back {n} seconds; Skip forward {n} seconds; Expand player; Dismiss (paused) |
 | Full player | Collapse player; chapter next/previous when chapters exist |
 | Downloads row | Play; Pause/Resume; Download now; Use mobile data (Android); Cancel; Retry; Delete; Share file (`COMPLETED`, shareable root; desktop: Show in folder); Open episode (only the actions valid for the row's state) |
 | Continue on this device card (MS3) | Play; Dismiss |
@@ -3090,10 +3090,10 @@ Serves R2.7 (settings screens), R3.9 (display), R5.5, R6.2–R6.3 and R6.6 (Sett
 
 | `SettingsPage` | Sections and rows | Keys owned by |
 |---|---|---|
-| `APPEARANCE` | Theme (on the desktop "System" follows the OS, [App scheme](#app-scheme)); Use wallpaper colours (Android API 31+ only; hidden below and on the desktop); Tint with artwork colours (M10); Pure black (M10, enabled only when the theme can be dark); Language (Android: per-app picker listing `BuildInfo.shippedLocales` plus "System default", applied with `AppCompatDelegate.setApplicationLocales`, [09 Localisation](09-quality-and-release.md#localisation); on the desktop the row is in `DESKTOP`); Library: grid size (M10), show titles; Gestures (Android; hidden on the desktop, which has no row swipes): swipe episodes in Feeds, swipe toward the end action (`appearance.swipe_start_action`), swipe toward the start action (`appearance.swipe_end_action`) — labelled "Swipe right"/"Swipe left" in LTR and mirrored in RTL; Mini player skip button; YouTube rows: video thumbnail or channel picture (M8) | 08, 09 |
+| `APPEARANCE` | Theme (on the desktop "System" follows the OS, [App scheme](#app-scheme)); Use wallpaper colours (Android API 31+ only; hidden below and on the desktop); Tint with artwork colours (M10); Pure black (M10, enabled only when the theme can be dark); Language (Android: per-app picker listing `BuildInfo.shippedLocales` plus "System default", applied with `AppCompatDelegate.setApplicationLocales`, [09 Localisation](09-quality-and-release.md#localisation); on the desktop the row is in `DESKTOP`); Library: grid size (M10), show titles; Gestures (Android; hidden on the desktop, which has no row swipes): swipe episodes in Feeds, swipe toward the end action (`appearance.swipe_start_action`), swipe toward the start action (`appearance.swipe_end_action`) — labelled "Swipe right"/"Swipe left" in LTR and mirrored in RTL; YouTube rows: video thumbnail or channel picture (M8) | 08, 09 |
 | `FEEDS` | Refresh interval, Wi-Fi only (Android), refresh on open, load older episodes when subscribing, show-notes images; Notifications: new episodes (with the blocked-permission row on Android); Groups: show Ungrouped tab, Manage groups | 03, 05 |
 | `DISCOVER` | Country; Apple; fyyd; Podcast Index and "Use my own Podcast Index key"; provider disclosure | 03 |
-| `PLAYBACK` | Default speed, skip silence, speed presets, skip back, skip forward (these defaults sync while "Sync playback settings" is on, [Sync screens](#sync-screens)), pause for navigation prompts (Android), streaming on mobile data (Android), headset next/previous (the desktop: media-key next/previous), rewind after long pauses; Storage: streaming cache size, usage, Clear streaming cache (`PlaybackMaintenance`) | 06 |
+| `PLAYBACK` | Default speed, skip silence, speed presets, skip back, skip forward (these defaults sync while "Sync playback settings" is on, [Sync screens](#sync-screens)), pause for navigation prompts (Android), streaming on mobile data (Android), rewind after long pauses; Storage: streaming cache size, usage, Clear streaming cache (`PlaybackMaintenance`) | 06 |
 | `DOWNLOADS` | 07's [Settings](07-downloads.md#settings): mobile data for manual downloads (Android), automatic downloads (enabled, keep latest, network and charging on Android, include video), delete played episodes, storage limit; Storage location (Android: `storageRoots()` as radio rows with free space; choosing another root asks "Move {n} downloads ({2.3 GB}) to {SD card}?" → `changeRoot(rootId, moveExisting)`; desktop: a row linking to Settings › Desktop › Downloads folder); usage line from `observeStorage()`; "Clean up unknown files" ({1.2 GB}, confirmation → `deleteOrphanFiles()`); YouTube channels auto-download (with the engine, M9a, 04) | 07, 04 |
 | `YOUTUBE` | 04's [Settings](04-youtube.md#settings), filtered by capabilities: with the engine the [YouTube engine rows](#youtube-engine-rows) ("Play YouTube in the app", engine version and source, status line, engine updates policy, "Check for engine update", "Reset to bundled"), audio quality, volume levelling; in external mode the reason card ([External reason texts](#external-reason-texts)); in both: variants info, suggest RSS, mark played on open | 04 |
 | `BACKUP` | the [Backup and restore](#backup-and-restore) body (the desktop shows the computer-backup text instead of the Android backup section) | 05 |
@@ -3157,7 +3157,7 @@ Portable keys are added to the backup whitelist automatically (05); `ui.*` keys 
 | `appearance.feeds_row_swipe` | Bool | false | `settings` | Appearance › Gestures › Swipe episodes in Feeds | M2 |
 | `appearance.swipe_start_action` | Choice `SwipeAction` {ADD_UP_NEXT, MARK_PLAYED, DOWNLOAD, NONE}: action of a start-to-end swipe | ADD_UP_NEXT | `settings` | Appearance › Gestures | M2 |
 | `appearance.swipe_end_action` | Choice `SwipeAction` (same values): action of an end-to-start swipe | MARK_PLAYED | `settings` | Appearance › Gestures | M2 |
-| `appearance.mini_player_skip` | Bool | true | `settings` | Appearance › Mini player skip button | M4 |
+| `appearance.mini_player_skip` | Bool | true | `settings` | Legacy value retained for settings and backup compatibility; ignored | M4 |
 | `appearance.player_time` | Choice `PlayerTimeDisplay` {REMAINING, TOTAL} | REMAINING | `settings` | tap on the player's time label | M4 |
 | `appearance.youtube_row_art` | Choice `YouTubeRowArt` {VIDEO_THUMBNAIL, CHANNEL_AVATAR} | VIDEO_THUMBNAIL | `settings` | Appearance (shown when YouTube subscriptions exist) | M8 |
 | `ui.feeds_selected_source` | Text (`all`, `ungrouped`, `group:{uuid}`) | `all` | `device_settings` | internal | M2 |

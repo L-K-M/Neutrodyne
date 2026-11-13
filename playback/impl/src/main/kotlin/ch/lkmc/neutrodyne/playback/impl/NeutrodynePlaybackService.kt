@@ -63,7 +63,6 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     pauseAllPlayersAndStopSelf()
                 },
                 cancelPendingPlay = access.hub::newPlaybackIntent,
-                hardwareButtons = { access.prefs.current.value.hardwareButtons },
                 userPaused = { bridge?.userPaused() },
                 transportProtocol = { session.transportProtocol() },
             ).also { sessionPlayer = it }
