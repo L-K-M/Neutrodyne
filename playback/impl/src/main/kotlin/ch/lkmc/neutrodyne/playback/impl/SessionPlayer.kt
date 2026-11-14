@@ -7,7 +7,6 @@ import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaSession
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +22,6 @@ internal class SessionPlayer private constructor(
     private val stopAction: suspend () -> Unit,
     private val cancelPendingPlay: () -> Unit,
     private val sessionSource: SessionSource,
-    private val hardwareButtons: () -> HardwareButtons,
     private val userPaused: () -> Unit,
     private val transportProtocol: () -> TransportProtocol,
 ) : ForwardingSimpleBasePlayer(sessionSource) {
@@ -35,7 +33,6 @@ internal class SessionPlayer private constructor(
         previous: suspend () -> Unit,
         stopAction: suspend () -> Unit,
         cancelPendingPlay: () -> Unit,
-        hardwareButtons: () -> HardwareButtons = { HardwareButtons.EPISODE },
         userPaused: () -> Unit = {},
         transportProtocol: () -> TransportProtocol = { TransportProtocol.MEDIA3 },
     ) : this(
@@ -47,7 +44,6 @@ internal class SessionPlayer private constructor(
         stopAction,
         cancelPendingPlay,
         SessionSource(exo),
-        hardwareButtons,
         userPaused,
         transportProtocol,
     )
@@ -118,12 +114,8 @@ internal class SessionPlayer private constructor(
             }
         return when (command) {
             Player.COMMAND_SEEK_TO_PREVIOUS -> {
-                if (hardwareButtons() == HardwareButtons.SKIP) {
-                    exo.seekBack()
-                    Futures.immediateVoidFuture()
-                } else {
-                    scope.future { previous() }
-                }
+                exo.seekBack()
+                Futures.immediateVoidFuture()
             }
 
             Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
@@ -131,12 +123,8 @@ internal class SessionPlayer private constructor(
             }
 
             Player.COMMAND_SEEK_TO_NEXT -> {
-                if (hardwareButtons() == HardwareButtons.SKIP) {
-                    exo.seekForward()
-                    Futures.immediateVoidFuture()
-                } else {
-                    nextEpisode()
-                }
+                exo.seekForward()
+                Futures.immediateVoidFuture()
             }
 
             Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {

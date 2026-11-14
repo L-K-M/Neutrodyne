@@ -17,7 +17,6 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -301,33 +300,15 @@ class SettingsScreensTest {
         }
 
     @Test
-    fun miniPlayerSkipReflectsAndChangesTheStoredPreference() =
+    fun obsoleteMiniPlayerSkipPreferenceIsRetainedButNotShown() =
         runComposeUiTest {
             val settings = FakeSettingsRepository()
             runBlocking { settings.set(AppearanceSettingKeys.MINI_PLAYER_SKIP, false) }
             setSettingsRoot(settingsRepository = settings)
             openSettings()
             onAllNodesWithText("Appearance").onFirst().performClick()
-            val toggle = onNodeWithText("Mini player skip button").performScrollTo()
-            toggle.assertIsOff()
-            toggle.performClick()
-            toggle.assertIsOn()
-            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.MINI_PLAYER_SKIP) })
-        }
-
-    @Test
-    fun failedMiniPlayerSkipWriteKeepsTheStoredValue() =
-        runComposeUiTest {
-            val settings = FakeSettingsRepository().apply { failNextSet = SettingsError.WriteFailed }
-            setSettingsRoot(settingsRepository = settings)
-            openSettings()
-            onAllNodesWithText("Appearance").onFirst().performClick()
-            val toggle = onNodeWithText("Mini player skip button").performScrollTo()
-            toggle.assertIsOn()
-            toggle.performClick()
-            onNodeWithText("Couldn’t save the setting").assertIsDisplayed()
-            toggle.assertIsOn()
-            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.MINI_PLAYER_SKIP) })
+            onNodeWithText("Mini player skip button").assertDoesNotExist()
+            assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.MINI_PLAYER_SKIP) })
         }
 
     @Test

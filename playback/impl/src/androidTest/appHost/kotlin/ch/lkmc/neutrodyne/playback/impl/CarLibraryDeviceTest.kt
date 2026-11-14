@@ -3,7 +3,6 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.content.ComponentName
 import android.content.Intent
-import android.media.AudioManager
 import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.os.Bundle
@@ -153,7 +152,7 @@ class CarLibraryDeviceTest {
         }
 
     @Test @ReleaseSmoke
-    fun legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances() =
+    fun legacyHardwareSkipIgnoresStoredEpisodeMode() =
         runBlocking {
             val db = graph.databaseOpener.requireDatabase()
             val next =
@@ -193,36 +192,21 @@ class CarLibraryDeviceTest {
                         ?.isPlaying,
                 )
 
-                withContext(Dispatchers.Main) { transport.play() }
-                awaitPlaying(true)
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
-                graph.settingsRepository
-                    .observe(PlaybackSettingKeys.HARDWARE_BUTTONS)
-                    .first { it == HardwareButtons.EPISODE }
-                // The setting collector is asynchronous; the observed transport result is the proof.
-                delay(500)
+                withContext(Dispatchers.Main) { transport.seekTo(0) }
+                withTimeout(20_000) {
+                    while ((currentPosition() ?: Long.MAX_VALUE) > SKIP_TOLERANCE_MS) delay(50)
+                }
                 withContext(Dispatchers.Main) { transport.skipToNext() }
+                val fromStart = (SKIP_MS - SKIP_TOLERANCE_MS)..(SKIP_MS + SKIP_TOLERANCE_MS)
                 withTimeout(20_000) {
-                    while (graph.playbackStateSource.nowPlaying.value
-                            ?.episodeId != next ||
-                        graph.playbackStateSource.nowPlaying.value
-                            ?.isPlaying != true
-                    ) {
-                        delay(50)
-                    }
+                    while (currentPosition()?.let { it in fromStart } != true) delay(50)
                 }
-                // AudioService publishes AudioPlaybackConfiguration asynchronously to the
-                // session's own isPlaying signal; on the loaded api26 image it trailed the
-                // restarted track long enough to fail a single read (CI run 42328682766).
-                withTimeout(20_000) {
-                    while (app
-                            .getSystemService(AudioManager::class.java)
-                            .activePlaybackConfigurations
-                            .isEmpty()
-                    ) {
-                        delay(50)
-                    }
-                }
+                assertEquals(
+                    episode,
+                    graph.playbackStateSource.nowPlaying.value
+                        ?.episodeId,
+                )
             } finally {
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
                 graph.settingsRepository.set(

@@ -76,6 +76,7 @@ internal fun Project.registerPythonStandalone() {
         dependsOn(fetch)
         archive.set(fetch.flatMap { it.archive })
         this.trimScript.set(trimScript)
+        extractionScript.set(rootProject.layout.projectDirectory.file("scripts/engine/extract-python-archive.py"))
         // A subdirectory, so trimming never deletes the fetch task's archive output.
         output.set(pythonStandalone.map { it.dir("trimmed") })
     }
@@ -240,6 +241,10 @@ abstract class TrimPythonStandalone : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val trimScript: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val extractionScript: RegularFileProperty
 
     /** The trimmed tree under `python/` plus `cacert.pem` beside it. */
     @get:OutputDirectory

@@ -23,22 +23,14 @@ output=${2:?usage: trim-python.sh <archive.tar.gz> <output-dir>}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Fail closed on members and link targets that would leave the owned extraction root:
-# absolute paths, '..' segments, drive letters and backslashes. tar implementations differ
-# in their default refusals, so the check is explicit rather than delegated (11 Trim list).
-if tar -tzf "$archive" \
-    | LC_ALL=C grep -qE '(^|/)\.\.(/|$)|^/|^[A-Za-z]:|\\'; then
-  echo "trim-python.sh: $archive carries a member path outside the extraction root" >&2
-  exit 1
-fi
-if tar -tvzf "$archive" \
-    | LC_ALL=C sed -nE 's/^.*( -> | link to )(.*)$/\2/p' \
-    | LC_ALL=C grep -qE '(^|/)\.\.(/|$)|^/|^[A-Za-z]:|\\'; then
-  echo "trim-python.sh: $archive carries a link target outside the extraction root" >&2
-  exit 1
-fi
-
-tar -xzf "$archive" -C "$work"
+# Check each member as it is extracted, including links resolved through earlier links.
+# Safe relative links are allowed; share/ is omitted because it is removed by the trim.
+script_dir=$(cd "$(dirname "$0")" && pwd)
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) python=python ;;
+  *) python=python3 ;;
+esac
+"$python" "$script_dir/extract-python-archive.py" "$archive" "$work"
 root="$work/python"
 if [ ! -d "$root" ]; then
   echo "trim-python.sh: $archive has no python/ root" >&2

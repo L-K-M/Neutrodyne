@@ -85,7 +85,7 @@ public object AppearanceSettingKeys {
     /** Empty means All; otherwise Ungrouped or a group UUID (08 Library). */
     val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
 
-    /** Mini player › optional forward-skip control (08 Player sheet, M4). */
+    /** Legacy mini-player visibility preference, retained for settings and backup compatibility. */
     public val MINI_PLAYER_SKIP = SettingKey.Bool("appearance.mini_player_skip", true)
 
     public val PLAYER_TIME: SettingKey.Choice<PlayerTimeDisplay> =

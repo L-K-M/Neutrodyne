@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.common.Log
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayOrigin
@@ -10,7 +9,6 @@ import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -23,7 +21,8 @@ import kotlin.math.roundToLong
  * and on its 5-s playing tick — is pushed into the session together with the skip increments
  * and speed presets the OS surfaces label their buttons with. Commands dispatch to the shared
  * controller on this coordinator's scope, never on the thread the OS delivered them from;
- * next/previous follow `playback.hardware_buttons` read live (06 SessionPlayer).
+ * next/previous always seek the configured increments, ignoring the stored
+ * `playback.hardware_buttons` mode (11 Remote commands).
  *
  * Seeks are rate-limited to [SEEKS_PER_SECOND] per second (11 Remote commands) — a dropped
  * intermediate seek is the position the OS UI already moved past. `SetRate` from an external
@@ -38,7 +37,6 @@ class MediaSessionCoordinator(
     private val skipBackMs: Flow<Long>,
     private val skipForwardMs: Flow<Long>,
     private val speedPresets: Flow<List<Float>>,
-    private val hardwareButtons: StateFlow<HardwareButtons>,
     private val setExternalRate: (suspend (Float) -> Unit)? = null,
     private val artworkPath: (NowPlaying) -> String? = { null },
     private val nanos: () -> Long = System::nanoTime,
@@ -73,19 +71,11 @@ class MediaSessionCoordinator(
             }
 
             RemoteCommand.Next -> {
-                if (hardwareButtons.value == HardwareButtons.EPISODE) {
-                    controller.skipToNext()
-                } else {
-                    controller.skipForward()
-                }
+                controller.skipForward()
             }
 
             RemoteCommand.Previous -> {
-                if (hardwareButtons.value == HardwareButtons.EPISODE) {
-                    controller.skipToPrevious()
-                } else {
-                    controller.skipBack()
-                }
+                controller.skipBack()
             }
 
             RemoteCommand.SkipForward -> {

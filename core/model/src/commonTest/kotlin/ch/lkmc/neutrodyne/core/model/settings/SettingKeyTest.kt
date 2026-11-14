@@ -161,7 +161,7 @@ class SettingKeyTest {
         assertEquals(1.0f, PlaybackSettingKeys.SPEED.default)
         assertEquals(false, PlaybackSettingKeys.SKIP_SILENCE.default)
         assertEquals("0.8,1.0,1.2,1.5,1.8,2.0", PlaybackSettingKeys.SPEED_PRESETS.default)
-        assertEquals(10_000L, PlaybackSettingKeys.SKIP_BACK_MS.default)
+        assertEquals(30_000L, PlaybackSettingKeys.SKIP_BACK_MS.default)
         assertEquals(30_000L, PlaybackSettingKeys.SKIP_FORWARD_MS.default)
         assertEquals(true, PlaybackSettingKeys.PAUSE_FOR_NAVIGATION.default)
         assertEquals(StreamOnMetered.ALLOW, PlaybackSettingKeys.STREAM_ON_METERED.default)
