@@ -452,8 +452,8 @@ flowchart TD
 2. `GET` with 01's FEED client (`NeutrodyneHttpClients.client(FEED)`, 120 s call timeout; the API client's 8 s is too short for this page), headers `Cookie: SOCS=CAE=` (the "reject all" consent value, which skips the EU consent interstitial; NewPipe sends the same), `Accept: text/html`, `Accept-Language: {app locale}, en;q=0.5`. User-Agent: ours ([01 Interceptors](01-foundation.md#interceptors)).
 3. Status: 404 → `NotFound`; 429 → `Failed(RATE_LIMITED)`; 5xx / I/O → `Failed(NETWORK, retryable)`; final URL host `consent.youtube.com` → `Failed(CONSENT_WALL)`.
 4. Read the body channel (Ktor `bodyAsChannel()`) into a buffer until `</head>` (case-insensitive) or 1.5 MiB, then `ChannelPageParser.parseHead(prefix, baseUri)` (pure common code). It uses `HeadTagScanner`, a small scanner of `<link>`, `<meta>` and `<title>` tags (case-insensitive tag and attribute names, quoted and unquoted attribute values, decoding of `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;` and numeric character references), with no DOM and no HTML-parser dependency: jsoup is JVM-only and lives only in `:feeds:jvm` ([01 Open questions](01-foundation.md#open-questions) 23, decided here 2026-10-05). The selectors below name the tags the scanner matches. Unverified: that YouTube's head uses no other named entities in the fields we read (the M8 fixture decides; an undecodable entity stays literal).
-5. Channel ID, first match wins: `link[rel=alternate][type=application/rss+xml]` href `channel_id=`; `link[rel=canonical]` `/channel/UC…`; `meta[itemprop=identifier]`; regex `"externalId":"(UC[\w-]{22})"` over the prefix. If none and fewer than 1.5 MiB were read, keep streaming the body for `"externalId"` up to 3 MiB total. Validate with `YouTubeIds.CHANNEL`; otherwise `Failed(PAGE_UNREADABLE)`.
-6. Title `meta[property=og:title]` (fallback `<title>` minus `" - YouTube"`); avatar `meta[property=og:image]`; description `meta[property=og:description]` (plain text).
+5. Channel ID, first match wins: `link[rel=alternate][type=application/rss+xml]` href `channel_id=`; `link[rel=canonical]` `/channel/UC…`; `meta[itemprop=identifier]`; regex `"externalId":"(UC[\w-]{22})"` over the prefix. If none and fewer than 1.5 MiB were read, keep streaming the body for the same metadata tags or `"externalId"` up to 3 MiB total. YouTube can send its channel metadata after `</head>`, and its mobile response need not contain `"externalId"`. Preserve tokenizer state across reads, ignore tags in scripts, styles and comments, and cap each retained tag/title at 64 KiB. Validate with `YouTubeIds.CHANNEL`; otherwise `Failed(PAGE_UNREADABLE)`.
+6. Title `meta[property=og:title]` (fallback `<title>` minus `" - YouTube"`); avatar `meta[property=og:image]`; description `meta[property=og:description]` (plain text). Metadata found during the body identity scan replaces generic head values such as the title "YouTube".
 7. Only for `depth = FULL`: continue streaming the body with a 64 KiB sliding window (2 KiB overlap) for `"imageBannerViewModel":{"image":{"sources":[`, capture up to the closing `]`, decode the array of `{url, width, height}` with kotlinx.serialization, stop at 3 MiB total. Close the response as soon as everything needed is found.
 
 The page is about 2.5 MB; reading it fully for every subscribe is wasteful, hence head-first. Unverified: the byte size of `<head>`; M8 measures it on the recorded fixture. If the median head exceeds 512 KiB, imports fetch avatars only for the first 20 channels per refresh run on metered networks (rest on unmetered); the decision is recorded here.
@@ -469,9 +469,13 @@ small libraries use the two control feeds before declaring an outage.
 Replay fixtures live in `youtube/impl/src/test/resources/recorded/` and are
 shared by desktop and Android host tests. Their provenance explicitly labels
 the successful response shapes as reconstructed research fixtures, rather
-than fresh successful recordings. A current successful handle/oEmbed capture
-and the channel-head median needed for the metered-avatar decision remain
-open. Synthetic fixture sizes cannot establish that policy.
+than fresh successful recordings. The 2026-11-14 subscription repair adds a
+scrubbed mobile response shape from a successful `@TheTechReportTR` capture:
+the initial head names only the handle, while a later block supplies the
+channel feed, title and avatar, without `externalId`. The reported video’s
+oEmbed author URL points to that same handle. This single-channel capture
+does not establish the channel-head median needed for the metered-avatar
+decision; synthetic fixture sizes cannot establish that policy.
 
 ### oEmbed, user feed and watch page
 
