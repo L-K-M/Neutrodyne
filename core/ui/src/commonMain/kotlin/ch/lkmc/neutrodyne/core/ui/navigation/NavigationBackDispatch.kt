@@ -36,7 +36,7 @@ internal fun NavigationBackDispatch(
     val parent = LocalNavigationEventDispatcherOwner.current ?: rememberNavigationEventDispatcherOwner()
 
     val events = remember(parent, panes) { BackEventOwner(panes) }
-    val entries = remember(parent, panes) { EntryBackOwner(parent, panes) }
+    val entries = remember(parent, panes) { EntryBackOwner(parent, panes, events) }
     DisposableEffect(events) {
         events.attach(parent.navigationEventDispatcher)
         onDispose { events.dispose() }
@@ -142,7 +142,18 @@ private data class BackOrigin(
 private class EntryBackOwner(
     val parent: NavigationEventDispatcherOwner,
     val panes: PaneSceneStrategy,
+    val overlayOwner: NavigationEventDispatcherOwner,
 )
+
+@Composable
+internal fun OverlayBackOwner(content: @Composable () -> Unit) {
+    val owner = LocalEntryBackDispatch.current?.overlayOwner
+    if (owner == null) {
+        content()
+    } else {
+        CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner, content = content)
+    }
+}
 
 /** Entry selection and other screen handlers retain precedence over navigation completion. */
 @Composable
