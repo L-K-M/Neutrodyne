@@ -3,6 +3,7 @@
 """Safety and portability checks for the desktop Python archive extractor."""
 
 import io
+import os
 import pathlib
 import subprocess
 import sys
@@ -11,6 +12,7 @@ import tempfile
 import unittest
 
 EXTRACTOR = pathlib.Path(__file__).resolve().parents[1] / "extract-python-archive.py"
+TRIM = EXTRACTOR.with_name("trim-python.sh")
 
 
 class ArchiveExtractionTest(unittest.TestCase):
@@ -81,6 +83,22 @@ class ArchiveExtractionTest(unittest.TestCase):
         result, outside, _, _ = self.run_archive(members)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(outside)
+
+    def test_git_bash_uses_windows_python(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for name, body in (("uname", "echo MINGW64_NT"), ("python", "exit 42")):
+                executable = root / name
+                executable.write_text(f"#!/bin/sh\n{body}\n")
+                executable.chmod(0o755)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"])
+            result = subprocess.run(
+                ["bash", str(TRIM), str(root / "archive"), str(root / "output")],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 42, result.stderr)
 
 
 if __name__ == "__main__":
