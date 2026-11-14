@@ -14,7 +14,11 @@ def safe_members(archive):
         parts = pathlib.PurePosixPath(name).parts
         if not name or "\\" in name or name.startswith("/") or ntpath.splitdrive(name)[0] or ".." in parts:
             raise ValueError(f"unsafe archive member: {name!r}")
-        if member.issym() or member.islnk():
+        # tarfile may resolve an absent hardlink target from the archive without
+        # reapplying the extraction filter. The pinned runtimes have no hardlinks.
+        if member.islnk():
+            raise ValueError(f"hardlinks are not supported: {name!r}")
+        if member.issym():
             target = member.linkname
             if not target or "\\" in target or target.startswith("/") or ntpath.splitdrive(target)[0]:
                 raise ValueError(f"unsafe link target: {target!r}")

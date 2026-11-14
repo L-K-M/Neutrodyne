@@ -57,6 +57,7 @@ class ArchiveExtractionTest(unittest.TestCase):
             [("symlink", "python/bin/python", "../../../escape")],
             [("symlink", "python/bin/python", "/escape")],
             [("hardlink", "python/bin/python", "../escape")],
+            [("file", "python/file", "ok"), ("hardlink", "python/link", "python/file")],
             [("symlink", "python/link", "../../escape"), ("file", "python/link/file", "bad")],
             [("file", "python/../escape", "bad")],
             [("symlink", "python/bin/python", "C:\\escape")],
