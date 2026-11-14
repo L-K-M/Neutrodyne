@@ -67,6 +67,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
@@ -85,6 +86,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -726,6 +728,46 @@ class NeutrodyneRootTest {
         }
 
     @Test
+    fun previewRedirectCanOpenSheetDuringTransition() =
+        runComposeUiTest {
+            val routes =
+                flowOf(
+                    Route.Push(
+                        PodcastPreviewKey("https://example.com/feed"),
+                    ),
+                )
+            setContent { TestRoot(routes = routes) }
+            waitUntil(timeoutMillis = 10_000) {
+                onAllNodesWithText("add-podcast-sheet").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("add-podcast-sheet").assertIsDisplayed()
+            onAllNodesWithContentDescription("Close sheet").onFirst().performTouchInput { click(Offset(4f, 4f)) }
+            waitForIdle()
+            onNodeWithText("add-podcast-sheet").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun previewRedirectCanOpenDialogDuringTransition() =
+        runComposeUiTest {
+            val routes =
+                flowOf(
+                    Route.Push(
+                        PodcastPreviewKey("dialog"),
+                    ),
+                )
+            setContent { TestRoot(routes = routes) }
+            waitUntil(timeoutMillis = 10_000) {
+                onAllNodesWithText("export-dialog").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("export-dialog").assertIsDisplayed()
+            onNodeWithText("export-dialog").performTouchInput { click(Offset(-20f, -20f)) }
+            waitForIdle()
+            onNodeWithText("export-dialog").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
     fun sheetWindowDismissClosesOnlyOverlay() =
         runComposeUiTest {
             setRootContent()
@@ -1128,6 +1170,23 @@ private val TestInstallers: Set<EntryProviderInstaller> =
             }
         }
         add { entry<ImportKey>(metadata = NdSceneMetadata.paneDetail()) { Text("import-${it.sessionId}") } }
+        add {
+            entry<PodcastPreviewKey>(
+                metadata = NdSceneMetadata.paneDetail(),
+            ) { key ->
+                val navigator = LocalAppNavigator.current
+                LaunchedEffect(key) {
+                    if (navigator.pop(key)) {
+                        if (key.feedUrl == "dialog") {
+                            navigator.push(ExportKey(null))
+                        } else {
+                            navigator.push(AddPodcastKey(key.feedUrl))
+                        }
+                    }
+                }
+                Text("preview")
+            }
+        }
         add {
             entry<ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey>(metadata = NdSceneMetadata.paneDetail()) {
                 Text("verification-notice")

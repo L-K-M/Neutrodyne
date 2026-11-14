@@ -141,9 +141,13 @@ internal object HeadTagScanner {
     private val ENTITY = Regex("&(#(?:[xX][0-9a-fA-F]+|[0-9]+)|[A-Za-z]+);")
 }
 
-/** Incremental ASCII markup boundary detection; script strings and comments cannot end the head. */
-internal class HeadBoundary {
+/** Byte-stream metadata and head boundaries; raw text and comments stay opaque across chunks. */
+internal class HtmlMetadataStream(
+    private val onMetadata: ((List<HeadTagScanner.Tag>) -> Unit)? = null,
+) {
     private var tag: StringBuilder? = null
+    private var truncatedTag = false
+    private var title: StringBuilder? = null
     private var quote: Char? = null
     private var comment = false
     private var raw: String? = null
@@ -151,6 +155,9 @@ internal class HeadBoundary {
 
     fun accept(byte: Byte): Boolean {
         val char = (byte.toInt() and 0xff).toChar()
+        title?.let {
+            if (it.length < METADATA_CAP) it.append(char) else title = null
+        }
         tail = (tail + char).takeLast(4)
         if (comment) {
             if (tail.endsWith("-->")) comment = false
@@ -158,16 +165,20 @@ internal class HeadBoundary {
         }
         val active = tag
         if (active == null) {
-            if (char == '<') tag = StringBuilder()
+            if (char == '<') {
+                tag = StringBuilder()
+                truncatedTag = false
+            }
             return false
         }
         // In raw text, '<' does not start a nested HTML tag.
         if (raw != null && char == '<') {
             tag = StringBuilder()
+            truncatedTag = false
             return false
         }
-        active.append(char)
-        if (active.length == 3 && active.toString() == "!--") {
+        if (active.length < METADATA_CAP) active.append(char) else truncatedTag = true
+        if (raw == null && active.length == 3 && active.toString() == "!--") {
             comment = true
             tag = null
             return false
@@ -185,14 +196,35 @@ internal class HeadBoundary {
             if (raw != null && active.length > 16) tag = null
             return false
         }
-        val content = active.toString().dropLast(1).trim()
+        val content = (if (truncatedTag) active.toString() else active.toString().dropLast(1)).trim()
         val name = content.takeWhile { !it.isWhitespace() && it != '/' }.lowercase()
         tag = null
         if (raw != null) {
-            if (content.equals("/$raw", true)) raw = null
+            if (content.equals("/$raw", true)) {
+                title?.let {
+                    it.setLength(it.length - active.length - 1)
+                    emit("<title>${utf8(it)}</title>")
+                }
+                title = null
+                raw = null
+            }
             return false
         }
+        if (!truncatedTag && name in listOf("link", "meta")) emit("<${utf8(active)}")
         if (name in listOf("script", "style", "title")) raw = name
+        if (name == "title" && onMetadata != null) title = StringBuilder()
         return content.equals("/head", true)
+    }
+
+    private fun emit(markup: String) {
+        onMetadata?.invoke(HeadTagScanner.scan(markup))
+    }
+
+    // Each char holds one original byte, so split UTF-8 code points survive read boundaries.
+    private fun utf8(bytes: StringBuilder): String =
+        ByteArray(bytes.length) { bytes[it].code.toByte() }.decodeToString()
+
+    private companion object {
+        const val METADATA_CAP = 64 * 1024
     }
 }

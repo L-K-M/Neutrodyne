@@ -139,6 +139,96 @@ class ChannelPageParserTest {
             )
         }
 
+    @Test fun channelMetadataCanArriveAfterTheHeadWithoutExternalId() =
+        runTest {
+            val text =
+                "<head><title>YouTube</title><link rel=canonical href=/@example></head><body>" +
+                    "<style>" + " ".repeat(70000) + "</style>" +
+                    "<link rel=alternate type=application/rss+xml href='/feeds/videos.xml?channel_id=$id'>" +
+                    "<meta property=og:title content='Channel &amp; Studio'>" +
+                    "<meta property=og:image content=https://yt3.ggpht.com/avatar>" +
+                    "<meta property=og:description content='Channel description'>"
+            for (depth in MetadataDepth.entries) {
+                val result = scan(text, depth)
+                assertEquals(id, result.channelId)
+                assertEquals(if (depth == MetadataDepth.ID_ONLY) null else "Channel & Studio", result.title)
+                assertEquals(
+                    if (depth ==
+                        MetadataDepth.ID_ONLY
+                    ) {
+                        null
+                    } else {
+                        "https://yt3.ggpht.com/avatar"
+                    },
+                    result.avatarUrl,
+                )
+                assertEquals(if (depth == MetadataDepth.ID_ONLY) null else "Channel description", result.description)
+            }
+        }
+
+    @Test fun bodyMetadataIgnoresCommentsAndRawTextAcrossWindows() =
+        runTest {
+            val decoy = "<meta itemprop=identifier content=$other>"
+            val text =
+                "<head></head><body><script>" + " ".repeat(70000) + decoy + "</script>" +
+                    "<!--" + " ".repeat(70000) + decoy + "-->" +
+                    "<meta itemprop=identifier content=$id><title>Channel &amp; Studio - YouTube</title>"
+            val result = scan(text, MetadataDepth.AVATAR)
+            assertEquals(id, result.channelId)
+            assertEquals("Channel & Studio", result.title)
+        }
+
+    @Test fun bodyMetadataIsByteBoundedAndSurvivesChunkBoundaries() =
+        runTest {
+            val start = "<head></head><body>"
+            val tag = "<meta itemprop=identifier content=$id>"
+            for (offset in listOf(8190, 65520, HtmlAutodiscoveryChannelResolver.PAGE_CAP - tag.length)) {
+                assertEquals(
+                    id,
+                    scan(start + " ".repeat(offset - start.length) + tag, MetadataDepth.ID_ONLY).channelId,
+                    "offset $offset",
+                )
+            }
+            assertIs<ChannelResolution.Failed>(
+                rawScan(start + " ".repeat(HtmlAutodiscoveryChannelResolver.PAGE_CAP) + tag, MetadataDepth.ID_ONLY),
+            )
+        }
+
+    @Test fun bodyMetadataPreservesSplitUtf8AndSkipsOversizedTags() =
+        runTest {
+            val start = "<head></head><body>"
+            val title = "<meta property=og:title content='"
+            val padding = " ".repeat(8191 - start.length - title.length)
+            val text =
+                start + padding + title + "é音楽'>" +
+                    "<meta content='" + "x".repeat(70000) + "' itemprop=identifier>" +
+                    "<meta itemprop=identifier content=$id>"
+            val result = scan(text, MetadataDepth.AVATAR)
+            assertEquals(id, result.channelId)
+            assertEquals("é音楽", result.title)
+        }
+
+    @Test fun watchMetadataAfterHeadUsesOnlyTheChannelId() =
+        runTest {
+            val text =
+                "<head><title>Video title</title></head><body>" +
+                    "<meta itemprop=identifier content=8Y-fS_55pD0>" +
+                    "<meta property=og:title content='Video title'>" +
+                    "<meta itemprop=channelId content=$id>"
+            val result =
+                assertIs<ChannelResolution.Resolved>(
+                    HtmlAutodiscoveryChannelResolver.scan(
+                        ByteReadChannel(text.encodeToByteArray()),
+                        base,
+                        MetadataDepth.ID_ONLY,
+                        HtmlAutodiscoveryChannelResolver.PageKind.WATCH,
+                    ),
+                )
+            assertEquals(id, result.channelId)
+            assertNull(result.title)
+            assertNull(result.avatarUrl)
+        }
+
     @Test fun fullAloneSearchesBannerAndStopsAtThreeMiB() =
         runTest {
             val head = "<head><meta itemprop=identifier content=$id></head>"
