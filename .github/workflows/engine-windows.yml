@@ -6,6 +6,9 @@ on:
     paths:
       - "youtube/engine/**"
       - "youtube/ytdlp/src/test/**"
+      - "scripts/engine/extract-python-archive.py"
+      - "scripts/engine/trim-python.sh"
+      - "build-logic/convention/src/main/kotlin/PythonStandalone.kt"
       - ".github/workflows/engine-windows.yml"
   workflow_dispatch:
 
@@ -54,6 +57,8 @@ jobs:
           ./gradlew.bat --no-daemon --max-workers=4 --no-build-cache
           :youtube:engine:cleanTest :youtube:engine:test
           --tests "*BundledEngineStoreTest*"
+      - name: Trim the pinned desktop Python runtime
+        run: ./gradlew.bat --no-daemon --max-workers=4 --no-build-cache :youtube:ytdlp-desktop:trimPythonStandalone
       - name: Require the DOS regression cases to execute
         shell: bash
         run: |

@@ -26,7 +26,11 @@ trap 'rm -rf "$work"' EXIT
 # Check each member as it is extracted, including links resolved through earlier links.
 # Safe relative links are allowed; share/ is omitted because it is removed by the trim.
 script_dir=$(cd "$(dirname "$0")" && pwd)
-python3 "$script_dir/extract-python-archive.py" "$archive" "$work"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) python=python ;;
+  *) python=python3 ;;
+esac
+"$python" "$script_dir/extract-python-archive.py" "$archive" "$work"
 root="$work/python"
 if [ ! -d "$root" ]; then
   echo "trim-python.sh: $archive has no python/ root" >&2
