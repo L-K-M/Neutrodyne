@@ -7,7 +7,6 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
-import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.desktop.system.IdleSleepInhibitor
 import ch.lkmc.neutrodyne.desktop.system.MediaSessionCoordinator
@@ -21,19 +20,15 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The OS surfaces of the desktop shell (11 DesktopAppGraph): the shared playback state and
  * controller wired to the OS media session, and the power policy with the idle-sleep
  * inhibitor, both started once at initializer band 250 and torn down by the shutdown before
- * playback flushes its last position. The skip increments, speed presets and the
- * `playback.hardware_buttons` mapping come from the settings repository exactly as the
- * shared controller reads them.
+ * playback flushes its last position. The skip increments and speed presets come from the
+ * settings repository exactly as the shared controller reads them.
  */
 @SingleIn(AppScope::class)
 @Inject
@@ -50,10 +45,6 @@ class DesktopOsSurfaces(
     settings: SettingsRepository,
 ) {
     private val started = AtomicBoolean(false)
-    private val hardwareButtons: StateFlow<HardwareButtons> =
-        settings
-            .observe(PlaybackSettingKeys.HARDWARE_BUTTONS)
-            .stateIn(scope, SharingStarted.Eagerly, HardwareButtons.EPISODE)
 
     private val mediaSession =
         MediaSessionCoordinator(
@@ -67,7 +58,6 @@ class DesktopOsSurfaces(
                 settings
                     .observe(PlaybackSettingKeys.SPEED_PRESETS)
                     .map { PlaybackSettingKeys.parseSpeedPresets(it) ?: DEFAULT_SPEED_PRESETS },
-            hardwareButtons = hardwareButtons,
             artworkPath = { nowPlaying -> nowPlaying?.let { artwork().pinnedPath(it.artwork.key)?.toString() } },
         )
 

@@ -194,7 +194,7 @@ class EffectivePlaybackSettingsTest {
         runTest {
             subject.observePreferences().test {
                 val initial = awaitItem()
-                assertEquals(10_000, initial.skipBackMs)
+                assertEquals(30_000, initial.skipBackMs)
                 assertEquals(30_000, initial.skipForwardMs)
                 assertEquals(500, initial.streamCacheMb)
                 globals.set(PlaybackSettingKeys.SKIP_BACK_MS, 20_000L)

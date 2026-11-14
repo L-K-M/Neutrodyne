@@ -139,7 +139,7 @@ R8.1 requires every difference to be listed here. Everything not in this table b
 | Screen readers | TalkBack | VoiceOver; NVDA through Java Access Bridge; none on Linux | [Accessibility](#accessibility) |
 | Video podcasts | Played as audio in v1.0 (video surface v1.x) | Played as audio; video through libmpv in v1.x (M17) | [D64](../PLAN.md#3-key-decisions) |
 | Widgets, mini-player window, Quick Settings | v1.x / later | None | [PLAN 1.2](../PLAN.md#12-non-goals-for-v10) |
-| Hardware next/previous (`playback.hardware_buttons`) | Headset and Bluetooth keys | The same setting maps media-key next/previous from the OS sessions | [Remote commands](#remote-commands) |
+| Hardware next/previous | Headset and Bluetooth keys | OS next/previous seek by the configured intervals | [Remote commands](#remote-commands) |
 
 ---
 
@@ -636,8 +636,8 @@ class OsPowerMonitor : PowerMonitor; class OsDesktopNotifier : DesktopNotifier; 
 | `Play` | `ButtonPressed(Play)` | `playCommand` | `Play()` | `play()` — resume, else start Up next (06) |
 | `Pause` | `ButtonPressed(Pause)`, `Stop` | `pauseCommand`, `stopCommand` | `Pause()`, `Stop()` | `pause()` (stop keeps the session, like Android) |
 | `Toggle` | — | `togglePlayPauseCommand` | `PlayPause()` | play or pause |
-| `Next` | `ButtonPressed(Next)` | `nextTrackCommand` | `Next()` | `playback.hardware_buttons` = `EPISODE`: `skipToNext()`; `SKIP`: `skipForward()` ([06 Hardware buttons and SessionPlayer](06-playback.md#hardware-buttons-and-sessionplayer)) |
-| `Previous` | `ButtonPressed(Previous)` | `previousTrackCommand` | `Previous()` | `EPISODE`: `skipToPrevious()`; `SKIP`: `skipBack()` |
+| `Next` | `ButtonPressed(Next)` | `nextTrackCommand` | `Next()` | `skipForward()` ([06 Hardware buttons and SessionPlayer](06-playback.md#hardware-buttons-and-sessionplayer)) |
+| `Previous` | `ButtonPressed(Previous)` | `previousTrackCommand` | `Previous()` | `skipBack()` |
 | `SkipForward` / `SkipBack` | `ButtonPressed(FastForward / Rewind)` | `skipForwardCommand` / `skipBackwardCommand` (`preferredIntervals` = the skip settings in seconds) | `Seek(offset)` with a positive or negative offset → `SeekTo(position + offset)` | `skipForward()` / `skipBack()` |
 | `SeekTo(ms)` | `PlaybackPositionChangeRequested` | `changePlaybackPositionCommand` | `SetPosition(trackId, position)` (ignored unless `trackId` is the current track) | `seekTo(ms)` |
 | `SetRate(x)` | `PlaybackRateChangeRequested` | `changePlaybackRateCommand` (`supportedPlaybackRates` = speed presets) | setting `Rate` (clamped to 0.5–3.0) | speed for the current item, not persisted — 06's rule for external controllers ([06 Per-scope playback settings](06-playback.md#per-scope-playback-settings)) |

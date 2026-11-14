@@ -28,7 +28,7 @@ object PlaybackSettingKeys {
         SettingKey.Text("playback.speed_presets", DEFAULT_SPEED_PRESETS, synced = true)
 
     val SKIP_BACK_MS: SettingKey.Int64 =
-        SettingKey.Int64("playback.skip_back_ms", 10_000L, synced = true)
+        SettingKey.Int64("playback.skip_back_ms", 30_000L, synced = true)
 
     val SKIP_FORWARD_MS: SettingKey.Int64 =
         SettingKey.Int64("playback.skip_forward_ms", 30_000L, synced = true)

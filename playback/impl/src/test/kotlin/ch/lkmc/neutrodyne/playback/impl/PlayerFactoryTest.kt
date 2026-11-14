@@ -75,7 +75,7 @@ class PlayerFactoryTest {
         assertThat(player.trackSelectionParameters.audioOffloadPreferences.audioOffloadMode)
             .isEqualTo(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
         assertThat(player.seekParameters).isEqualTo(SeekParameters.EXACT)
-        assertThat(player.seekBackIncrement).isEqualTo(10_000L)
+        assertThat(player.seekBackIncrement).isEqualTo(30_000L)
         assertThat(player.seekForwardIncrement).isEqualTo(30_000L)
     }
 
