@@ -183,6 +183,31 @@ class ServerImageTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertFalse((root / 'moved').exists())
 
+    def test_published_mutable_release_still_requires_source_check(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            marker = root / 'source-check'
+            (root / 'gh').write_text('#!/bin/sh\ncat <<EOF\n' + json.dumps({
+                'draft': False, 'prerelease': False, 'immutable': False,
+            }) + '\nEOF\n')
+            (root / 'gh').chmod(0o755)
+            # Run the real publication-state guard, then stop at the source
+            # check. This fixture never reaches a registry or Docker command.
+            (root / 'python3').write_text(
+                f'#!{sys.executable}\nimport os,sys\nfrom pathlib import Path\n'
+                f'if sys.argv[1] == "-c": os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n'
+                f'Path({str(marker)!r}).write_text(" ".join(sys.argv[1:]))\n'
+                'raise SystemExit(77)\n'
+            )
+            (root / 'python3').chmod(0o755)
+            environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
+                               GITHUB_REPOSITORY='L-K-M/Neutrodyne', PUBLISH_MAKE_LATEST='true')
+            result = subprocess.run([str(IMAGE.ROOT / 'scripts/ci/promote-server-image.sh'), 'v1.0.0',
+                                     'ghcr.io/l-k-m/neutrodyne-server@sha256:' + 'a' * 64, str(root)],
+                                    env=environment, capture_output=True)
+            self.assertEqual(77, result.returncode, result.stdout + result.stderr)
+            self.assertIn('server-image.py check-sources --version 1.0.0', marker.read_text())
+
     def test_untrusted_archive_paths_are_rejected(self):
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode='w') as tar:

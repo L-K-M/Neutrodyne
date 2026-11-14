@@ -6,7 +6,7 @@ user-defined sets of podcasts and YouTube channels — each get their own
 newest-first episode feed. There is no Neutrodyne-operated backend; whoever
 wants devices in step self-hosts Neutrodyne Sync.
 
-**Status: implementation in progress (M3 candidate under review; state in [HANDOFF.md](HANDOFF.md)).** [docs/PLAN.md](docs/PLAN.md) is the
+**Status: implementation merged; v1.0 candidate acceptance in progress (state in [HANDOFF.md](HANDOFF.md)).** [docs/PLAN.md](docs/PLAN.md) is the
 source of truth (requirements, decisions, owner decisions, roadmap); the
 design docs in [docs/design/](docs/design/) elaborate it. Implement milestone
 by milestone and record any deviation in the owning document (and in PLAN.md
@@ -24,6 +24,11 @@ node tools/doccheck/mmdcheck.mjs .             # every Mermaid diagram
 `checkdocs.py` is stdlib-only. `mmdcheck.mjs` needs
 `npm i mermaid@11 jsdom@25` inside `tools/doccheck/` (or anywhere on Node's
 module path).
+
+`scripts/build.sh` builds every host-feasible development target (debug APK,
+desktop app image, server JAR) into `dist/`; `--install` also puts the app on
+the machine or connected device. Release artifacts come from
+`scripts/release.sh` and the release workflow.
 
 ## Standing owner conventions — apply them without asking
 

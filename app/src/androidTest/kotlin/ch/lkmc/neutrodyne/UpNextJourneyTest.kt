@@ -97,10 +97,11 @@ class UpNextJourneyTest {
 
         compose.waitUntil(STARTUP_TIMEOUT_MS) {
             compose
-                .onAllNodes(hasTestTag(TAG_UP_NEXT))
+                .onAllNodes(hasTestTag("radio_menu"))
                 .fetchSemanticsNodes(atLeastOneRootRequired = false)
                 .isNotEmpty()
         }
+        compose.onNodeWithTag("radio_menu").performClick()
         compose.onNodeWithTag(TAG_UP_NEXT).performClick()
         awaitRows(ids)
 

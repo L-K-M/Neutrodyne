@@ -15,6 +15,8 @@
 #     and the diff touches only gradle.properties with the two version lines.
 #     (The release commit's own ci.yml starts together with release.yml, and a
 #     version-line change cannot alter what CI verified.)
+#     For v1.0.0 only, the explicit owner CI waiver recorded in its annotated
+#     tag replaces this CI proof. All other preconditions remain in force.
 #   * make_latest: true when this tag's versionCode is higher than the current
 #     latest release's; true when no published release exists yet ("release not
 #     found"), so the first release is latest; any other gh error fails.
@@ -89,7 +91,18 @@ ci_green() { # ci_green <sha>: at least one ci.yml run on it concluded success
     [ -n "$n" ] && [ "$n" -ge 1 ] 2>/dev/null
 }
 
-if ! ci_green "$SHA"; then
+# The owner waived required GitHub CI for the first complete release. Require
+# its explicit annotation on this exact tag object; future tags still need CI.
+CI_WAIVER="CI-WAIVER: owner-approved required GitHub CI waived; no CI success claimed."
+WAIVED=false
+if [ "$TAG" = v1.0.0 ] && [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = tag ] \
+    && [ "$(git rev-parse "refs/tags/$TAG^{}")" = "$SHA" ] \
+    && git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -Fxq "$CI_WAIVER"; then
+    WAIVED=true
+    echo "verify-tag: WAIVED required ci.yml proof by owner instruction for v1.0.0; no CI success claimed"
+fi
+
+if [ "$WAIVED" = false ] && ! ci_green "$SHA"; then
     # the release.sh fallback: one parent, parent green, only the two version lines
     parents="$(git rev-list --parents -n1 HEAD | wc -w)"
     [ "$parents" -eq 2 ] || fail "no green ci.yml for $SHA and the commit has $((parents-1)) parents (release.sh makes one)"

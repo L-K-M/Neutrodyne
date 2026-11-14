@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.youtube.api.FailReason
 import ch.lkmc.neutrodyne.youtube.api.FeedChannelMetadata
 import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
 import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
 import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -66,7 +67,9 @@ class LayerAReplayTest {
         val route =
             Interceptor { chain ->
                 val original = chain.request()
-                check(original.url.host == "www.youtube.com") { "Unexpected host: ${original.url.host}" }
+                check(
+                    original.url.host in setOf("www.youtube.com", "m.youtube.com"),
+                ) { "Unexpected host: ${original.url.host}" }
                 val local =
                     server
                         .url(
@@ -137,6 +140,42 @@ class LayerAReplayTest {
             assertEquals("de-CH, en;q=0.5", request.headers["Accept-Language"])
             assertEquals("text/html", request.headers["Accept"])
             assertTrue(request.headers["User-Agent"]!!.startsWith("Neutrodyne/"))
+        }
+
+    @Test fun sharedChannelAndVideoLinksResolveMobileMetadataOutsideHead() =
+        runBlocking {
+            val classifier = YouTubeUrlClassifier()
+            val urls =
+                listOf(
+                    "https://www.youtube.com/@TheTechReportTR",
+                    "https://www.youtube.com/@TheTechReportTR?app=desktop",
+                    "https://www.youtube.com/watch?v=8Y-fS_55pD0",
+                )
+            for (url in urls) {
+                val ref = checkNotNull(classifier.classify(url))
+                if (ref is YtRef.Video) {
+                    response(
+                        body = """{"author_url":"https://www.youtube.com/@TheTechReportTR","author_name":"The Tech Report"}""",
+                    )
+                }
+                server.enqueue(
+                    MockResponse
+                        .Builder()
+                        .code(302)
+                        .addHeader("Location", "https://m.youtube.com/@TheTechReportTR")
+                        .build(),
+                )
+                response(body = fixture("mobile-channel.html"))
+                val channel = resolved(resolver().resolve(ref))
+                assertEquals("UCPiMR-Ize9p3dgjzZ8bo9ZQ", channel.channelId, url)
+                assertEquals("The Tech Report", channel.title, url)
+                assertEquals("https://yt3.googleusercontent.com/example-avatar", channel.avatarUrl, url)
+                if (ref is YtRef.Video) assertEquals("/oembed", server.takeRequest().url.encodedPath)
+                assertEquals("/@TheTechReportTR", server.takeRequest().url.encodedPath)
+                val mobile = server.takeRequest()
+                assertEquals("/@TheTechReportTR", mobile.url.encodedPath)
+                assertEquals("SOCS=CAE=", mobile.headers["Cookie"])
+            }
         }
 
     @Test fun unicodeHandleIsEncodedOnlyInRequest() =

@@ -1,0 +1,14 @@
+{
+  "source": "fdd9cb5c6de1fb47e0c8a309c077d014bebdfd77",
+  "version": "1.0.0",
+  "jarSha256": "117911682e6b990b8f91fe392fe6651140179a8000bc76cfc75d0f5caab3f98a",
+  "migrate": true,
+  "doctor": true,
+  "readyz": {
+    "status": 200,
+    "body": "ok"
+  },
+  "environment": "macOS ARM64 local JVM21, isolated temporary data, loopback only",
+  "passed": true,
+  "ownedProcessStopped": true
+}

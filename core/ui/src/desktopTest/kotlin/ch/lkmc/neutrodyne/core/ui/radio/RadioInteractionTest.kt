@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.ui.radio
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -16,13 +17,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onFirst
@@ -31,11 +35,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -80,8 +86,8 @@ class RadioInteractionTest {
             waitForIdle()
             assertEquals(1L, discarded)
             onNodeWithTag("radio_episode_1").assertDoesNotExist()
-            onNodeWithTag("radio_undo").performClick()
-            onNodeWithTag("radio_episode_1").assertIsDisplayed()
+            onNodeWithTag("radio_undo").assertIsFocused().performClick()
+            onNodeWithTag("radio_episode_1").assertIsDisplayed().assertIsFocused()
         }
 
     @Test
@@ -127,6 +133,7 @@ class RadioInteractionTest {
             }
             onNodeWithText(getString(Res.string.radio_paused)).assertIsDisplayed()
             onNodeWithContentDescription(getString(Res.string.radio_elapsed_full, 12L, 0L, 0L)).assertIsDisplayed()
+            onAllNodes(hasText("900:00")).assertCountEquals(2)
         }
 
     @Test fun insertDraftSurvivesColumnSwitchAndRecreation() =
@@ -175,6 +182,49 @@ class RadioInteractionTest {
             onNodeWithTag("radio_episode_1").assertIsDisplayed()
             onNodeWithTag("radio_retry").performClick()
             assertEquals(1, retries)
+        }
+
+    @Test fun doubleTextScaleKeepsHeaderAndTransportReachable() =
+        runDesktopComposeUiTest(width = 320, height = 568) {
+            var menuClicks = 0
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                    NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                        RadioScreen(radioFixture(), RadioActions(menu = { menuClicks++ }))
+                    }
+                }
+            }
+            onNodeWithTag("radio_menu").performTouchInput { click() }
+            assertEquals(1, menuClicks)
+            onNodeWithTag("radio_play").performScrollTo().assertIsDisplayed()
+        }
+
+    @Test fun aLongSelectedTitleStowsTheDeckWithoutOscillating() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var state by mutableStateOf(radioFixture())
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                    RadioScreen(state, RadioActions(), Modifier.padding(top = 48.dp, bottom = 24.dp))
+                }
+            }
+            onNodeWithTag("radio_valve_deck").assertIsDisplayed()
+            runOnIdle {
+                state =
+                    state.copy(
+                        episodes =
+                            state.episodes.map { episode ->
+                                if (episode.id == 1L) {
+                                    episode.copy(title = "A longer programme title that needs room. ".repeat(6))
+                                } else {
+                                    episode
+                                }
+                            },
+                    )
+            }
+            onNodeWithTag("radio_valve_deck").assertDoesNotExist()
+            mainClock.advanceTimeBy(500)
+            onNodeWithTag("radio_valve_deck").assertDoesNotExist()
+            onNodeWithTag("radio_play").assertIsDisplayed()
         }
 
     @Test fun resizeCancelsArmedSwipe() =

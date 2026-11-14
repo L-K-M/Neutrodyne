@@ -1,5 +1,48 @@
 # Handoff — state of the Neutrodyne work
 
+**Radio integration correction, 2026-11-12:** the earlier completion claim
+missed the production radio integration. PR #301 supplied shared materials
+and components, but the playback adapter and home navigation remained on
+`impl/radio-home`. The app therefore opened the superseded Feeds interface.
+The repair restores the radio as the home, its playlist chooser and creation,
+and the unplayed-only programme feed with swipe discard and Undo under
+PO-51–PO-54. Marking played in an unfiltered legacy feed was never an
+acceptable substitute for removing the row from the programme list.
+The `v1.0.0` tag predates this correction. Its artifacts do not contain it.
+
+**Current status, 2026-11-11:** the Android, desktop and sync implementation
+tracks are merged. The Android 14 activity-retention fix is merged through
+[#506](https://github.com/L-K-M/Neutrodyne/pull/506). The version 1.0.0
+candidate (code 1000095) and owner waivers are merged through
+[#510](https://github.com/L-K-M/Neutrodyne/pull/510) and
+[#511](https://github.com/L-K-M/Neutrodyne/pull/511). Annotated tag `v1.0.0`
+points to `449b8bf68bea81fb5445302149e3a092ea69bf4e`; its annotation records
+the required-CI waiver. The [release workflow](https://github.com/L-K-M/Neutrodyne/actions/runs/43092763622)
+is queued at `verify-tag`. Tag checks pass locally, but no release has been
+published. The current blocker is GitHub Actions startup and runner allocation.
+
+The owner waived GitHub release locking. Published assets must still match
+the build and pass provenance verification. The main-only `engine-approval`
+environment and matching signing secret are configured. Its updated
+[bootstrap](https://github.com/L-K-M/Neutrodyne/actions/runs/43097362607)
+returned GitHub's internal startup error before creating jobs, including
+a bounded rerun. Local workflow validation passes. Resume by inspecting
+these runs; address actual build failures before publishing, then verify
+the complete release and image and record the released status. Do not mark
+queued, failed or waived checks as successful.
+
+The owner waived required GitHub CI and extended the waiver for two
+consecutive reviewer-integration failures. Waived checks are never reported
+as passes. On 2026-11-11 the owner directed the remaining acceptance work to
+use the simulator. Record emulator and hosted-VM results as such; physical
+reference-hardware measurements are not claimed. The current evidence and
+remaining operational prerequisites are in the
+[v1 candidate record](docs/evidence/v1-candidate.md).
+
+The older milestone snapshots below remain as historical detail. This
+current-status paragraph and the candidate record supersede their statements
+about work still awaiting implementation or merge.
+
 This file lets another person or agent take over the work at any point. **Last updated: 2026-11-01.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) and root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) are merged; buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) and dismissal fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252) are merged. Native projection #255, player #253 and device-oracle repair #256 are merged. Compact transport #258 is merged. Release-ABI maintenance #257 is merged. Last green main CI: `dee25e7c`, with 98 actual device cases and no failures, errors or skips. M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi

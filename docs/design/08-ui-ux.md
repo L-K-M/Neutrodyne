@@ -206,6 +206,35 @@ interaction and keep the create header/action fixed while fields scroll.
 All supplied English labels follow brief section 5 exactly; German resources
 are supplied. Menu (Menü) is the single owner-added label.
 
+**Selection fallback (2026-11-04).** Deleting the selected group falls back
+to the first remaining playlist, or the empty radio if none remain. This
+adapts the old All-feed fallback to the group-only home. Undoing group deletion
+does not reselect that group, including while the fallback preference write
+is pending or has failed. The shared preference retains the legacy All marker
+on deletion; home resolves it to its retained or first group so the existing
+All-feed browser's fallback remains intact. Paging keeps the selected episode
+and its saved position when its page leaves the loaded window; live-row
+queries follow only the visible window plus its margin and selected episode,
+and release on exit.
+
+**Playback ownership and routes (2026-11-04).** The radio follows active
+playback started on any screen, including before a playlist exists. Resuming
+a followed session retains its loaded context and queue; starting a browsed
+episode uses the selected group. Only an explicit playlist choice pauses.
+Incoming feed routes and passive preference/group changes reselect the view
+without issuing transport commands, retaining D7's routes-only-navigate fence.
+A failed or consent-blocked start keeps any still-playing session controllable
+until its replacement starts.
+
+**Large text and time scales (2026-11-04).** Cabinet fitting includes font
+scale; when the controls and programme need more height, the whole assembly
+scrolls. The normal 56–60 dp transport cap is retained through 1.3× text and
+grows above that scale to keep its label inside. Content titles use at most
+two lines with ellipsis and retain their full accessible text. Deck fitting
+uses the measured player height independently of whether the deck is shown.
+The printed needle scale retains uncapped minutes and seconds; only the
+four-tube counter uses PO-53's capped hours format.
+
 **Implementation notes (2026-11-04).** The shared radio primitives and resources
 live in `:core:ui`; the production adapter lives in `:feature:feeds`. A queued
 episode outside the group's membership still drives the radio transport and

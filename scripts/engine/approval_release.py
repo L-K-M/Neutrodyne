@@ -23,8 +23,11 @@ asset, never marks a snapshot or the index as latest, never mutates the
 repository settings and never touches the legacy index assets.  A failed
 pointer write leaves the completed snapshot unindexed and the old pointer
 intact; success is reported only after the new pointer is visible.  A newly
-published snapshot must be reported immutable by the API; the legacy index
-release may stay body-only discovery with ``immutable: false``.
+published snapshot must normally be reported immutable by the API. The
+owner's 2026-11-11 waiver permits ``--allow-mutable`` for repositories without
+GitHub release locking. The publisher still never edits a published snapshot
+and verifies its exact assets and tag commit before advancing the index.
+The legacy index release may stay body-only discovery with ``immutable: false``.
 
 Draft discovery and tag provenance: the by-tag endpoint returns published
 releases only, so a leftover draft with the snapshot tag is recovered
@@ -50,7 +53,7 @@ The unsigned index is discovery metadata only, never an approval authority.
 
 CLI:
     approval_release.py publish --run-id N --run-attempt N --commit-sha SHA \
-        --snapshot-dir DIR [--dry-run] \
+        --snapshot-dir DIR [--dry-run] [--allow-mutable] \
         [--expected-index-tag TAG | --expect-no-index]
     approval_release.py resolve
 
@@ -917,11 +920,13 @@ class SnapshotPublisher:
         index_url: str = INDEX_URL,
         approval_base_url: str = APPROVAL_BASE_URL,
         timeout_seconds: float | None = None,
+        require_immutable: bool = True,
     ):
         self._transport = transport
         self._index_url = index_url
         self._approval_base_url = approval_base_url
         self._timeout = timeout_seconds
+        self._require_immutable = require_immutable
 
     def _request(self, method: str, url: str, **kwargs) -> TransportResponse:
         if self._transport is None:
@@ -1437,7 +1442,7 @@ class SnapshotPublisher:
         if release.make_latest == "true":
             raise SnapshotStateError("snapshot became the latest release")
         self._verify_snapshot_tag_commit(release.tag_name, commit_sha)
-        if release.immutability_signal() is not True:
+        if self._require_immutable and release.immutability_signal() is not True:
             raise SnapshotNotImmutableError(
                 "the API did not report the newly published snapshot as immutable"
             )
@@ -1676,6 +1681,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="fail when any index exists (the verified bootstrap path)",
     )
     publish.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    publish.add_argument(
+        "--allow-mutable",
+        action="store_true",
+        help="owner waiver of GitHub release locking; exact asset and tag checks still apply",
+    )
 
     resolve = sub.add_parser("resolve", help="read the stable index (no secret)")
     resolve.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
@@ -1720,8 +1730,16 @@ def main(
             return 0
 
         files = _load_files_from_args(args)
+        if args.allow_mutable:
+            print(
+                "approval_release: WAIVED GitHub release locking by owner instruction; "
+                "exact asset and tag checks remain required",
+                file=err,
+            )
         if args.dry_run:
-            plan = SnapshotPublisher(None, timeout_seconds=args.timeout).plan(
+            plan = SnapshotPublisher(
+                None, timeout_seconds=args.timeout, require_immutable=not args.allow_mutable
+            ).plan(
                 files, args.run_id, args.run_attempt, args.commit_sha
             )
             print(plan.summary(), file=out)
@@ -1741,7 +1759,8 @@ def main(
         # the check and send an unencodable secret.
         validate_token(token)
         publisher = SnapshotPublisher(
-            factory(token=token), timeout_seconds=args.timeout
+            factory(token=token), timeout_seconds=args.timeout,
+            require_immutable=not args.allow_mutable,
         )
         result = publisher.publish(
             files,

@@ -105,6 +105,82 @@ for arg in sys.argv[1:]:
         self.assertIn("ditto /tmp/neutrodyne-dmg-mnt/Neutrodyne.app", text)
         self.assertNotIn("cp -R /tmp/neutrodyne-dmg-mnt/Neutrodyne.app", text)
 
+    def test_macos_dmg_leg_supplies_finite_y_to_licence_prompt(self):
+        """The real build-desktop-release.sh DMG leg must confirm a bundled
+        licence prompt on stdin (EOF cancels attach) while retaining
+        nobrowse, ditto copy and detach cleanup behaviour."""
+        # Relocate the script's fixed staging paths into this fixture before
+        # its real commands run; the test must not write into shared /tmp paths.
+        script = self.root / "scripts/ci/build-desktop-release.sh"
+        script.write_text(script.read_text()
+                          .replace("/tmp/neutrodyne-dmg-mnt", str(self.root / "dmg-mount"))
+                          .replace("/tmp/neutrodyne-smoke-img", str(self.root / "smoke-image")))
+        # macOS layout expected by the script.
+        self.write("scripts/ci/check-desktop-image.sh", "#!/bin/sh\nexit 0\n")
+        self.write("scripts/ci/check-runtime-sources.sh", "#!/bin/sh\nexit 0\n")
+        self.write("scripts/desktop/smoke-start.sh", "#!/bin/sh\necho 'SMOKE fixture'\n")
+        self.write("bin/ditto", "#!/bin/sh\nmkdir -p \"$2\"\necho copied > \"$2/copied\"\n")
+        self.write("bin/codesign", "#!/bin/sh\nexit 0\n")
+        self.write("gradlew", """#!/usr/bin/env python3
+from pathlib import Path
+import sys
+if 'packageDmg' not in sys.argv: raise SystemExit('expected packageDmg')
+Path('desktopApp/build/compose/binaries/main/app/Neutrodyne.app').mkdir(parents=True, exist_ok=True)
+dmg = Path('desktopApp/build/compose/binaries/main/dmg/fixture.dmg')
+dmg.parent.mkdir(parents=True, exist_ok=True)
+dmg.write_bytes(b'DMG')
+""")
+        self.write("bin/hdiutil", r"""#!/usr/bin/env bash
+set -euo pipefail
+log="${FAKE_HDIUTIL_LOG:?}"
+case "${1:-}" in
+  attach)
+    shift
+    mnt="" nb=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -nobrowse) nb=1; shift ;;
+        -mountpoint) mnt="$2"; shift 2 ;;
+        -*) shift ;;
+        *) shift ;;
+      esac
+    done
+    [ "$nb" = 1 ] || { echo "missing -nobrowse" >&2; exit 1; }
+    [ -n "$mnt" ] || exit 1
+    echo "SOFTWARE LICENCE AGREEMENT"
+    if IFS= read -r answer; then
+      case "$answer" in
+        [Yy]|[Yy][Ee][Ss]) echo "attach-accepted" >>"$log" ;;
+        *) echo "attach canceled" >&2; exit 1 ;;
+      esac
+    else
+      echo "attach canceled" >&2
+      exit 1
+    fi
+    mkdir -p "$mnt/Neutrodyne.app"
+    echo "attach $mnt" >>"$log"
+    ;;
+  detach)
+    echo "detach $2" >>"$log"
+    ;;
+  *) exit 1 ;;
+esac
+""")
+        log = self.root / "hdiutil.log"
+        result = subprocess.run(
+            ["bash", "scripts/ci/build-desktop-release.sh", "macos-arm64", "9.9.9", "dmg"],
+            cwd=self.root,
+            env={**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
+                 "FAKE_HDIUTIL_LOG": str(log)},
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        entries = log.read_text().splitlines()
+        self.assertIn("attach-accepted", entries)
+        self.assertIn("attach " + str(self.root / "dmg-mount"), entries)
+        self.assertIn("detach " + str(self.root / "dmg-mount"), entries)
+        self.assertTrue((self.root / "smoke-image/Neutrodyne.app/copied").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

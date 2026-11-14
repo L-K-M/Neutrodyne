@@ -351,6 +351,12 @@ class SigningTests(unittest.TestCase):
              '--keys-dir', str(self.keys)],
             capture_output=True, text=True, env=env)
 
+    def test_committed_manifest_pins_are_raw_ed25519(self):
+        pins = edsig.public_keys(ROOT / 'youtube/ytdlp/keys')
+        self.assertTrue(pins, 'At least one production manifest key is required')
+        for pin in pins:
+            self.assertEqual(32, len(base64.b64decode(pin, validate=True)))
+
     def test_dry_run_without_secret(self):
         result = self.run_sign()
         self.assertEqual(77, result.returncode)
@@ -661,7 +667,7 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn('--max-filesize 4096', detect)
 
     def test_deploy_states_the_verified_index_precondition(self):
-        step = self.step_block('deploy', 'Publish the immutable snapshot and advance the index')
+        step = self.step_block('deploy', 'Publish the signed snapshot and advance the index')
         self.assertIn('PRESENT: ${{ needs.detect.outputs.present }}', step)
         self.assertIn('--expected-index-tag', step)
         self.assertIn('--expect-no-index', step)

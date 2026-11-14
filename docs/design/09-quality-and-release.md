@@ -2301,6 +2301,23 @@ Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB
 
 ## Release checklist
 
+**Owner amendment, 2026-11-11 (N12, D79):** GitHub release locking is
+optional. After publication, download all assets into an owned temporary
+directory, compare their names and bytes with `dist`, then verify every
+build attestation against this repository's release workflow, tag and exact
+commit. Server image tags still require a published normal release and the
+verified digest/source offer. Engine approvals keep unique write-once
+snapshots, exact asset/tag verification and signed manifests; their protected
+publisher explicitly uses `--allow-mutable`. This supersedes older mandatory
+immutability and `gh release verify-asset` instructions below.
+
+**Owner amendment, 2026-11-11:** required GitHub CI is waived for the first
+complete v1.0.0 release. `scripts/release.sh 1.0.0 --waive-ci` records that
+waiver in its annotated tag; tag verification accepts it only for that
+release and exact commit. This replaces the CI/nightly proof requirements
+below. Build, package, source, checksum and publication checks still apply.
+Missing, failed or skipped CI is not reported as successful.
+
 Serves N1–N13. Copied into `.github/ISSUE_TEMPLATE/release.md`; one issue per release. Items marked with a milestone apply from that milestone on.
 
 ### Every release

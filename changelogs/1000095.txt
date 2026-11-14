@@ -1,0 +1,10 @@
+First complete Android, desktop and optional self-hosted sync release.
+
+Group podcasts and YouTube channels into feeds. Stream or download audio,
+manage Up next and chapters, and import subscriptions or encrypted backups.
+
+Desktop packages bundle Java, audio and YouTube engines. Optional sync
+keeps subscriptions and listening state in step without storing audio.
+
+App updates link to GitHub for manual installation. YouTube engine updates
+follow the approved-engine policy.

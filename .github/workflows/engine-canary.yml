@@ -7,7 +7,7 @@
 # and sums, licence inventory, contract-mode recorded replay, the vendored
 # trust-chain test and the existing live canary through both host adapters),
 # approve writes and signs the manifest and heartbeat, deploy publishes them
-# as one immutable engine-approvals-<run>-<attempt> snapshot and advances the
+# as one signed engine-approvals-<run>-<attempt> snapshot and advances the
 # stable index through the existing approval_release.py publisher.
 #
 # Implementation note 2026-11-10: the design's deploy target is the immutable
@@ -385,14 +385,16 @@ jobs:
                   sys.exit(f'{doc}: signature does not verify against the committed keys')
               print(f'{doc}: signature verifies')
           EOF
-      - name: Publish the immutable snapshot and advance the index
+      - name: Publish the signed snapshot and advance the index
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRESENT: ${{ needs.detect.outputs.present }}
           EXPECTED_INDEX_TAG: ${{ needs.detect.outputs.snapshot_tag }}
         run: |
           set -e
-          args=(--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" --commit-sha "$GITHUB_SHA" --snapshot-dir approved)
+          # Owner waiver, 2026-11-11: GitHub release locking is optional.
+          # Signatures, exact asset bytes, unique tags and commit checks apply.
+          args=(--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" --commit-sha "$GITHUB_SHA" --snapshot-dir approved --allow-mutable)
           # detect verified the index state: a resolved index pins the pointer
           # this run may advance, and a verified bootstrap requires its absence.
           # A reused bootstrap output therefore fails closed instead of
