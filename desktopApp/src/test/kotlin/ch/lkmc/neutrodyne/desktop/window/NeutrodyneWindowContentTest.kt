@@ -338,7 +338,8 @@ class NeutrodyneWindowContentTest {
                 )
             }
 
-            runBlocking { banners.post(IMPORT_NOTIFICATION) }
+            // An action-less banner has a short duration, leaving time for the next notice.
+            runBlocking { banners.post(IMPORT_NOTIFICATION.copy(route = null)) }
             waitUntil("the banner message shows", TIMEOUT_MS) {
                 onAllNodesWithText("Import finished — 3 added").fetchSemanticsNodes().isNotEmpty()
             }
