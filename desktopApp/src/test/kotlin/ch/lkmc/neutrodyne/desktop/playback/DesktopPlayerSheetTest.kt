@@ -48,6 +48,9 @@ class DesktopPlayerSheetTest {
                             )
                         }
                     }
+                    // The radio home uses its own player; the shared side panel is shown on Library.
+                    onNodeWithTag("radio_menu").performClick()
+                    onNodeWithTag("nav_library").performClick()
                     waitUntil(timeoutMillis = 10_000) {
                         onAllNodes(hasTestTag("full_player")).fetchSemanticsNodes().isNotEmpty()
                     }

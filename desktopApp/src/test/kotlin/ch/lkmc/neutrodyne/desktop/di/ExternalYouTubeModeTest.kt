@@ -49,6 +49,8 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
+import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
@@ -86,9 +88,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
@@ -146,6 +150,8 @@ class ExternalYouTubeModeTest {
                 }
             }
             val group = runBlocking { db.groupDao().insert(groupEntity(name = "Journey group", orderKey = "a0")) }
+            val navigationRoutes = MutableSharedFlow<Route>(extraBufferCapacity = 1)
+            val routes = navigationRoutes.onStart { emit(route) }
             var showing by mutableStateOf(true)
             try {
                 graph.jobRunner.start()
@@ -162,7 +168,7 @@ class ExternalYouTubeModeTest {
                                 RootActions({}, {}, {}, {}, { false }),
                                 RootSlots(player = {}, userMessages = emptyFlow()),
                                 graph.entryInstallers,
-                                routes = flowOf(route),
+                                routes = routes,
                                 platform = BuildInfo.Platform.DESKTOP,
                             )
                         }
@@ -227,6 +233,11 @@ class ExternalYouTubeModeTest {
                 )
                 // Fail both subscription variants/fallbacks and the real monitor's controls.
                 replay.feedsUnavailable = true
+                // The All-feed notification route opens the feed browser above radio home.
+                navigationRoutes.tryEmit(Route.Navigate(FeedsKey, listOf(FeedBrowserKey)))
+                waitUntil(timeoutMillis = 10_000) {
+                    onAllNodesWithContentDescription("Refresh").fetchSemanticsNodes().isNotEmpty()
+                }
                 // One forced scope request survives the preceding import's fetch-state flush.
                 onAllNodesWithContentDescription("Refresh").onFirst().performClick()
                 val outage =
@@ -312,6 +323,7 @@ class ExternalYouTubeModeTest {
                 }
             }
             val actions = CapturedBrowserActions()
+            val routes = flowOf(Route.Navigate(FeedsKey, listOf(FeedBrowserKey)))
             val id =
                 runBlocking {
                     val channel =
@@ -341,6 +353,7 @@ class ExternalYouTubeModeTest {
                                 RootActions({}, {}, {}, {}, { false }),
                                 RootSlots(player = {}, userMessages = emptyFlow()),
                                 graph.entryInstallers,
+                                routes = routes,
                                 platform = BuildInfo.Platform.DESKTOP,
                             )
                         }
@@ -388,6 +401,8 @@ class ExternalYouTubeModeTest {
                 onAllNodesWithText(outage).assertCountEquals(1)
                 onNodeWithText("Retry now").performClick()
                 assertEquals(1, bindings.health.retries)
+                onRoot().performKeyInput { pressKey(Key.Escape) }
+                onNodeWithTag("radio_menu").performClick()
                 onNodeWithTag("nav_library").performClick()
                 waitUntil(timeoutMillis = 10_000) { onAllNodesWithText(outage).fetchSemanticsNodes().isNotEmpty() }
                 onAllNodesWithText(outage).assertCountEquals(1)

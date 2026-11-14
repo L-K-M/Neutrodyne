@@ -38,21 +38,25 @@ private class NdSheetScene<T : Any>(
 
     override val content: @Composable (() -> Unit) = {
         val lifecycleOwner = rememberLifecycleOwner()
-        NdModalBottomSheet(
-            onDismissRequest = onBack,
-            // A modal sheet is a window of its own, so NeutrodyneRoot's resource-ID flag never
-            // reaches it: the sheet root carries the flag itself, or 08's test tags inside any
-            // sheet stay invisible to UI Automator (desktop actual: no-op).
-            modifier = Modifier.testTagsAsResourceId(),
-            initialExpansion =
-                if (entry.metadata[NdSceneMetadata.KEY_HALF_HEIGHT] == true) {
-                    NdSheetExpansion.HALF
-                } else {
-                    NdSheetExpansion.EXPANDED
-                },
-        ) {
-            CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
-                entry.Content()
+        // The underlying pane can leave while an overlay enters. Its dispatcher is disposed
+        // with that pane, so the window must register with the navigation host's stable owner.
+        OverlayBackOwner {
+            NdModalBottomSheet(
+                onDismissRequest = onBack,
+                // A modal sheet is a window of its own, so NeutrodyneRoot's resource-ID flag never
+                // reaches it: the sheet root carries the flag itself, or 08's test tags inside any
+                // sheet stay invisible to UI Automator (desktop actual: no-op).
+                modifier = Modifier.testTagsAsResourceId(),
+                initialExpansion =
+                    if (entry.metadata[NdSceneMetadata.KEY_HALF_HEIGHT] == true) {
+                        NdSheetExpansion.HALF
+                    } else {
+                        NdSheetExpansion.EXPANDED
+                    },
+            ) {
+                CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
+                    entry.Content()
+                }
             }
         }
     }
@@ -117,9 +121,11 @@ private class NdDialogScene<T : Any>(
 
     override val content: @Composable (() -> Unit) = {
         val lifecycleOwner = rememberLifecycleOwner()
-        androidx.compose.ui.window.Dialog(onDismissRequest = onBack) {
-            CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
-                entry.Content()
+        OverlayBackOwner {
+            androidx.compose.ui.window.Dialog(onDismissRequest = onBack) {
+                CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
+                    entry.Content()
+                }
             }
         }
     }

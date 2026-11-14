@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -72,7 +74,7 @@ class MainActivitySyncHandoffTest {
         composeRule.onNodeWithText("Episode 7 · 23:14 · from Pixel 8").assertExists()
         assertThat(app.syncResolutions).isGreaterThan(0)
 
-        composeRule.onNodeWithText("Play").performClick()
+        composeRule.onNode(hasText("Play") and isEnabled()).performClick()
         composeRule.waitUntil(TIMEOUT_MS) {
             app.playback.calls.contains(
                 FakePlaybackController.Call.Transport(FakePlaybackController.Action.PLAY),
@@ -153,6 +155,7 @@ class MainActivitySyncHandoffTest {
     @Test
     fun reconnectOpensTheRealSetupEntryWithTheSavedAddress() {
         app.sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
+        composeRule.onNodeWithTag("radio_menu").performClick()
         composeRule.onNodeWithTag("nav_library").performClick()
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule.onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
@@ -169,6 +172,7 @@ class MainActivitySyncHandoffTest {
     @Test
     fun notNowSurvivesActivityRecreationThroughTheAppScopedHolder() {
         app.sync.status.value = SyncStatus.Reconnect(RECONNECT_URL, "anna")
+        composeRule.onNodeWithTag("radio_menu").performClick()
         composeRule.onNodeWithTag("nav_library").performClick()
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule.onAllNodesWithText(RECONNECT_MESSAGE).fetchSemanticsNodes().isNotEmpty()
@@ -179,7 +183,7 @@ class MainActivitySyncHandoffTest {
 
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("nav_library").performClick()
+        composeRule.onNodeWithText("Library").assertExists()
         composeRule.onNodeWithText(RECONNECT_MESSAGE).assertDoesNotExist()
         assertThat(app.sync.status.value).isEqualTo(SyncStatus.Reconnect(RECONNECT_URL, "anna"))
     }
