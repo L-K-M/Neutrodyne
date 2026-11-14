@@ -338,8 +338,7 @@ class NeutrodyneWindowContentTest {
                 )
             }
 
-            // An action-less banner has a short duration, leaving time for the next notice.
-            runBlocking { banners.post(IMPORT_NOTIFICATION.copy(route = null)) }
+            runBlocking { banners.post(IMPORT_NOTIFICATION) }
             waitUntil("the banner message shows", TIMEOUT_MS) {
                 onAllNodesWithText("Import finished — 3 added").fetchSemanticsNodes().isNotEmpty()
             }
@@ -347,6 +346,7 @@ class NeutrodyneWindowContentTest {
             waitUntil("the notices flow is subscribed", TIMEOUT_MS) {
                 sync.noticeSubscriptions.value > 0
             }
+            onNodeWithText("Open").performClick()
             waitUntil("the preceding snackbar finishes", 10_000) {
                 onAllNodesWithText("Import finished — 3 added").fetchSemanticsNodes().isEmpty()
             }
