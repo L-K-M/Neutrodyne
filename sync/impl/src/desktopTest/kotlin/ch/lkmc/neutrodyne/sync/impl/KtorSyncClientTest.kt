@@ -27,6 +27,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -99,6 +100,35 @@ class KtorSyncClientTest {
 
             assertIs<SyncTransportException>(failure)
             assertEquals(12L, failure.retryAfterSeconds)
+        }
+
+    @Test
+    fun theFirstChangesRequestOmitsAnAbsentCursor() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(
+                json("""{"records":[],"cursor":"c:00000001:0","hasMore":false,"serverTime":"t"}"""),
+            )
+
+            fixture.client.changes(null, 5)
+
+            val request = fixture.take()
+            assertEquals("/api/v1/changes", request.url.encodedPath)
+            assertNull(request.url.queryParameter("since"))
+            assertEquals("5", request.url.queryParameter("limit"))
+        }
+
+    @Test
+    fun anOversizePushExposesTheHttpStatusForAdaptiveBatching() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(
+                json("""{"type":"about:blank","title":"Too large","status":413,"code":"payload_too_large"}""", 413),
+            )
+            val failure = assertFailsWith<SyncTransportException> { fixture.client.sync(null, emptyList()) }
+            assertEquals(413, failure.status)
+            assertEquals("payload_too_large", failure.code)
+            assertEquals("/api/v1/sync", fixture.take().url.encodedPath)
         }
 
     @Test

@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -57,6 +58,118 @@ class SyncApplierTest {
     private val podcastSyncId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     private val now = 1_800_000_000_000L
     private val deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    private val groupUuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+    @Test
+    fun anAbsentMembershipStillRecordsTheRemovalClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val podcast = seedPodcast(db, podcastSyncId)
+                val group = db.groupDao().insert(groupEntity(uuid = groupUuid, orderKey = "a"))
+                link(db)
+                val applier = applier(db)
+                val removal = memberRemoval()
+
+                applier.applyPage(listOf(removal), roundId = now)
+
+                assertRemovalClock(db, "member", groupUuid + podcastSyncId)
+                applier.applyPage(listOf(olderAddition(removal)), roundId = now + 1)
+                assertNull(db.groupDao().member(group, podcast))
+                assertRemovalClock(db, "member", groupUuid + podcastSyncId)
+                assertTrue(db.syncOutboxDao().rows().isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anAbsentQueueEntryStillRecordsTheRemovalClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val podcast = seedPodcast(db, podcastSyncId)
+                val episode =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcast, identityKey = "g:one")),
+                        ).single()
+                link(db)
+                val applier = applier(db)
+                val removal = queueRemoval()
+
+                applier.applyPage(listOf(removal), roundId = now)
+
+                assertRemovalClock(db, "upnext", "${podcastSyncId}g:one")
+                applier.applyPage(listOf(olderAddition(removal)), roundId = now + 1)
+                assertNull(db.queueDao().entryByEpisode(episode))
+                assertRemovalClock(db, "upnext", "${podcastSyncId}g:one")
+                assertTrue(db.syncOutboxDao().rows().isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun childRemovalClocksDoNotNeedTheirParentsToExist() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+
+                applier(db).applyPage(listOf(memberRemoval(), queueRemoval()), roundId = now)
+
+                assertRemovalClock(db, "member", groupUuid + podcastSyncId)
+                assertRemovalClock(db, "upnext", "${podcastSyncId}g:one")
+                assertTrue(db.syncParkedDao().all().isEmpty())
+                assertTrue(db.syncOutboxDao().rows().isEmpty())
+                assertNull(db.podcastDao().bySyncId(podcastSyncId))
+                assertNull(db.groupDao().groupByUuid(groupUuid))
+            } finally {
+                db.close()
+            }
+        }
+
+    private fun memberRemoval(): RecordDto =
+        record(
+            "member",
+            buildJsonObject {
+                put("g", groupUuid)
+                put("p", podcastSyncId)
+            },
+            null,
+            "in" to bool(false),
+        )
+
+    private fun queueRemoval(): RecordDto =
+        record(
+            "upnext",
+            buildJsonObject {
+                put("p", podcastSyncId)
+                put("k", "g:one")
+            },
+            null,
+            "in" to bool(false),
+        )
+
+    private fun olderAddition(removal: RecordDto): RecordDto =
+        removal.copy(seq = 2, fields = mapOf("in" to FieldValue(JsonPrimitive(true), clock(9).toString())))
+
+    private suspend fun assertRemovalClock(
+        db: NeutrodyneDatabase,
+        collection: String,
+        rid: String,
+    ) {
+        val raw = assertNotNull(SyncClockStore(db).get(collection, rid))
+        val removal =
+            raw
+                .confirmed()
+                .state.fields
+                .getValue("in")
+        assertEquals(JsonPrimitive(false), removal.v)
+        assertEquals(clock(10), removal.c)
+    }
 
     @Test
     fun remotePodcastIsInsertedAsPendingAndStateApplied() =

@@ -796,6 +796,10 @@ pull-before-play timing remains S17's manual checklist.
 
 - Unsubscribe pushes `subscribed = false`; group delete `deleted = true`; removing a member or an Up next item `in = false`. Receivers apply them through the normal local paths ([Pull and apply](#pull-and-apply)), guarded by the mass-change rule.
 - The server keeps tombstoned `podcast`, `group`, `member` and `upnext` records for 365 days and the `episode` records of unsubscribed podcasts for 180 days ([PO-45](../PLAN.md#48-further-product-owner-decisions)), so a re-subscription within that time restores history ([Same podcast on two devices](#same-podcast-on-two-devices)). Purges advance `min_cursor` ([Garbage collection and retention](#garbage-collection-and-retention)).
+- A linked unsubscribe removes local Up next rows and retains their sync clocks
+  on both the sender and the receiver. Approval can occur after the receiver
+  has applied the server's Up next tombstones; keeping those clocks prevents an
+  older add from recreating a removed queue entry after re-subscription.
 - Local storage housekeeping never propagates: episode retention ([D23](../PLAN.md#3-key-decisions)) and stub cleanup run with `applying = 1`, and the triggers ignore every `DELETE` on `episode_state` and `episode_position` ([Capture rules](#capture-rules)).
 - There is no cross-device undo, and none is needed for R2.1's 10-s local undo of a group delete: `OutboxReader` holds back a group's `deleted = true` row and the `member` `in = false` rows of that group until the deletion is 10 s old, on both platforms ([Outbox and coalescing](#outbox-and-coalescing)). An undo inside the window re-inserts the group, whose captures (every field, `in = true`) replace the held rows with newer clocks before anything leaves the device.
 
@@ -964,6 +968,7 @@ Room, DataStore and `SecretStore` cannot commit atomically. `SyncApplyEffects` t
 
 - One row per `(coll, rid, field)`: repeated changes coalesce, so 5-s position saves for one episode keep one row whatever the push cadence.
 - Value at push time: `ChangeBuilder` reads the outbox rows and the current source rows in one read transaction, so a value always corresponds to the newest clock of its row. A row whose source row no longer exists and whose `value` is NULL is skipped (the deletion wrote its own literal row).
+  - For a missing group, membership or Up next source, the client retires an unchanged local row without a literal only after a confirmed removal with a complete clock at least as new. A confirmed deletion of the absent parent group also covers its memberships. This cleanup follows undo filtering and checks the linked profile in the same writer transaction. It preserves literals, replay rows, redirects, still-present sources and newer intents.
 - A `*` row and per-field rows of one record may coexist (an insert after a pending removal, such as a group re-created by undo); `ChangeBuilder` takes, per wire field, the row with the newest clock, so a newer `*` supersedes an older literal removal and vice versa. A `*` row is not deleted when a remote value beats it for one field; `ChangeBuilder` instead omits every field whose `sync_clock` entry is newer than the row's clock (that field now holds the remote value).
 - **Undo window.** `OutboxReader` skips a group's `deleted = true` row, and the `member` `in = false` rows with that group's `uuid` prefix, until 10 s after the deletion was captured (05's undo, R2.1). `SyncScheduler` notes the capture time of each new group-deletion row in memory when the outbox changes; after a process restart the rows are eligible at once, matching 05's rule that process death inside the window makes the delete final. The scheduler pokes a round when the oldest skipped row comes of age. Every other row is eligible at once.
 - After acknowledgement, delete only rows whose complete `(hlc, nodeId)` clock is at most the sent clock, and merge the exact sent fields into `sync_clock.raw` without lowering a known field clock. A change made during the round stays for the next one; replays never borrow this device's node ID. `SyncApplyEffects.acknowledge` owns this whole step: it stages each sent `auth` pair under the credential coordinator before the Room write, then one transaction deletes the acknowledged outbox rows, binds each winning auth's staged reference, and merges every acknowledged change's sent state — a failed stage or failed merge leaves all of the push's rows intact for a retry.
@@ -996,9 +1001,9 @@ Each field's clock is the wire form of its row's `hlc` and **row's `nodeId`**. L
 3. Collection-specific writes:
    - `podcast`: unknown and dead → record its clocks in `sync_clock` (a few bytes, so later `episode`, `member` and `upnext` records of a dead podcast are dropped instead of parked) and delete parked rows with its `syncId`; unknown and live → resolve a same-feed collision ([Same podcast on two devices](#same-podcast-on-two-devices)); otherwise insert as `PENDING_FIRST_FETCH`, `initialFetch = 1`, `nextRefreshAt = now`, `feedKey = UrlNormalizer.forIdentity(feedUrl)` (a URL that is not `http(s)` or exceeds 4 KiB is skipped), aliases with reason `SYNC`, title from the hint or the URL host, `artworkUrl` hint and `artworkKey` as restore does, synced overrides; credentials per [Feed passwords and private feed URLs](#feed-passwords-and-private-feed-urls). Known → user fields, overrides, a move when `feedUrl` won, display hints only while pending. A winning `subscribed = false` → staged for the [Mass-change guard](#mass-change-guard).
    - `group`: insert or update (name through `GroupNames`; a `nameKey` collision → `SurvivorRule.group`); a winning `deleted = true` → staged.
-   - `member`: both ends resolved → `INSERT OR IGNORE` with `orderKey`, or delete; an end known dead here → drop; an end missing → park. The same "known dead → drop" rule applies to `episode` and `upnext` records of a dead podcast.
+   - `member`: a winning `in = false` deletes an existing membership and retains its raw removal clock even when either end or the membership is absent. It creates no parent and does not park. For a live membership, both ends resolved → `INSERT OR IGNORE` with `orderKey`; an end known dead → drop; an end missing → park. The same "known dead → drop" rule applies to live `episode` and `upnext` records of a dead podcast.
    - `episode`: podcast missing → park; episode matched by `EpisodeMatcher` → write the derived state ([Episode-state rules](#episode-state-rules)): `episode_state` (`playedAt`, `playCount = max`, `lastPlayedAt = max`, `isFavorite`, `measuredDurationMs`, `startedAt` per derivation), `episode_position` (a winning reset through 02's `reset`, a winning non-zero position by a direct update); not matched → stub or park.
-   - `upnext`: resolved and not effectively played and not the local current item → upsert `queue_entry(episodeId, orderKey)`; removal → delete; unresolved → stub (from `match`) or park.
+   - `upnext`: resolved and not effectively played and not the local current item → upsert `queue_entry(episodeId, orderKey)`. A winning `in = false` deletes an existing entry and retains the raw removal clock even if the source is absent, without creating a stub or parking. An unresolved live reference → stub (from `match`) or park.
    - `session`: `SessionAdopter` ([Now playing and handoff](#now-playing-and-handoff)).
    - `setting`: persist `pendingSetting` with its value and clock; DataStore writes run after commit through `SyncApplyEffects`, or remain pending while the switch is off.
 4. Raise `sync_state.hlc` to the largest clock received in the page (applied, staged, parked or lost, [Hybrid logical clocks](#hybrid-logical-clocks)); store `cursor`; set `applying = 0`; commit. A crash before the commit re-applies the page idempotently. A record that fails validation (caps, types, URL schemes, an unknown collection) is skipped and counted in diagnostics, and the cursor still advances past it, so one hostile or too-new record cannot block every later round.
@@ -1007,7 +1012,7 @@ Each field's clock is the wire form of its row's `hlc` and **row's `nodeId`**. L
 ### Parked state and stubs
 
 - **Stubs.** An `episode` record that is effectively in progress or favourite, or an `upnext`/`session` reference, whose episode is not ingested yet but whose hints include `enc` or `ytId`, becomes a stub through 02's stub insert ([02 Restore matching](02-data-model.md#restore-matching): `inFeed = 0`, `isNew = 0`, `contentHash = 0`). Played-only and empty records never create stubs, so D23 retention keeps working.
-- **Parked.** Everything else that cannot be resolved is stored in `sync_parked` (`podcastSyncId`, `identityKey`, `guid`, `enclosureKey = UrlNormalizer.forIdentity(enc)`, the record JSON, `receivedAt`): episode records of known podcasts not yet ingested, and `member` and `upnext` records whose podcast is missing (members use `identityKey = "@member:" + groupUuid`).
+- **Parked.** Other unresolved live references are stored in `sync_parked` (`podcastSyncId`, `identityKey`, `guid`, `enclosureKey = UrlNormalizer.forIdentity(enc)`, the record JSON, `receivedAt`): episode records of known podcasts not yet ingested, and live `member` and `upnext` records whose podcast is missing (members use `identityKey = "@member:" + groupUuid`).
 - **Release.** 03's ingestion calls `SyncIngestHook.afterIngest(podcastId)` after inserting episodes; `SyncParkedStateApplier` loads the podcast's parked rows, matches them with 02's restore ladder and applies the matched ones with `applying = 1`. Podcast or group inserts by `SyncApplier` release their parked members in the same transaction. A retry re-reads each journal row after acquiring the write transaction: unlink or expiry can remove it, and another page can add fields after the initial read. Removed rows are skipped; accumulated fields are applied before deleting the journal row.
 - **Expiry.** Parked rows are deleted with their podcast's tombstone and by `db-maintenance` after 180 days (02).
 
@@ -1194,6 +1199,34 @@ while the gate has set `LocalNetworkAccess.syncAllowed`.
 | Malformed response (not JSON, wrong envelope, response cap exceeded) | decoding | the page is discarded, the round fails (`Server(200)` in diagnostics); a page is never partially applied. A single invalid record inside a well-formed page is skipped and counted instead ([Pull and apply](#pull-and-apply) step 4) |
 | Process death mid-round | — | outbox rows remain until acknowledged; pages re-apply idempotently; staged removals live in `sync_held` |
 | Database full | `SQLITE_FULL` | the page transaction rolls back; retried next round; 02's error handling surfaces storage-full |
+
+**Implementation note (2026-11-10, clock correction).** Each sync and changes
+request samples local time around the RPC. The owning profile stores the offset
+and repairs its unaccepted local clock groups in one writer transaction, seeded
+after the accepted field and match clocks. Raw state may include pending local
+values, so its envelope retains a separate confirmed snapshot while those values
+differ. Pulls and acknowledgements advance that snapshot without secret bytes;
+its frontier includes stripped credential clocks and parked wire records. Repair
+removes invalid unaccepted raw overlays while preserving their materialized values
+and queued literals. Legacy envelopes without provenance keep their clocks
+conservatively. Accepted state and replay clocks stay unchanged. Settings keep
+their original physical receipt while the pending wire
+clock and matching materialization baseline advance together, including a late
+post-write callback or recovery that started before correction.
+
+**Implementation note (2026-11-10, oversized pushes).** HTTP 413 halves the
+next outbox batch without acknowledging the failed request. If one change still
+cannot fit, only its unchanged rows that were actually sent are retired and
+reported as rejected. Newer edits and withheld credentials remain pending. A
+rejected setting receipt is remembered separately from confirmed state so the
+same physical write is not captured again; a later explicit write can retry.
+Recovery replay reports the rejection instead of announcing a completed resync.
+
+The first clock rejection persists until its pending writes are acknowledged;
+an empty successful pull does not clear it. A second rejection pauses pushes
+across restarts while empty sync requests continue pulling and sampling time.
+A successful correction permits pushes again. First-link uploads retain the
+unfinished link on rejection or an undrained upload limit.
 
 ```mermaid
 stateDiagram-v2
@@ -2535,6 +2568,10 @@ synthetic loopback test does not replace E12's Android/desktop journey,
 physical-device checks, session handoff or real-network PB31 measurements.
 
 E12 / `CrossDeviceSyncTest` (09 owns the journey; nightly and in M11b): an Android emulator (API 36) and a desktop JVM (headless app graph) against a server from the release JAR; random offline edits to subscriptions, groups, order, played state, positions, favourites and Up next converge (MS2 acceptance 2); a desktop pause resumes on Android within 1 s of the next sync through "Continue on this device" (R8.5); unsubscribing 11 of 50 podcasts is held (MS2 acceptance 4); propagation with both apps in the foreground ≤ 10 s (PB31, MS3 acceptance 1). M11b acceptance 14 adds the manual checklist with a phone, a desktop on each OS and a server.
+
+**Implementation note (2026-11-10).** The Android half of E12 now exists as `CrossDeviceSyncAndroidTest`, a host-driven phase driver (`seed`/`link`/`edit`/`sync`/`dump`) over the real app graph, Room and `SyncController`; its config, ownership, phase and result contracts are in [10.A Cross-device Android driver](10-cross-device-android-driver.md). It is **Android driver only**: the host coordinator, the desktop half, the nightly job and the real emulator/device proof remain UNVERIFIED. The planned E12 framework above is not actual code and this is not the E12 acceptance criterion.
+
+**Implementation note (2026-11-10, E12 desktop driver).** The desktop half's host-driven phases add a test-only `apply-held` step: after the host proves the 11-podcast delete is HELD and every subscription remains, the driver checks the batch (one HELD row, exactly `expectedHeldPodcastCount`, default 11, a matching summary, fixture podcasts still subscribed) and approves it through the public `SyncController.resolveHeld` APPLY path, then waits for the row to resolve. The optional `expectedHeldPodcastCount` config field narrows that contract; the default phase sequence is unchanged. Opt-in desktop phase tasks always execute against their caller-owned runtime state; Gradle test caching and up-to-date skipping remain enabled for ordinary tests.
 
 ### Data-loss scenarios
 

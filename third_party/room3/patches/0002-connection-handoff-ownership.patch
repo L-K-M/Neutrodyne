@@ -1,6 +1,6 @@
 --- a/commonMain/androidx/room3/RoomConnectionManager.kt
 +++ b/commonMain/androidx/room3/RoomConnectionManager.kt
-@@ -67,46 +67,60 @@
+@@ -67,46 +67,62 @@
      /* Open and configure a connection. Called from the connection factory. */
      private suspend fun openLocked(delegate: SQLiteDriver, filename: String): SQLiteConnection {
          val resolvedFileName = resolveFileName(filename)
@@ -44,7 +44,9 @@
 +                        val connection = delegate.open(resolvedFileName)
 +                        orphan = connection
 +                        try {
-+                            if (!isConfigured) {
++                            // A private in-memory schema belongs to the native connection.
++                            // A cancelled handoff can close it before the pool owns it.
++                            if (!isConfigured || resolvedFileName == ":memory:") {
 +                                // Perform initial connection configuration
 +                                try {
 +                                    isInitializing = true

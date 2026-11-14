@@ -267,7 +267,7 @@ interface YouTubeAvailabilityRecorder { suspend fun record(episodeId: Long, avai
 | `PodcastDao.youtubeChannelIds()` | DAO function (requested from 02) | "Retry now" refresh scope; `totalSubscribed` of `onRunFinished()` |
 | `engine-prepare` (M9a), `engine-update`, `engine-update-now` (M9b) | WorkManager unique work (`:youtube:ytdlp`); the desktop's lane `engine-update` (11) does the same jobs | [Host and packaging](#host-and-packaging), [Update flow](#update-flow) |
 | `youtube/ytdlp/engine/{yt-dlp, SHA2-256SUMS, SHA2-256SUMS.sig, bundled.json}`, `youtube/ytdlp/keys/{yt-dlp-release-key.asc, engine-manifest-ed25519.pub}` (both read by both hosts' builds); `youtube/engine/src/test/resources/recorded/{scenario}/` (moved from `youtube/ytdlp/src/test/resources/recorded/`); on Android `noBackupFilesDir/ytdlp/{active.json, versions/, staging/}`, `cacheDir/yt-dlp/`; on the desktop `<data>/ytdlp/…`, `<cache>/engine-cache/yt-dlp/` (11) | repository and device files | [Host and packaging](#host-and-packaging), [Engine updates](#engine-updates), [Recorded responses](#recorded-responses) |
-| `scripts/youtube/record-responses.sh`, `scripts/engine/{bump-ytdlp.sh, make-engine-manifest.sh, sign-engine-manifest.sh}`; nightly jobs `youtube-canary`, `engine-nightly-canary`, `no-engine-build`; the test content of `engine-canary.yml` (both host adapters) | repository files / 09 jobs and workflows | Recorded responses, engine canary, emergency build |
+| `scripts/youtube/record-responses.sh`, `scripts/engine/{bump-ytdlp.sh, make-engine-manifest.py, sign-engine-manifest.py}`; nightly jobs `youtube-canary`, `engine-nightly-canary`, `no-engine-build`; the test content of `engine-canary.yml` (both host adapters) | repository files / 09 jobs and workflows | Recorded responses, engine canary, emergency build |
 
 ---
 
@@ -452,8 +452,8 @@ flowchart TD
 2. `GET` with 01's FEED client (`NeutrodyneHttpClients.client(FEED)`, 120 s call timeout; the API client's 8 s is too short for this page), headers `Cookie: SOCS=CAE=` (the "reject all" consent value, which skips the EU consent interstitial; NewPipe sends the same), `Accept: text/html`, `Accept-Language: {app locale}, en;q=0.5`. User-Agent: ours ([01 Interceptors](01-foundation.md#interceptors)).
 3. Status: 404 → `NotFound`; 429 → `Failed(RATE_LIMITED)`; 5xx / I/O → `Failed(NETWORK, retryable)`; final URL host `consent.youtube.com` → `Failed(CONSENT_WALL)`.
 4. Read the body channel (Ktor `bodyAsChannel()`) into a buffer until `</head>` (case-insensitive) or 1.5 MiB, then `ChannelPageParser.parseHead(prefix, baseUri)` (pure common code). It uses `HeadTagScanner`, a small scanner of `<link>`, `<meta>` and `<title>` tags (case-insensitive tag and attribute names, quoted and unquoted attribute values, decoding of `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;` and numeric character references), with no DOM and no HTML-parser dependency: jsoup is JVM-only and lives only in `:feeds:jvm` ([01 Open questions](01-foundation.md#open-questions) 23, decided here 2026-10-05). The selectors below name the tags the scanner matches. Unverified: that YouTube's head uses no other named entities in the fields we read (the M8 fixture decides; an undecodable entity stays literal).
-5. Channel ID, first match wins: `link[rel=alternate][type=application/rss+xml]` href `channel_id=`; `link[rel=canonical]` `/channel/UC…`; `meta[itemprop=identifier]`; regex `"externalId":"(UC[\w-]{22})"` over the prefix. If none and fewer than 1.5 MiB were read, keep streaming the body for `"externalId"` up to 3 MiB total. Validate with `YouTubeIds.CHANNEL`; otherwise `Failed(PAGE_UNREADABLE)`.
-6. Title `meta[property=og:title]` (fallback `<title>` minus `" - YouTube"`); avatar `meta[property=og:image]`; description `meta[property=og:description]` (plain text).
+5. Channel ID, first match wins: `link[rel=alternate][type=application/rss+xml]` href `channel_id=`; `link[rel=canonical]` `/channel/UC…`; `meta[itemprop=identifier]`; regex `"externalId":"(UC[\w-]{22})"` over the prefix. If none and fewer than 1.5 MiB were read, keep streaming the body for the same metadata tags or `"externalId"` up to 3 MiB total. YouTube can send its channel metadata after `</head>`, and its mobile response need not contain `"externalId"`. Preserve tokenizer state across reads, ignore tags in scripts, styles and comments, and cap each retained tag/title at 64 KiB. Validate with `YouTubeIds.CHANNEL`; otherwise `Failed(PAGE_UNREADABLE)`.
+6. Title `meta[property=og:title]` (fallback `<title>` minus `" - YouTube"`); avatar `meta[property=og:image]`; description `meta[property=og:description]` (plain text). Metadata found during the body identity scan replaces generic head values such as the title "YouTube".
 7. Only for `depth = FULL`: continue streaming the body with a 64 KiB sliding window (2 KiB overlap) for `"imageBannerViewModel":{"image":{"sources":[`, capture up to the closing `]`, decode the array of `{url, width, height}` with kotlinx.serialization, stop at 3 MiB total. Close the response as soon as everything needed is found.
 
 The page is about 2.5 MB; reading it fully for every subscribe is wasteful, hence head-first. Unverified: the byte size of `<head>`; M8 measures it on the recorded fixture. If the median head exceeds 512 KiB, imports fetch avatars only for the first 20 channels per refresh run on metered networks (rest on unmetered); the decision is recorded here.
@@ -469,9 +469,13 @@ small libraries use the two control feeds before declaring an outage.
 Replay fixtures live in `youtube/impl/src/test/resources/recorded/` and are
 shared by desktop and Android host tests. Their provenance explicitly labels
 the successful response shapes as reconstructed research fixtures, rather
-than fresh successful recordings. A current successful handle/oEmbed capture
-and the channel-head median needed for the metered-avatar decision remain
-open. Synthetic fixture sizes cannot establish that policy.
+than fresh successful recordings. The 2026-11-14 subscription repair adds a
+scrubbed mobile response shape from a successful `@TheTechReportTR` capture:
+the initial head names only the handle, while a later block supplies the
+channel feed, title and avatar, without `externalId`. The reported video’s
+oEmbed author URL points to that same handle. This single-channel capture
+does not establish the channel-head median needed for the metered-avatar
+decision; synthetic fixture sizes cannot establish that policy.
 
 ### oEmbed, user feed and watch page
 
@@ -1494,6 +1498,13 @@ Interactions: downloads wait (`BACKOFF` until the gate reopens); auto-download p
 
 ## Engine updates
 
+**Owner amendment, 2026-11-11:** GitHub release locking is waived. The
+protected publisher uses `--allow-mutable`; unique snapshot tags, its policy
+of never editing published snapshot assets, exact byte/tag checks and the
+signed-manifest trust chain remain required. Earlier references to immutable
+snapshots describe this write-once publication policy rather than a required
+GitHub repository setting.
+
 **Implementation boundary (2026-11-08).** The protocol below describes the
 M9b updater and canary slices; their Android production wiring landed the
 same day (M9b Android host adapter): `AndroidEngineStorePaths`,
@@ -1681,15 +1692,33 @@ The `youtube-canary` nightly scope runs the live probes by themselves. A failed 
 
 ### Engine canary
 
+**Implementation note (2026-11-10, M9b `engine-approval-pipeline`).** The gate's
+second host leg is the existing live canary `scripts/ci/youtube-engine-canary.py`
+(the Android JVM embedded leg and the desktop stdio leg, #482) probing the staged
+candidate, not a `:youtube:ytdlp-desktop:shimTestStdio` Gradle task (that task
+does not exist on this head); the recorded contract replay runs through
+`:youtube:ytdlp:shimTest -Preplay=contract`, and `run.py` reads the staged
+`bundled.json` so the candidate passes the same entry point a bump PR would. The
+manifest tools are `scripts/engine/make-engine-manifest.py` and
+`scripts/engine/sign-engine-manifest.py` (the text below names `.sh`), and the
+immutable snapshot/index trust chain is the existing
+`scripts/engine/approval_release.py` (09 owns the workflow contract). A run
+without `NEUTRODYNE_ENGINE_MANIFEST_KEY` ends green with nothing published.
+The privileged jobs (`gate`, `approve`, `deploy`) each require
+`github.ref == 'refs/heads/main'`, so a branch dispatch runs only the
+read-only detect job; the `engine-approval` environment must itself restrict
+deployment to `main` **before** the owner installs the key, because the
+workflow's code guards do not protect against edits to the workflow itself.
+
 The workflow, its schedule, environment and release publication are 09's ([09 engine-canary.yml](09-quality-and-release.md#engine-canaryyml)); what it tests is defined here. Every 6 h and on `workflow_dispatch(tag)`:
 
 1. **Detect.** The latest yt-dlp stable tag from the `Location` header of `https://github.com/yt-dlp/yt-dlp/releases/latest` (or the dispatched `tag`); nothing to do when it equals the approved version.
 2. **Verify** as the app does: `SHA2-256SUMS.sig` against the pinned yt-dlp key with both OpenPGP implementations — build-logic's `OpenPgpSignatureCheck` through `verifyBundledYtDlp` ([01 Python and native components](01-foundation.md#python-and-native-components)) and the app's own `OpenPgpDetachedVerifier` through `UpstreamReleaseVerifierTest`'s vendored-release case, which reads whatever `bump-ytdlp.sh` placed in `youtube/ytdlp/engine/` — so the candidate passes the parser that runs on devices; the asset's SHA-256, the zip-content, `ORIGIN` and yt-dlp-ejs checks and the 10 MB cap ([Trust chain](#trust-chain) checks 6–10).
-3. **Gate (blocking)**, run for **both host adapters** with the candidate on `sys.path` and host CPython 3.14 — `:youtube:ytdlp:shimTest -Preplay=contract` (Chaquopy adapter) and, from MD3, `:youtube:ytdlp-desktop:shimTestStdio -Preplay=contract` (stdio adapter driving a real child process, urllib as the only handler); a release is approved only when both pass: the self-test's API probe, the shim's option names, the error-message corpus, and every recorded-response scenario of [Testing](#testing) through `ReplayRH` in **contract mode** — recorded responses are served by endpoint and InnerTube client (watch page, `/youtubei/v1/player` for the client named in the request, tab browse, search), whatever the exact query parameters and body; an endpoint or client with no recording is answered with HTTP 404 and reported, not failed; a scenario passes when the shim's result (code, chosen format, fields) equals its recorded `result.json`. GitHub runners are bot-checked by YouTube, so nothing in the gate is live; an optional live smoke from the runner is reported but never blocks.
+3. **Gate (blocking)**, run for **both host adapters** with the candidate on `sys.path` and host CPython 3.14 — `:youtube:ytdlp:shimTest -Preplay=contract` (Chaquopy adapter: the self-test's API probe, the shim's option names, the error-message corpus, and every recorded-response scenario of [Testing](#testing) through `ReplayRH` in **contract mode** — recorded responses are served by endpoint and InnerTube client (watch page, `/youtubei/v1/player` for the client named in the request, tab browse, search), whatever the exact query parameters and body; an endpoint or client with no recording is answered with HTTP 404 and reported, not failed; a scenario passes when the shim's result (code, chosen format, fields) equals its recorded `result.json`) and `scripts/ci/youtube-engine-canary.py` (the existing live canary: the Android JVM embedded leg and the desktop stdio leg driving a real child, urllib as the only handler, #482); a release is approved only when both pass. GitHub runners are bot-checked by YouTube, so the live legs are noisy by design and a failure there fails the gate closed (the runbook's re-record path applies).
 4. **Report (non-blocking):** the same scenarios in **strict mode** (exact request match, as in PR CI). A mismatch means yt-dlp now sends different requests; it never blocks approval, but opens or updates an `engine-canary` issue asking for a re-record, so the strict fixtures catch up.
-5. **Publish** when the gate is green for both adapters: the manifest names the candidate (`sequence + 1`, `shimApi` = the shim range under test on both hosts, `revoked` carried over), signed in environment `engine-approval` and published with the heartbeat pair as the four assets of an immutable `engine-approvals-<run>-<attempt>` prerelease; the stable `engine-approvals` index body then advances to the new snapshot tag. On red: no manifest; an issue labelled `engine-canary` is opened or updated with the failing scenarios.
+5. **Publish** when the gate is green for both adapters: the manifest names the candidate (`sequence + 1`, `shimApi` = the shim range under test on both hosts, `revoked` carried over), signed in environment `engine-approval` and published with the heartbeat pair as the four assets of an immutable `engine-approvals-<run>-<attempt>` prerelease; the stable `engine-approvals` index body then advances to the new snapshot tag, with the publisher receiving `--expected-index-tag` when detect resolved an index and `--expect-no-index` on a verified bootstrap, failing closed on a contradiction. On red: no manifest; an issue labelled `engine-canary` is opened or updated with the failing scenarios.
 
-A yt-dlp fix often changes the requests yt-dlp sends; strict replay then reports "unrecorded request", but the gate replays by contract, so such a release is still approved when it parses the recorded responses as before — the common case for the fixes that matter. Only a release whose fix depends on a response the fixtures lack (a new client's or endpoint's answer), or whose parsing changed, fails the gate; that is path 2 of the runbook below (re-record, review, dispatch), with a maintainer target of ≤ 24 h from the issue to the dispatch (N11); the on-device self-test and [Rollback and reset](#rollback-and-reset) still guard every activation. Approval latency when the gate passes: ≤ 6 h after the upstream release plus the release publication (N11); apps then activate within 24 h of their last check, sooner after a breaker opening. Revocation: `scripts/engine/make-engine-manifest.sh --revoke <version>` and a dispatch publish a manifest that names the last good approved version and lists the bad one.
+A yt-dlp fix often changes the requests yt-dlp sends; strict replay then reports "unrecorded request", but the gate replays by contract, so such a release is still approved when it parses the recorded responses as before — the common case for the fixes that matter. Only a release whose fix depends on a response the fixtures lack (a new client's or endpoint's answer), or whose parsing changed, fails the gate; that is path 2 of the runbook below (re-record, review, dispatch), with a maintainer target of ≤ 24 h from the issue to the dispatch (N11); the on-device self-test and [Rollback and reset](#rollback-and-reset) still guard every activation. Approval latency when the gate passes: ≤ 6 h after the upstream release plus the release publication (N11); apps then activate within 24 h of their last check, sooner after a breaker opening. Revocation: `scripts/engine/make-engine-manifest.py --revoke <version>` and a dispatch publish a manifest that names the last good approved version and lists the bad one.
 
 ### Hotfix runbook
 

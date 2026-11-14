@@ -14,12 +14,12 @@ branch. Host/assembly evidence does not prove OS behavior.
 
 Methods are exact source names. Default tasks:
 `:download:impl:desktopTest`, or `:download:impl:testAndroidHostTest` for Android
-host cases. Every pending column remains an acceptance gap.
+host cases. Device evidence is pending unless a receipt below records it.
 
 | M6 AC | Host assertion and exact tests | Device, nightly or owner evidence still required |
 |---|---|---|
 | 1, inherited M6a | `RssTransferSourceTest.cutAtHalfResumesWithStrongValidatorAndActualLength`; shared transfer suite | Physical radio/network/captive-portal checks; remaining M6a cases are in HANDOFF |
-| 2, M6b E10 half | `DownloadReconcilerTest.processDeathTrimsOnlyTheTornTailBeforeResume`, `staleTokensResetOnceAndRegisteredOwnersSurviveParallelPasses`; benchmark assembly is build evidence | `ch.lkmc.neutrodyne.benchmark.ProcessDeathResumeTest.killReconcilesSystemAndResumesFromPartLength` on bench34: actual PID death, strong ETag, server Range/If-Range, reset row and final hash. Reboot/force-stop/update remain separate gaps |
+| 2, M6b E10 half | `DownloadReconcilerTest.processDeathTrimsOnlyTheTornTailBeforeResume`, `staleTokensResetOnceAndRegisteredOwnersSurviveParallelPasses` | E10 passed on bench34: actual PID death, strong ETag, server Range/If-Range, reset row and final hash. Reboot, force-stop and update remain separate gaps |
 | 3, inherited M6a | `DownloadWorkersTest.visiblePromotionAllowedOnlyBefore34` (Android host) | `DownloadJourneyTest.visibleApi33DownloadUsesDataSyncForegroundWorker` on33; `backgroundUidtBesidePlaybackForTwentyMinutes` on34/36, screen off with bytes/audio/notifications |
 | 4, M6b | `AutoDownloadPlannerTest.ac4GroupKeepsNewestThreeAndTombstonesFreeSlots`, `d45TwoGroupsUseOneResolvedPolicyAndOneRowPerEpisode`, `killedBeforeWatermarkCommitKeepsBaselineAndRollsBackWholePass`, `killedAfterWatermarkCommitBeforeBaselinePreservesCommittedWatermark`, `noBackfillFromInitialIngestOldArrivalOrDumpGuard` | API34+ real settings/refresh on unmetered network: keep 3, kill/relaunch around enabling, delete then refresh, two groups with one row, no initial backfill |
 | 5, M6b | `CleanupPlannerTest.deletesAtTwentyFourHoursButNotOneSecondEarlier`, `favouritesCurrentAndExactlyNextThreeProtectPlayedFiles`, `unplayedManualAndStartedAutoAreProtectedEvenOutsideRollingWindow`, `deletesPlayedManualAndAutoWithoutWritingOrClearingTombstones` | Real overnight 24 h from playedAt plus protected controls; TestClock proves eligibility, not an exact OS wake |
@@ -50,10 +50,9 @@ Supplementary host coverage (same task conventions as the AC table):
 
 ## Device and job receipts to collect
 
-Future receipts: SHA/task/test, device/API/ABI or OS/arch/package, application ID,
+Receipts record the SHA/task/test, device/API/ABI or OS/arch/package, application ID,
 variant/date/counts/artifacts. Debug app: `ch.lkmc.neutrodyne.debug`; benchmark
 target: `ch.lkmc.neutrodyne`, test APK: `ch.lkmc.neutrodyne.benchmark`.
-All lanes below are **not run**.
 
 | Lane | Entry point and required evidence |
 |---|---|
@@ -70,6 +69,18 @@ FGS so `am kill` can kill its cached process; it does not prove UIDT/Task Manage
 behavior. Smoke uses normal UI/scheduling. `system-tests.sh` deletes stale XML;
 `assert-system-tests.py` rejects empty/duplicate/failed/skipped evidence. E10
 needs full scope, not `downloads` scope.
+
+### E10 process death receipt
+
+The [system-tests job](https://github.com/L-K-M/Neutrodyne/actions/runs/42793164779/job/129751499951)
+passed on 2026-11-10 at `c380f83c8893034e72c8b5ca39ad5412c7490287`.
+The `system-tests-results` archive's `run.json` and `variant.txt` identify
+`process-death`, full-image API 34 `bench34`, and the minified, profileable
+`benchmarkRelease` target. Its `TEST-bench34.xml` records one passing case,
+zero failures, zero errors and zero skips:
+`ProcessDeathResumeTest.killReconcilesSystemAndResumesFromPartLength`.
+This proves E10 on that build. It does not cover the published APK, reboot,
+force-stop, update, or the other jobs in that nightly run.
 
 ## Owner hardware checklist
 
@@ -95,5 +106,5 @@ recorded in the port's final report. Skips there: Windows DPAPI and two
 desktop menu pickers. Sync protocol mutation has no cases and supplies no
 mutation proof.
 
-AC2 E10, AC4/5/11/13/15 and inherited M6a device gaps remain open.
+AC4/5/11/13/15 and the remaining AC2 and inherited M6a device gaps remain open.
 No schema/entity/index/dependency/code change or milestone-completion claim.

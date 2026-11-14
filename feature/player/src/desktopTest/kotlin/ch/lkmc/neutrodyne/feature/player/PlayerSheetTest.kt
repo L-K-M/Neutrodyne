@@ -26,6 +26,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
@@ -77,6 +78,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.UpNextList
+import ch.lkmc.neutrodyne.core.ui.root.PlayerPresentation
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
 import ch.lkmc.neutrodyne.playback.api.MarkedPlayedElsewhere
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
@@ -226,6 +228,28 @@ class PlayerSheetTest {
                 registry = SaveableStateRegistry(saved) { true }
                 show = true
             }
+            onNodeWithTag("mini_player").assertIsDisplayed()
+        }
+
+    @Test fun wideRadioStillHonoursExternalExpandRequests() =
+        runComposeUiTest {
+            val fixture = SheetFixture().apply { presentation = PlayerPresentation.RADIO_HOME }
+            setContent { fixture.Content(windowWidthDp = 1200) }
+            onNodeWithTag("mini_player").assertIsNotDisplayed()
+            runOnIdle { fixture.expandToken++ }
+            onNodeWithTag("full_player").assertIsDisplayed()
+        }
+
+    @Test fun radioHidesCollapsedMiniButExternalExpandAndOtherScreensStillWork() =
+        runComposeUiTest {
+            val fixture = SheetFixture().apply { presentation = PlayerPresentation.RADIO_HOME }
+            setContent { fixture.Content() }
+            onNodeWithTag("mini_player").assertIsNotDisplayed()
+            runOnIdle { fixture.expandToken++ }
+            onNodeWithTag("full_player").assertIsDisplayed()
+            onNodeWithContentDescription("Collapse player").performClick()
+            onNodeWithTag("mini_player").assertIsNotDisplayed()
+            runOnIdle { fixture.presentation = PlayerPresentation.STANDARD }
             onNodeWithTag("mini_player").assertIsDisplayed()
         }
 
@@ -793,6 +817,7 @@ private class SheetFixture(
     var currentChapter by mutableStateOf<CurrentChapter?>(null)
     var sleepTimer by mutableStateOf<SleepTimerState>(SleepTimerState.Off)
     var pending by mutableStateOf<PlayResult.NeedsMeteredConsent?>(null)
+    var presentation by mutableStateOf(PlayerPresentation.STANDARD)
     var expandToken by mutableIntStateOf(0)
     var collapseToken by mutableIntStateOf(0)
     var contentBottomPx = 0f
@@ -852,6 +877,7 @@ private class SheetFixture(
                         PlayerSlotState(
                             paneLayout,
                             { navigated += it },
+                            presentation = presentation,
                             contentBottomPx = contentBottomPx,
                             expandRequest = expandToken,
                             collapseRequest = collapseToken,

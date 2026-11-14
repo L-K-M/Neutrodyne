@@ -73,13 +73,15 @@ case "$TARGET" in
             cp desktopApp/build/compose/binaries/main/dmg/*.dmg "$DIST/neutrodyne-$V-macos-arm64.dmg"
             MAC_PACKAGE="$DIST/neutrodyne-$V-macos-arm64.dmg"
             mkdir -p /tmp/neutrodyne-dmg-mnt
+            # The project-bundled 1.0 DMG shows its licence and hdiutil cancels
+            # attach on EOF; supply a finite Y confirmation for unattended CI.
             hdiutil attach -nobrowse -mountpoint /tmp/neutrodyne-dmg-mnt \
-                "$DIST/neutrodyne-$V-macos-arm64.dmg"
+                "$DIST/neutrodyne-$V-macos-arm64.dmg" <<< $'Y\n'
             # ditto, not cp -R: it carries the artifact's timestamps, modes and
             # symlinks, so the smoke image keeps the trained JARs' recorded
             # mtimes and a drifted DMG payload stays drifted for the strict
             # check instead of being silently re-stamped at extraction time.
-            ditto /tmp/neutrodyne-dmg-mnt/Neutrodyne.app "$SMOKE_IMG/"
+            ditto /tmp/neutrodyne-dmg-mnt/Neutrodyne.app "$SMOKE_IMG/Neutrodyne.app"
             hdiutil detach /tmp/neutrodyne-dmg-mnt
         fi
         smoke "$SMOKE_IMG/Neutrodyne.app"

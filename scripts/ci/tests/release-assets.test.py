@@ -57,6 +57,7 @@ class ReleaseAssetsTest(unittest.TestCase):
         ):
             shutil.copy2(REPO / relative, root / relative)
         shutil.copy2(VERIFY_TAG, root / "scripts/ci/verify-tag.sh")
+        shutil.copy2(REPO / "scripts/release.sh", root / "scripts/release.sh")
         shutil.copy2(REPO / "scripts/ci/release_assets.py", root / "scripts/ci/release_assets.py")
         shutil.copy2(ASSETS, root / "release-assets.json")
         (root / "fakebin/gh").write_text(
@@ -187,6 +188,71 @@ class ReleaseAssetsTest(unittest.TestCase):
         self.assertIn("expected_assets<<__NL_EOF__", text)
         self.assertIn("neutrodyne-0.1.0-arm64-v8a.apk", text)
         self.assertIn("ffmpeg_version=9.0.2", text)
+
+    def prepare_ci_waiver(self, version="1.0.0"):
+        major, minor, patch = map(int, version.split("."))
+        code = major * 1000000 + minor * 10000 + patch * 100 + 95
+        props = self.root / "gradle.properties"
+        props.write_text(props.read_text().replace("versionName=0.1.0", "versionName=" + version)
+                         .replace("versionCode=10095", "versionCode=" + str(code)))
+        (self.root / f"changelogs/{code}.txt").write_text("Fixture notes.\n")
+        # No successful CI exists. An open release blocker is independently
+        # configurable and must still prevent a waived release from tagging.
+        gh = self.root / "fakebin/gh"
+        gh.write_text(gh.read_text().replace("import sys", "import os, sys")
+                      .replace("args = sys.argv[1:]", "args = sys.argv[1:]\n"
+                               "if args[:2] == ['issue', 'list']:\n"
+                               "    print(os.environ.get('FIXTURE_BLOCKERS', '0')); sys.exit(0)")
+                      .replace("print('1'); sys.exit(0)", "print('0'); sys.exit(0)"))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "Prepare fixture release without CI")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def git(self, *args):
+        return subprocess.run(["git", *args], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout
+
+    def release_with_waiver(self, version="1.0.0", **extra):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GH_", "GITHUB_"))}
+        env.update(PATH=str(self.root / "fakebin") + os.pathsep + os.environ["PATH"], **extra)
+        return subprocess.run(["bash", str(self.root / "scripts/release.sh"), version, "--waive-ci"],
+                              cwd=self.root, env=env, capture_output=True, text=True, timeout=60)
+
+    def test_owner_waiver_is_recorded_in_tag_and_accepted_without_ci(self):
+        self.prepare_ci_waiver()
+        result = self.release_with_waiver()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("WAIVED", result.stdout)
+        annotation = self.git("for-each-ref", "--format=%(contents)", "refs/tags/v1.0.0")
+        self.assertIn("CI-WAIVER: owner-approved required GitHub CI waived; no CI success claimed.", annotation)
+        verified = self.verify("android", tag="v1.0.0")
+        self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
+        self.assertIn("WAIVED", verified.stdout)
+
+    def test_prepared_release_without_annotation_still_needs_ci(self):
+        self.prepare_ci_waiver()
+        self.git("tag", "v1.0.0")
+        result = self.verify("android", tag="v1.0.0")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("no green ci.yml", result.stderr)
+
+    def test_owner_waiver_does_not_cover_another_release(self):
+        self.prepare_ci_waiver("1.0.1")
+        result = self.release_with_waiver("1.0.1")
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual("", self.git("tag", "-l", "v1.0.1"))
+        self.git("tag", "-a", "v1.0.1", "-m",
+                 "CI-WAIVER: owner-approved required GitHub CI waived; no CI success claimed.")
+        verified = self.verify("android", tag="v1.0.1")
+        self.assertNotEqual(0, verified.returncode)
+        self.assertIn("no green ci.yml", verified.stderr)
+
+    def test_owner_waiver_keeps_release_blocker_gate(self):
+        self.prepare_ci_waiver()
+        result = self.release_with_waiver(FIXTURE_BLOCKERS="1")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("open release-blocker issues", result.stderr)
+        self.assertEqual("", self.git("tag", "-l", "v1.0.0"))
 
 
 if __name__ == "__main__":

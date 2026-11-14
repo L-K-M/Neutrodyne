@@ -20,15 +20,27 @@ class DeviceTestSelectionTest {
     fun unseededOreoSelectsExactlyTheSupportedCases() {
         for (sdk in listOf(26, 27)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(','))
-                .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, YTX, YOUTUBE_SMOKE, YTX_ISOLATION, ATF)
+                .containsExactly(
+                    REBOOT,
+                    RESTORE,
+                    CROSS_DEVICE,
+                    NOTIFY_DENIED,
+                    RELABEL,
+                    YTX,
+                    YOUTUBE_SMOKE,
+                    YTX_ISOLATION,
+                    ATF,
+                )
         }
     }
 
     @Test
     fun modernDevicesKeepLocaleAndPythonAcceptanceChecks() {
-        assertThat(select(sdk = 33).getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE, ATF)
+        assertThat(select(sdk = 33).getString("notClass")?.split(','))
+            .containsExactly(REBOOT, RESTORE, CROSS_DEVICE, ATF)
         for (sdk in listOf(34, 36, 37)) {
-            assertThat(select(sdk = sdk).getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE)
+            assertThat(select(sdk = sdk).getString("notClass")?.split(','))
+                .containsExactly(REBOOT, RESTORE, CROSS_DEVICE)
         }
     }
 
@@ -51,20 +63,21 @@ class DeviceTestSelectionTest {
     @Test
     fun supportedOreoAbiKeepsPythonCheck() {
         assertThat(select(sdk = 26, abi = "arm64-v8a").getString("notClass")?.split(','))
-            .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, ATF)
+            .containsExactly(REBOOT, RESTORE, CROSS_DEVICE, NOTIFY_DENIED, RELABEL, ATF)
     }
 
     @Test
     fun pieKeepsPythonCheck() {
         assertThat(select(sdk = 28).getString("notClass")?.split(','))
-            .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, ATF)
+            .containsExactly(REBOOT, RESTORE, CROSS_DEVICE, NOTIFY_DENIED, RELABEL, ATF)
     }
 
     @Test
     fun shippedGermanKeepsRelabelCheckOnOreo() {
         val arguments = Bundle()
         selectSupportedDeviceTests(arguments, 26, "arm64-v8a", listOf("en-US", "de-DE"), false)
-        assertThat(arguments.getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, ATF)
+        assertThat(arguments.getString("notClass")?.split(','))
+            .containsExactly(REBOOT, RESTORE, CROSS_DEVICE, NOTIFY_DENIED, ATF)
     }
 
     @Test
@@ -74,6 +87,16 @@ class DeviceTestSelectionTest {
         val driven = Bundle().apply { putString("hostReboot", "true") }
         selectSupportedDeviceTests(driven, 36, "x86_64", listOf("en-US"), false)
         assertThat(driven.getString("notClass").orEmpty().split(',')).doesNotContain(REBOOT)
+    }
+
+    @Test
+    fun crossDeviceDriverRunsOnlyUnderTheHostDriver() {
+        assertThat(select(sdk = 36).getString("notClass").orEmpty().split(','))
+            .contains(CROSS_DEVICE)
+
+        val driven = Bundle().apply { putString("crossDevice", "true") }
+        selectSupportedDeviceTests(driven, 36, "x86_64", listOf("en-US"), false)
+        assertThat(driven.getString("notClass").orEmpty().split(',')).doesNotContain(CROSS_DEVICE)
     }
 
     @Test
@@ -134,5 +157,6 @@ class DeviceTestSelectionTest {
         const val YOUTUBE_SMOKE = "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest"
         const val YTX_ISOLATION = "ch.lkmc.neutrodyne.YtxIsolationTest"
         const val ATF = "ch.lkmc.neutrodyne.AccessibilityChecksTest"
+        const val CROSS_DEVICE = "ch.lkmc.neutrodyne.CrossDeviceSyncAndroidTest"
     }
 }

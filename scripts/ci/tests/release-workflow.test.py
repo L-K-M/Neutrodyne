@@ -24,6 +24,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def setUp(self):
         self.text = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_release_is_not_described_as_immutable(self):
+        head = self.text.split("\nname: release", 1)[0]
+        self.assertNotIn("immutable", head.lower())
+        self.assertNotIn("immutable", self.text.lower())
+
     def test_every_action_is_pinned_by_full_sha(self):
         uses = re.findall(r"^\s*(?:-\s+)?uses:\s+(\S+)", self.text, re.MULTILINE)
         self.assertGreater(len(uses), 10)
@@ -88,6 +93,21 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("subject-name: ${{ steps.index.outputs.repository }}", manifest)
         self.assertIn("subject-digest: ${{ steps.index.outputs.digest }}", manifest)
         self.assertIn("push-to-registry: true", manifest)
+
+    def test_publish_verifies_published_assets_by_download_and_attestation(self):
+        publish = self.text.split("  publish:", 1)[1].split("  image-tags:", 1)[0]
+        self.assertIn("name: Verify the published release", publish)
+        self.assertIn("scripts/ci/verify-published-release.py", publish)
+        self.assertIn("--dist dist", publish)
+        self.assertIn('REPO: ${{ github.repository }}', publish)
+        self.assertIn('--repo "$REPO"', publish)
+        self.assertIn('SOURCE_DIGEST: ${{ github.sha }}', publish)
+        self.assertIn('--source-digest "$SOURCE_DIGEST"', publish)
+        self.assertIn('--signer-workflow \"$REPO/.github/workflows/release.yml\"', publish)
+        self.assertNotIn("gh release verify", publish)
+        self.assertNotIn("gh release verify-asset", publish)
+        self.assertNotIn("immutable", publish.lower())
+        self.assertNotIn("immutable", self.text.split("#", 1)[0].lower())
 
     def test_publish_downloads_every_build_artifact(self):
         publish = self.text.split("  publish:", 1)[1].split("  image-tags:", 1)[0]

@@ -13,7 +13,9 @@ import androidx.test.espresso.action.ViewActions.pressKey
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.Route
 import com.google.common.truth.Truth.assertThat
 import org.junit.Before
 import org.junit.Rule
@@ -40,7 +42,10 @@ class Nav3SpikeTest {
     val compose = createAndroidComposeRule<SpikeRootActivity>()
 
     @Before
-    fun resetProbe() = PodcastVmProbe.reset()
+    fun resetProbe() {
+        PodcastVmProbe.reset()
+        SpikeRoutes.drain()
+    }
 
     @Test
     fun perTabStateSurvivesTabSwitch() {
@@ -48,13 +53,13 @@ class Nav3SpikeTest {
         compose.onNodeWithText("feeds-count:1").assertIsDisplayed()
 
         // Library's entries leave composition entirely; rememberSaveable must restore the count.
-        compose.onNodeWithTag("nav_library").performClick()
+        openMenuItem("nav_library")
         compose.onNodeWithText("library-inc").performClick()
         compose.onNodeWithText("library-count:1").assertIsDisplayed()
 
-        compose.onNodeWithTag("nav_feeds").performClick()
+        backToFeeds()
         compose.onNodeWithText("feeds-count:1").assertIsDisplayed()
-        compose.onNodeWithTag("nav_library").performClick()
+        openMenuItem("nav_library")
         compose.onNodeWithText("library-count:1").assertIsDisplayed()
     }
 
@@ -64,7 +69,9 @@ class Nav3SpikeTest {
         compose.onNodeWithText("open-podcast").performClick()
         compose.onNodeWithText("podcast-3").assertIsDisplayed()
 
-        compose.onNodeWithTag("nav_library").performClick()
+        // With a detail pushed, the home's Menu key is unreachable; a deep link is the
+        // production path that selects another tab and leaves this stack untouched.
+        openLibraryViaRoute()
         compose.onNodeWithText("library-inc").performClick()
         compose.onNodeWithText("open-podcast").performClick()
         compose.onNodeWithText("podcast-9").assertIsDisplayed()
@@ -80,7 +87,7 @@ class Nav3SpikeTest {
         compose.onNodeWithText("library-count:1").assertIsDisplayed()
 
         // Feeds' stack restored too: the pushed detail is on top, the root's count below it.
-        compose.onNodeWithTag("nav_feeds").performClick()
+        backToFeeds()
         compose.onNodeWithText("podcast-3").assertIsDisplayed()
         pressBack()
         compose.waitForIdle()
@@ -103,10 +110,10 @@ class Nav3SpikeTest {
         assertThat(vm3).isNotSameInstanceAs(vm5)
 
         // While the Library tab shows, Feeds' entries keep their ViewModel stores (the decorator
-        // clears on pop, not on hide).
-        compose.onNodeWithTag("nav_library").performClick()
+        // clears on pop, not on hide). The deep-link route switches tabs above pushed details.
+        openLibraryViaRoute()
         compose.onNodeWithText("library-content").assertIsDisplayed()
-        compose.onNodeWithTag("nav_feeds").performClick()
+        backToFeeds()
 
         compose.onNodeWithText("podcast-5").assertIsDisplayed()
         assertThat(PodcastVmProbe.instancesOf(key5)).containsExactly(vm5)
@@ -149,11 +156,32 @@ class Nav3SpikeTest {
 
     @Test
     fun backAtANonFeedsRootSelectsFeeds() {
-        compose.onNodeWithTag("nav_library").performClick()
+        openMenuItem("nav_library")
         compose.onNodeWithText("library-content").assertIsDisplayed()
 
         pressBack()
         compose.waitForIdle()
         compose.onNodeWithText("feeds-content").assertIsDisplayed()
+    }
+
+    /**
+     * The radio home's physical Menu key opens the destination sheet; its rows keep the retired
+     * navigation items' tags.
+     */
+    private fun openMenuItem(tag: String) {
+        compose.onNodeWithTag("radio_menu").performClick()
+        compose.onNodeWithTag(tag).performClick()
+    }
+
+    /** Back at a non-Feeds root selects Feeds — the 08 back order asserted below. */
+    private fun backToFeeds() {
+        pressBack()
+        compose.waitForIdle()
+    }
+
+    /** An `open/library` deep link: selects Library's root and keeps every other stack. */
+    private fun openLibraryViaRoute() {
+        SpikeRoutes.emit(Route.Navigate(LibraryKey, emptyList()))
+        compose.waitForIdle()
     }
 }

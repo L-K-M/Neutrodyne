@@ -3,6 +3,16 @@ plugins {
     alias(libs.plugins.neutrodyne.android.library)
 }
 
+tasks.withType<Test>().configureEach {
+    if (name == "testDebugUnitTest") {
+        // CI uploads this file even when Gradle restores the test from cache.
+        inputs
+            .file(rootProject.layout.projectDirectory.file("playback/engine/src/test/resources/dsp-reference.tsv"))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+        outputs.file(layout.projectDirectory.file("build/md0-reference/dsp-reference.tsv"))
+    }
+}
+
 dependencies {
     implementation(project(":playback:core"))
     implementation(project(":playback:api"))

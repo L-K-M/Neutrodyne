@@ -155,11 +155,12 @@ class SettingsCapture(
         if (!matchesLiteral(key, snapshot.json, json) || snapshot.origin == null) return
         db.withWriteTransaction {
             val state = linkedState() ?: return@withWriteTransaction
-            val clock = captureClock(snapshot.origin, state)
             val row = db.syncClockDao().get(SyncCollection.SETTING.wire, key.name)
             val raw = row?.clocks?.let(::decode)
             if (row != null && raw == null) return@withWriteTransaction
             val stored = raw ?: RawSyncRecord(RecordState(SyncCollection.SETTING))
+            val intent = db.syncOutboxDao().get(SyncCollection.SETTING.wire, key.name, "v")
+            val clock = captureClock(snapshot.origin, state, intent, stored.settingIntent)
             val next =
                 if (clock == null) {
                     SettingBaseline(settingBaselineHash(json))
@@ -175,6 +176,8 @@ class SettingsCapture(
     private fun captureClock(
         origin: SettingWriteOrigin?,
         state: SyncStateEntity,
+        intent: SyncOutboxEntity? = null,
+        boundary: SettingIntent? = null,
     ): Hlc? {
         val token = (origin as? SettingWriteOrigin.Captured)?.token ?: return null
         val receipt =
@@ -185,7 +188,14 @@ class SettingsCapture(
         ) {
             return null
         }
-        return parseHlc(receipt.clock)?.takeIf { it.nodeId.value == state.nodeId }
+        val physical = parseHlc(receipt.clock)?.takeIf { it.nodeId.value == state.nodeId } ?: return null
+        if (intent?.captureKind == SyncCaptureKind.LOCAL && intent.nodeId == state.nodeId &&
+            boundary?.clock == Hlc(intent.hlc, NodeId(intent.nodeId)).toString() &&
+            boundary.receiptClock == physical.toString()
+        ) {
+            return Hlc(intent.hlc, NodeId(intent.nodeId))
+        }
+        return physical
     }
 
     /** Step 2 of [install]: replay or retire each committed `v` intent under its key's lock. */
@@ -223,7 +233,7 @@ class SettingsCapture(
         val snapshot = settings.currentSnapshot(key) ?: return
         val current = snapshot.json
         val state = db.syncStateDao().get() ?: return
-        val receiptClock = captureClock(snapshot.origin, state)
+        val receiptClock = captureClock(snapshot.origin, state, row, raw?.settingIntent)
         val hasOrigin = scope == RecoveryScope.LINKED && snapshot.origin != null
         val uncaptured = hasOrigin && receiptClock == null
         val matchesIntent = row.value?.let { matchesLiteral(key, current, it) } == true
@@ -289,6 +299,33 @@ class SettingsCapture(
         return settings.canonicalJson(key, json)
     }
 
+    /** Caller owns the profile writer; this records no accepted value and performs no store IO. */
+    internal suspend fun rejectOversizeSetting(row: SyncOutboxEntity) {
+        if (row.coll != SyncCollection.SETTING.wire || row.field != "v") return
+        val literal =
+            row.value?.let { canonicalLiteral(row.rid, it) }
+                ?: throw IOException("rejected setting literal is unreadable")
+        val entry = db.syncClockDao().get(row.coll, row.rid)
+        val raw = entry?.clocks?.let(::decode)
+        if (entry != null && raw == null) throw IOException("setting metadata is unreadable")
+        val stored = raw ?: RawSyncRecord(RecordState(SyncCollection.SETTING))
+        db.syncClockDao().upsert(
+            SyncClockEntity(
+                row.coll,
+                row.rid,
+                encode(
+                    stored.copy(
+                        rejectedSetting =
+                            SettingBaseline(
+                                settingBaselineHash(literal),
+                                Hlc(row.hlc, NodeId(row.nodeId)).toString(),
+                            ),
+                    ),
+                ),
+            ),
+        )
+    }
+
     /** Baselines [json] at [clock] when that is newer — merged into the fresh row, one transaction. */
     private suspend fun advanceBaseline(
         key: SettingKey<*>,
@@ -300,10 +337,23 @@ class SettingsCapture(
             val raw = row?.clocks?.let(::decode)
             if (row != null && raw == null) return@withWriteTransaction
             val stored = raw ?: RawSyncRecord(RecordState(SyncCollection.SETTING))
+            // Recovery may have read its intent just before clock repair committed.
+            // Resolve the immutable receipt again under this writer, against the fresh row.
+            val intent = db.syncOutboxDao().get(SyncCollection.SETTING.wire, key.name, "v")
+            val boundary = stored.settingIntent
+            val currentClock = intent?.let { Hlc(it.hlc, NodeId(it.nodeId)).toString() }
+            val effectiveClock =
+                if (intent?.captureKind == SyncCaptureKind.LOCAL && boundary?.clock == currentClock &&
+                    boundary?.receiptClock == clock
+                ) {
+                    checkNotNull(currentClock)
+                } else {
+                    clock
+                }
             val next =
                 stored.settingHash.advancedTo(
                     json,
-                    clock,
+                    effectiveClock,
                     settings.canonicalJson(key, json) ?: return@withWriteTransaction,
                 )
             if (next === stored.settingHash) return@withWriteTransaction
@@ -423,6 +473,17 @@ class SettingsCapture(
                 val snapshot = settings.currentSnapshot(key) ?: return@withLock
                 val current = snapshot.json
                 val state = db.syncStateDao().get() ?: return@withLock
+                val rejected = raw?.rejectedSetting
+                val rejectedReceipt =
+                    raw?.settingIntent?.takeIf { it.clock == rejected?.clock }?.receiptClock ?: rejected?.clock
+                if (rejected != null && rejectedReceipt != null &&
+                    captureClock(snapshot.origin, state)?.toString() == rejectedReceipt &&
+                    matchesBaseline(key, current, rejected)
+                ) {
+                    // A 413 already retired this exact materialized local receipt. An explicit
+                    // new edit has its own outbox row/receipt; off-switch writes have no clock.
+                    return@withLock
+                }
                 val uncaptured = snapshot.origin != null && captureClock(snapshot.origin, state) == null
                 val accepted = raw?.state?.fields?.get("v")
                 val baseline = raw?.settingHash

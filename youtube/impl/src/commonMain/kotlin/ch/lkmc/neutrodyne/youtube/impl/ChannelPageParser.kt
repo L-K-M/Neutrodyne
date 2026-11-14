@@ -36,7 +36,15 @@ internal object ChannelPageParser {
         baseUri: String,
         depth: MetadataDepth,
     ): Page {
-        val tags = HeadTagScanner.scan(prefix)
+        val page = parseTags(HeadTagScanner.scan(prefix), baseUri, depth)
+        return page.copy(channelId = page.channelId ?: externalId(prefix))
+    }
+
+    fun parseTags(
+        tags: List<HeadTagScanner.Tag>,
+        baseUri: String,
+        depth: MetadataDepth,
+    ): Page {
         val links = tags.filter { it.name == "link" }
         val meta = tags.filter { it.name == "meta" }
         val alternate =
@@ -76,7 +84,7 @@ internal object ChannelPageParser {
                 }?.trim()
                 ?.takeIf { it.isNotEmpty() }
 
-        val id = alternate ?: canonical ?: identifier ?: externalId(prefix)
+        val id = alternate ?: canonical ?: identifier
         if (depth == MetadataDepth.ID_ONLY) return Page(id, null, null, null)
         val title =
             property("og:title") ?: tags
@@ -90,13 +98,17 @@ internal object ChannelPageParser {
     }
 
     fun watchId(prefix: String): String? =
-        HeadTagScanner.scan(prefix).firstNotNullOfOrNull { tag ->
+        watchId(HeadTagScanner.scan(prefix))
+            ?: WATCH_ID.findAll(prefix).firstNotNullOfOrNull { it.groupValues[1].validId() }
+
+    fun watchId(tags: List<HeadTagScanner.Tag>): String? =
+        tags.firstNotNullOfOrNull { tag ->
             if (tag.name == "meta" && tag.attributes["itemprop"].tokens().contains("channelid")) {
                 tag.attributes["content"]?.validId()
             } else {
                 null
             }
-        } ?: WATCH_ID.findAll(prefix).firstNotNullOfOrNull { it.groupValues[1].validId() }
+        }
 
     fun externalId(text: String): String? =
         EXTERNAL_ID.findAll(text).firstNotNullOfOrNull { it.groupValues[1].validId() }

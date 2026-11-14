@@ -718,7 +718,7 @@ class SyncParkedStateTest {
         }
 
     @Test
-    fun aDeadGroupOrARemovalDropsInsteadOfParkingAMember() =
+    fun deadGroupDropsLiveMemberButKeepsRemovalClock() =
         runTest {
             val db = TestDb.inMemory()
             try {
@@ -740,7 +740,7 @@ class SyncParkedStateTest {
                 assertEquals(1, member.stale)
                 assertEquals(0, db.syncParkedDao().count())
 
-                // A membership removal for unknown ends has nothing to park either.
+                // A removal with an unknown group is applied to the clock store without parking.
                 val removal =
                     applier.applyPage(
                         listOf(
@@ -752,7 +752,7 @@ class SyncParkedStateTest {
                         ),
                         roundId = now + 2,
                     )
-                assertEquals(1, removal.stale)
+                assertEquals(1, removal.applied)
                 assertEquals(0, db.syncParkedDao().count())
             } finally {
                 db.close()

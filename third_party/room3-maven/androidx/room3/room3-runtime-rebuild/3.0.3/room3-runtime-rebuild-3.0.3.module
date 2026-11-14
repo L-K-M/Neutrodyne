@@ -92,11 +92,11 @@
         {
           "name": "room3-runtime-rebuild-kotlin-3.0.3-sources.jar",
           "url": "room3-runtime-rebuild-3.0.3-sources.jar",
-          "size": 93128,
-          "sha512": "fd07f0c2ad5abccb1e424ee449f76ffa44fbe6b1c1039d6e30abbcbeb71e071c9eda991a31b326a6a2a08b213aa728f8d94419d284a691dcad55ca88b44bc008",
-          "sha256": "4845cbcc83732ddddac89f84980675b0bc743baecae726ba921cc5730b49b04e",
-          "sha1": "f8852ed80df74e01ae1ae1dfdfe613c7b0a0572e",
-          "md5": "b2b17f53ebf96652c3e249b238d5b62b"
+          "size": 93185,
+          "sha512": "6722d930e740e5ef5daf72dcd92eebdc6104def86d084cb8ad02dad1f80f52b437760fe0e96c20e58713821b24ac2a5e14e734a18b7b66a535f7729ccd3c458e",
+          "sha256": "d3df3d3bd3e9af900f34b0c134357ca0edac3f9a70286c8db3449a1d0598b150",
+          "sha1": "3e2b8206ad865f93692c56932e13c39b7a6a7f66",
+          "md5": "bd21919e9c435c00580df889415f8f4d"
         }
       ]
     },

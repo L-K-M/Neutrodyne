@@ -389,8 +389,10 @@ class DesktopPlaybackControllerTest {
                 assertNotEquals(first, third)
                 assertNotEquals(second, third)
 
-                // Restarting the same episode mints again.
-                fixture.controller.playEpisode(1)
+                // Dismissal unloads it, so the next play starts a new occurrence.
+                fixture.controller.dismiss()
+                assertNull(fixture.controller.nowPlaying.value)
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
                 fixture.awaitEpisode(1)
                 assertNotEquals(
                     third,

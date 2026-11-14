@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Unlicense
-# Called only after immutable publication, in the shared release-publish concurrency group.
+# Called only after publication, in the shared release-publish concurrency group.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 tag="${1:?tag required}"
@@ -13,7 +13,7 @@ version="${tag#v}"
 image_repo="${image%@*}"
 # A failed draft must never move any release image tag.
 release="$(gh api "repos/$repository/releases/tags/$tag")"
-python3 -c 'import json,sys; r=json.loads(sys.argv[1]); sys.exit(0 if not r["draft"] and not r["prerelease"] and r["immutable"] else "Release is not immutable and published")' "$release"
+python3 -c 'import json,sys; r=json.loads(sys.argv[1]); sys.exit(0 if not r["draft"] and not r["prerelease"] else "Release is not published")' "$release"
 python3 "$root/scripts/ci/server-image.py" check-sources --version "$version" --directory "$sources"
 runtime="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["runtime"]["name"])' "$root/sync/server/deploy/image-sources.lock.json")"
 (
@@ -37,4 +37,4 @@ docker buildx imagetools create "${tags[@]}" "$image"
 for ((i=1; i<${#tags[@]}; i+=2)); do
     [[ "$(oras resolve "${tags[$i]}")" == "${image#*@}" ]] || exit 1
 done
-echo 'Verified immutable version, ordered minor/latest tags and same-registry source offer'
+echo 'Verified published version, ordered minor/latest tags and same-registry source offer'

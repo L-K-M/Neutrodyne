@@ -65,7 +65,6 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import okio.Buffer
-import org.jetbrains.compose.resources.getString
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -144,17 +143,19 @@ class PlayJourneyTest {
             }
             observation.launch { graph.playbackStateSource.nowPlaying.collect {} }
             withTimeout(OPEN_TIMEOUT_MS) { graph.databaseOpener.awaitOpen() }
-            val playLabel = getString(Res.string.play)
             phase("seed")
             seed()
 
-            // The visible group tab, then that feed page's own Play action.
-            phase("feed/tab")
-            awaitNode(hasTestTag(tabTag))
-            compose.onNodeWithTag(tabTag).performClick()
-            val playAction = hasText(playLabel).and(hasAnyAncestor(hasTestTag(pageTag)))
-            awaitNode(playAction)
-            compose.onNode(playAction).performClick()
+            // The radio home is the player: pick the seeded group in its playlist chooser and
+            // press its physical Play key with the newest slip selected.
+            phase("radio/playlist")
+            awaitNode(hasTestTag("radio_playlist"))
+            compose.onNodeWithTag("radio_playlist").performClick()
+            awaitNode(hasTestTag("radio_playlist_option_$groupId"))
+            compose.onNodeWithTag("radio_playlist_option_$groupId").performClick()
+            awaitNode(hasTestTag("radio_episode_${queued[0]}"))
+            compose.onNodeWithTag("radio_episode_${queued[0]}").performClick()
+            compose.onNodeWithTag("radio_play").performClick()
 
             // M4 AC6: the queue's head is promoted and its remaining order is kept.
             phase("start/queue-first")
@@ -171,6 +172,13 @@ class PlayJourneyTest {
             assertThat(start.context?.id).isEqualTo(groupId)
             assertThat(start.context?.title).isEqualTo(groupName)
             awaitAudio()
+
+            // The radio home hides the mini player; the physical Menu key opens Library over it.
+            phase("menu/library")
+            awaitNode(hasTestTag("radio_menu"))
+            compose.onNodeWithTag("radio_menu").performClick()
+            awaitNode(hasTestTag("nav_library"))
+            compose.onNodeWithTag("nav_library").performClick()
 
             phase("player/mini")
             awaitNode(hasTestTag(TAG_MINI_PLAYER))
@@ -202,7 +210,7 @@ class PlayJourneyTest {
 
             phase("player/collapse")
             pressBack()
-            awaitNode(hasTestTag(TAG_MINI_PLAYER))
+            awaitDisplayed(TAG_MINI_PLAYER)
             compose.onNodeWithTag(TAG_MINI_PLAYER).assertIsDisplayed()
 
             phase("notification/assert")
@@ -224,7 +232,7 @@ class PlayJourneyTest {
             val launch = checkNotNull(app.packageManager.getLaunchIntentForPackage(app.packageName))
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             app.startActivity(launch)
-            awaitNode(hasTestTag(TAG_MINI_PLAYER))
+            awaitDisplayed(TAG_MINI_PLAYER)
             compose.onNodeWithTag(TAG_MINI_PLAYER).assertIsDisplayed()
             await {
                 val current = nowPlaying()
@@ -251,9 +259,6 @@ class PlayJourneyTest {
                 )
             assertThat(saved.positionMs).isGreaterThan(0)
         }
-
-    private val tabTag get() = "feed-tab:group:$groupUuid"
-    private val pageTag get() = "feed-page:group:$groupUuid"
 
     private suspend fun seed() {
         val frame =
@@ -346,6 +351,16 @@ class PlayJourneyTest {
                 .onAllNodes(matcher)
                 .fetchSemanticsNodes(atLeastOneRootRequired = false)
                 .isNotEmpty()
+        }
+    }
+
+    /**
+     * Waits for [tag] to settle visible, not just exist: the mini player slides in from below the
+     * viewport and a semantics node appears before it is displayed.
+     */
+    private fun awaitDisplayed(tag: String) {
+        compose.waitUntil(WAIT_MS) {
+            runCatching { compose.onNodeWithTag(tag).assertIsDisplayed() }.isSuccess
         }
     }
 

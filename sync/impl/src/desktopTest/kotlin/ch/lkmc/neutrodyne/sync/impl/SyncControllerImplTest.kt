@@ -90,6 +90,67 @@ class SyncControllerImplTest {
     private val serverUrl = "https://$host"
 
     @Test
+    fun aRepeatedFirstLinkClockRejectionShowsTheClockProblem() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
+                h.client.syncHandler = { _, changes ->
+                    SyncResponse(
+                        changes.mapIndexed { index, _ ->
+                            ChangeResultDto(index, "rejected", code = "clock_skew")
+                        },
+                        emptyList(),
+                        "c:00000001:1",
+                        false,
+                        "",
+                    )
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+                h.controller.chooseFirstLink(FirstLinkChoice.MERGE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(2, h.client.calls.count { it == "sync" })
+                assertEquals(SyncProblem.ClockSkew, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.linkedAt,
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aPersistedClockBlockSurvivesSuccessfulPulls() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.db.withWriteTransaction {
+                    val state = checkNotNull(h.db.syncStateDao().get())
+                    h.db.syncStateDao().upsert(state.copy(lastError = "ClockSkew"))
+                }
+                h.controller.refreshStatus()
+                assertEquals(SyncProblem.ClockSkew, (h.controller.status.value as SyncStatus.Linked).problem)
+                h.controller.syncNow()
+                assertEquals(
+                    "ClockSkew",
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.lastError,
+                )
+                assertEquals(SyncProblem.ClockSkew, (h.controller.status.value as SyncStatus.Linked).problem)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun discoveryFailureShowsTheTransportProblem() =
         runTest {
             val h = harness(this)
@@ -611,18 +672,66 @@ class SyncControllerImplTest {
     @Test
     fun aPasswordLoginStoresTheTokenAndClearsThePassword() =
         runTest {
-            val h = harness(this)
+            val password = "s3cret".toCharArray()
+            val clearedBeforeStorage = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            val backing = FakeSecretStore()
+            val store =
+                object : SecretStore by backing {
+                    override suspend fun put(
+                        origin: String,
+                        username: String,
+                        secret: CharArray,
+                        attributes: Map<String, String>,
+                    ): Long? {
+                        if (origin == syncOrigin(host)) clearedBeforeStorage.complete(password.all { it == '\u0000' })
+                        return backing.put(origin, username, secret, attributes)
+                    }
+                }
+            val h = harness(this, store)
             try {
                 h.addLocalPodcast()
-                val password = "s3cret".toCharArray()
                 h.controller.discover(serverUrl)
                 await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
                 h.controller.submitPassword("alice", password)
                 await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
                 assertTrue(h.tokenStoreContains(host))
+                assertTrue(clearedBeforeStorage.await(), "Clear the password before storing the token")
                 assertEquals("alice", h.address.username())
                 assertTrue(password.all { it == '\u0000' })
                 assertTrue(h.client.calls.contains("login:alice"))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aPasswordWithoutAnActiveLinkIsCleared() =
+        runTest {
+            val h = harness(this)
+            try {
+                val password = "fixture".toCharArray()
+                h.controller.submitPassword("alice", password)
+                assertTrue(password.all { it == '\u0000' })
+                assertFalse(h.client.calls.any { it.startsWith("login:") })
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun cancellingBeforeThePasswordJobStartsStillClearsIt() =
+        runTest {
+            val h =
+                Harness(this, now, controllerDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+            try {
+                h.controller.discover(serverUrl)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                val password = "fixture".toCharArray()
+                h.controller.submitPassword("alice", password)
+                h.controller.link?.cancel()
+                h.tick()
+                assertTrue(password.all { it == '\u0000' })
+                assertFalse(h.client.calls.any { it.startsWith("login:") })
             } finally {
                 h.close()
             }
@@ -1897,6 +2006,56 @@ class SyncControllerImplTest {
                 assertNull(h.db.groupDao().groupByUuid(GROUP_UUID))
                 assertNull(h.db.syncHeldDao().byId(resolved))
                 assertNotNull(h.db.syncHeldDao().byId(other))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun applyingHeldUnsubscribeKeepsTheQueueRemovalClock() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.seedLinked()
+                val queueRid = PODCAST_SYNC_ID + "g:one"
+                val removal =
+                    RecordDto(
+                        coll = "upnext",
+                        id =
+                            buildJsonObject {
+                                put("p", JsonPrimitive(PODCAST_SYNC_ID))
+                                put("k", JsonPrimitive("g:one"))
+                            },
+                        seq = 1,
+                        by = OTHER_ACCOUNT_ID,
+                        fields =
+                            mapOf(
+                                "in" to
+                                    FieldValue(
+                                        JsonPrimitive(false),
+                                        Hlc.of(now, 3, NodeId("0000000000000002")).toString(),
+                                    ),
+                            ),
+                    )
+                assertEquals(1, h.applier.applyPage(listOf(removal), roundId = 1).applied)
+                val clock = assertNotNull(h.db.syncClockDao().get("upnext", queueRid))
+                val held = insertHeld(h, heldAt = 1, podcasts = listOf(PODCAST_SYNC_ID))
+                await(h) {
+                    h.controller.heldChanges.value
+                        .singleOrNull()
+                        ?.id == held
+                }
+
+                h.controller.resolveHeld(held, HeldResolution.APPLY)
+                await(h) {
+                    h.controller.heldChanges.value
+                        .isEmpty()
+                }
+                assertNull(h.db.podcastDao().bySyncId(PODCAST_SYNC_ID))
+                assertNull(h.db.syncHeldDao().byId(held))
+                assertEquals(clock, h.db.syncClockDao().get("upnext", queueRid))
+                assertEquals(0, h.db.syncOutboxDao().count())
             } finally {
                 h.close()
             }

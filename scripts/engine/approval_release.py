@@ -23,8 +23,11 @@ asset, never marks a snapshot or the index as latest, never mutates the
 repository settings and never touches the legacy index assets.  A failed
 pointer write leaves the completed snapshot unindexed and the old pointer
 intact; success is reported only after the new pointer is visible.  A newly
-published snapshot must be reported immutable by the API; the legacy index
-release may stay body-only discovery with ``immutable: false``.
+published snapshot must normally be reported immutable by the API. The
+owner's 2026-11-11 waiver permits ``--allow-mutable`` for repositories without
+GitHub release locking. The publisher still never edits a published snapshot
+and verifies its exact assets and tag commit before advancing the index.
+The legacy index release may stay body-only discovery with ``immutable: false``.
 
 Draft discovery and tag provenance: the by-tag endpoint returns published
 releases only, so a leftover draft with the snapshot tag is recovered
@@ -39,16 +42,19 @@ provenance.
 
 Concurrency precondition (not a linearizable CAS): GitHub's release-body
 PATCH has no compare-and-swap.  ``expected_index_tag`` is checked before the
-PATCH and a missing index is a mismatch when the caller supplied one; a
-caller that needs exclusivity must serialize publishing (for example one
-workflow concurrency group with ``cancel-in-progress: false``).  The
-later protected canary workflow must verify the current signed manifest and
-its sequence under that serial group and reject stale approve artifacts.
+PATCH and a missing index is a mismatch when the caller supplied one;
+``expect_no_index`` is the mutually exclusive bootstrap precondition that
+refuses an existing index.  A caller that needs exclusivity must serialize
+publishing (for example one workflow concurrency group with
+``cancel-in-progress: false``).  The later protected canary workflow must
+verify the current signed manifest and its sequence under that serial group
+and reject stale approve artifacts.
 The unsigned index is discovery metadata only, never an approval authority.
 
 CLI:
     approval_release.py publish --run-id N --run-attempt N --commit-sha SHA \
-        --snapshot-dir DIR [--dry-run] [--expected-index-tag TAG]
+        --snapshot-dir DIR [--dry-run] [--allow-mutable] \
+        [--expected-index-tag TAG | --expect-no-index]
     approval_release.py resolve
 
 ``publish`` reads the token only from ``GITHUB_TOKEN`` and only for a real
@@ -914,11 +920,13 @@ class SnapshotPublisher:
         index_url: str = INDEX_URL,
         approval_base_url: str = APPROVAL_BASE_URL,
         timeout_seconds: float | None = None,
+        require_immutable: bool = True,
     ):
         self._transport = transport
         self._index_url = index_url
         self._approval_base_url = approval_base_url
         self._timeout = timeout_seconds
+        self._require_immutable = require_immutable
 
     def _request(self, method: str, url: str, **kwargs) -> TransportResponse:
         if self._transport is None:
@@ -968,7 +976,12 @@ class SnapshotPublisher:
         commit_sha: str,
         *,
         expected_index_tag: str | None = None,
+        expect_no_index: bool = False,
     ) -> PublishResult:
+        if expected_index_tag is not None and expect_no_index:
+            raise ValidationError(
+                "expected_index_tag and expect_no_index are mutually exclusive"
+            )
         plan = self.plan(files, run_id, run_attempt, commit_sha)
         tag = plan.snapshot_tag
         # A fresh snapshot tag owns no git ref until publication.  A
@@ -981,6 +994,11 @@ class SnapshotPublisher:
             # leftover draft is recovered through the exact pending-tag
             # lookup and a REST by-id identity check.
             release = self._discover_draft_release(tag)
+        if release is None and (expected_index_tag is not None or expect_no_index):
+            # Preflight the index before creating a snapshot a stale detect
+            # would orphan.  An existing snapshot keeps its retry path: the
+            # authoritative check still runs in advance_index below.
+            self._check_index_precondition(expected_index_tag, expect_no_index)
         created = False
         published = False
         reused = False
@@ -1005,7 +1023,10 @@ class SnapshotPublisher:
                 )
         self._verify_published(release, files, commit_sha)
         index_release_id, index_created = self.advance_index(
-            tag, commit_sha, expected_index_tag=expected_index_tag
+            tag,
+            commit_sha,
+            expected_index_tag=expected_index_tag,
+            expect_no_index=expect_no_index,
         )
         return PublishResult(
             snapshot_tag=tag,
@@ -1421,7 +1442,7 @@ class SnapshotPublisher:
         if release.make_latest == "true":
             raise SnapshotStateError("snapshot became the latest release")
         self._verify_snapshot_tag_commit(release.tag_name, commit_sha)
-        if release.immutability_signal() is not True:
+        if self._require_immutable and release.immutability_signal() is not True:
             raise SnapshotNotImmutableError(
                 "the API did not report the newly published snapshot as immutable"
             )
@@ -1429,30 +1450,15 @@ class SnapshotPublisher:
 
     # -- stable index advance ------------------------------------------------
 
-    def advance_index(
-        self,
-        snapshot_tag: str,
-        commit_sha: str,
-        *,
-        expected_index_tag: str | None = None,
-    ) -> tuple[int, bool]:
-        """Advance the stable index body, or bootstrap it when missing.
-
-        The expected-tag check is a precondition, not a linearizable CAS: the
-        caller must serialize publishing.  The old pointer stays intact when
-        the check fails or the PATCH fails.
-        """
+    def _read_index(self) -> IndexRelease | None:
+        """Return the validated index release, or None when it is absent."""
         response = self._request(
             "GET",
             self._index_url,
             max_response_bytes=MAX_INDEX_JSON_BYTES,
         )
         if response.status == 404:
-            if expected_index_tag is not None:
-                raise IndexChangedError(
-                    f"index is missing, expected {expected_index_tag!r}"
-                )
-            return self._create_index(snapshot_tag, commit_sha)
+            return None
         if response.status != 200:
             raise IndexAdvanceError(f"index lookup failed with HTTP {response.status}")
         try:
@@ -1467,10 +1473,57 @@ class SnapshotPublisher:
         )
         if index.release_id is None:
             raise IndexAdvanceError("index release has no id")
-        if expected_index_tag is not None and index.snapshot_tag != expected_index_tag:
-            raise IndexChangedError(
-                f"index points at {index.snapshot_tag!r}, expected {expected_index_tag!r}"
+        return index
+
+    def _check_index_precondition(
+        self,
+        expected_index_tag: str | None,
+        expect_no_index: bool,
+    ) -> IndexRelease | None:
+        """Fail closed when the live index contradicts the caller's precondition.
+
+        The check is a precondition, not a linearizable CAS: the caller must
+        serialize publishing.  It never mutates the index.
+        """
+        index = self._read_index()
+        if expect_no_index:
+            if index is not None:
+                raise IndexChangedError(
+                    f"index exists pointing at {index.snapshot_tag!r}, expected none"
+                )
+            return None
+        if expected_index_tag is not None:
+            if index is None:
+                raise IndexChangedError(
+                    f"index is missing, expected {expected_index_tag!r}"
+                )
+            if index.snapshot_tag != expected_index_tag:
+                raise IndexChangedError(
+                    f"index points at {index.snapshot_tag!r}, expected {expected_index_tag!r}"
+                )
+        return index
+
+    def advance_index(
+        self,
+        snapshot_tag: str,
+        commit_sha: str,
+        *,
+        expected_index_tag: str | None = None,
+        expect_no_index: bool = False,
+    ) -> tuple[int, bool]:
+        """Advance the stable index body, or bootstrap it when missing.
+
+        The precondition check is not a linearizable CAS: the caller must
+        serialize publishing.  The old pointer stays intact when the check
+        fails or the PATCH fails.
+        """
+        if expected_index_tag is not None and expect_no_index:
+            raise ValidationError(
+                "expected_index_tag and expect_no_index are mutually exclusive"
             )
+        index = self._check_index_precondition(expected_index_tag, expect_no_index)
+        if index is None:
+            return self._create_index(snapshot_tag, commit_sha)
         payload = {
             "body": index_body(snapshot_tag),
             "prerelease": True,
@@ -1617,11 +1670,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="validate and print the plan without reading GITHUB_TOKEN or the network",
     )
-    publish.add_argument(
+    precondition = publish.add_mutually_exclusive_group()
+    precondition.add_argument(
         "--expected-index-tag",
         help="fail before the index PATCH when the index points elsewhere",
     )
+    precondition.add_argument(
+        "--expect-no-index",
+        action="store_true",
+        help="fail when any index exists (the verified bootstrap path)",
+    )
     publish.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    publish.add_argument(
+        "--allow-mutable",
+        action="store_true",
+        help="owner waiver of GitHub release locking; exact asset and tag checks still apply",
+    )
 
     resolve = sub.add_parser("resolve", help="read the stable index (no secret)")
     resolve.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
@@ -1666,8 +1730,16 @@ def main(
             return 0
 
         files = _load_files_from_args(args)
+        if args.allow_mutable:
+            print(
+                "approval_release: WAIVED GitHub release locking by owner instruction; "
+                "exact asset and tag checks remain required",
+                file=err,
+            )
         if args.dry_run:
-            plan = SnapshotPublisher(None, timeout_seconds=args.timeout).plan(
+            plan = SnapshotPublisher(
+                None, timeout_seconds=args.timeout, require_immutable=not args.allow_mutable
+            ).plan(
                 files, args.run_id, args.run_attempt, args.commit_sha
             )
             print(plan.summary(), file=out)
@@ -1687,7 +1759,8 @@ def main(
         # the check and send an unencodable secret.
         validate_token(token)
         publisher = SnapshotPublisher(
-            factory(token=token), timeout_seconds=args.timeout
+            factory(token=token), timeout_seconds=args.timeout,
+            require_immutable=not args.allow_mutable,
         )
         result = publisher.publish(
             files,
@@ -1695,6 +1768,7 @@ def main(
             args.run_attempt,
             args.commit_sha,
             expected_index_tag=args.expected_index_tag,
+            expect_no_index=args.expect_no_index,
         )
         print(
             json.dumps(

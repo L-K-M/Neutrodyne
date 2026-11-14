@@ -5,7 +5,10 @@ package ch.lkmc.neutrodyne.sync.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncCaptureKind
 import ch.lkmc.neutrodyne.core.database.SyncClockEntity
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
@@ -82,6 +85,84 @@ class SyncApplyEffects(
     private val cacheDir: Path,
 ) {
     private val fileSystem = FileSystem.SYSTEM
+
+    /**
+     * A removed source cannot supply its old order fields. Once the server has confirmed a
+     * removal at least as new as those intents, they are obsolete. Keep newer intents, replay
+     * literals and every field whose source still exists. The caller supplies the reader's
+     * undo-filtered rows, so a pending group undo is never shortened by this cleanup.
+     */
+    internal suspend fun discardRemovedSourceFields(
+        rows: List<SyncOutboxEntity>,
+        expectedProfile: SyncStateEntity?,
+    ): List<SyncOutboxEntity> {
+        val candidates =
+            rows
+                .filter {
+                    it.captureKind == SyncCaptureKind.LOCAL && it.value == null &&
+                        it.coll in setOf("group", "member", "upnext")
+                }.groupBy { it.coll to it.rid }
+        if (candidates.isEmpty() || expectedProfile == null || !expectedProfile.enabled) return rows
+        val discarded = mutableSetOf<SyncOutboxEntity>()
+        db.withWriteTransaction {
+            requireSyncProfile(expectedProfile, db.syncStateDao().get())
+            // These three lookups read only Room; no credential or DataStore access occurs here.
+            val source = SourceReader(db, secrets) { false }
+            val clocks = SyncClockStore(db)
+            for ((key, pending) in candidates) {
+                val (coll, rid) = key
+                val collection = SyncCollection.fromWire(coll)
+                val id = runCatching { RecordId.fromRid(collection, rid) }.getOrNull() ?: continue
+                val raw = clocks.get(coll, rid)
+                if (raw != null && (raw.redirectsSource() || raw.state.coll != collection)) continue
+                val ownRemoval = confirmedRemovalClock(raw, collection)
+                val parentRemoval =
+                    if (id is RecordId.Member) {
+                        // Cascading group deletion cannot capture each child once the parent
+                        // lookup disappears. Its confirmed tombstone also supersedes the child.
+                        val parent = clocks.get(SyncCollection.GROUP.wire, id.group.value)
+                        confirmedRemovalClock(parent, SyncCollection.GROUP)
+                            ?.takeIf { source.group(id.group.value) == null }
+                    } else {
+                        null
+                    }
+                val removalClock = listOfNotNull(ownRemoval, parentRemoval).maxOrNull() ?: continue
+                val absent =
+                    when (collection) {
+                        SyncCollection.GROUP -> source.group(rid) == null
+                        SyncCollection.MEMBER -> source.member(rid) == null
+                        SyncCollection.UPNEXT -> source.upnext(rid) == null
+                        else -> false
+                    }
+                if (!absent) continue
+                for (row in pending) {
+                    if (row.field != "*" && row.field !in collection.fields) continue
+                    val clock = outboxClock(row) ?: continue
+                    if (clock > removalClock) continue
+                    if (db.syncOutboxDao().get(coll, rid, row.field) != row) continue
+                    db.syncOutboxDao().deleteIfUnchanged(coll, rid, row.field, row.hlc, row.nodeId)
+                    discarded += row
+                }
+            }
+        }
+        return rows.filterNot { it in discarded }
+    }
+
+    private fun confirmedRemovalClock(
+        raw: RawSyncRecord?,
+        collection: SyncCollection,
+    ): Hlc? {
+        if (raw == null || raw.redirectsSource()) return null
+        val state = raw.confirmed().state
+        if (state.coll != collection) return null
+        val name = if (collection == SyncCollection.GROUP) "deleted" else "in"
+        val removal = state.fields[name] ?: return null
+        if (removal.v != JsonPrimitive(collection == SyncCollection.GROUP)) return null
+        return removal.c
+    }
+
+    private fun RawSyncRecord.redirectsSource(): Boolean =
+        alias != null || redirect != null || state.mergedInto != null || accepted?.state?.mergedInto != null
 
     /** Applies every pending setting whose marker survived; leaves the rest for a later drain. */
     suspend fun drainSettings() {
@@ -364,6 +445,7 @@ class SyncApplyEffects(
                         db.syncOutboxDao().deleteField(coll, rid, "~rekey")
                         return@forEachIndexed
                     }
+                    confirmAcknowledged(change, rid)
                     for ((field, value) in change.fields) {
                         val clock = value.c ?: continue
                         val parsed = runCatching { Hlc.parse(clock) }.getOrNull() ?: continue
@@ -383,6 +465,28 @@ class SyncApplyEffects(
                 }
             }
         }
+    }
+
+    /** Freeze the immutable sent snapshot before deleting its outbox proof. */
+    private suspend fun confirmAcknowledged(
+        change: ChangeDto,
+        rid: String,
+    ) {
+        val write =
+            ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+                .change(change) as?
+                ch.lkmc.neutrodyne.sync.protocol.ValidatedChange.Write ?: return
+        val store = SyncClockStore(db)
+        val stored = store.get(change.coll, rid)
+        val accepted = stored.confirm(write.state)
+        val visible =
+            SyncRecordMerger
+                .merge(
+                    stored?.state,
+                    null,
+                    write.state.copy(fields = write.state.fields - "auth"),
+                ).record
+        store.put(change.coll, rid, (stored ?: RawSyncRecord(visible)).copy(state = visible).withConfirmed(accepted))
     }
 
     /**
@@ -452,6 +556,12 @@ class SyncApplyEffects(
                         pendingSetting = materializeWinner,
                         pendingAuth = stored?.pendingAuth,
                         settingIntent = stored?.settingIntent,
+                        rejectedSetting =
+                            stored?.rejectedSetting?.takeIf { rejected ->
+                                rejected.clock?.let { runCatching { Hlc.parse(it) }.getOrNull() }?.let { it > clock } ==
+                                    true
+                            },
+                        accepted = stored?.accepted,
                     ),
                 ),
             ),
@@ -501,6 +611,7 @@ class SyncApplyEffects(
                         pendingSetting = stored?.pendingSetting,
                         pendingAuth = stored?.pendingAuth,
                         settingIntent = stored?.settingIntent,
+                        accepted = stored?.accepted,
                     ),
                 ),
             ),

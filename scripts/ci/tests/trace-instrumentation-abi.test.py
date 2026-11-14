@@ -70,6 +70,7 @@ ANALYSIS_ROOT_ENTRIES = {
     for name in (
         "ch.lkmc.neutrodyne.NeutrodyneTestRunner",
         "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest",
+        "ch.lkmc.neutrodyne.RadioHomeDeviceTest",
         "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
         "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
         "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",

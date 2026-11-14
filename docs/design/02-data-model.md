@@ -1853,10 +1853,11 @@ UPDATE play_session SET contextType = NULL, contextId = NULL, contextAnchorEpiso
 DELETE FROM credential WHERE origin <> 'podcastindex' AND origin NOT LIKE 'sync:%'
    AND id = (SELECT credentialId FROM podcast WHERE id = :pid)
    AND NOT EXISTS (SELECT 1 FROM podcast o WHERE o.credentialId = credential.id AND o.id <> :pid);
--- sync housekeeping (no-ops while unlinked): parked records and the clocks of the podcast's
--- episode, upnext and member records; the podcast's own clock row stays with its tombstone
+-- Sync housekeeping: discard parked records and child clocks, except Up next clocks
+-- on either origin of a linked unsubscribe. The podcast's own tombstone stays.
 DELETE FROM sync_parked WHERE podcastSyncId = (SELECT syncId FROM podcast WHERE id = :pid);
-DELETE FROM sync_clock WHERE ((coll IN ('episode', 'upnext') AND substr(rid, 1, 36) = (SELECT syncId FROM podcast WHERE id = :pid))
+DELETE FROM sync_clock WHERE ((coll IN ('episode', 'upnext') AND (:keepQueueClocks = 0 OR coll <> 'upnext')
+                               AND substr(rid, 1, 36) = (SELECT syncId FROM podcast WHERE id = :pid))
                            OR (coll = 'member' AND substr(rid, 37, 36) = (SELECT syncId FROM podcast WHERE id = :pid)));
 DELETE FROM podcast WHERE id = :pid;
 -- FK cascades: episode (+ description, transcript, alt_enclosure, chapter, episode_state, episode_position,
@@ -1865,9 +1866,14 @@ DELETE FROM podcast WHERE id = :pid;
 -- SET NULL: play_session.currentEpisodeId, import_item.podcastId
 ```
 
+A linked unsubscribe keeps Up next clocks even if its local queue rows disappear.
+This preserves server removal clocks received before approval; otherwise the cursor
+has advanced past records that cleanup deletes. An unlinked deletion or the
+`deleteMergeLoserCascade` call in a duplicate-feed merge purges those clocks too.
+
 `artwork` rows and files of the podcast are left to the reference-based garbage collection ([Artwork references](#artwork-references)).
 
-The last-reference credential delete races with a concurrent `SecretStore.put` for the same origin (`put` returns that origin's existing row, and its referencing write has not committed yet), exactly like the `db-maintenance` sweep. Every caller of `deleteCascade` — 03's `PodcastRepository.unsubscribe` (both origins) and `merge` (step 7 below) — therefore runs the transaction inside `CredentialCommitCoordinator.withCredentialCommit`, acquired before the write transaction ([03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore)).
+The last-reference credential delete races with a concurrent `SecretStore.put` for the same origin (`put` returns that origin's existing row, and its referencing write has not committed yet), exactly like the `db-maintenance` sweep. Every unsubscribe or duplicate-feed merge therefore runs the transaction inside `CredentialCommitCoordinator.withCredentialCommit`, acquired before the write transaction ([03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore)).
 
 **Merge** of podcast `loser` into `winner` (03 decides when, [03 Ingestion and diff](03-feeds-and-discovery.md#podcast-dedupe-and-merge); 05's import report shows `MERGED`). Before the transaction 03 deletes, through `DownloadController`, only the download files of **matched** loser episodes whose winner episode already has a `download` row (step 4 keeps the winner's row); unmatched loser episodes keep their downloads, because step 5 re-parents them. Matching runs in Kotlin on both podcasts' `IngestDao.existing()` lists: `identityKey`, then normalised enclosure URL. Then one write transaction:
 
@@ -2322,7 +2328,7 @@ Serves N1, N5, N9, R7.1. Test infrastructure, runners and CI wiring are owned by
 | `ConverterTest` | Desktop JVM | Every enum round-trips; unknown names map to the documented fallback; every `SqlEnumLiterals` name exists; bit constants; appended constants (`ImportFormat.URL_LIST`, `WaitReason.YOUTUBE_ENGINE_OFF` from M9a, `AliasReason.SYNC` from MS2) round-trip; each persisted enum still contains every name of a committed golden list (append-only rule) | M1, M9a |
 | `DescriptionCodecTest` | Desktop JVM | Round trip of ASCII, emoji, 1 MB HTML; < 512 bytes stored raw; corrupt header handled | M1 |
 | `IdentityStorageTest` | Desktop JVM | Duplicate `(podcastId, identityKey)` aborts the whole transaction; `rekey` keeps `episode_state`, `episode_position`, `download`, `queue_entry` rows | M1 |
-| `UnsubscribeCascadeTest` | Desktop JVM + GMD | `deleteCascade` removes every dependent row incl. person/funding and an unshared credential (a shared one and a `sync:` token survive); `play_session.currentEpisodeId` → NULL; `import_item.podcastId` → NULL; the podcast's `sync_parked` and episode, Up next and member `sync_clock` rows go | M1, MS2 |
+| `UnsubscribeCascadeTest` | Desktop JVM + GMD | `deleteCascade` removes every dependent row incl. person/funding and an unshared credential (a shared one and a `sync:` token survive); `play_session.currentEpisodeId` → NULL; `import_item.podcastId` → NULL; the podcast's `sync_parked` and episode and member `sync_clock` rows go; a linked unsubscribe retains Up next clocks, and a merge loser does not | M1, MS2 |
 | `PodcastMergeTest` | Desktop JVM | Memberships (with their `orderKey`) and aliases move without an alias equal to a `feedKey`; matched episodes merge user state and queue/download/current pointers; unmatched loser episodes are re-parented with `inFeed = 0` and keep their state; a `PODCAST` context follows the winner; while linked the loser's deletion captures no `subscribed = false`, only the literal `feedUrl` and `feedKeys` move rows | M1, MS2 |
 | `RebuildProcedureTest` | Desktop JVM + GMD | [Tests](#tests): `TableRebuild` keeps child rows and `sqlite_sequence`, refuses to run with foreign keys on | M1 |
 | `IngestDaoTest` | Desktop JVM | `updateFeedFields` keeps stored `durationMs`/`imageUrl`+`artworkKey`/`chaptersUrl` when the parsed value is null; `touchSeen` writes only rows older than a day; `applyFeedMetadata` never touches user and YouTube-owned columns; `forceDue` + `dueForRefresh` order (pending first) | M1 |

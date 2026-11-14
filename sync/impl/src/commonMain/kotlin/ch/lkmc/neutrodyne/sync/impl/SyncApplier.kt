@@ -249,9 +249,12 @@ class SyncApplier(
         val pending = pendingState(coll, resolved.rid)
         // The merge runs on the field-stripped record: the winner's `auth` is decided below
         // against the stored reference and the pending local intent, never carried in state.
+        val accepted = stored.confirm(incoming)
         val authField = incoming.fields["auth"]
         val merge = SyncRecordMerger.merge(stored?.state, pending, incoming.withoutField("auth"))
         if (merge.advanced.isEmpty() && merge.lost.isEmpty() && merge.record == stored?.state) {
+            // A lost ACK can make an equal echo the first durable proof of acceptance.
+            clockStore.put(coll.wire, resolved.rid, checkNotNull(stored).withConfirmed(accepted))
             return RecordOutcome.Stale
         }
         val auth =
@@ -318,7 +321,8 @@ class SyncApplier(
                     pendingSetting = pendingSetting ?: stored?.pendingSetting,
                     pendingAuth = auth?.pending ?: stored?.pendingAuth,
                     settingIntent = stored?.settingIntent,
-                ),
+                    rejectedSetting = stored?.rejectedSetting,
+                ).withConfirmed(accepted),
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)
         }
@@ -652,8 +656,14 @@ class SyncApplier(
         val member = id as RecordId.Member
         val group = db.groupDao().groupByUuid(member.group.value)
         val podcast = db.podcastDao().bySyncId(member.podcast.value)
+        val inGroup = merge.record.booleanField("in") ?: true
+        // A winning removal updates canonical state even when there is no Room row to delete.
+        if (!inGroup) {
+            if (group != null && podcast != null) db.groupDao().deleteMembers(group.id, listOf(podcast.id))
+            return RecordOutcome.Applied
+        }
         if (group == null || podcast == null) {
-            // An end known dead (or the membership's own removal) drops instead of parking.
+            // An end known dead or a redirected record drops instead of parking.
             return if (podcastDead(member.podcast.value) ||
                 groupDead(member.group.value) ||
                 RecordMerger.isDead(merge.record)
@@ -663,13 +673,7 @@ class SyncApplier(
                 RecordOutcome.Parked
             }
         }
-        val inGroup = merge.record.booleanField("in") ?: true
         val existing = db.groupDao().member(group.id, podcast.id)
-        if (!inGroup) {
-            if (existing == null) return RecordOutcome.Stale
-            db.groupDao().deleteMembers(group.id, listOf(podcast.id))
-            return RecordOutcome.Applied
-        }
         if (existing == null) {
             db
                 .groupDao()
@@ -837,14 +841,14 @@ class SyncApplier(
         merge: RecordMerge,
     ): RecordOutcome {
         val episodeId = id as RecordId.Episode
+        val inQueue = merge.record.booleanField("in") ?: true
         val podcast =
             db.podcastDao().bySyncId(episodeId.podcast.value)
-                ?: return if (podcastDead(episodeId.podcast.value)) {
-                    RecordOutcome.Stale
-                } else {
-                    RecordOutcome.Parked
+                ?: return when {
+                    !inQueue -> RecordOutcome.Applied
+                    podcastDead(episodeId.podcast.value) -> RecordOutcome.Stale
+                    else -> RecordOutcome.Parked
                 }
-        val inQueue = merge.record.booleanField("in") ?: true
         val hints = merge.record.match
         var matched = matcher.match(podcast.id, episodeId.key.value, hints)
         if (matched == null && inQueue && (hints?.enc != null || hints?.ytId != null)) {
@@ -863,12 +867,15 @@ class SyncApplier(
                 }
         }
         if (matched == null) {
-            return if (RecordMerger.isDead(merge.record)) RecordOutcome.Stale else RecordOutcome.Parked
+            return when {
+                !inQueue -> RecordOutcome.Applied
+                RecordMerger.isDead(merge.record) -> RecordOutcome.Stale
+                else -> RecordOutcome.Parked
+            }
         }
         val existing = db.queueDao().entryByEpisode(matched)
         if (!inQueue) {
-            if (existing == null) return RecordOutcome.Stale
-            db.queueDao().removeEpisodes(listOf(matched))
+            if (existing != null) db.queueDao().removeEpisodes(listOf(matched))
             return RecordOutcome.Applied
         }
         if (existing == null) {

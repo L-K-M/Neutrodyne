@@ -44,6 +44,19 @@ import kotlin.test.assertTrue
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 internal class NavHostTransitionHostTest : NdNavHostHarness() {
     @Test
+    fun radioHomeStaysBehindPushedScreensInWideWindows() {
+        setFixedHost(directive = TwoPaneDirective)
+        rule.runOnUiThread { navigation.push(PodcastKey(3)) }
+        settle()
+        assertTrue(rule.onAllNodesWithTag(FEEDS_TAG).fetchSemanticsNodes().isEmpty())
+        assertEquals(0, leftEdgeOf(rule.onRoot().captureToImage().toPixelMap(), PODCAST_COLOR))
+        rule.runOnUiThread { navigation.pop() }
+        settle()
+        assertTrue(rule.onAllNodesWithTag(PODCAST_TAG).fetchSemanticsNodes().isEmpty())
+        assertEquals(0, leftEdgeOf(rule.onRoot().captureToImage().toPixelMap(), FEEDS_COLOR))
+    }
+
+    @Test
     fun tabSwitchSettlesWithinASwapFrame() {
         setFixedHost()
 

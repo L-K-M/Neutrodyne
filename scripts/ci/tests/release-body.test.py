@@ -108,8 +108,7 @@ class ReleaseBodyTest(unittest.TestCase):
             "java -jar neutrodyne-server-1.0.0.jar serve",
             "ghcr.io/l-k-m/neutrodyne-server:1.0.0 (digest " + DIGEST + ")",
             "sha256sum --check --ignore-missing SHA256SUMS",
-            "gh release verify-asset v1.0.0 <file> -R L-K-M/Neutrodyne",
-            "gh attestation verify <file> -R L-K-M/Neutrodyne",
+            "gh attestation verify <file> -R L-K-M/Neutrodyne --signer-workflow L-K-M/Neutrodyne/.github/workflows/release.yml --source-ref refs/tags/v1.0.0 --source-digest <commit-sha>",
             "gh attestation verify oci://ghcr.io/l-k-m/neutrodyne-server@" + DIGEST,
             "Obtainium (Android)",
             r"neutrodyne-.*-arm64-v8a\.apk$",
@@ -120,6 +119,8 @@ class ReleaseBodyTest(unittest.TestCase):
                 self.assertIn(needle, body)
         self.assertNotIn("{{", body)
         self.assertNotIn("{%", body)
+        self.assertNotIn("gh release verify-asset", body)
+        self.assertNotIn("immutable", body.lower())
 
     def test_android_only_leaves_out_desktop_and_server(self):
         body = self.render("android", digest=None)
@@ -128,6 +129,8 @@ class ReleaseBodyTest(unittest.TestCase):
         self.assertNotIn("Sync server (optional, self-hosted)", body)
         self.assertNotIn("gh attestation verify oci://", body)
         self.assertIn("Obtainium (Android)", body)
+        self.assertNotIn("gh release verify-asset", body)
+        self.assertNotIn("immutable", body.lower())
 
     def test_ffmpeg_link_names_the_lock_version(self):
         body = self.render("android,desktop,sources,ffmpeg-sources,server,server-sources")

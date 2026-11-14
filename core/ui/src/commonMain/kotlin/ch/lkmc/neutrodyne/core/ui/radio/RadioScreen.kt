@@ -30,7 +30,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,9 +42,11 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.radio_valve_deck
@@ -107,22 +113,32 @@ private fun RadioCabinet(
             }
         val compact = viewportHeight < 800.dp
         val short = viewportHeight < 660.dp
-        val scale = LocalDensity.current.fontScale
+        val rows =
+            when {
+                compact -> RadioRows.COMPACT
+                wide -> RadioRows.WIDE
+                else -> RadioRows.STANDARD
+            }
+        val density = LocalDensity.current
+        val scale = density.fontScale
+        var measuredPlayer by remember(width, scale, compact, short) { mutableStateOf<Dp?>(null) }
         // Always calculate against the unhidden deck, independent of content and the last result.
         val deckWidth = width - (if (narrow) 20.dp else 24.dp) + 18.dp
         val naturalDeck = deckWidth * (423f / 1100f)
-        val playerBudget = if (wide) 0.dp else (if (compact) 207.dp else 240.dp) * scale
-        val programmeBudget = (if (compact) 220.dp else 250.dp) * scale
+        val playerBudget = if (wide) 0.dp else measuredPlayer ?: (if (compact) 207.dp else 240.dp) * scale
+        val programmeBudget = (if (compact) 230.dp else 280.dp) * scale
         val deckVisible = height >= 660.dp && height - naturalDeck - playerBudget - 80.dp >= programmeBudget
-        val tooShort = !wide && height < 480.dp
-        Column(if (tooShort) Modifier.verticalScroll(rememberScrollState()) else Modifier) {
-            val contentHeight = if (tooShort) 500.dp * scale else height
+        val minimumHeight = (if (wide) 280.dp else 500.dp) * scale
+        val needsScroll = height < minimumHeight
+        Column(if (needsScroll) Modifier.verticalScroll(rememberScrollState()) else Modifier) {
+            val contentHeight = maxOf(height, minimumHeight)
             Column(Modifier.height(contentHeight).fillMaxWidth().padding(horizontal = if (narrow) 10.dp else 12.dp)) {
                 if (deckVisible) {
                     Image(
                         painterResource(Res.drawable.radio_valve_deck),
                         null,
                         Modifier
+                            .testTag("radio_valve_deck")
                             .requiredWidth(
                                 deckWidth,
                             ).height(naturalDeck)
@@ -156,6 +172,7 @@ private fun RadioCabinet(
                                     programme,
                                     scroll,
                                     compact,
+                                    rows,
                                     Modifier.weight(1.15f).fillMaxHeight(),
                                 )
                                 Column(
@@ -168,7 +185,15 @@ private fun RadioCabinet(
                                             large = true,
                                         )
                                     }
-                                    RadioPlayer(state, actions, compact, short)
+                                    RadioPlayer(
+                                        state,
+                                        actions,
+                                        compact,
+                                        short,
+                                        Modifier.onSizeChanged {
+                                            measuredPlayer = with(density) { it.height.toDp() }
+                                        },
+                                    )
                                 }
                             }
                         } else {
@@ -196,9 +221,18 @@ private fun RadioCabinet(
                                     programme,
                                     scroll,
                                     compact,
+                                    rows,
                                     Modifier.fillMaxWidth().weight(1f),
                                 )
-                                RadioPlayer(state, actions, compact, short)
+                                RadioPlayer(
+                                    state,
+                                    actions,
+                                    compact,
+                                    short,
+                                    Modifier.onSizeChanged {
+                                        measuredPlayer = with(density) { it.height.toDp() }
+                                    },
+                                )
                             }
                         }
                     }

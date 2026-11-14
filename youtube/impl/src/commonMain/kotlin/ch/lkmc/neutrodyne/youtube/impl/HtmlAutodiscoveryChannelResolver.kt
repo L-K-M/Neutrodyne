@@ -82,7 +82,7 @@ internal class HtmlAutodiscoveryChannelResolver(
         ): ChannelResolution {
             val head = Buffer()
             val chunk = ByteArray(8192)
-            val boundary = HeadBoundary()
+            val boundary = HtmlMetadataStream()
             var total = 0
             var ended = false
             var pending = ByteArray(0)
@@ -108,7 +108,7 @@ internal class HtmlAutodiscoveryChannelResolver(
             val headBytes = head.size
             val prefix = head.readUtf8()
             // A video's og:title/image describe the video, never its channel.
-            val page =
+            var page =
                 if (kind == PageKind.WATCH) {
                     ChannelPageParser.Page(ChannelPageParser.watchId(prefix), null, null, null)
                 } else {
@@ -123,19 +123,29 @@ internal class HtmlAutodiscoveryChannelResolver(
                 return id?.let { page.resolved(it, banner) } ?: failed(FailReason.PAGE_UNREADABLE)
             }
 
+            // YouTube streams a second metadata block after </head>, especially on mobile.
+            // Keep tokenizer state across reads so scripts, comments and split tags stay safe.
+            val tags = mutableListOf<HeadTagScanner.Tag>()
+            val metadata = if (mayFindId) HtmlMetadataStream { tags.addAll(it) } else null
+            pending.forEach { metadata?.accept(it) }
             // Retain enough overlap for an externalId or a banner array spanning a window boundary.
             val window = Buffer().writeUtf8(prefix.takeLast(OVERLAP)).write(pending)
             while (true) {
                 val text = window.snapshot().utf8()
-                if (mayFindId && id == null) {
-                    id =
-                        if (kind ==
-                            PageKind.WATCH
-                        ) {
-                            ChannelPageParser.watchId(text)
-                        } else {
-                            ChannelPageParser.externalId(text)
-                        }
+                if (mayFindId) {
+                    if (kind == PageKind.WATCH) {
+                        id = id ?: ChannelPageParser.watchId(tags) ?: ChannelPageParser.watchId(text)
+                    } else {
+                        val discovered = ChannelPageParser.parseTags(tags, base, depth)
+                        page =
+                            page.copy(
+                                title = discovered.title ?: page.title,
+                                avatar = discovered.avatar ?: page.avatar,
+                                description = discovered.description ?: page.description,
+                            )
+                        id = id ?: discovered.channelId ?: ChannelPageParser.externalId(text)
+                    }
+                    tags.clear()
                     id?.let { remember(page.resolved(it)) }
                 }
                 if (depth == MetadataDepth.FULL && banner == null) banner = ChannelPageParser.banner(text)
@@ -148,6 +158,7 @@ internal class HtmlAutodiscoveryChannelResolver(
                     continue
                 }
                 total += count
+                for (i in 0 until count) metadata?.accept(chunk[i])
                 if (window.size + count > WINDOW) {
                     // Preserve an in-progress array, including sources longer than the normal overlap.
                     val start =

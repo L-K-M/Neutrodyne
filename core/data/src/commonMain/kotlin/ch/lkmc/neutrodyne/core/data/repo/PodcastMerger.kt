@@ -167,7 +167,7 @@ internal class PodcastMerger(
         dao.moveImportItems(loserId, winnerId)
         dao.copyProvenance(loserId, winnerId)
         dao.unionAmbiguity(loserId, winnerId)
-        podcasts.deleteCascade(loserId, now)
+        podcasts.deleteMergeLoserCascade(loserId, now)
         val session = db.playSessionDao().get()
         if (session != null && session.currentEpisodeId != currentBefore) {
             // A moved current must load paused, after index ownership is published on commit.

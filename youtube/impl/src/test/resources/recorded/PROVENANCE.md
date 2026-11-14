@@ -24,3 +24,21 @@ consent measurements, not channel-head measurements. No valid channel-head
 median was obtained and the 512 KiB metered-avatar decision remains pending
 a successful owner capture. Scrubbed fixture sizes cannot answer that question.
 Replay and PR tests make no live network requests.
+
+## Mobile channel metadata after the head
+
+`mobile-channel.html` is a reduced, scrubbed response shape captured successfully
+on 2026-11-14 from `https://www.youtube.com/@TheTechReportTR`, following its
+mobile redirect with an Android Neutrodyne User-Agent, SOCS=CAE= and de-CH
+locale. The 561,098-byte response ended its initial head at byte 2,865; its RSS
+link and channel metadata appeared around byte 281,000 in the body. There was
+no `externalId` field. Retained public values are the handle, channel ID and
+title; the avatar and description are inert replacements. Scripts, styles,
+request-specific values and unrelated markup were removed. The fixture retains
+the metadata order, not the original response sizes.
+
+A successful oEmbed response for `8Y-fS_55pD0`, the video reported alongside the
+handle, identified `https://www.youtube.com/@TheTechReportTR` as `author_url`.
+The replay test supplies only that author URL and public author name. These
+captures explain why both inputs reached the same unreadable-page failure;
+they do not establish a channel-head median or guarantee live availability.

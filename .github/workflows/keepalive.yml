@@ -28,8 +28,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          for wf in nightly.yml keepalive.yml; do
-            # TODO (M9b): engine-canary.yml joins this list with its workflow.
+          for wf in nightly.yml engine-canary.yml keepalive.yml; do
             if [ -f ".github/workflows/$wf" ]; then
               gh workflow enable "$wf" || true
             fi

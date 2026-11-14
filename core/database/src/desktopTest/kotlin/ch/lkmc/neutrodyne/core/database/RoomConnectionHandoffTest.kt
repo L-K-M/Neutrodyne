@@ -119,6 +119,48 @@ class RoomConnectionHandoffTest {
             }
         }
 
+    @Test
+    fun aCancelledFirstInMemoryOpenInitializesTheReplacementConnection() =
+        runBlocking {
+            val scope = CoroutineScope(Job() + Dispatchers.Default)
+            val insideOpen = CompletableDeferred<Unit>()
+            val releaseOpen = CompletableDeferred<Unit>()
+            val seen = CopyOnWriteArrayList<SeenConnection>()
+            val driver = GatedDriver(BundledSQLiteDriver(), { it == 1 }, insideOpen, releaseOpen, seen)
+            val db = TestDb.inMemory(driver)
+            val attempt = scope.async { db.syncStateDao().get() }
+            try {
+                assertTrue(
+                    withTimeoutOrNull(BOUND_MS) {
+                        insideOpen.await()
+                        true
+                    } == true,
+                )
+                attempt.cancel()
+                releaseOpen.complete(Unit)
+                assertIs<CancellationException>(assertThrows { attempt.await() })
+                assertEquals(0, seen.count { !it.closed.get() })
+
+                // An in-memory connection owns its schema. The discarded connection
+                // cannot leave the manager configured for its empty replacement.
+                val heldCount =
+                    db.useWriterConnection {
+                        it.usePrepared("SELECT COUNT(*) FROM sync_held") { statement ->
+                            statement.step()
+                            statement.getLong(0)
+                        }
+                    }
+                assertEquals(0L, heldCount)
+                assertEquals(0, db.syncStateDao().get()?.id)
+            } finally {
+                releaseOpen.complete(Unit)
+                scope.cancel()
+                withTimeoutOrNull(BOUND_MS) { attempt.join() }
+                db.close()
+                seen.filter { !it.closed.get() }.forEach { it.close() }
+            }
+        }
+
     /**
      * The same window on the readers pool after startup: with the writer connection already
      * pooled, a cancelled read acquisition opens a *second* connection (the readers factory also

@@ -67,7 +67,12 @@ class EnginePreparationTest {
             paths.ytDlpCacheDir.toString(),
         )
         assertEquals("3.14", paths.pythonMinor)
-        assertTrue(paths.bundledJson().contains("2026.08.19"))
+        val packagedMetadata =
+            context.assets
+                .open("ytdlp/bundled.json")
+                .bufferedReader()
+                .use { it.readText() }
+        assertEquals(packagedMetadata, paths.bundledJson())
         assertEquals("#!/usr/bin/env python3", paths.openBundledZip().buffer().use { it.readUtf8Line() })
         for (name in listOf("ytdlp/SHA2-256SUMS", "ytdlp/SHA2-256SUMS.sig", "ytdlp/yt-dlp-release-key.asc")) {
             assertFailsWith<java.io.FileNotFoundException> { context.assets.open(name).close() }

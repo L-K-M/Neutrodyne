@@ -690,15 +690,16 @@ class FirstLinkMergerTest {
                 val result = merger.merge(FirstLinkChoice.MERGE)
 
                 assertTrue(result is FirstLinkResult.Completed, "$result")
-                val rows = db.syncOutboxDao().rows()
-                val feedUrl = rows.first { it.coll == "podcast" && it.field == "feedUrl" }
-                assertTrue(feedUrl.hlc ushr 16 <= now)
-                assertTrue(rows.any { it.coll == "group" && it.rid.isNotEmpty() }, "groups upload too, rows=$rows")
-                assertTrue(rows.any { it.coll == "member" }, "members upload too, rows=$rows")
+                val sent = client.pushed
+                val feedUrl = sent.first { it.coll == "podcast" && "feedUrl" in it.fields }.fields.getValue("feedUrl")
+                assertTrue(Hlc.parse(checkNotNull(feedUrl.c)).millis <= now)
+                assertTrue(sent.any { it.coll == "group" }, "groups upload too")
+                assertTrue(sent.any { it.coll == "member" }, "members upload too")
                 assertTrue(
-                    rows.none { it.hlc ushr 16 > now + 1_000 },
-                    "bootstrap writes keep their row timestamps, rows=$rows",
+                    sent.flatMap { it.fields.values }.mapNotNull { it.c }.none { Hlc.parse(it).millis > now + 1_000 },
+                    "bootstrap writes keep their row timestamps",
                 )
+                assertEquals(0, db.syncOutboxDao().count(), "successful uploads acknowledge the queued writes")
             } finally {
                 db.close()
             }
@@ -757,13 +758,14 @@ class FirstLinkMergerTest {
                 assertEquals(JsonPrimitive(false), episode.fields.getValue("played").v)
                 assertEquals(JsonNull, episode.fields.getValue("playedAt").v)
                 // The capture pass skips the server-won fields (their origin node differs).
-                val rows = db.syncOutboxDao().rows()
+                val sent = client.pushed
                 assertTrue(
-                    rows.none { it.coll == "episode" && (it.field == "played" || it.field == "pos") },
-                    "server-won fields not echoed, rows=$rows",
+                    sent.none { it.coll == "episode" && ("played" in it.fields || "pos" in it.fields) },
+                    "server-won fields are not echoed",
                 )
-                // The local podcast's identity fields carried local stamps: captured.
-                assertTrue(rows.any { it.coll == "podcast" && it.field == "title" }, "rows=$rows")
+                // Inspect the frozen wire payload after its real acknowledgement drained the outbox.
+                assertTrue(sent.any { it.coll == "podcast" && "title" in it.fields })
+                assertEquals(0, db.syncOutboxDao().count())
             } finally {
                 db.close()
             }
@@ -955,6 +957,183 @@ class FirstLinkMergerTest {
                 val parked = db.syncParkedDao().forPodcast(podcastSyncId)
                 assertEquals(listOf("g:one"), parked.map { it.identityKey })
                 assertEquals("one", parked.single().guid, "the match hints ride along")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun rejectedFirstLinkWritesCannotCompleteTheLink() =
+        runTest {
+            val db = TestDb.inMemory()
+            var pushes = 0
+            try {
+                link(db)
+                db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId))
+                val client =
+                    ScriptedClient(emptyList(), syncHandler = { _, changes ->
+                        pushes++
+                        SyncResponse(
+                            changes.mapIndexed { index, _ -> ChangeResultDto(index, "rejected", code = "invalid") },
+                            emptyList(),
+                            "c:00000001:1",
+                            false,
+                            "",
+                        )
+                    })
+                val result = mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Failed, "rejected uploads cannot complete linking")
+                assertEquals(1, pushes, "a non-clock rejection cannot be repaired by resending unchanged data")
+                assertNull(db.syncStateDao().get()?.linkedAt)
+                assertTrue(db.syncOutboxDao().count() > 0, "rejected intents remain recoverable")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aNonClockRejectionAfterTheClockRetryFailsImmediately() =
+        runTest {
+            val db = TestDb.inMemory()
+            var pushes = 0
+            try {
+                link(db)
+                db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId))
+                val client =
+                    ScriptedClient(emptyList(), syncHandler = { _, changes ->
+                        pushes++
+                        val code = if (pushes == 1) "clock_skew" else "invalid"
+                        SyncResponse(
+                            changes.mapIndexed { index, _ -> ChangeResultDto(index, "rejected", code = code) },
+                            emptyList(),
+                            "c:00000001:1",
+                            false,
+                            "",
+                        )
+                    })
+                val result = mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Failed)
+                assertEquals(2, pushes, "a non-clock failure ends the clock retry immediately")
+                assertNull(db.syncStateDao().get()?.linkedAt)
+                assertTrue(db.syncOutboxDao().count() > 0)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun localFirstLinkSeedsCannotPoisonTheCorrectedClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId, subscribedAt = now))
+                val serverNow = now - 21_600_000L
+                val serverTime =
+                    kotlin.time.Instant
+                        .fromEpochMilliseconds(serverNow)
+                        .toString()
+                val base = CountingClient(emptyList())
+                val client =
+                    object : SyncClient by base {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage = base.changes(since, limit).copy(serverTime = serverTime)
+
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ChangeDto>,
+                        ): SyncResponse {
+                            val response = base.sync(since, changes)
+                            return response.copy(
+                                serverTime = serverTime,
+                                results =
+                                    changes.mapIndexed { index, change ->
+                                        val future =
+                                            change.fields.values.any { field ->
+                                                field.c?.let { Hlc.parse(it).millis > serverNow + 300_000L } == true
+                                            }
+                                        ChangeResultDto(
+                                            index,
+                                            if (future) "rejected" else "applied",
+                                            code = if (future) "clock_skew" else null,
+                                        )
+                                    },
+                            )
+                        }
+                    }
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Completed)
+                val raw = checkNotNull(SyncClockStore(db).get("podcast", podcastSyncId))
+                assertTrue(
+                    checkNotNull(raw.state.maxClock).millis <= serverNow + 300_000L,
+                    "unaccepted first-link seeds must not masquerade as accepted future clocks",
+                )
+                db.withWriteTransaction {
+                    db.syncOutboxDao().captureLiteral("podcast", podcastSyncId, "title", "\"Later local edit\"")
+                }
+                val report =
+                    engine(
+                        db,
+                        client,
+                        SyncActivityState(),
+                    ).round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW)
+                assertEquals(0, report.rejected, "the next local edit must remain admissible")
+                assertEquals(0, db.syncOutboxDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun adoptingTheServerLibraryKeepsTheCorrectedWallClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val offset = -21_600_000L
+                db.syncStateDao().setClockOffset(offset)
+                val merger = mergerOf(db, CountingClient(emptyList()), FakeLibraryMerger())
+                assertTrue(merger.merge(FirstLinkChoice.USE_SERVER) is FirstLinkResult.Completed)
+                val state = checkNotNull(db.syncStateDao().get())
+                assertEquals(offset, state.clockOffsetMs)
+                assertEquals(
+                    (now + offset) shl Hlc.COUNTER_BITS,
+                    state.hlc,
+                    "first-link adoption must not restore the uncorrected future clock",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun firstLinkPullSamplesTheServerClockBeforeAdoption() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val offset = -21_600_000L
+                val base = CountingClient(emptyList())
+                val timed =
+                    object : SyncClient by base {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage =
+                            base.changes(since, limit).copy(
+                                serverTime =
+                                    kotlin.time.Instant
+                                        .fromEpochMilliseconds(now + offset)
+                                        .toString(),
+                            )
+                    }
+                val merger = mergerOf(db, timed, FakeLibraryMerger())
+                assertTrue(merger.merge(FirstLinkChoice.USE_SERVER) is FirstLinkResult.Completed)
+                val state = checkNotNull(db.syncStateDao().get())
+                assertEquals(offset, state.clockOffsetMs, "staging pulls also correct the clock")
+                assertEquals((now + offset) shl Hlc.COUNTER_BITS, state.hlc)
             } finally {
                 db.close()
             }
@@ -2304,7 +2483,7 @@ class FirstLinkMergerTest {
                                         mapOf(
                                             "played" to
                                                 ch.lkmc.neutrodyne.sync.protocol.FieldState(
-                                                    JsonPrimitive(true),
+                                                    JsonPrimitive(false),
                                                     stored,
                                                 ),
                                             "playedAt" to
@@ -2426,9 +2605,13 @@ class FirstLinkMergerTest {
                             checkNotNull(take().body).utf8(),
                         )
                 assertEquals("c:0000000a:2", pushed.since)
+                pushed.changes.forEach {
+                    ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+                        .change(it)
+                }
                 val fields = pushed.changes.single { it.coll == "episode" }.fields
                 assertEquals(stored.toString(), fields["played"]?.c)
-                assertEquals(JsonPrimitive(true), fields["played"]?.v)
+                assertEquals(JsonPrimitive(false), fields["played"]?.v)
                 assertEquals(stored.toString(), fields["playedAt"]?.c)
                 assertEquals(JsonNull, fields["playedAt"]?.v)
                 assertEquals(pending.toString(), fields["fav"]?.c)
@@ -3022,6 +3205,7 @@ private class CountingClient(
     private val records: List<RecordDto>,
     private val hasMore: Boolean = false,
 ) : SyncClient {
+    val pushed = mutableListOf<ChangeDto>()
     var changesCalls = 0
         private set
 
@@ -3079,14 +3263,16 @@ private class CountingClient(
     override suspend fun sync(
         since: String?,
         changes: List<ChangeDto>,
-    ): SyncResponse =
-        SyncResponse(
-            results = emptyList(),
+    ): SyncResponse {
+        pushed += changes
+        return SyncResponse(
+            results = changes.mapIndexed { index, _ -> ChangeResultDto(index, "applied") },
             records = emptyList(),
             cursor = "c:00000001:1",
             hasMore = false,
             serverTime = "",
         )
+    }
 
     override suspend fun changes(
         since: String?,

@@ -62,11 +62,73 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 /** AC2 at the engine level: two devices converge through the shared merge rules. */
 private const val NOW = 1_800_000_000_000L
 
 class SyncEngineTest {
+    @Test
+    fun aSyncResponseCorrectsTheDeviceClockFromTheRequestMidpoint() =
+        runTest {
+            val db = TestDb.inMemory()
+            lateinit var device: Device
+            val base = InMemorySyncClient(InMemorySyncServer { NOW })
+            val timed =
+                object : SyncClient by base {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse {
+                        device.clock.advanceBy(1.seconds)
+                        return base.sync(since, changes).copy(
+                            serverTime = Instant.fromEpochMilliseconds(NOW - 21_600_000 + 500).toString(),
+                        )
+                    }
+                }
+            try {
+                seedRound(db)
+                device = Device(db, timed)
+                device.engine.round(SyncRoundReason.PERIODIC)
+                assertEquals(-21_600_000L, db.syncStateDao().get()!!.clockOffsetMs)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aLaterPullPageAlsoUpdatesTheClockOffset() =
+        runTest {
+            val db = TestDb.inMemory()
+            lateinit var device: Device
+            val base = InMemorySyncClient(InMemorySyncServer { NOW })
+            val timed =
+                object : SyncClient by base {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse = base.sync(since, changes).copy(hasMore = true, serverTime = "")
+
+                    override suspend fun changes(
+                        since: String?,
+                        limit: Int,
+                    ): ChangesPage {
+                        device.clock.advanceBy(1.seconds)
+                        return base.changes(since, limit).copy(
+                            serverTime = Instant.fromEpochMilliseconds(NOW - 7_200_000 + 500).toString(),
+                        )
+                    }
+                }
+            try {
+                seedRound(db)
+                device = Device(db, timed)
+                device.engine.round(SyncRoundReason.PERIODIC)
+                assertEquals(-7_200_000L, db.syncStateDao().get()!!.clockOffsetMs)
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun diagnosticsRecordTheActualCompletedRoundAndItsReason() =
         runTest {
@@ -866,7 +928,7 @@ class SyncEngineTest {
         }
     }
 
-    private class Device(
+    internal class Device(
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         val client: SyncClient,
         private val activity: SyncActivityState = SyncActivityState(),
@@ -1053,7 +1115,7 @@ class SyncEngineTest {
 }
 
 /** The MS0 in-memory server behind the [SyncClient] surface, for engine tests. */
-private class InMemorySyncClient(
+internal class InMemorySyncClient(
     private val server: InMemorySyncServer,
 ) : SyncClient {
     override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()

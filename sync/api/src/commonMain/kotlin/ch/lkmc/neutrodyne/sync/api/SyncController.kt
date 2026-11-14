@@ -55,6 +55,7 @@ interface SyncController {
 
     fun submitInvite(code: String)
 
+    /** Takes ownership of [password] and clears it when authentication finishes or is discarded. */
     fun submitPassword(
         username: String,
         password: CharArray,
