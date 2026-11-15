@@ -59,7 +59,7 @@
   <string name="sync_setup_replace_server_backup">Save a backup first</string>
   <string name="sync_setup_replace_server_confirm">Replace</string>
   <string name="sync_setup_replace_device_title">Use this device’s library everywhere?</string>
-  <string name="sync_setup_replace_device_body">Other devices will remove podcasts and groups this device doesn’t have when they next sync; devices ask first when this exceeds their limits.</string>
+  <string name="sync_setup_replace_device_body">Other devices will remove %1$d podcasts and %2$d groups when they next sync; devices ask first when this exceeds their limits.</string>
   <string name="sync_setup_replace_device_confirm">Replace everywhere</string>
   <string name="sync_setup_backup_working">Saving backup…</string>
   <string name="sync_setup_backup_saved">Backup saved.</string>

@@ -276,6 +276,34 @@ class FirstLinkMerger(
         backupGroupNames: Set<String>,
     ): Pair<Int, Int> {
         val pull = pullStaged(roundId, resume = true) { _, _, _ -> }
+        return countServerOnly(pull, backupPodcastKeys, backupGroupNames)
+    }
+
+    /**
+     * 10 "Use this device's library everywhere" step 1 for the link flow: a fresh staging pull,
+     * then the second confirmation's counts (the server's live podcasts and groups this device
+     * lacks). Nothing is applied or captured. The staging file stays, so the confirmed choice
+     * merges, uploads and prunes against exactly the snapshot these counts describe.
+     */
+    suspend fun stageResetEffect(): Pair<Int, Int> {
+        val roundId = clock.now()
+        activity.begin()
+        try {
+            val pull = pullStaged(roundId, resume = false)
+            val podcastKeys = db.podcastDao().allForExport().mapTo(HashSet()) { it.feedKey }
+            val groupNames = db.groupDao().groupsInOrder().mapTo(HashSet()) { it.name }
+            return countServerOnly(pull, podcastKeys, groupNames)
+        } finally {
+            activity.end()
+        }
+    }
+
+    /** The staged live podcasts and groups whose key or `nameKey` is not in the given library. */
+    private fun countServerOnly(
+        pull: StagedPull,
+        backupPodcastKeys: Set<String>,
+        backupGroupNames: Set<String>,
+    ): Pair<Int, Int> {
         val backupNameKeys =
             backupGroupNames.mapNotNull { (GroupNames.validate(it) as? GroupNames.Validation.Valid)?.nameKey }.toSet()
         var podcasts = 0

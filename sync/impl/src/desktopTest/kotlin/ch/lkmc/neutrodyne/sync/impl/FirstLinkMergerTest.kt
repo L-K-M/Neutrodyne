@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -2784,6 +2785,65 @@ class FirstLinkMergerTest {
                 assertEquals("30000", intent.value)
                 assertTrue(intent.hlc > serverClock.packed, "the upload outranks the snapshot")
                 assertTrue(port.applied.none { it.first == key }, "applied=${port.applied}")
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 "Use this device's library everywhere" step 1 for the link flow: the staging pull
+     * counts the server's live podcasts and groups this device lacks (a dead record and one
+     * this device has do not count) and keeps its snapshot, so the confirmed choice merges and
+     * prunes against it without pulling again.
+     */
+    @Test
+    fun stageResetEffectCountsTheServerOnlyLibraryAndKeepsTheSnapshot() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                db.podcastDao().insertPodcast(
+                    podcastEntity(
+                        syncId = podcastSyncId,
+                        feedUrl = "https://example.com/feed",
+                        // 02: a feed key is the identity form of its URL, as the counts compare.
+                        feedKey = checkNotNull(UrlNormalizer.forIdentity("https://example.com/feed")),
+                        title = "Example",
+                    ),
+                )
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database
+                        .groupEntity(name = "News", orderKey = "a0"),
+                )
+                val client =
+                    CountingClient(
+                        listOf(
+                            podcastRecord(),
+                            podcastRecordFor("00000000-0000-4000-8000-0000000000b1", "https://b.example/feed"),
+                            podcastRecordWithSubscription(
+                                "00000000-0000-4000-8000-0000000000b2",
+                                "https://c.example/feed",
+                                subscribed = false,
+                            ),
+                            groupRecord("00000000-0000-4000-8000-0000000000c1", "news", ok = null),
+                            groupRecord("00000000-0000-4000-8000-0000000000c2", "Sport", ok = null),
+                            groupRecord("00000000-0000-4000-8000-0000000000c3", "Gone", ok = null, deleted = true),
+                        ),
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertEquals(1 to 1, merger.stageResetEffect())
+                assertTrue(library.calls.isEmpty(), "nothing merges before the confirmation")
+                assertEquals(0, client.resetCalls)
+
+                // Only the confirmed choice prunes.
+                client.allowReset = true
+                val result = merger.merge(FirstLinkChoice.USE_DEVICE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertEquals(1, client.changesCalls, "the confirmed choice resumed the staged snapshot")
+                assertEquals("c:00000001:1", client.resetBeforeCursor)
             } finally {
                 db.close()
             }

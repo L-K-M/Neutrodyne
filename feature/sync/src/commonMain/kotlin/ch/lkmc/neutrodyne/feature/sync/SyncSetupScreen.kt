@@ -154,9 +154,9 @@ internal fun SyncSetupScreen(
     val awaiting = state as? LinkState.AwaitingInput
     val host = hostOf(awaiting?.server?.serverUrl ?: address)
 
-    // The destructive choices wait for their confirmation; only the explicit final action calls
-    // `chooseFirstLink`. `USE_DEVICE` still lacks the service's staged effect counts, so its
-    // dialog warns without numbers (the exact two-stage gate arrives with the service).
+    // The destructive choices wait for their confirmation; only the explicit final action runs
+    // the merge. `USE_SERVER` confirms here; `USE_DEVICE` asks the service, which stages the
+    // server's library and answers with `ConfirmReplaceEverywhere` and its effect counts.
     var pendingChoice by remember { mutableStateOf<FirstLinkChoice?>(null) }
     var backupPhase by remember { mutableStateOf<BackupPhase>(BackupPhase.Idle) }
     var backupError by remember { mutableStateOf<BackupError?>(null) }
@@ -391,9 +391,27 @@ internal fun SyncSetupScreen(
                         when (choice) {
                             FirstLinkChoice.MERGE -> controller.chooseFirstLink(FirstLinkChoice.MERGE)
                             FirstLinkChoice.USE_SERVER -> pendingChoice = FirstLinkChoice.USE_SERVER
-                            FirstLinkChoice.USE_DEVICE -> pendingChoice = FirstLinkChoice.USE_DEVICE
+                            FirstLinkChoice.USE_DEVICE -> controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
                         }
                     },
+                )
+            }
+
+            is LinkState.ConfirmReplaceEverywhere -> {
+                val confirm = state as LinkState.ConfirmReplaceEverywhere
+                // The choices stay behind the second confirmation; Cancel returns to them.
+                ChooseFirstLinkStep(
+                    state = confirm.choices,
+                    host = host,
+                    choice = FirstLinkChoice.USE_DEVICE,
+                    onChoice = {},
+                    onContinue = {},
+                )
+                ReplaceEverywhereDialog(
+                    removedPodcasts = confirm.removedPodcasts,
+                    removedGroups = confirm.removedGroups,
+                    onReplace = { controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE) },
+                    onCancel = link::cancel,
                 )
             }
 
@@ -435,14 +453,8 @@ internal fun SyncSetupScreen(
                 )
             }
 
-            FirstLinkChoice.USE_DEVICE -> {
-                ReplaceEverywhereDialog(
-                    onReplace = { confirmChoice(FirstLinkChoice.USE_DEVICE) },
-                    onCancel = ::dismissConfirmation,
-                )
-            }
-
-            FirstLinkChoice.MERGE -> {
+            // `USE_DEVICE` confirms through the service's `ConfirmReplaceEverywhere` step.
+            FirstLinkChoice.USE_DEVICE, FirstLinkChoice.MERGE -> {
                 Unit
             }
         }
@@ -842,20 +854,21 @@ private fun ReplaceServerDialog(
 }
 
 /**
- * 08 Linking a device, "Use this device's library everywhere": the confirmation before the
- * replace. The exact effect counts need the service's staged pull, which this branch's link
- * service does not expose yet, so the warning names the effect without numbers; the service's
- * later `ConfirmReplaceEverywhere` step can replace this local gate.
+ * 08 Linking a device, "Use this device's library everywhere": the second confirmation, shown
+ * after the service staged the server's library. It names the removals the other devices will
+ * see; only "Replace everywhere" runs the merge.
  */
 @Composable
 private fun ReplaceEverywhereDialog(
+    removedPodcasts: Int,
+    removedGroups: Int,
     onReplace: () -> Unit,
     onCancel: () -> Unit,
 ) {
     NdDialog(
         onDismissRequest = onCancel,
         title = stringResource(Res.string.sync_setup_replace_device_title),
-        text = stringResource(Res.string.sync_setup_replace_device_body),
+        text = stringResource(Res.string.sync_setup_replace_device_body, removedPodcasts, removedGroups),
         confirm =
             NdDialogAction(
                 stringResource(Res.string.sync_setup_replace_device_confirm),

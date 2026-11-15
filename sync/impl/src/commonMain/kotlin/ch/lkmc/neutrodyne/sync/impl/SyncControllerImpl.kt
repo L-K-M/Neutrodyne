@@ -404,10 +404,19 @@ class SyncControllerImpl(
     }
 
     override fun chooseFirstLink(choice: FirstLinkChoice) {
+        val state = linkFlow.state.value
         // An empty account offers no choice: only the named upload confirmation can continue it.
-        if (linkFlow.state.value is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmUpload &&
-            choice != FirstLinkChoice.MERGE
+        if (state is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmUpload && choice != FirstLinkChoice.MERGE) {
+            return
+        }
+        // 10 First-link choices: "Use this device's library everywhere" asks its second
+        // confirmation after the choice's staging pull, so it can name what the other devices
+        // will remove. Only the confirmation's own action runs the merge.
+        if (choice == FirstLinkChoice.USE_DEVICE &&
+            state !is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmReplaceEverywhere
         ) {
+            if (state !is ch.lkmc.neutrodyne.sync.api.LinkState.ChooseFirstLink) return
+            linkJob = scope.launch { stageReplaceEverywhere(state) }
             return
         }
         linkJob = scope.launch { beginMerge(choice) }
@@ -1035,6 +1044,28 @@ class SyncControllerImpl(
                         refreshStatus()
                     }
                 }
+            } finally {
+                _syncing.value = false
+            }
+        }
+
+    /**
+     * 10 "Use this device's library everywhere" step 1: the staging pull whose snapshot feeds
+     * the second confirmation. The staged file stays until the confirmed merge completes, which
+     * resumes it instead of pulling again; nothing is merged, uploaded or pruned here.
+     */
+    private suspend fun stageReplaceEverywhere(choices: ch.lkmc.neutrodyne.sync.api.LinkState.ChooseFirstLink) =
+        identityMutex.withLock {
+            coroutineContext.ensureActive()
+            _syncing.value = true
+            try {
+                linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
+                val (podcasts, groups) = merger.stageResetEffect()
+                linkFlow.confirmReplaceEverywhere(choices, podcasts, groups)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                linkFlow.failed(classify(failure))
             } finally {
                 _syncing.value = false
             }

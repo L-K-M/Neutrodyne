@@ -191,8 +191,13 @@ class SyncSetupConfirmationTest {
             assertTrue(harness.backup.savePreparedCalls.isEmpty())
         }
 
+    /**
+     * 10 First-link choices: Continue hands "Use this device's library everywhere" to the
+     * service, which stages the server's library before its second confirmation; the screen
+     * shows no dialog of its own.
+     */
     @Test
-    fun useDeviceContinueOnlyAsksForConfirmation() =
+    fun useDeviceContinueAsksTheServiceToStageItsConfirmation() =
         runComposeUiTest {
             val harness = Harness()
             setPage(harness)
@@ -201,25 +206,41 @@ class SyncSetupConfirmationTest {
             onNodeWithText("Continue").performClick()
             waitForIdle()
 
+            assertEquals(listOf(FirstLinkChoice.USE_DEVICE), harness.controller.firstLinkChoices)
+            onNodeWithText("Use this device’s library everywhere?").assertDoesNotExist()
+        }
+
+    /** 08: the second confirmation names the staged removals before anything runs. */
+    @Test
+    fun useDeviceConfirmationNamesTheStagedRemovals() =
+        runComposeUiTest {
+            val harness = Harness()
+            setPage(harness)
+
+            showDeviceConfirmation(harness)
+
             onNodeWithText("Use this device’s library everywhere?").assertIsDisplayed()
+            onNodeWithText(
+                "Other devices will remove 4 podcasts and 2 groups when they next sync; " +
+                    "devices ask first when this exceeds their limits.",
+            ).assertIsDisplayed()
             onNodeWithText("Replace everywhere").assertIsDisplayed()
             onNodeWithText("Cancel").assertIsDisplayed()
             assertTrue(harness.controller.firstLinkChoices.isEmpty())
         }
 
     @Test
-    fun useDeviceCancelIsInert() =
+    fun useDeviceCancelLeavesThroughTheService() =
         runComposeUiTest {
             val harness = Harness()
             setPage(harness)
 
-            openDeviceDialog()
+            showDeviceConfirmation(harness)
             onNodeWithText("Cancel").performClick()
             waitForIdle()
 
-            onNodeWithText("Use this device’s library everywhere?").assertDoesNotExist()
             assertTrue(harness.controller.firstLinkChoices.isEmpty())
-            assertEquals(0, harness.link.cancelCount)
+            assertEquals(1, harness.link.cancelCount)
         }
 
     @Test
@@ -228,7 +249,7 @@ class SyncSetupConfirmationTest {
             val harness = Harness()
             setPage(harness)
 
-            openDeviceDialog()
+            showDeviceConfirmation(harness)
             onNodeWithText("Replace everywhere").performClick()
             waitForIdle()
 
@@ -241,10 +262,11 @@ class SyncSetupConfirmationTest {
             val harness = Harness()
             setPage(harness)
 
-            openDeviceDialog()
+            showDeviceConfirmation(harness)
             onNodeWithText("Replace everywhere").assertIsNotFocused()
 
-            onNodeWithText("Cancel").performClick()
+            // The fake service does not move; the real one returns to the choices on Cancel.
+            harness.link.setState(harness.choices)
             waitForIdle()
 
             openServerDialog()
@@ -273,11 +295,13 @@ class SyncSetupConfirmationTest {
             onNodeWithText("Bibliothek dieses Geräts überall verwenden").performScrollTo().performClick()
             onNodeWithText("Weiter").performScrollTo().performClick()
             waitForIdle()
+            assertEquals(listOf(FirstLinkChoice.USE_DEVICE), harness.controller.firstLinkChoices)
+            showDeviceConfirmation(harness)
 
             onNodeWithText("Bibliothek dieses Geräts überall verwenden?").assertIsDisplayed()
             onNodeWithText("Überall ersetzen").assertIsDisplayed()
             onNodeWithText("Abbrechen").assertIsDisplayed()
-            assertTrue(harness.controller.firstLinkChoices.isEmpty())
+            assertEquals(listOf(FirstLinkChoice.USE_DEVICE), harness.controller.firstLinkChoices)
         }
 
     private fun ComposeUiTest.openServerDialog() {
@@ -286,9 +310,11 @@ class SyncSetupConfirmationTest {
         waitForIdle()
     }
 
-    private fun ComposeUiTest.openDeviceDialog() {
-        onNodeWithText("library everywhere", substring = true).performClick()
-        onNodeWithText("Continue").performClick()
+    /** The service's answer to the USE_DEVICE choice: its staged second confirmation. */
+    private fun ComposeUiTest.showDeviceConfirmation(harness: Harness) {
+        harness.link.setState(
+            LinkState.ConfirmReplaceEverywhere(harness.choices, removedPodcasts = 4, removedGroups = 2),
+        )
         waitForIdle()
     }
 
@@ -324,15 +350,14 @@ class SyncSetupConfirmationTest {
     }
 
     private class Harness {
-        val link =
-            FakeLinkFlow(
-                LinkState.ChooseFirstLink(
-                    localPodcasts = 3,
-                    localGroups = 1,
-                    serverPodcasts = 5,
-                    serverGroups = 2,
-                ),
+        val choices =
+            LinkState.ChooseFirstLink(
+                localPodcasts = 3,
+                localGroups = 1,
+                serverPodcasts = 5,
+                serverGroups = 2,
             )
+        val link = FakeLinkFlow(choices)
         val controller = FakeSyncController(link = link)
         val backup = FakeBackupRepository()
         var target: String? = "file:///backup.zip"

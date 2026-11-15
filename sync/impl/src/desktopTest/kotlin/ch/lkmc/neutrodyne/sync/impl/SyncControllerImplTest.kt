@@ -1055,6 +1055,44 @@ class SyncControllerImplTest {
             }
         }
 
+    /** Cancel on the second confirmation returns to the choices with nothing merged or pruned. */
+    @Test
+    fun cancellingReplaceEverywhereReturnsToTheChoices() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.addGroup()
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(1, 1, 0, 0, 0), 1, 0, 0)
+                h.client.changesHandler = { since ->
+                    if (since == null) {
+                        ChangesPage(listOf(otherPodcastRecord(), otherGroupRecord()), "c:00000001:1", false, "")
+                    } else {
+                        emptyPage()
+                    }
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+                val choices = h.linkFlow.state.value
+                h.controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
+                await(h) { h.linkFlow.state.value is LinkState.ConfirmReplaceEverywhere }
+
+                checkNotNull(h.controller.link).cancel()
+
+                assertEquals(choices, h.linkFlow.state.value)
+                assertTrue(h.libraryMerger.calls.isEmpty())
+                assertTrue(h.client.calls.none { it == "sync" || it.startsWith("reset:") }, "calls=${h.client.calls}")
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.linkedAt,
+                )
+            } finally {
+                h.close()
+            }
+        }
+
     @Test
     fun useDeviceEverywhereUploadsThenPrunesTheServerLibrary() =
         runTest {
@@ -1078,7 +1116,30 @@ class SyncControllerImplTest {
                 h.controller.startLink(serverUrl, LinkMethod.CODE)
                 await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
                 h.controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
+                // 10 First-link choices: the second confirmation follows the staging pull and
+                // names the removals; nothing is merged, uploaded or pruned before it.
+                await(h) { h.linkFlow.state.value is LinkState.ConfirmReplaceEverywhere }
+                val confirm = h.linkFlow.state.value as LinkState.ConfirmReplaceEverywhere
+                assertEquals(1, confirm.removedPodcasts)
+                assertEquals(1, confirm.removedGroups)
+                assertTrue(h.libraryMerger.calls.isEmpty())
+                assertTrue(h.client.calls.none { it == "sync" || it.startsWith("reset:") }, "calls=${h.client.calls}")
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.linkedAt,
+                )
+                h.controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
                 await(h) { h.controller.status.value is SyncStatus.Linked }
+                assertEquals(
+                    ch.lkmc.neutrodyne.core.model.MergePolicy.LINK_HISTORY,
+                    h.libraryMerger.calls
+                        .single()
+                        .policy,
+                )
+                // The confirmed choice resumed the staged snapshot: one full pull in all.
+                assertEquals(1, h.client.calls.count { it == "changes:null" }, "calls=${h.client.calls}")
                 // Uploaded this device's library ...
                 assertTrue(h.client.calls.any { it == "sync" })
                 assertTrue(

@@ -98,6 +98,19 @@ sealed interface LinkState {
         val serverGroups: Int,
     ) : LinkState
 
+    /**
+     * 10 "Use this device's library everywhere": the second confirmation, shown after that
+     * choice's staging pull. [removedPodcasts] and [removedGroups] count the server's live
+     * podcasts and groups this device lacks, which the other devices remove when they next
+     * sync (each asks first above its mass-change thresholds). Confirming re-enters the choice
+     * and merges the staged snapshot; cancelling returns to [choices].
+     */
+    data class ConfirmReplaceEverywhere(
+        val choices: ChooseFirstLink,
+        val removedPodcasts: Int,
+        val removedGroups: Int,
+    ) : LinkState
+
     data class Merging(
         val phase: LinkPhase,
         val done: Int,
@@ -118,6 +131,9 @@ sealed interface LinkState {
 interface LinkFlow {
     val state: StateFlow<LinkState>
 
-    /** Leaves the flow before `Authorising`; a merge in progress continues in the background. */
+    /**
+     * Leaves the flow before `Authorising`; a merge in progress continues in the background.
+     * From [LinkState.ConfirmReplaceEverywhere] it returns to the first-link choices instead.
+     */
     fun cancel()
 }

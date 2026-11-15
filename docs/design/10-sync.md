@@ -1492,6 +1492,20 @@ Deviations:
   the backup's timestamps, so merging the server history there needs its
   own rules and tests.
 
+**Implementation note (2026-11-15, second confirmation).** The local
+warning gate of the 2026-11-04 link-flow note is gone. Choosing "Use this
+device's library everywhere" runs step 1's staging pull
+(`FirstLinkMerger.stageResetEffect`) and shows
+`LinkState.ConfirmReplaceEverywhere` with 08's wording and the counts of
+the server's live podcasts and groups this device lacks. **Replace
+everywhere** re-enters the choice, which resumes that staged snapshot, so
+the merge and the prune use the snapshot the counts describe; Cancel
+returns to the choices with nothing merged or pruned. The counts match
+podcasts by feed key and groups by `nameKey`; a server podcast that only
+an alias or `podcastGuid` matches is counted as a removal although the
+merge keeps it, so the confirmation can overstate the effect, never
+understate it.
+
 ### Use the server's library on this device
 
 05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). The setup screen implements this at the current UI boundary: the backup is prepared and saved through `BackupRepository` and `PlatformActions.saver` (with 05's R1.9 warning when the prepared artifact carries private links or passwords) and the flow stops there; only the explicit Replace then calls `chooseFirstLink(USE_SERVER)`. A cancelled or failed backup leaves the choice unconfirmed. All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.

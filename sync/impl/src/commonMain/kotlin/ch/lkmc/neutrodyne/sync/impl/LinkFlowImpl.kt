@@ -71,6 +71,15 @@ class LinkFlowImpl : LinkFlow {
             LinkState.ChooseFirstLink(localPodcasts, localGroups, serverPodcasts, serverGroups)
     }
 
+    /** 10 First-link choices: the USE_DEVICE second confirmation, after its staging pull. */
+    fun confirmReplaceEverywhere(
+        choices: LinkState.ChooseFirstLink,
+        removedPodcasts: Int,
+        removedGroups: Int,
+    ) {
+        _state.value = LinkState.ConfirmReplaceEverywhere(choices, removedPodcasts, removedGroups)
+    }
+
     fun merging(
         phase: ch.lkmc.neutrodyne.sync.api.LinkPhase,
         done: Int,
@@ -91,6 +100,8 @@ class LinkFlowImpl : LinkFlow {
     }
 
     override fun cancel() {
-        _state.value = LinkState.Address
+        // Cancelling the second confirmation leaves nothing merged or pruned: back to the choices.
+        val current = _state.value
+        _state.value = if (current is LinkState.ConfirmReplaceEverywhere) current.choices else LinkState.Address
     }
 }
