@@ -36,3 +36,6 @@ captures/
 # OS and Python extras
 Thumbs.db
 .venv/
+
+# Local Claude Code approvals can contain secrets.
+**/.claude/settings.local.json
