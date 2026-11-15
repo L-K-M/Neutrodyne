@@ -32,9 +32,9 @@ class Journeys {
         }
 
     @Test
-    fun playerExpandCollapse() =
-        benchmark.measureFrames(Destination.FEEDS, "mini_player") {
-            with(JourneyActions) { expandCollapsePlayer() }
+    fun playerOpenRadio() =
+        benchmark.measureFrames(Destination.LIBRARY, "mini_player") {
+            with(JourneyActions) { openRadioFromMiniPlayer() }
         }
 
     @Test

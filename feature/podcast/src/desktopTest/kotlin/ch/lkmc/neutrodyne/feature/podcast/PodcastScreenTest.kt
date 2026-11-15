@@ -806,9 +806,8 @@ class PodcastScreenTest {
             runComposeUiTest {
                 val panes =
                     when (scene) {
-                        HeaderScene.COEXISTING -> PaneLayout(2, false, 1024)
-                        HeaderScene.PLAYER_PANEL -> PaneLayout(1, true, 384)
-                        HeaderScene.BACKGROUND -> PaneLayout(1, false, 1024)
+                        HeaderScene.COEXISTING -> PaneLayout(2, 1024)
+                        HeaderScene.BACKGROUND -> PaneLayout(1, 1024)
                     }
                 setPodcast(
                     PodcastUiState(loaded = true, detail = testPodcastDetail(7)),
@@ -864,7 +863,7 @@ class PodcastScreenTest {
         onConfirmUnsubscribe: () -> Unit = {},
         onDismissUnsubscribe: () -> Unit = {},
         onRemoveGroup: (Group) -> Unit = {},
-        paneLayout: PaneLayout = PaneLayout(1, false, 1024),
+        paneLayout: PaneLayout = PaneLayout(1, 1024),
         headerForeground: Boolean = true,
     ): LazyPagingItems<EpisodeRow> {
         lateinit var pagingItems: LazyPagingItems<EpisodeRow>
@@ -1076,4 +1075,4 @@ private val TestPlatformActions =
         override val notifications = null
     }
 
-private enum class HeaderScene { COEXISTING, PLAYER_PANEL, BACKGROUND }
+private enum class HeaderScene { COEXISTING, BACKGROUND }

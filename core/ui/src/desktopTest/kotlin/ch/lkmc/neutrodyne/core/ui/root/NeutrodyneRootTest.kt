@@ -122,7 +122,7 @@ class NeutrodyneRootTest {
     }
 
     @Test
-    fun playerRoutesKeepTheWidePanelVisible() =
+    fun playerDeepLinkOpensTheRadioHomeWithoutASidePanel() =
         runDesktopComposeUiTest(width = 1200, height = 800) {
             val pending = Channel<Route>(Channel.UNLIMITED)
             var slot: PlayerSlotState? = null
@@ -134,77 +134,31 @@ class NeutrodyneRootTest {
                     slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
                 )
             }
-            runOnIdle { pending.trySend(Route.ExpandPlayer) }
-            waitForIdle()
             runOnIdle {
-                kotlin.test.assertEquals(1, slot?.expandRequest)
-                assertTrue(requireNotNull(slot).layout.playerPanel)
-                kotlin.test.assertEquals(412, requireNotNull(slot).layout.playerPanelWidthDp)
-                assertTrue(requireNotNull(slot).layout.contentWidthDp > 0)
+                kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation)
+                kotlin.test.assertEquals(1200, requireNotNull(slot).layout.contentWidthDp)
             }
             runOnIdle { pending.trySend(Route.ExpandPlayer) }
             waitForIdle()
-            runOnIdle { kotlin.test.assertEquals(2, slot?.expandRequest) }
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation) }
         }
 
     @Test
-    fun hidingTheWidePanelMovesOnePlayerComposition() =
-        runDesktopComposeUiTest(width = 1200, height = 800) {
-            var hidden by mutableStateOf(false)
-            var panel = false
-            var starts = 0
-            var disposals = 0
+    fun theMiniPlayersOpenRadioReturnsToTheRadioHome() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
             setContent {
                 TestRoot(
-                    initialTab = LibraryKey,
-                    state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
-                    slots =
-                        RootSlots(player = { slot ->
-                            val identity = remember { Any() }
-                            DisposableEffect(identity) {
-                                starts++
-                                onDispose { disposals++ }
-                            }
-                            SideEffect { panel = slot.layout.playerPanel }
-                            Text("Persistent player")
-                        }, userMessages = emptyFlow()),
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
                 )
             }
+            runOnIdle { requireNotNull(slot).navigate(PodcastKey(3)) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation) }
+            runOnIdle { requireNotNull(slot).openRadio() }
             waitForIdle()
-            runOnIdle {
-                assertTrue(panel)
-                hidden = true
-            }
-            waitForIdle()
-            runOnIdle {
-                kotlin.test.assertFalse(panel)
-                hidden = false
-            }
-            waitForIdle()
-            runOnIdle {
-                assertTrue(panel)
-                kotlin.test.assertEquals(1, starts, "A resize must retain the player composition")
-                kotlin.test.assertEquals(0, disposals, "The player must not detach during a layout change")
-            }
-        }
-
-    @Test
-    fun widePanelRestoresNavigationAfterAnExpandedSheet() =
-        runDesktopComposeUiTest(width = 1200, height = 800) {
-            var hidden by mutableStateOf(true)
-            setContent {
-                TestRoot(
-                    initialTab = LibraryKey,
-                    state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
-                    slots =
-                        RootSlots(player = { slot ->
-                            SideEffect { slot.onExpandedSettled(!slot.layout.playerPanel) }
-                        }, userMessages = emptyFlow()),
-                )
-            }
-            onNodeWithText("count:0").assertDoesNotExist()
-            runOnIdle { hidden = false }
-            onNodeWithText("count:0").assertExists()
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation) }
         }
 
     @Test
@@ -228,11 +182,10 @@ class NeutrodyneRootTest {
             }
             runOnIdle {
                 kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation)
-                kotlin.test.assertFalse(requireNotNull(slot).layout.playerPanel)
             }
             openMenuDestination("nav_library")
             runOnIdle {
-                assertTrue(requireNotNull(slot).layout.playerPanel)
+                kotlin.test.assertEquals(1200, requireNotNull(slot).layout.contentWidthDp)
                 kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation)
                 kotlin.test.assertEquals(1, starts)
                 kotlin.test.assertEquals(0, disposals)
@@ -275,27 +228,6 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun restoredExpandedPlayerMeasuresBeforeHidingSuite() =
-        // Below the 840 dp side-panel width, so the restored player stays in the sheet.
-        runDesktopComposeUiTest(width = 400, height = 800) {
-            var slot: PlayerSlotState? = null
-            setContent {
-                TestRoot(
-                    state = RootUiState.READY.copy(hasNowPlaying = true),
-                    slots =
-                        RootSlots(
-                            player = {
-                                slot = it
-                                androidx.compose.runtime.SideEffect { it.onExpandedSettled(true) }
-                            },
-                            userMessages = emptyFlow(),
-                        ),
-                )
-            }
-            runOnIdle { assertTrue(requireNotNull(slot).contentBottomPx > 0f) }
-        }
-
-    @Test
     fun playerSharesTheRootsBackAndViewModelOwners() =
         runComposeUiTest {
             var back: androidx.navigationevent.NavigationEventDispatcherOwner? = null
@@ -326,28 +258,6 @@ class NeutrodyneRootTest {
             }
         }
 
-    @Test
-    fun expandedPlayerHidesUnderlyingContentSemantics() =
-        runDesktopComposeUiTest(width = 400, height = 800) {
-            var expanded by mutableStateOf(false)
-            setContent {
-                TestRoot(
-                    state = RootUiState.READY.copy(hasNowPlaying = true),
-                    slots =
-                        RootSlots(player = {
-                            SideEffect { it.onExpandedSettled(expanded) }
-                            if (expanded) Text("full-player")
-                        }, userMessages = emptyFlow()),
-                )
-            }
-            onNodeWithText("open-podcast").assertIsDisplayed()
-            runOnIdle { expanded = true }
-            onNodeWithText("full-player").assertIsDisplayed()
-            onNodeWithText("open-podcast").assertDoesNotExist()
-            runOnIdle { expanded = false }
-            onNodeWithText("open-podcast").assertIsDisplayed()
-        }
-
     @Test fun disappearingFocusedActionKeepsEscapeWorking() =
         runDesktopComposeUiTest(width = 400, height = 800) {
             var visible by mutableStateOf(true)
@@ -368,150 +278,16 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun expandedPlayerReleasesUnderlyingKeyboardFocus() =
-        runDesktopComposeUiTest(width = 400, height = 800) {
-            var expanded by mutableStateOf(false)
-            setContent {
-                TestRoot(
-                    state = RootUiState.READY.copy(hasNowPlaying = true),
-                    slots =
-                        RootSlots(player = {
-                            SideEffect { it.onExpandedSettled(expanded) }
-                            if (expanded) NdButton("full-player", onClick = {})
-                        }, userMessages = emptyFlow()),
-                )
-            }
-            onNodeWithText("open-podcast").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
-            runOnIdle { expanded = true }
-            onNodeWithText("full-player").assertIsDisplayed()
-            onNodeWithText("full-player").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
-            onNodeWithTag("root-box").performKeyInput {
-                repeat(8) {
-                    keyDown(Key.Tab)
-                    keyUp(Key.Tab)
-                    keyDown(Key.Enter)
-                    keyUp(Key.Enter)
-                }
-            }
-            runOnIdle { expanded = false }
-            onNodeWithText("podcast-3").assertDoesNotExist()
-            onNodeWithText("open-podcast").assertIsDisplayed()
-        }
-
-    @Test
-    fun snackbarActionRemainsAboveTheExpandedPlayer() =
-        runDesktopComposeUiTest(width = 400, height = 800) {
-            var result: SnackbarResult? = null
-            var playerClicks = 0
-            setContent {
-                TestRoot(
-                    state = RootUiState.READY.copy(hasNowPlaying = true),
-                    slots =
-                        RootSlots(player = {
-                            SideEffect { it.onExpandedSettled(true) }
-                            val host = LocalSnackbarHost.current
-                            LaunchedEffect(host) {
-                                result =
-                                    host.showSnackbar(
-                                        "Player error",
-                                        "Retry",
-                                        duration = SnackbarDuration.Indefinite,
-                                    )
-                            }
-                            Box(Modifier.fillMaxSize().clickable { playerClicks++ }) { Text("full-player") }
-                        }, userMessages = emptyFlow()),
-                )
-            }
-            onAllNodesWithText("Player error").assertCountEquals(1)
-            // Send a real pointer event; a semantics click would bypass an obscuring player.
-            onNodeWithText("Retry").performTouchInput { click() }
-            runOnIdle {
-                kotlin.test.assertEquals(SnackbarResult.ActionPerformed, result)
-                kotlin.test.assertEquals(0, playerClicks)
-            }
-        }
-
-    @Test
-    fun navigationFromThePlayerCollapsesWithoutLosingTheTabStack() =
+    fun navigationFromThePlayerKeepsTheTabStack() =
         runComposeUiTest {
             var slot: PlayerSlotState? = null
             setContent { TestRoot(slots = RootSlots(player = { slot = it }, userMessages = emptyFlow())) }
             runOnIdle { requireNotNull(slot).navigate(PodcastKey(3)) }
             onNodeWithText("podcast-3").assertIsDisplayed()
-            runOnIdle { assertTrue(requireNotNull(slot).collapseRequest > 0) }
             runOnIdle { requireNotNull(slot).navigate(DiscoverKey) }
             onAllNodesWithText("discover-content").onFirst().assertIsDisplayed()
             pressEscape()
             onNodeWithText("podcast-3").assertIsDisplayed()
-        }
-
-    @Test
-    fun incomingScreenRoutesRequestPlayerCollapse() =
-        runComposeUiTest {
-            val pending = Channel<Route>(Channel.UNLIMITED)
-            var slot: PlayerSlotState? = null
-            setContent {
-                TestRoot(
-                    routes = pending.receiveAsFlow(),
-                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
-                )
-            }
-            runOnIdle { pending.trySend(Route.Push(PodcastKey(3))) }
-            onNodeWithText("podcast-3").assertIsDisplayed()
-            runOnIdle { assertTrue(requireNotNull(slot).collapseRequest > 0) }
-        }
-
-    @Test
-    fun playerBackPrecedesTheUnderlyingDetail() =
-        runComposeUiTest {
-            var collapsed = 0
-            setContent {
-                TestRoot(
-                    slots = RootSlots(player = { PlayerBackProbe { collapsed++ } }, userMessages = emptyFlow()),
-                )
-            }
-            onNodeWithText("open-podcast").performClick()
-            onNodeWithText("podcast-3").assertIsDisplayed()
-            pressEscape()
-            runOnIdle { kotlin.test.assertEquals(1, collapsed) }
-            onNodeWithText("podcast-3").assertIsDisplayed()
-        }
-
-    @Test
-    fun speedSheetBackPrecedesThePlayer() =
-        runComposeUiTest {
-            var slot: PlayerSlotState? = null
-            var dispatcher: NavigationEventDispatcher? = null
-            var collapsed = 0
-            val input = DirectNavigationEventInput()
-            setContent {
-                TestRoot(
-                    slots =
-                        RootSlots(player = {
-                            slot = it
-                            val owner = checkNotNull(LocalNavigationEventDispatcherOwner.current)
-                            dispatcher = owner.navigationEventDispatcher
-                            PlayerBackProbe { collapsed++ }
-                        }, userMessages = emptyFlow()),
-                )
-            }
-            runOnIdle {
-                checkNotNull(dispatcher).addInput(input)
-                checkNotNull(slot).navigate(SpeedKey)
-            }
-            try {
-                onNodeWithText("speed-sheet").assertIsDisplayed()
-                runOnIdle {
-                    input.backStarted(NavigationEvent())
-                    input.backCompleted()
-                }
-                onNodeWithText("speed-sheet").assertDoesNotExist()
-                runOnIdle { kotlin.test.assertEquals(0, collapsed) }
-                runOnIdle { input.backCompleted() }
-                runOnIdle { kotlin.test.assertEquals(1, collapsed) }
-            } finally {
-                runOnIdle { checkNotNull(dispatcher).removeInput(input) }
-            }
         }
 
     @Test
@@ -652,6 +428,17 @@ class NeutrodyneRootTest {
             }
             pressEscape()
             onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun radioMenuOpensThePlaybackSheets() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithTag("radio_menu").performClick()
+            onNodeWithTag("radio_sleep_timer").assertIsDisplayed()
+            onNodeWithTag("radio_speed").performClick()
+            onNodeWithText("speed-sheet").assertIsDisplayed()
+            onNodeWithTag("radio_destinations").assertDoesNotExist()
         }
 
     @Test
@@ -1209,25 +996,6 @@ private val TestInstallers: Set<EntryProviderInstaller> =
     }
 
 /** Same root-dispatch registration as the player, without coupling core UI tests to a feature. */
-@Composable
-private fun PlayerBackProbe(onBack: () -> Unit) {
-    val owner = checkNotNull(androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current)
-    val callback by rememberUpdatedState(onBack)
-    val handler =
-        remember(owner) {
-            object : androidx.navigationevent.NavigationEventHandler<androidx.navigationevent.NavigationEventInfo>(
-                androidx.navigationevent.NavigationEventInfo.None,
-                true,
-            ) {
-                override fun onBackCompleted() = callback()
-            }
-        }
-    DisposableEffect(owner, handler) {
-        owner.navigationEventDispatcher.addHandler(handler)
-        onDispose { handler.remove() }
-    }
-}
-
 @Composable
 private fun FeedsStub() {
     val navigator = LocalAppNavigator.current

@@ -33,28 +33,6 @@ import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
 
-/**
- * Shell-owned embedding avoids a player-to-queue dependency.
- * [navigate] must select top-level tabs and push other keys, as PlayerSlotState.navigate does.
- */
-@Composable
-public fun PlayerUpNextRoute(navigate: (NavKey) -> Unit) {
-    val navigator = LocalAppNavigator.current
-    val playerNavigator =
-        remember(navigator, navigate) {
-            object : AppNavigator by navigator {
-                override fun push(key: NavKey) = navigate(key)
-
-                override fun pushDetail(key: NavKey) = navigate(key)
-
-                override fun selectTab(key: TopLevelKey) = navigate(key)
-            }
-        }
-    CompositionLocalProvider(LocalAppNavigator provides playerNavigator, LocalMiniPlayerInset provides 0.dp) {
-        UpNextRoute(surface = UpNextSurface.PLAYER)
-    }
-}
-
 /** Queue row starts use playEpisode, retaining the existing context when the row is queued. */
 @Composable
 internal fun UpNextRoute(

@@ -20,7 +20,7 @@ The desktop app is the same Kotlin Multiplatform product as the Android app ([D8
 | Window, close behaviour, tray, start at login, window state | Screens, navigation suite, adaptive layouts — [08 Navigation](08-ui-ux.md#navigation), [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) |
 | `DesktopJobRunner`, the `JobLane` contract, wake and restart catch-up | What each lane does — [03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh), [07 Desktop runners](07-downloads.md#desktop-runners), [08 Artwork pipeline](08-ui-ux.md#artwork-pipeline), [09 Update check](09-quality-and-release.md#update-check), [04 Engine updates](04-youtube.md#engine-updates), [10 Client sync engine](10-sync.md#client-sync-engine), [02 Retention and maintenance](02-data-model.md#retention-and-maintenance) |
 | SMTC, Now Playing, MPRIS, power, audio-route monitoring, `DesktopNotifier`, `ndmedia`'s OS shims | Artwork files the sessions read — [08 Artwork pipeline](08-ui-ux.md#artwork-pipeline); notification texts — [03 New-episode notifications](03-feeds-and-discovery.md#new-episode-notifications), [07 Progress and notifications](07-downloads.md#progress-and-notifications) |
-| `AudioEngine`, sources, `SpanCache`, the FFmpeg build and FFM bindings, DSP ports, output and clock, `DesktopPlaybackController` | Queue window, position, played, start, sleep-timer and chapter rules — [06 Shared playback core](06-playback.md#shared-playback-core); cache rules — [06 Streaming cache](06-playback.md#streaming-cache) ([D40](../PLAN.md#3-key-decisions)); player UI — [08 Player sheet](08-ui-ux.md#player-sheet) |
+| `AudioEngine`, sources, `SpanCache`, the FFmpeg build and FFM bindings, DSP ports, output and clock, `DesktopPlaybackController` | Queue window, position, played, start, sleep-timer and chapter rules — [06 Shared playback core](06-playback.md#shared-playback-core); cache rules — [06 Streaming cache](06-playback.md#streaming-cache) ([D40](../PLAN.md#3-key-decisions)); player UI — [08 Mini player](08-ui-ux.md#mini-player) |
 | Default and chosen download folders, moves on the desktop, Windows path rules beyond 07's names, "Show in folder", desktop disk-full and removable-drive handling | Transfer core, state machine, naming algorithm, move algorithm — [07 Transfer core](07-downloads.md#transfer-core), [07 State machine](07-downloads.md#state-machine), [07 Storage layout](07-downloads.md#storage-layout), [07 Moving between roots](07-downloads.md#moving-between-roots) |
 | CPython selection, trim, child process, stdio framing, desktop engine paths, JS bridge over stdio | Engine methods, shim, trust chain, update policy, capability rules — [04 Shared engine module](04-youtube.md#shared-engine-module), [04 Engine updates](04-youtube.md#engine-updates), [04 Capability matrix](04-youtube.md#capability-matrix) |
 | `nativeDistributions` per target, jlink modules, JVM options, AOT cache, resources layout, macOS ad-hoc signing and the 0.x ZIP, MSI `upgradeUuid`, runtime-exception and FFmpeg-LGPL obligations, `check-desktop-image.sh` rules | Release workflow and jobs — [09 release.yml](09-quality-and-release.md#releaseyml); licence policy, locks and allow-lists — [01 Licensing and dependency policy](01-foundation.md#licensing-and-dependency-policy), [01 Python and native components](01-foundation.md#python-and-native-components) |
@@ -831,7 +831,7 @@ Linux has no OS shim in `ndmedia`: MPRIS, logind, portals and notifications are 
 
 | Failure | Behaviour |
 |---|---|
-| Media session cannot be created (SMTC refuses the hidden window, no session bus) | Playback works; media keys do not; diagnostics show the reason; the in-app player and the tray remain |
+| Media session cannot be created (SMTC refuses the hidden window, no session bus) | Playback works; media keys do not; diagnostics show the reason; the mini player and the tray remain |
 | A remote command arrives with nothing loaded | `Play` starts Up next or the restored session (a user action); others are ignored |
 | Artwork file missing | Published without artwork; the next publish after `ArtworkStore` pins it adds it |
 | Suspend notice missing or late | The ≤ 5-s periodic save bounds the position loss (N1); the wall-clock check of the runner detects the wake |
@@ -971,8 +971,8 @@ owns the completed-file index binding; the shell currently supplies its empty in
 is available behind the existing capability gate, which remains external until
 MD3. New RSS connections retain MD1a.1's fresh-cache-resource rule.
 
-The existing shared sheet chooses its desktop side panel or mini-player layout;
-this work adds no home or navigation UI and remains compatible with the radio
+The desktop docks the shared mini player like every other screen; there is no side
+panel. This work adds no home or navigation UI and remains compatible with the radio
 home lane. `:desktopApp:run` builds and locates this host's native libraries.
 Release-image native bundling, the release source bundle, gapless preparation,
 chapter enrichment/navigation, sleep-timer controls, retry/device-loss handling
@@ -2042,7 +2042,7 @@ Global shortcuts (R8.9); "Ctrl/Cmd" means Ctrl on Windows and Linux, Cmd on macO
 | Ctrl/Cmd+1 … 5 | Feeds, Library, Up next, Downloads, Discover |
 | Ctrl/Cmd+, | Settings |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next / previous Feeds page (08) |
-| Esc | Back: collapse the player, leave selection, close sheets and dialogs (08's back order) |
+| Esc | Back: leave selection, close sheets and dialogs, pop the tab stack (08's back order) |
 | Ctrl/Cmd+W | Close the window (close behaviour applies) |
 | Ctrl+Q (Windows, Linux), Cmd+Q (macOS) | Quit |
 
@@ -2069,7 +2069,7 @@ Non-file, non-text transfers show that message in the overlay.
 
 ### Window sizing
 
-Minimum 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)); default 1200 × 800 dp on first start; width classes and panes per [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) (desktop windows are usually medium or expanded, so list-detail and the side-panel player are the common layouts); macOS full screen and Windows snap layouts work through the AWT frame; the window follows the OS scale factor (Compose density), and the screenshot matrix covers 600, 900 and 1400 dp widths (MD4 AC2).
+Minimum 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)); default 1200 × 800 dp on first start; width classes and panes per [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) (desktop windows are usually medium or expanded, so list-detail is the common layout and the mini player docks above the navigation chrome); macOS full screen and Windows snap layouts work through the AWT frame; the window follows the OS scale factor (Compose density), and the screenshot matrix covers 600, 900 and 1400 dp widths (MD4 AC2).
 
 ### Desktop settings
 
@@ -2133,12 +2133,12 @@ Run on macOS 15 with VoiceOver and Windows 11 with NVDA (Java Access Bridge on);
 | # | Check | Pass |
 |---|---|---|
 | 1 | Subscribe by URL: Ctrl/Cmd+N, type a URL, Subscribe | Every step announced; the new podcast announced in the library |
-| 2 | Play from a group feed: open Feeds, move to a group page, play an episode | Row announced as one stop with its state; play announced; the player's controls labelled |
+| 2 | Play from a group feed: open Feeds, move to a group page, play an episode | Row announced as one stop with its state; play announced; the mini player's actions labelled |
 | 3 | Reorder Up next with the keyboard or context menu ("Move up", "Move down", "Move to top") | Order change announced |
 | 4 | Every action of 08's custom-actions catalogue reachable by keyboard or context menu | MD4 AC1 |
 | 5 | Dialogs and sheets take focus, Esc closes them, focus returns to the opener | — |
 | 6 | Snackbars and banners (download failed, storage full, update available) announced | — |
-| 7 | 200 % OS display scaling: no clipped text in the five destinations and the player | — |
+| 7 | 200 % OS display scaling: no clipped text in the five destinations and the radio home | — |
 | 8 | Contrast of the brand and artwork schemes in light and dark (08's rules) | — |
 
 ---
@@ -2202,6 +2202,7 @@ Serves N1, N4, N5, N7, N8, N11 for the desktop; risks T19, T20, T24, T25, T26. R
 | `LinuxDesktopEntryTest` (as `LinuxDesktopEntryWriterTest`, `LinuxMenuEntryWriterTest`, `LinuxMenuEntryInstallerTest`, 2026-11-05) | `desktopTest` (pure, fake home) | `LinuxDesktopEntryWriter` for the menu and the autostart entry: extraction paths containing spaces, `(`, `$`, `\`, `"`, a backtick and `%` give an always double-quoted Exec with `%U` (or `--background`), the four inner characters backslash-escaped, `%` written `%%` in Exec only, then every `\` doubled by the string escape (a literal `\` reads `\\\\` and a literal `$` reads `\\$` in Exec), and a TryExec and Icon with only the string escape, no quotes and no `%` rewriting; a path with a control character or `=` is refused and writes nothing; MimeType kept; moving the archive and re-running refreshes Exec, TryExec and Icon without duplicating the entry; writes only under `~/.local/share`, never under `/usr/share`, and starts no process | MD2 |
 | `CloseBehaviourTest` | `desktopTest` with fakes | idle close quits within 2 s; close while playing or downloading hides and shows the tray; `KEEP_RUNNING` always hides; hidden and idle for 10 min quits (`TestClock`); no tray support → iconify (MD2 AC3) | M0b, MD2 |
 | `NeutrodyneWindowContentTest` | `desktopTest` with `runComposeUiTest` | the window content renders the five labelled destinations through the real entry installers and opens Settings › About and Licences; the licences list carries the OpenJDK runtime entry from the build's generated `aboutlibraries.json` (PLAN M0 AC5) | M0b |
+| `DesktopMiniPlayerTest` | `desktopApp` `test` | the window docks the mini player above the navigation chrome with no side panel and no full player; transport accessibility actions pause and resume; tapping the bar opens the radio home and Back returns without touching the engine window | MD1a.2 |
 | `DesktopLicencesSourceTest` | `desktopTest` | the generated `aboutlibraries.json` parses and carries the manual OpenJDK runtime entry with the GPL-2.0/Classpath/GCC texts and the source-asset name; the dangling custom-licence reference of plugin 15.2.0 is repaired at load (01 M0 checklist step 33) | M0b |
 | `DesktopJobRunnerTest` | `desktopTest`, `TestClock`, fake lanes | only due work runs; `poke` runs a lane within one dispatch and coalesces; a running lane is never started twice, a poke during a run reruns it once; an exception backs the lane off and leaves the others running; after a simulated 3-h sleep (`Resumed`, and separately a wall-clock jump without a notice) every overdue lane starts within 2 min (M1 AC10, MD2 AC6); `stop(3 s)` cancels and returns | M1a, MD2 |
 | `PowerPolicyTest` | `desktopTest` with fake `PowerMonitor`, `IdleSleepInhibitor`, engine | `Suspending` → pause and an event position save before returning; `Resumed` → nothing plays, pools evicted, lanes poked; inhibitor held exactly while playing (MD2 AC2) | MD2 |

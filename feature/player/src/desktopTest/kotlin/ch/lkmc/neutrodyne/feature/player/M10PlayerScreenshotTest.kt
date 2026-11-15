@@ -29,11 +29,7 @@ class M10PlayerScreenshotTest {
                     waitForIdle()
                     waitUntil(timeoutMillis = 5_000) {
                         val pixels = onNodeWithTag(visual.sheetTag).captureToImage().toPixelMap()
-                        pixels[
-                            if (visual.viewport == PlayerViewport.MINI) pixels.width / 2 else pixels.width - 4,
-                            if (visual.viewport == PlayerViewport.MINI) 8 else 32,
-                        ].toArgb() ==
-                            visual.expectedSheetArgb()
+                        pixels[pixels.width / 2, 8].toArgb() == visual.expectedSheetArgb()
                     }
                     onRoot().captureRoboImage("screenshots/desktop/m10-player-${visual.name}.png")
                 }

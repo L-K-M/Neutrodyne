@@ -30,7 +30,7 @@ On Android, one `MediaLibraryService` ([D37](../PLAN.md#3-key-decisions)) owns o
 | Applying speed and skip silence; scope writes from the player | Resolution rules and attribution — [05 Effective settings resolution](05-groups-opml-backup.md#effective-settings-resolution) |
 | Sleep timer; chapter sources, fetch, priority, current chapter | PSC chapter ingestion — [03 Ingestion and diff](03-feeds-and-discovery.md#ingestion-and-diff); timestamp grammar — [03 Show notes](03-feeds-and-discovery.md#show-notes) |
 | Notification buttons, Auto browse tree, Assistant, resumption, Bluetooth | Artwork files, `ArtworkProvider`, monograms — [08 Artwork pipeline](08-ui-ux.md#artwork-pipeline) (06 consumes `ArtworkStore.contentUri`) |
-| `PlaybackController`, `PlaybackStateSource`, threading | Player sheet layout, speed/sleep sheets, row overlay — [08 Player sheet](08-ui-ux.md#player-sheet), [08 Live row state](08-ui-ux.md#live-row-state) |
+| `PlaybackController`, `PlaybackStateSource`, threading | Mini player layout, the radio Menu's speed/sleep sheets, row overlay — [08 Mini player](08-ui-ux.md#mini-player), [08 Live row state](08-ui-ux.md#live-row-state) |
 
 ### Modules and public API
 
@@ -633,7 +633,7 @@ Serves R4.1, R4.3, R3.5, R3.7, R5.2. Delivered in M4 (remote), M6 (local), M8 (e
 2. RSS with its own art: the episode `artworkKey` only if `ArtworkStore.pinnedFile(key) != null` (episode art is pinned for downloads, [R5.3](../PLAN.md#21-functional-requirements)); otherwise the podcast key.
 3. 08's `ArtworkProvider` serves the monogram when the file for a key is missing ([08 Artwork pipeline](08-ui-ux.md#artwork-pipeline)), so 06 never needs a fallback branch.
 
-This rule is for system surfaces only. `NowPlaying.artwork` (in-app player, rendered by 08 through Coil) is `ArtworkRef(mediaInfo.artworkKey, …)` — the episode's own art when present, for YouTube the 16:9 video thumbnail — because the full player draws a 16:9 box for YouTube items.
+This rule is for system surfaces only. `NowPlaying.artwork` (in-app player, rendered by 08 through Coil) is `ArtworkRef(mediaInfo.artworkKey, …)` — the episode's own art when present, for YouTube the 16:9 video thumbnail — because the mini player draws a 16:9 box for YouTube items.
 
 The session keeps Media3's default bitmap loader (`DataSourceBitmapLoader` behind `CacheBitmapLoader`), which reads `content://` URIs through `DefaultDataSource`; no Coil dependency in the service. `pinnedFile` touches the disk, so `MediaItemFactory` runs on `@Dispatcher(IO)`.
 
@@ -1332,7 +1332,7 @@ Registered on `ProcessLifecycleOwner` by an `AppInitializer` (order 300, switche
 | `sleepTimer`, `currentChapter`, `effectivePlayback` | `SleepTimer`, `Chapters`, `EffectivePlaybackApplier` | event-driven |
 | `events` | `ErrorRecovery`, `PositionTracker`, `SleepTimer` | `MutableSharedFlow(extraBufferCapacity = 8)` |
 
-The full player's scrubber interpolates every frame with `PositionSnapshot.positionAt(clock.elapsedRealtime())` (`:core:common`'s `Clock`: `SystemClock.elapsedRealtime()` on Android, a monotonic clock on the desktop, the same clock `sampledAtElapsedMs` uses on each platform), read inside the frame loop (no 60 Hz flow; the frame time is not on that clock). 08's `EpisodeLiveStateSource` combines `nowPlaying` (is-now-playing, is-playing) and `positionTicks` for the playing row with 02's `IN (:ids)` position query for the others ([08 Live row state](08-ui-ux.md#live-row-state)).
+The mini player's progress line follows `positionTicks` (1 Hz); no surface runs a per-frame interpolation loop. 08's `EpisodeLiveStateSource` combines `nowPlaying` (is-now-playing, is-playing) and `positionTicks` for the playing row with 02's `IN (:ids)` position query for the others ([08 Live row state](08-ui-ux.md#live-row-state)).
 
 ### No Media3 in features (v1.0)
 
@@ -1477,7 +1477,7 @@ Numbering is stable (04 and 08 cite items 3 and 9); resolved items stay listed w
 9. Resolved: channel `alerts` is created by `PlaybackChannels` (initializer order 10); 04's `YouTubeAlertNotifier` creates it idempotently with the identical ID, name and importance before posting ([04 Circuit breaker](04-youtube.md#circuit-breaker)).
 10. Unverified (resolved during M4/M5 by tests or the device matrix): Android 17 while-in-use for plays from Android Auto and from the resumption card (not media keys, not notification taps); whether every AVRCP head unit delivers next/previous as key events or transport controls (both are handled); the tuned `SilenceSkippingAudioProcessor` parameters; MP3 seek accuracy on VBR files with coarse Xing TOCs; whether Android Auto highlights the playing item in browse lists when browse IDs carry the `@{parent}` suffix (item 13); that the current Android Auto release still lists a GitHub-installed media app once "Unknown sources" is on, on the Desktop Head Unit and on a real head unit (M5 acceptance 4).
 11. Moved to [PO-20](../PLAN.md#48-further-product-owner-decisions)'s follow-ups (defaults: replaying a played episode marks it unplayed at its first `isPlaying`; an external play under "Ask" counts as consent to stream on mobile data).
-12. **Owner 08:** "Mark played and skip" in the full player's overflow must call only `EpisodeRepository.setPlayed(listOf(id), true)`; the projector already advances when the current item is marked played ([QueueProjector](#queueprojector) edge cases), so an extra `skipToNext()` skips two episodes.
+12. Resolved 2026-11-15: the full player overflow is removed and the mini player's menu has no mark-played action, so the question is closed. The projector still advances when the current item is marked played ([QueueProjector](#queueprojector) edge cases).
 13. Resolved: (a) Auto playable children use `episode:{id}@{parent}` (`@upnext`, `@group:7`, `@downloads`, `@podcast:3`) so the context survives a tap in the car; player items keep the canonical `episode:{id}`. (b) YouTube cache keys are `yt:{videoId}:{formatId}` in [D52](../PLAN.md#3-key-decisions) and PLAN 5.2. (c) `nd.PLAY_CONTEXT` gains `mediaFilter`, `minSortDate`, `startPositionMs` and result extras; `nd.DISMISS` is new (both listed in [New names introduced here](#new-names-introduced-here)).
 14. Resolved (PLAN [5.1](../PLAN.md#51-module-graph)): `ExternalReason` is declared in `:core:model` (04 keeps ownership of its values, `:youtube:api` uses it), as `IpFamily` is, so `UnplayableReason.YouTubeExternal(reason: ExternalReason)` in `:playback:api` needs no mirror enum.
 15. Unverified: whether `visionos` player responses ever carry preroll placements, i.e. whether `availableAtMs` is ever in the future on the JS-free path ([04 Open questions](04-youtube.md#open-questions) 17). The ≤ 30 s wait ships either way; if M9a fixtures show waits above 30 s, raise the limit rather than looping through `Transient(NETWORK)` retries.

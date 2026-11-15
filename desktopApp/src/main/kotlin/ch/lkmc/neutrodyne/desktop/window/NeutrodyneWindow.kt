@@ -12,7 +12,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -51,7 +50,6 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
-import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
@@ -92,7 +90,6 @@ import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.desktop.resources.window_title_playing
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
-import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.ReconnectDismissals
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
@@ -693,26 +690,9 @@ internal fun NeutrodyneWindowContent(
     syncController: (() -> SyncController)? = null,
     reconnectDismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
 ) {
-    val panelScope = rememberCoroutineScope()
-    val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
-        panelScope.launch {
-            suspendRunCatching {
-                settings?.set(
-                    AppearanceSettingKeys.PLAYER_PANEL_HIDDEN,
-                    visibility == PlayerPanelVisibility.HIDDEN,
-                )
-            }.onSuccess { result ->
-                if (result is Outcome.Failure) Log.w("DesktopPlayer") { "Player panel preference write failed" }
-            }.onFailure { Log.w("DesktopPlayer", it) { "Player panel preference write failed" } }
-        }
-    }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions(portal)
     val nowPlaying by playbackState.nowPlaying.collectAsState()
-    val panelHidden by (
-        settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
-            ?: flowOf(false)
-    ).collectAsState(initial = false)
     val updates =
         if (updateChecker != null && updateNotices != null && settings != null) {
             rememberUpdateRootPresentation(updateChecker, updateNotices, settings)
@@ -791,8 +771,6 @@ internal fun NeutrodyneWindowContent(
                 userMessageAction = { id ->
                     if (syncRoot?.messageAction(id) != true) banners?.messageAction(id)
                 },
-                hidePlayerPanel = { setPanelVisibility(PlayerPanelVisibility.HIDDEN) },
-                revealPlayerPanel = { setPanelVisibility(PlayerPanelVisibility.SHOWN) },
                 refresh = refresh,
                 onTextFieldFocusChange = onTextFieldFocusChange,
             )
@@ -809,7 +787,7 @@ internal fun NeutrodyneWindowContent(
                     menuActions.attachBack(it.back)
                     menuActions.attachFind(it.find)
                     openHandler?.let { DesktopInputFeedback(it) }
-                    PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
+                    PlayerRoute(it)
                 },
                 // Banner posts and sync notices share the root's serial snackbar through an
                 // acknowledged fan-in: plain `merge` would let a banner's `emit` return before
@@ -836,7 +814,6 @@ internal fun NeutrodyneWindowContent(
                 RootUiState.READY.copy(
                     startup = startup,
                     hasNowPlaying = nowPlaying != null,
-                    playerPanelHidden = panelHidden,
                     settingsBadge = updates?.badge ?: false,
                     notice = updates?.notice,
                     heldChanges = syncRoot?.heldChanges,
@@ -868,5 +845,3 @@ internal fun NeutrodyneWindowContent(
 }
 
 private const val APPEARANCE_GATE_MS = 1_000L
-
-private enum class PlayerPanelVisibility { SHOWN, HIDDEN }

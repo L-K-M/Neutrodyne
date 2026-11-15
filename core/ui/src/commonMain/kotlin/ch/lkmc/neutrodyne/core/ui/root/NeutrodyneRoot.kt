@@ -146,8 +146,6 @@ public fun NeutrodyneRoot(
     val navigation = rememberNavigationState(initialTab)
     val snackbarHost = remember { SnackbarHostState() }
     val rootScope = rememberCoroutineScope()
-    var expandRequest by rememberSaveable { mutableIntStateOf(0) }
-    var collapseRequest by rememberSaveable { mutableIntStateOf(0) }
 
     val dark =
         when (prefs.theme) {
@@ -176,18 +174,15 @@ public fun NeutrodyneRoot(
                         routes.collect { route ->
                             when (route) {
                                 is Route.Navigate -> {
-                                    collapseRequest++
                                     navigation.open(route.tab, route.stack)
                                 }
 
                                 is Route.Push -> {
-                                    if (route.key != SpeedKey) collapseRequest++
                                     navigation.push(route.key)
                                 }
 
                                 is Route.SelectFeed -> {
                                     if (actions.selectFeedSource(route.groupUuid)) {
-                                        collapseRequest++
                                         navigation.open(
                                             FeedsKey,
                                             if (route.groupUuid ==
@@ -203,8 +198,9 @@ public fun NeutrodyneRoot(
                                     }
                                 }
 
+                                // The radio home is the player.
                                 Route.ExpandPlayer -> {
-                                    expandRequest++
+                                    navigation.open(FeedsKey, emptyList())
                                 }
 
                                 Route.None -> {
@@ -223,8 +219,6 @@ public fun NeutrodyneRoot(
                         platform,
                         statusBarAppearanceFor(dark),
                         modifier,
-                        expandRequest,
-                        collapseRequest,
                         failedDownloads,
                     )
                 }
@@ -245,47 +239,18 @@ private fun ReadyRoot(
     platform: BuildInfo.Platform,
     appBarAppearance: StatusBarAppearance,
     modifier: Modifier = Modifier,
-    expandRequest: Int = 0,
-    collapseRequest: Int = 0,
     failedDownloads: Flow<Int> = emptyFlow(),
 ) {
     val failedDownloadCount by failedDownloads.collectAsStateWithLifecycle(initialValue = 0)
-    var expandedSettled by remember { mutableStateOf(false) }
-    var playerNavigationRequests by rememberSaveable { mutableIntStateOf(0) }
-    var lastPlayerTab by remember { mutableStateOf(navigation.selectedTab) }
-    LaunchedEffect(navigation.selectedTab) {
-        if (lastPlayerTab != navigation.selectedTab) playerNavigationRequests++
-        lastPlayerTab = navigation.selectedTab
-    }
     val navigateFromPlayer: (NavKey) -> Unit = { key ->
-        // Same-tab requests must collapse too; this token signals change, not event count.
-        if (key != SpeedKey) playerNavigationRequests++
         if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
     }
+    // The radio home is the only full player; the mini bar and the player deep link open it.
+    val openRadio: () -> Unit = { navigation.open(FeedsKey, emptyList()) }
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
-    var measuredContentBottomPx by remember { mutableFloatStateOf(0f) }
     var viewportBottomPx by remember { mutableFloatStateOf(0f) }
     val radioHome = navigation.selectedTab == FeedsKey && navigation.stack(FeedsKey).lastOrNull() == FeedsKey
-    PlatformSystemBarAppearance(
-        if (radioHome && !expandedSettled) StatusBarAppearance.LightIcons else appBarAppearance,
-    )
-    val hideSuite = state.hasNowPlaying && expandedSettled && contentBottomPx > 0f
-    val dockBottomToCommit =
-        if (!expandedSettled ||
-            contentBottomPx == 0f
-        ) {
-            measuredContentBottomPx.takeIf { it > 0f }
-        } else {
-            null
-        }
-    SideEffect { dockBottomToCommit?.let { contentBottomPx = it } }
-    val focusManager = LocalFocusManager.current
-    LaunchedEffect(hideSuite, focusManager) {
-        if (hideSuite) focusManager.clearFocus(force = true)
-    }
-    LaunchedEffect(state.hasNowPlaying) {
-        if (!state.hasNowPlaying) expandedSettled = false
-    }
+    PlatformSystemBarAppearance(if (radioHome) StatusBarAppearance.LightIcons else appBarAppearance)
     val windowInfo = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
     val density = LocalDensity.current
     val dockBottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
@@ -301,8 +266,6 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            hasNowPlaying = state.hasNowPlaying && !radioHome,
-            panelHidden = state.playerPanelHidden,
         )
     val posture =
         remember(windowInfo.windowPosture, density) {
@@ -390,7 +353,7 @@ private fun ReadyRoot(
             if (!rootHasFocus) rootKeyFocus.requestFocus()
         }
     }
-    LaunchedEffect(navigation.selectedTab, navigation.stack(navigation.selectedTab).lastOrNull(), hideSuite) {
+    LaunchedEffect(navigation.selectedTab, navigation.stack(navigation.selectedTab).lastOrNull()) {
         rootKeyFocus.requestFocus()
     }
     val discoverSearchFocus = remember { DiscoverSearchFocus() }
@@ -407,7 +370,7 @@ private fun ReadyRoot(
     val find: () -> Boolean = {
         navigation.selectedTab == DiscoverKey && discoverSearchFocus.request()
     }
-    val miniInset = if (!radioHome && !layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
+    val miniInset = if (!radioHome && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalDiscoverSearchFocus provides discoverSearchFocus,
         ch.lkmc.neutrodyne.core.ui.radio.LocalFailedDownloadCount provides failedDownloadCount,
@@ -450,14 +413,7 @@ private fun ReadyRoot(
                         }
                     }.focusable(),
         ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .focusProperties {
-                        onEnter = { if (hideSuite) cancelFocusChange() }
-                    }.focusGroup()
-                    .then(if (hideSuite) Modifier.clearAndSetSemantics {} else Modifier),
-            ) {
+            Box(Modifier.fillMaxSize().focusGroup()) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         RootBanners(
@@ -492,7 +448,7 @@ private fun ReadyRoot(
                                     ).focusRequester(importContentFocus)
                                     .focusable()
                                     .onGloballyPositioned {
-                                        measuredContentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
+                                        contentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
                                     },
                             ) {
                                 NeutrodyneNavHost(
@@ -502,53 +458,25 @@ private fun ReadyRoot(
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
-                            if (!radioHome && layout.playerPanel) {
-                                Box(Modifier.width(layout.playerPanelWidthDp.dp)) {
-                                    player(
-                                        PlayerSlotState(
-                                            layout,
-                                            navigateFromPlayer,
-                                            hidePanel = actions.hidePlayerPanel,
-                                            windowWidthDp = windowWidthDp,
-                                            posture = posture,
-                                            expandRequest = expandRequest,
-                                            collapseRequest = collapseRequest + playerNavigationRequests,
-                                            onExpandedSettled = { expandedSettled = it },
-                                            back = desktopBack,
-                                            find = find,
-                                        ),
-                                    )
-                                }
-                            }
                         }
                     }
                 }
             }
 
-            if (!layout.playerPanel) {
-                Box(Modifier.fillMaxSize()) {
-                    player(
-                        PlayerSlotState(
-                            layout = layout,
-                            windowWidthDp = windowWidthDp,
-                            posture = posture,
-                            presentation =
-                                if (radioHome) PlayerPresentation.RADIO_HOME else PlayerPresentation.STANDARD,
-                            navigate = navigateFromPlayer,
-                            contentBottomPx = contentBottomPx,
-                            expandRequest = expandRequest,
-                            collapseRequest = collapseRequest + playerNavigationRequests,
-                            revealPanel =
-                                actions.revealPlayerPanel.takeIf {
-                                    platform == BuildInfo.Platform.DESKTOP &&
-                                        windowWidthDp >= PLAYER_PANEL_MIN_WINDOW_DP
-                                },
-                            onExpandedSettled = { expandedSettled = it },
-                            back = desktopBack,
-                            find = find,
-                        ),
-                    )
-                }
+            Box(Modifier.fillMaxSize()) {
+                player(
+                    PlayerSlotState(
+                        layout = layout,
+                        windowWidthDp = windowWidthDp,
+                        posture = posture,
+                        presentation = if (radioHome) PlayerPresentation.RADIO_HOME else PlayerPresentation.STANDARD,
+                        navigate = navigateFromPlayer,
+                        openRadio = openRadio,
+                        contentBottomPx = contentBottomPx,
+                        back = desktopBack,
+                        find = find,
+                    ),
+                )
             }
 
             state.remoteSession?.let { card ->
@@ -563,20 +491,13 @@ private fun ReadyRoot(
             }
 
             // One host stays above the player; collapsed messages retain the content dock.
-            val snackbarBottomPx =
-                if (hideSuite) {
-                    WindowInsets.navigationBars.getBottom(density).toFloat()
-                } else {
-                    (viewportBottomPx - contentBottomPx).coerceAtLeast(0f)
-                }
+            val snackbarBottomPx = (viewportBottomPx - contentBottomPx).coerceAtLeast(0f)
             SnackbarHost(
                 hostState = snackbarHost,
                 modifier =
                     Modifier.align(Alignment.BottomCenter).padding(
-                        start = if (hideSuite) 0.dp else navChromeDp.dp,
-                        bottom =
-                            with(density) { snackbarBottomPx.toDp() } +
-                                (if (hideSuite) 0.dp else miniInset) + SNACKBAR_MARGIN,
+                        start = navChromeDp.dp,
+                        bottom = with(density) { snackbarBottomPx.toDp() } + miniInset + SNACKBAR_MARGIN,
                     ),
             )
         }

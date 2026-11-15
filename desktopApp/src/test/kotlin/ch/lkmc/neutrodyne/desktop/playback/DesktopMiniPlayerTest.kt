@@ -10,6 +10,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindowContent
@@ -18,11 +19,11 @@ import org.junit.Test
 import java.util.Locale
 import kotlin.test.assertFalse
 
-/** Real desktop window/player/queue ViewModels driving the real controller; no audio device. */
+/** Real desktop window and player ViewModels driving the real controller; no audio device. */
 @OptIn(ExperimentalTestApi::class)
-class DesktopPlayerSheetTest {
+class DesktopMiniPlayerTest {
     @Test
-    fun sharedPanelPausesHidesAndReopensWithoutReloadingAudio() =
+    fun miniPlayerPausesAndOpensTheRadioWithoutReloadingAudio() =
         runDesktopComposeUiTest(width = 1200, height = 800) {
             runBlocking {
                 val locale = Locale.getDefault()
@@ -48,30 +49,25 @@ class DesktopPlayerSheetTest {
                             )
                         }
                     }
-                    // The radio home uses its own player; the shared side panel is shown on Library.
+                    // The radio home is the player; other screens dock the mini player, with no side panel.
                     onNodeWithTag("radio_menu").performClick()
                     onNodeWithTag("nav_library").performClick()
                     waitUntil(timeoutMillis = 10_000) {
-                        onAllNodes(hasTestTag("full_player")).fetchSemanticsNodes().isNotEmpty()
+                        onAllNodes(hasTestTag("mini_player")).fetchSemanticsNodes().isNotEmpty()
                     }
-                    onNodeWithTag("player_side_panel").assertIsDisplayed()
-                    onNodeWithTag("full_player").assertIsDisplayed()
-                    onNodeWithContentDescription("Pause").performClick()
+                    onNodeWithTag("player_side_panel").assertDoesNotExist()
+                    onNodeWithTag("full_player").assertDoesNotExist()
+                    onNodeWithTag("mini_player").performCustomAccessibilityActionWithLabel("Pause")
                     fixture.awaitPaused()
                     assertFalse(
                         fixture.controller.nowPlaying.value!!
                             .isPlaying,
                     )
-                    onNodeWithContentDescription("Hide player panel").performClick()
-                    waitUntil(timeoutMillis = 10_000) {
-                        onAllNodes(hasTestTag("mini_player")).fetchSemanticsNodes().isNotEmpty()
-                    }
-                    onNodeWithTag("player_side_panel").assertDoesNotExist()
                     onNodeWithTag("mini_player").performClick()
                     waitUntil(timeoutMillis = 10_000) {
-                        onAllNodes(hasTestTag("player_side_panel")).fetchSemanticsNodes().isNotEmpty()
+                        onAllNodes(hasTestTag("radio_home")).fetchSemanticsNodes().isNotEmpty()
                     }
-                    onNodeWithTag("player_side_panel").assertIsDisplayed()
+                    onNodeWithTag("mini_player").assertDoesNotExist()
                     kotlin.test.assertEquals(windows, fixture.engine.windows.size)
                 } finally {
                     showing = false
