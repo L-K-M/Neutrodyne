@@ -1,8 +1,8 @@
 # 08 — UI and UX
 
-> Status: Draft v1, 2026-10-04; revised 2026-10-05 for the product owner's decisions (GitHub-only distribution, no developer verification, yt-dlp engine); revised 2026-10-05 for PO-31–PO-35 (notify-only update check with GitHub links instead of an in-app updater, no beta channel); scope revision 2026-10-05 (S0–S13): one Compose Multiplatform UI for the Android and desktop apps (desktop window layouts, context menus, keyboard, hover, scrollbars and screen readers, Settings › Desktop, the desktop variants of Settings › Updates and the Install & updates help), the Sync screens, the brand scheme and icon rules derived from `media-sources/icon.png`, and published APKs as release builds signed with the committed key (PO-35 re-resolved); **final cross-document review 2026-10-05:** the root takes `RootUiState`/`RootActions`/`RootSlots` from the shells, the restore-while-linked confirmation follows the pull, `SyncNotice.PasswordSet` · Implements: R2.4, R2.5, R2.8 (display), R3.7 (display), R3.9 (display), R4.6, R5.1–R5.8, R7.2, R7.5–R7.7, R7.9 (screens and wording), R8.9, R8.10 (shared UI), the screens of R1.1–R1.9, R2.1–R2.7, R3.1, R4.8, R6.1–R6.6 and the Settings › Desktop rows of R8.3 and R8.8 / N4, N5 (UI), N6, N7 (edge-to-edge, predictive back, resizability; desktop window), N10 (RTL, text expansion), N12 (what the update card and help page show), N13 (the sync disclosure) · Milestones: M0 (M0a, M0b), M1, M2, M3, M4, M5, M6, M7, M8, M9 (M9a, M9b), M10, M11 (M11a, M11b), MD1, MD4, MD5, MS2, MS3, M13 · Honours: D2, D3, D6, D7, D16, D42, D51, D54, D55, D56, D57, D58, D61, D64, D76, D77, D78, D79, D80, D81, D83, D84, D85, D87, D92, D93, D96, D97; PO-2, PO-5, PO-31–PO-35 (resolved; PO-35 re-resolved), PO-17 (partly resolved); PO-4, PO-19, PO-36, PO-37, PO-38, PO-40, PO-44 defaults · Owns: information architecture and screen inventory, navigation behaviour (including Escape as back), every screen's layout, states and user-visible strings on both apps, shared components, the root `PlayerSheet`, the Feeds pager, `EpisodeLiveStateSource`, theming and colour, the brand rules (scheme, icon derivation, sizes, safe zones; the generator is 01's), the artwork pipeline (`ArtworkStore`, `ArtworkSyncWorker`, `DesktopArtworkLane`, `ArtworkProvider`, Coil, monograms, mosaics), adaptive layouts including desktop windows, per-screen keyboard, mouse, context-menu, hover and scrollbar behaviour (the window menus and the global shortcut list are 11's), the `PlatformActions` interfaces, accessibility of the shared UI, onboarding, the UI differences between engine present and external mode (including the Settings › YouTube engine rows), the update-check and install-guidance UI on both platforms (Settings › Updates with the update card and its GitHub links, the Settings gear badge, the first-run card, the verification notice, the `updates` notification wording, the Install & updates help page with its builds card), the Sync screens, dialogs, banners and wording (10 owns the behaviour), and the Settings structure (including the layout of Settings › Desktop, whose rows 11 owns)
+> Status: Draft v1, 2026-10-04; revised 2026-10-05 for the product owner's decisions (GitHub-only distribution, no developer verification, yt-dlp engine); revised 2026-10-05 for PO-31–PO-35 (notify-only update check with GitHub links instead of an in-app updater, no beta channel); scope revision 2026-10-05 (S0–S13): one Compose Multiplatform UI for the Android and desktop apps (desktop window layouts, context menus, keyboard, hover, scrollbars and screen readers, Settings › Desktop, the desktop variants of Settings › Updates and the Install & updates help), the Sync screens, the brand scheme and icon rules derived from `media-sources/icon.png`, and published APKs as release builds signed with the committed key (PO-35 re-resolved); **final cross-document review 2026-10-05:** the root takes `RootUiState`/`RootActions`/`RootSlots` from the shells, the restore-while-linked confirmation follows the pull, `SyncNotice.PasswordSet` · Implements: R2.4, R2.5, R2.8 (display), R3.7 (display), R3.9 (display), R4.6, R5.1–R5.8, R7.2, R7.5–R7.7, R7.9 (screens and wording), R8.9, R8.10 (shared UI), the screens of R1.1–R1.9, R2.1–R2.7, R3.1, R4.8, R6.1–R6.6 and the Settings › Desktop rows of R8.3 and R8.8 / N4, N5 (UI), N6, N7 (edge-to-edge, predictive back, resizability; desktop window), N10 (RTL, text expansion), N12 (what the update card and help page show), N13 (the sync disclosure) · Milestones: M0 (M0a, M0b), M1, M2, M3, M4, M5, M6, M7, M8, M9 (M9a, M9b), M10, M11 (M11a, M11b), MD1, MD4, MD5, MS2, MS3, M13 · Honours: D2, D3, D6, D7, D16, D42, D51, D54, D55, D56, D57, D58, D61, D64, D76, D77, D78, D79, D80, D81, D83, D84, D85, D87, D92, D93, D96, D97; PO-2, PO-5, PO-31–PO-35 (resolved; PO-35 re-resolved), PO-17 (partly resolved); PO-4, PO-19, PO-36, PO-37, PO-38, PO-40, PO-44 defaults · Owns: information architecture and screen inventory, navigation behaviour (including Escape as back), every screen's layout, states and user-visible strings on both apps, shared components, the mini player, the Feeds pager, `EpisodeLiveStateSource`, theming and colour, the brand rules (scheme, icon derivation, sizes, safe zones; the generator is 01's), the artwork pipeline (`ArtworkStore`, `ArtworkSyncWorker`, `DesktopArtworkLane`, `ArtworkProvider`, Coil, monograms, mosaics), adaptive layouts including desktop windows, per-screen keyboard, mouse, context-menu, hover and scrollbar behaviour (the window menus and the global shortcut list are 11's), the `PlatformActions` interfaces, accessibility of the shared UI, onboarding, the UI differences between engine present and external mode (including the Settings › YouTube engine rows), the update-check and install-guidance UI on both platforms (Settings › Updates with the update card and its GitHub links, the Settings gear badge, the first-run card, the verification notice, the `updates` notification wording, the Install & updates help page with its builds card), the Sync screens, dialogs, banners and wording (10 owns the behaviour), and the Settings structure (including the layout of Settings › Desktop, whose rows 11 owns)
 
-Contents: [Scope](#scope) · [Information architecture](#information-architecture) · [Navigation](#navigation) · [Screens](#screens) ([Sync screens](#sync-screens)) · [Components](#components) · [Player sheet](#player-sheet) · [Group feed pager](#group-feed-pager) · [Live row state](#live-row-state) · [Theming and colour](#theming-and-colour) ([Brand assets](#brand-assets)) · [Artwork pipeline](#artwork-pipeline) · [Adaptive layouts](#adaptive-layouts) ([Keyboard and mouse](#keyboard-and-mouse)) · [Accessibility](#accessibility) · [Onboarding and empty states](#onboarding-and-empty-states) · [Capability differences in UI](#capability-differences-in-ui) · [Settings](#settings) · [Testing](#testing) · [Error handling and failure modes](#error-handling-and-failure-modes) · [Delivery by milestone](#delivery-by-milestone) · [New names introduced here](#new-names-introduced-here) · [Open questions](#open-questions) · [Sources](#sources)
+Contents: [Scope](#scope) · [Information architecture](#information-architecture) · [Navigation](#navigation) · [Screens](#screens) ([Sync screens](#sync-screens)) · [Components](#components) · [Mini player](#mini-player) · [Group feed pager](#group-feed-pager) · [Live row state](#live-row-state) · [Theming and colour](#theming-and-colour) ([Brand assets](#brand-assets)) · [Artwork pipeline](#artwork-pipeline) · [Adaptive layouts](#adaptive-layouts) ([Keyboard and mouse](#keyboard-and-mouse)) · [Accessibility](#accessibility) · [Onboarding and empty states](#onboarding-and-empty-states) · [Capability differences in UI](#capability-differences-in-ui) · [Settings](#settings) · [Testing](#testing) · [Error handling and failure modes](#error-handling-and-failure-modes) · [Delivery by milestone](#delivery-by-milestone) · [New names introduced here](#new-names-introduced-here) · [Open questions](#open-questions) · [Sources](#sources)
 
 ---
 
@@ -12,7 +12,7 @@ Serves R5.1–R5.8, R2.4, R2.5, R4.6, R6.1–R6.6 (screens), R7.2, R7.5–R7.7, 
 
 **One UI for both apps** ([D83](../PLAN.md#3-key-decisions), [D81](../PLAN.md#3-key-decisions)). Every screen, ViewModel, component and theme in this document is Compose Multiplatform code in `commonMain` of its feature or UI-core module, compiled for `android` and `jvm("desktop")`; the Android app (`:app`) and the desktop app (`:desktopApp`) are thin shells around the shared `NeutrodyneRoot` ([01 Navigation](01-foundation.md#navigation)). Strings and plurals are Compose resources (`composeResources/values*/strings.xml`, the public `Res` of `:core:ui`; `Res.string.x` in composition, `suspend getString()` for notifications and workers); Android keeps `res/` only for `app_name` per locale, manifest labels, notification-channel names and Android Auto titles (D83, risk [T23](../PLAN.md#8-risks-and-mitigations)). Platform-only UI actions (share sheet, file dialogs, opening a link, "Show in folder", the notification permission) go through the small `PlatformActions` interfaces of `:core:ui` ([Modules](#modules)). Behaviour that exists on one platform only is marked "(Android)" or "(desktop)"; the full list of desktop differences is [11 Behaviour differences from Android](11-desktop.md#behaviour-differences-from-android).
 
-Neutrodyne is cover-first: artwork is shown at a size where it reads on every surface (grid tiles 72–152 dp, feed rows 56 dp, podcast header 160 dp, full player ≥ 280 dp, mini player 48 dp, notification, lock screen, Auto, and on the desktop the OS media controls), and artwork drives colour while the chrome stays quiet. Groups are places: each group is a tab and a page of the Feeds pager ([D55](../PLAN.md#3-key-decisions)). The player is one root sheet that follows the finger, and on wide windows a side panel ([D56](../PLAN.md#3-key-decisions)). Everything is stable Material 3 — Compose Multiplatform 1.12.1 with JetBrains `material3` 1.9.0, which resolves to androidx Material 3 1.4.0 on Android — wrapped in `:core:designsystem` ([D6](../PLAN.md#3-key-decisions), [PO-4](../PLAN.md#po-4-material-3-expressive)). The brand — amber `#F3881C` on navy `#00192E` — comes from the owner's icon ([D97](../PLAN.md#3-key-decisions), [Brand assets](#brand-assets)).
+Neutrodyne is cover-first: artwork is shown at a size where it reads on every surface (grid tiles 72–152 dp, feed rows 56 dp, podcast header 160 dp, mini player 48 dp, notification, lock screen, Auto, and on the desktop the OS media controls), and artwork drives colour while the chrome stays quiet. Groups are places: each group is a tab and a page of the Feeds pager ([D55](../PLAN.md#3-key-decisions)). The radio home is the only full player; every other screen keeps the docked mini player, and no side panel reserves width on wide windows ([D56](../PLAN.md#3-key-decisions), superseded by the 2026-11-15 owner revision). Everything is stable Material 3 — Compose Multiplatform 1.12.1 with JetBrains `material3` 1.9.0, which resolves to androidx Material 3 1.4.0 on Android — wrapped in `:core:designsystem` ([D6](../PLAN.md#3-key-decisions), [PO-4](../PLAN.md#po-4-material-3-expressive)). The brand — amber `#F3881C` on navy `#00192E` — comes from the owner's icon ([D97](../PLAN.md#3-key-decisions), [Brand assets](#brand-assets)).
 
 ### Responsibilities and boundaries
 
@@ -21,7 +21,7 @@ Neutrodyne is cover-first: artwork is shown at a size where it reads on every su
 | Destinations, screen inventory, pane roles, re-tap and back behaviour (Escape as back on the desktop), `AppNavigator` semantics | Nav3 mechanics (installers, per-tab stacks, decorators, scene strategies, `NavKeySerializers`, intent router and its desktop sources) — [01 Navigation](01-foundation.md#navigation) |
 | Every screen's layout, states, actions and user-visible strings (final wording) | What the actions do: feeds and add flow [03](03-feeds-and-discovery.md), YouTube [04](04-youtube.md), groups/import/backup [05](05-groups-opml-backup.md), playback [06](06-playback.md), downloads [07](07-downloads.md) |
 | `EpisodeRow`, `CoverTile`, `GroupMosaic`, `CoverArt`, `MonogramPainter`, show-notes renderer, banners, selection mode | Show-notes sanitising and block model — [03 Show notes](03-feeds-and-discovery.md#show-notes) |
-| `PlayerSheet`, mini/full player, side panel, speed and sleep sheets | Player behaviour, `PlaybackController`/`PlaybackStateSource` — [06 UI boundary](06-playback.md#ui-boundary) |
+| Mini player, the radio Menu's speed and sleep sheets | Player behaviour, `PlaybackController`/`PlaybackStateSource` — [06 UI boundary](06-playback.md#ui-boundary) |
 | Feeds pager, tabs, chips, selection persistence, visits | `FeedRepository`, counts window, "new since last visit" rule — [05 Group feeds](05-groups-opml-backup.md#group-feeds) |
 | `EpisodeLiveStateSource` contract and implementation | Its `IN (:ids)` SQL — [02 Live row state](02-data-model.md#live-row-state) |
 | Colour schemes (brand, artwork, pure black), tones, tokens, `Nd*` wrappers, icons; the brand rules: scheme, icon derivation, sizes, safe zones, monochrome silhouette, desktop and tray icons | Group palette values and icon keys — [05 Palette](05-groups-opml-backup.md#palette), [05 Icons](05-groups-opml-backup.md#icons); the brand-asset generator `generateBrandAssets`/`checkBrandAssets` — [01 Brand-asset generator](01-foundation.md#brand-asset-generator) |
@@ -162,11 +162,12 @@ paper episode slips and guides, routed progress recess, single recessed Nixie
 glass slot and ON/OFF play toggle switch form one assembly. No nameplate,
 visible discard button or extra decorative controls are added. Exactly one
 small physical Menu key opens existing
-Library, Up next, Downloads, Discover and Settings destinations over home.
+Library, Up next, Downloads, Discover and Settings destinations over home,
+with Playback speed and Sleep timer above them.
 The existing navigation keys, deep links, Add podcast, Import, notification
 routes and desktop menu items remain. Back returns through their existing
-stacks to radio home. The existing mini/full player remains on other screens;
-home hides the mini player because the radio is the player.
+stacks to radio home. The radio is the only full player; every other screen
+keeps the docked mini player, and home hides it because the radio is the player.
 
 Playlists are groups with existing membership, sync and import/export. Your
 playlists lists real groups. Its programme shows unplayed
@@ -197,7 +198,12 @@ toggle switch: a chrome bat lever through a hex nut on a plate printed ON
 flick toward the other label toggles it, and it is announced as a switch
 named Play with the transport status. Each slip shows its podcast's cover,
 falling back to the monogram. The Swipe left to discard hint is removed;
-Release / to discard feedback during a swipe remains.
+Release / to discard feedback during a swipe remains. The expanded player
+sheet, its tabs, the mini-to-full morph, drag-to-expand, predictive-back
+collapse and the desktop side panel are removed; the radio is the only full
+player and every other screen keeps the docked mini player. Playback speed
+and the sleep timer move into the radio's Menu dialog, above the destinations,
+and still push the `SpeedKey` and `SleepTimerKey` sheets.
 
 **Production deviations from the prototype (2026-11-04).** Data comes from
 subscriptions, groups and episodes, never fixture content. Selecting an
@@ -345,8 +351,8 @@ Pane roles apply when the [pane directive](#pane-directive) allows two or more p
 | [Diagnostics](#diagnostics) | `DiagnosticsKey` | `:feature:settings` | detail | M11 (M11b) |
 | [Speed sheet](#speed-and-sleep-sheets) | `SpeedKey` | `:feature:player` | sheet | M4 |
 | [Sleep timer sheet](#speed-and-sleep-sheets) | `SleepTimerKey` | `:feature:player` | sheet | M5 |
-| [Player](#player-sheet) (mini, full, side panel) | none (`PlayerSheet`, D56) | `:feature:player`, hosted by `NeutrodyneRoot` | root overlay / side panel | M4, M10; desktop MD1 |
-| [Continue on this device](#sync-screens) | none (`ContinueOnThisDeviceCard`, root) | `:core:ui`, hosted by `NeutrodyneRoot` | above the mini player / top of the side panel | MS3 |
+| [Mini player](#mini-player) | none (`PlayerRoute`, D56 superseded 2026-11-15) | `:feature:player`, hosted by `NeutrodyneRoot` | docked root overlay | M4, M10; desktop MD1 |
+| [Continue on this device](#sync-screens) | none (`ContinueOnThisDeviceCard`, root) | `:core:ui`, hosted by `NeutrodyneRoot` | above the mini player | MS3 |
 | [Startup gate](#banners-and-the-startup-gate) | none | `:core:ui` visuals, hosted by `MainActivity` and `NeutrodyneWindow` | full window | M1 |
 
 ```mermaid
@@ -387,8 +393,8 @@ flowchart LR
   SY --> SDG["SyncDiagnosticsKey"]
   SY -. dialog .-> SHC["SyncHeldChangesKey"]
   MENU(["desktop Help menu"]) -. dialog .-> KS["KeyboardShortcutsKey"]
-  PLAYER(["PlayerSheet (root)"]) -. sheet .-> SPD["SpeedKey"]
-  PLAYER -. sheet .-> SLP["SleepTimerKey"]
+  RADIOMENU(["radio Menu dialog"]) -. sheet .-> SPD["SpeedKey"]
+  RADIOMENU -. sheet .-> SLP["SleepTimerKey"]
   NOTICES(["UpdateNotices (root)"]) -. dialog .-> VN["VerificationNoticeKey"]
   VN --> IH
   SYNCB(["held-changes banner (root)"]) -. dialog .-> SHC
@@ -429,8 +435,8 @@ interface AppNavigator {
 @Serializable data object SyncDevicesKey : NavKey
 @Serializable data class SyncHeldChangesKey(val id: Long) : NavKey                  // mass-change dialog (R7.7)
 @Serializable data object SyncDiagnosticsKey : NavKey
-data class PaneLayout(val partitions: Int, val playerPanel: Boolean, val contentWidthDp: Int)
-val LocalPaneLayout = staticCompositionLocalOf { PaneLayout(1, false, 360) }       // provided by NeutrodyneRoot; changes only on resize/panel
+data class PaneLayout(val partitions: Int, val contentWidthDp: Int)
+val LocalPaneLayout = staticCompositionLocalOf { PaneLayout(1, 360) }       // provided by NeutrodyneRoot; changes only on resize
 val LocalNavTab = staticCompositionLocalOf<TopLevelKey> { FeedsKey }               // provided per entry by the shared host (01)
 ```
 
@@ -451,7 +457,7 @@ Metadata (01's `ListDetailSceneStrategy.listPane()/detailPane()/extraPane()`) pe
 
 ### Sheets and dialogs
 
-Sheet keys (`AddPodcastKey`, `AddToGroupsKey`, `AllGroupsKey`, `SpeedKey`, `SleepTimerKey`, from MS2 `SyncApproveKey`) and the dialog keys (`ExportKey`, from M11a `VerificationNoticeKey`, from MS2 `SyncHeldChangesKey`, from MD4 `KeyboardShortcutsKey`) are pushed on the selected tab's stack and rendered by 01's overlay scene strategies, which must use window-based `NdModalBottomSheet`/`NdDialog` so they draw above the root `PlayerSheet` (a sheet opened from the expanded player would otherwise sit under it; on the desktop the same z-order is spike S9's check). Small confirmations (unsubscribe, mark all played, metered prompts, Replace restore, unlink) are plain `NdDialog`s owned by the screen, not keys. Sheets have a drag handle, 28 dp top corners, and close on back, scrim tap or swipe down; on wide windows they keep Material's maximum sheet width (`BottomSheetDefaults.SheetMaxWidth`, 640 dp) and centre. On the desktop Esc closes the top sheet or dialog, a scrim click closes it, and focus moves into it on open and back to the element that opened it on close (11's MD4 checklist item 5).
+Sheet keys (`AddPodcastKey`, `AddToGroupsKey`, `AllGroupsKey`, `SpeedKey`, `SleepTimerKey`, from MS2 `SyncApproveKey`) and the dialog keys (`ExportKey`, from M11a `VerificationNoticeKey`, from MS2 `SyncHeldChangesKey`, from MD4 `KeyboardShortcutsKey`) are pushed on the selected tab's stack and rendered by 01's overlay scene strategies, which must use window-based `NdModalBottomSheet`/`NdDialog` so they draw above the content and the mini player (on the desktop the same z-order is spike S9's check). Small confirmations (unsubscribe, mark all played, metered prompts, Replace restore, unlink) are plain `NdDialog`s owned by the screen, not keys. Sheets have a drag handle, 28 dp top corners, and close on back, scrim tap or swipe down; on wide windows they keep Material's maximum sheet width (`BottomSheetDefaults.SheetMaxWidth`, 640 dp) and centre. On the desktop Esc closes the top sheet or dialog, a scrim click closes it, and focus moves into it on open and back to the element that opened it on close (11's MD4 checklist item 5).
 
 ### Deep links
 
@@ -464,7 +470,7 @@ Sheet keys (`AddPodcastKey`, `AddToGroupsKey`, `AllGroupsKey`, `SpeedKey`, `Slee
 | `Navigate(LibraryKey, [PodcastKey(id)])` | Library tab, its stack replaced by `[LibraryKey, PodcastKey]` |
 | `SelectFeed(groupUuid)` | Root writes `ui.feeds_selected_source = group:{uuid}` (`all` when `groupUuid == null`), then `selectTab(FeedsKey)` and `resetTab(FeedsKey)`; unknown UUID → All with a snackbar "That group no longer exists" |
 | `Navigate(DownloadsKey, [])` | Downloads root |
-| `ExpandPlayer` | Expands the sheet (or reveals the side panel); no-op when nothing is loaded |
+| `ExpandPlayer` | Opens the radio home (the Feeds stack root) |
 | `Navigate(LibraryKey, [ImportKey(id)])` | Import screen in the state of that session |
 | `Push(SettingsKey(page))`, `Push(DiagnosticsKey)` | Pushed on the current tab (back returns to where the user was); includes `…/open/settings/youtube` (04's breaker notice) and, from M11a, `…/open/settings/updates` (the `updates` notification, 05's "Check for updates") and `…/open/settings/updates/release` (the notification's "Open on GitHub" action) |
 | `Push(InstallHelpKey())` (`…/open/help/install`, M11a; 01's route table) | The [Install and updates help](#install-and-updates-help) page with every section collapsed, pushed on the current tab |
@@ -473,13 +479,13 @@ Sheet keys (`AddPodcastKey`, `AddToGroupsKey`, `AllGroupsKey`, `SpeedKey`, `Slee
 
 A route that arrives while the [startup gate](#banners-and-the-startup-gate) is shown is held by the root and applied once `NavDisplay` exists (01's start-up test). Routes only navigate; every write still needs a tap on the destination (01 security rule) — also on the desktop, where any local program can hand the running instance a link or file.
 
-**Update notices (M11a).** `VerificationNoticeKey` is not a route. `NeutrodyneRoot` cannot see `:core:domain` ([01 Dependency rules](01-foundation.md#dependency-rules) rule 7), so the shell's start-up ViewModel collects `UpdateNotices.pending` (09 decides when a notice becomes pending) and passes it as `RootUiState.notice` ([01 root contract](01-foundation.md#appnavigator-and-per-tab-back-stacks)); the root shows it once `NavDisplay` exists and the startup gate is gone, and shows at most one notice per process start, never while the player is expanded, a sheet or dialog is open or an import preview is on screen (it waits for the next top-level destination): `FIRST_RUN_CHOICE` → the [first-run card](#updates-settings) among the banners (not a key; both apps); `VERIFICATION_ENFORCEMENT` → `push(VerificationNoticeKey)` (Android only: 09 never raises it on the desktop). Each is dismissed through `RootActions.dismissNotice` (the shell calls `UpdateNotices.dismiss(notice)`) when the user closes it, so it never returns; the dismissal waits for the durable record — a failed settings write keeps the notice and surfaces `writeError` — before `pending` advances. A restored navigation state that already holds `VerificationNoticeKey` suppresses another root push. There is no "what's new" notice and no update-blocked sheet (removed 2026-10-05 with the in-app installer, PO-31): an available update appears as the gear badge, the `updates` notification (the desktop's OS notification) and the update card in Settings › Updates.
+**Update notices (M11a).** `VerificationNoticeKey` is not a route. `NeutrodyneRoot` cannot see `:core:domain` ([01 Dependency rules](01-foundation.md#dependency-rules) rule 7), so the shell's start-up ViewModel collects `UpdateNotices.pending` (09 decides when a notice becomes pending) and passes it as `RootUiState.notice` ([01 root contract](01-foundation.md#appnavigator-and-per-tab-back-stacks)); the root shows it once `NavDisplay` exists and the startup gate is gone, and shows at most one notice per process start, never while a sheet or dialog is open or an import preview is on screen (it waits for the next top-level destination): `FIRST_RUN_CHOICE` → the [first-run card](#updates-settings) among the banners (not a key; both apps); `VERIFICATION_ENFORCEMENT` → `push(VerificationNoticeKey)` (Android only: 09 never raises it on the desktop). Each is dismissed through `RootActions.dismissNotice` (the shell calls `UpdateNotices.dismiss(notice)`) when the user closes it, so it never returns; the dismissal waits for the durable record — a failed settings write keeps the notice and surfaces `writeError` — before `pending` advances. A restored navigation state that already holds `VerificationNoticeKey` suppresses another root push. There is no "what's new" notice and no update-blocked sheet (removed 2026-10-05 with the in-app installer, PO-31): an available update appears as the gear badge, the `updates` notification (the desktop's OS notification) and the update card in Settings › Updates.
 
 **Sync notices (MS2, MS3).** The shell's start-up ViewModel also maps `SyncController.heldChanges` into `RootUiState.heldChanges` (the held-changes banner, priority 3 in [Banners and the startup gate](#banners-and-the-startup-gate); never an unprompted dialog), `SyncController.remoteSession` into `RootUiState.remoteSession` (the [Continue on this device](#sync-screens) card) and `SyncController.notices` into `RootSlots.userMessages` (snackbars); `NeutrodyneRoot` renders them — all inert while sync is not configured ([R7.1](../PLAN.md#21-functional-requirements)).
 
 ### Back handling order
 
-`PlayerSheet` is composed after `NavDisplay` in `NeutrodyneRoot`, so its handler wins while enabled ([Navigation suite, insets and back](#navigation-suite-insets-and-back)). Order of consumers for one back gesture:
+The mini player has no Back handling of its own; Back on a screen with the bar follows the ordinary consumer order ([Navigation suite, insets and back](#navigation-suite-insets-and-back)). Order of consumers for one back gesture:
 
 ```mermaid
 flowchart TD
@@ -487,20 +493,16 @@ flowchart TD
   W -->|yes| W1["dismiss it (its own window)"]
   W -->|no| S{"selection mode?"}
   S -->|yes| S1["exit selection"]
-  S -->|no| T{"player tabs panel open?"}
-  T -->|yes| T1["panel to peek"]
-  T -->|no| P{"player sheet expanded?"}
-  P -->|yes| P1["collapse, following the gesture"]
-  P -->|no| N{"tab stack depth above 1?"}
+  S -->|no| N{"tab stack depth above 1?"}
   N -->|yes| N1["predictive navigation Back"]
   N -->|no| R{"selected tab is Feeds?"}
   R -->|no| R1["return to Feeds"]
   R -->|yes| H["Android leaves to home, desktop does nothing"]
 ```
 
-Selection mode registers its handler inside the screen's entry (composed inside `NavDisplay`, before the player) but is only enabled while selecting, and selection is impossible while the player is expanded, so the order above holds. Unverified (S5): how activity-compose 1.13.0's `PredictiveBackHandler` and Nav3 1.2.0's `NavigationBackHandler` (navigationevent 1.1.2) interleave; S5 picks one API for both `NavDisplay`-external handlers. On the desktop Esc reaches the same handlers through the root: nothing feeds the `navigationevent` dispatcher on the desktop, so `NeutrodyneRoot`'s `onKeyEvent` completes a back event through its own `NavigationEventInput` whenever the dispatcher has an enabled handler (this section's order holds — an enabled handler ahead of `NavDisplay` claims it first) and pops the selected tab's stack directly otherwise (verified 2026-10-06, S9 — the assumed built-in Esc→back mapping does not exist; this is the stated `onKeyEvent` fallback), with no predictive animation; Esc is consumed first by an open menu, a text field's IME composition and a focused search field (which clears its text before it lets Esc through).
+Selection mode registers its handler inside the screen's entry (composed inside `NavDisplay`) but is only enabled while selecting, so the order above holds. Unverified (S5): how activity-compose 1.13.0's `PredictiveBackHandler` and Nav3 1.2.0's `NavigationBackHandler` (navigationevent 1.1.2) interleave; S5 picks one API for both `NavDisplay`-external handlers. On the desktop Esc reaches the same handlers through the root: nothing feeds the `navigationevent` dispatcher on the desktop, so `NeutrodyneRoot`'s `onKeyEvent` completes a back event through its own `NavigationEventInput` whenever the dispatcher has an enabled handler (this section's order holds — an enabled handler ahead of `NavDisplay` claims it first) and pops the selected tab's stack directly otherwise (verified 2026-10-06, S9 — the assumed built-in Esc→back mapping does not exist; this is the stated `onKeyEvent` fallback), with no predictive animation; Esc is consumed first by an open menu, a text field's IME composition and a focused search field (which clears its text before it lets Esc through).
 
-**Expanded Back (PR73, [issue #75](https://github.com/L-K-M/Neutrodyne/issues/75)).** `PopUntilScaffoldValueChange` retains its existing boundary targets and removal counts, including removing both extra entries from Home → About → Episode 1 → Episode 2 to reach About. When the scaffold has no internal boundary, `NavDisplay` targets the preceding real stack entry instead. This fixes Android's two-pane no-op in Feeds and the Library history drain without switching globally to `PopLatest`. Tab-root fallback remains unchanged. One event-level handler applies a live target/count once per dispatched Back, including completion-only system Back; successive events each get their own plan. NavDisplay and Material handlers drive preview seeking rather than navigation completion. Predictive Back captures the originating tab and its unsaved selection generation. The first tab change cancels native seeking and invalidates completion, even after returning to the origin or switching twice before composition; neither history changes. Current entry, selection, overlay and player handlers retain their Back precedence.
+**Expanded Back (PR73, [issue #75](https://github.com/L-K-M/Neutrodyne/issues/75)).** `PopUntilScaffoldValueChange` retains its existing boundary targets and removal counts, including removing both extra entries from Home → About → Episode 1 → Episode 2 to reach About. When the scaffold has no internal boundary, `NavDisplay` targets the preceding real stack entry instead. This fixes Android's two-pane no-op in Feeds and the Library history drain without switching globally to `PopLatest`. Tab-root fallback remains unchanged. One event-level handler applies a live target/count once per dispatched Back, including completion-only system Back; successive events each get their own plan. NavDisplay and Material handlers drive preview seeking rather than navigation completion. Predictive Back captures the originating tab and its unsaved selection generation. The first tab change cancels native seeking and invalidates completion, even after returning to the origin or switching twice before composition; neither history changes. Current entry, selection and overlay handlers retain their Back precedence.
 
 ### Transitions and shared elements
 
@@ -510,7 +512,7 @@ Selection mode registers its handler inside the screen's entry (composed inside 
 - Known IME limitation: expanded detail-only scene changes move the shared list pane, ending an in-progress IME composition and its input connection; keyboard focus is restored. The follow-up post-decoration pane animator would avoid this reparenting.
 - Known fling limitation: expanded detail-only scene changes move the shared list pane, stopping an in-progress fling while preserving its scroll offset. The follow-up post-decoration pane animator would avoid this reparenting.
 - Shared elements (M10, `SharedTransitionLayout` around `NavDisplay`, 01): Library tile cover ↔ podcast header cover (`SharedKeys.cover(tab, podcastId)`); feed, Up next and Downloads row thumbnail ↔ episode detail art (`SharedKeys.episodeArt(tab, episodeId)`). Keys include `LocalNavTab` because the same podcast can be visible in two tab stacks. Shared elements run only when `LocalPaneLayout.partitions == 1`. Expanded layouts disable NavDisplay's automatic whole-entry shared-bounds decorator while retaining its movable entry state; pane cover/wipe applies instead.
-- The mini ↔ full player morph is not a shared element; it is geometry inside `PlayerSheet` driven by drag progress ([Morph mapping](#morph-mapping)).
+- The player has no shared element: the mini player opens the radio home through ordinary navigation, and the 2026-11-15 owner revision removed the mini-to-full morph.
 
 ---
 
@@ -1509,7 +1511,7 @@ Buttons, stacked: **Apply** (`resolveHeld(id, APPLY)`), **Keep mine** with "Keep
 
 #### Continue on this device
 
-`ContinueOnThisDeviceCard` (`:core:ui`, MS3; [10 Now playing and handoff](10-sync.md#now-playing-and-handoff), R7.5, R8.5): shown by `NeutrodyneRoot` while `RootUiState.remoteSession` (the shell's mapping of `SyncController.remoteSession`) is non-null and nothing plays here. It takes the mini player's slot (the mini player shows the same adopted item paused underneath it, 06) and the top of the side panel on wide windows:
+`ContinueOnThisDeviceCard` (`:core:ui`, MS3; [10 Now playing and handoff](10-sync.md#now-playing-and-handoff), R7.5, R8.5): shown by `NeutrodyneRoot` while `RootUiState.remoteSession` (the shell's mapping of `SyncController.remoteSession`) is non-null and nothing plays here. It takes the mini player's slot (the mini player shows the same adopted item paused underneath it, 06):
 
 ```
 | +----+ Continue on this device             (x)  |  72 dp, tonal surfaceContainerHigh, 8 dp side insets
@@ -1522,7 +1524,7 @@ Play (or a tap on the card) → `RootActions.continueHere`, which the shell wire
 
 | Source | UI |
 |---|---|
-| `SyncNotice.MarkedPlayedElsewhere(episodeId, title, device)` for the item loaded here (MS3) | Snackbar "Marked played on {device}. It keeps playing here." and, until the item changes, the line "Marked played on {device}" under the title in the full player and side panel (R7.5: playback is neither stopped nor sought) |
+| `SyncNotice.MarkedPlayedElsewhere(episodeId, title, device)` for the item loaded here (MS3) | Snackbar "Marked played on {device}. It keeps playing here." (the mini player shows no such line; R7.5: playback is neither stopped nor sought) |
 | `SyncNotice.Resynced(added)` | Snackbar "Sync started over with the server" (plus " · {added} changes from this device were sent again" when `added > 0`) |
 | `SyncNotice.PasswordSet(date)` (once per date, [10 Passwords](10-sync.md#passwords)) | Snackbar "A password was set for your sync account on {date}" + "Not you?" → the help entry explaining how to revoke web sessions and change the password on the server's `/account` page |
 | `SyncNotice.FeedPasswordNeeded(podcastIds)` | Snackbar "{n} podcasts from your other devices need a password here" + "Show" → the first podcast (its tile already carries the lock badge) |
@@ -1673,7 +1675,7 @@ Every `request`/`promote` call from a row, episode detail, selection mode or "Do
 
 **Accessibility.** One merged node: `semantics(mergeDescendants = true)` with `contentDescription` = [row summary](#row-summary), `stateDescription` = "40 percent played" or "Downloading, 34 percent", custom actions per the [catalogue](#custom-actions-catalogue); inner buttons use `clearAndSetSemantics {}` so TalkBack stops once per row; the cover is decorative. At `fontScale ≥ 1.5` the row stacks: leading art and title on the first line, meta and status below, the two buttons end-aligned on a third line. A focused row draws the `NdFocusIndication` ring (2 dp `secondary`, 4 dp inset; [Accessibility](#accessibility)).
 
-`UpNextList` (`:core:ui`) renders `List<UpNextItem>` with drag handles (`reorderable`), `Modifier.animateItem()` and the `QUEUE` style; it is used by Up next and the player's Up next tab. Keyboard: Alt+↑ / Alt+↓ move the focused row (`move`), Delete removes it with Undo.
+`UpNextList` (`:core:ui`) renders `List<UpNextItem>` with drag handles (`reorderable`), `Modifier.animateItem()` and the `QUEUE` style; it is used by the Up next screen. Keyboard: Alt+↑ / Alt+↓ move the focused row (`move`), Delete removes it with Undo.
 
 ### CoverArt and CoverTile
 
@@ -1847,11 +1849,15 @@ Other states: `DOWNLOADING` "{p} %" in rows and "{12.3 MB} of {48.0 MB} · {1.2 
 
 ---
 
-## Player sheet
+## Mini player
+
+<a id="player-sheet"></a>
+
+**Owner revision, 2026-11-15.** The expanded Material 'Now playing' player sheet, its tabs (Up next, Notes, Chapters), the mini-to-full morph, drag-to-expand and predictive-back collapse are removed, and the desktop player side panel with them. The radio home is the only full player; every other screen keeps the docked mini player below. Playback speed and the sleep timer move into the radio's Menu dialog, above the destinations, and still push the `SpeedKey` and `SleepTimerKey` sheets unchanged.
 
 **Implementation note (2026-10-19, M5).** Reuse M4 UI seams for sleep, chapters and timestamp seeking. Tint, side panels and other M10/MD1 layout/theming stay deferred. `playback.sleep_last_minutes` stores only the last choice (default 30, range 1–240, synced), never active timer state. Hardware buttons default to EPISODE (not synced); smart resume defaults true (synced).
 
-Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (sheet, mini and full player, speed sheet), M5 (sleep sheet, chapters tab, timestamp seeks), M9a (YouTube issue banners), M10 (artwork tint, side panel, tabletop, landscape), MD1 (the same player on the desktop, usually as the side panel), MS3 (the "Continue on this device" card and the "Marked played on" line, [Sync screens](#sync-screens)). Honours [D56](../PLAN.md#3-key-decisions), [D43](../PLAN.md#3-key-decisions), [D84](../PLAN.md#3-key-decisions). Behaviour behind every button is 06's common Player API ([06 UI boundary](06-playback.md#ui-boundary), [06 Shared playback core](06-playback.md#shared-playback-core)), served by Media3 on Android and by 11's `DesktopPlaybackController` on the desktop; `:feature:player` is common code with no Media3 type in v1.0 (06 [No Media3 in features](06-playback.md#no-media3-in-features-v10)).
+Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (mini player, speed sheet), M5 (sleep sheet, timestamp seeks), M9a (YouTube issue banners), M10 (artwork tint), MD1 (the desktop mini player), MS3 (the "Continue on this device" card, [Sync screens](#sync-screens)); the full player, its tabs and the side panel were removed by the owner revision of 2026-11-15. Honours [D56](../PLAN.md#3-key-decisions) (superseded by that revision), [D43](../PLAN.md#3-key-decisions), [D84](../PLAN.md#3-key-decisions). Behaviour behind every button is 06's common Player API ([06 UI boundary](06-playback.md#ui-boundary), [06 Shared playback core](06-playback.md#shared-playback-core)), served by Media3 on Android and by 11's `DesktopPlaybackController` on the desktop; `:feature:player` is common code with no Media3 type in v1.0 (06 [No Media3 in features](06-playback.md#no-media3-in-features-v10)).
 
 **MD1a.2 implementation note (2026-11-04).** Desktop playback activates the
 shared player's side-panel presentation at 840 dp (360 dp wide, or 412 dp from
@@ -1864,134 +1870,29 @@ presentation, without preparing or seeking audio. Android's wider adaptive
 player, tabletop, tint and landscape completeness remain M10. This supersedes
 the desktop part of the M4 boundary below and adds no home/navigation design.
 
-### Structure and states
+### The docked bar
 
-**M4 implementation boundary (2026-10-29).** Use the sheet at every width,
-without reserving a side-panel column or changing `ui.player_panel_hidden`.
-The side panel, tabletop layout and artwork tint remain MD1/M10. Chapters and
-sleep controls remain M5. The root supplies the measured content bottom and
-expand/collapse request tokens, retains the last visible-suite measurement
-while navigation is hidden, and shares its activity/window ViewModel owner
-with the speed sheet. Player and queue features meet through shell-owned
-composable slots, not a feature-to-feature dependency. Panel Back ownership
-outlives its visible content while closing. Predictive previews start at the
-current drag fraction. Dock measurements are retained until chrome is stable;
-settling need not trigger another layout. Count/detail reads retry once per
-second while observed, with one notice per failure streak; Notes retain
-explicit retry. Measured header lines and a
-font-scaled tab strip drive artwork, body and panel geometry. Text measurement
-handles Android's nonlinear font metrics; the full body scrolls when large
-text cannot fit.
+`PlayerRoute` (`:feature:player`, hosted by `NeutrodyneRoot` beside `NavDisplay`) renders the mini player on every screen except the radio home: the root passes `PlayerPresentation.RADIO_HOME` when the selected tab is Feeds and its stack is the root, and the bar hides because the radio is the player. The bar is 64 dp high with 8 dp side insets and 16 dp corners (`NeutrodyneShapes`), floating 8 dp above the navigation chrome (the navigation bar on compact, `WindowInsets.navigationBars` under a rail, the window bottom inset on the desktop). Contents: 48 dp `CoverArt` (10 dp corners; YouTube and other non-RSS items use the 16:9 crop), episode title `titleSmall` and podcast title `bodySmall` (one line each, ellipsis, no marquee), skip back, play/pause and skip forward, each 48 dp, and a 2 dp `primary` progress line on the bottom edge driven by `positionTicks`. Lists reserve `LocalMiniPlayerInset` (80 dp while the bar shows; 88 dp while the [Continue on this device](#continue-on-this-device) card replaces it).
 
-**Target v1.0 structure (side panel deferred to MD1/M10).**
-`NeutrodyneRoot` (`:core:ui`, hosted by `MainActivity` and `NeutrodyneWindow`) composes `Box(Modifier.semantics { testTagsAsResourceId = true }) { NdNavigationSuiteScaffold { Row { Box(Modifier.weight(1f)) { NeutrodyneNavHost(…) }; if (layout.playerPanel) PlayerSidePanel(…) } }; if (!layout.playerPanel) PlayerSheet(…) }` (`testTagsAsResourceId` lets 09's UI Automator journeys find Compose nodes by resource ID on Android; the desktop's `runComposeUiTest` uses test tags directly): the sheet overlays the whole window, including the navigation bar, so it can grow over it without resizing the scaffold. When `LocalPaneLayout.playerPanel` is true the sheet is not composed and `PlayerSidePanel` takes its fixed width at the end of the content row ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)). With `nowPlaying == null` neither exists and `LocalMiniPlayerInset` is 0. Switching between the two (unfolding, resizing a window) never carries the sheet's value: a sheet created after the panel starts `Collapsed`.
+Phases: `BUFFERING` → a 2 dp ring around the play button; `ERROR` or a non-null `issue` → an 8 dp `error` dot on the art; `NOT_LOADED` (service stopped, 06) → play resumes via `play()`. The bar shows no banners; playback results and events still surface as the snackbars of [Issues, results and events](#issues-results-and-events).
 
-```mermaid
-stateDiagram-v2
-  [*] --> Hidden
-  Hidden --> Collapsed: nowPlaying becomes non-null
-  Collapsed --> Expanded: tap, fling up, drag past half, ExpandPlayer route
-  Expanded --> Collapsed: fling down, drag below half, back gesture, chevron, navigation to a screen
-  Collapsed --> Dismissed: drag down past the dismiss anchor while paused
-  Dismissed --> Hidden: PlaybackController.dismiss() clears nowPlaying
-  Collapsed --> Hidden: nowPlaying becomes null
-  Expanded --> Hidden: nowPlaying becomes null
-```
+Tapping the bar opens the radio home: `PlayerSlotState.openRadio` calls `navigation.open(FeedsKey, emptyList())`, the Feeds stack root. The bar's "Open the radio" accessibility action and context-menu item do the same, and so does the `ExpandPlayer` deep link ([Deep links](#deep-links)). A tap never expands an in-app sheet. The radio home's Menu dialog is the only place that pushes the speed and sleep sheets.
 
-```kotlin
-// :feature:player
-enum class PlayerSheetValue { Collapsed, Expanded, Dismissed }
-enum class SheetDismissal { ALLOWED, BLOCKED }
-@Stable class PlayerSheetState(initial: PlayerSheetValue) {
-    val drag = AnchoredDraggableState(initialValue = initial)          // foundation 1.12: anchors set later via updateAnchors
-    val progress: Float get() = drag.progress(PlayerSheetValue.Collapsed, PlayerSheetValue.Expanded)
-    val isExpanded: Boolean get() = drag.currentValue == PlayerSheetValue.Expanded
-    fun setAnchors(collapsedPx: Float, dismissDistancePx: Float, dismissal: SheetDismissal) =
-        drag.updateAnchors(DraggableAnchors {
-            PlayerSheetValue.Expanded at 0f; PlayerSheetValue.Collapsed at collapsedPx
-            if (dismissal == SheetDismissal.ALLOWED) PlayerSheetValue.Dismissed at collapsedPx + dismissDistancePx })
-    suspend fun expand() = drag.animateTo(PlayerSheetValue.Expanded, NeutrodyneMotion.spatial)
-    suspend fun collapse() = drag.animateTo(PlayerSheetValue.Collapsed, NeutrodyneMotion.spatial)
-    companion object { val Saver: Saver<PlayerSheetState, String> }    // saves Collapsed/Expanded (Dismissed → Collapsed)
-}
-@Composable fun rememberPlayerSheetState(): PlayerSheetState      // rememberSaveable(saver = Saver)
-@Composable fun PlayerSheet(state: PlayerSheetState, layout: PaneLayout, onNavigate: (NavKey) -> Unit,
-                            vm: PlayerViewModel = metroViewModel())          // metrox-viewmodel-compose (01)
-```
+The context menu (secondary click, the Menu key or Shift+F10) lists "Go to episode" (`EpisodeKey`), "Go to podcast" (`PodcastKey`), "Open the radio" and, only while paused, "Dismiss player". The bar has no tabs and no Up next list; Up next stays its own destination ([Up next](#up-next)). A paused bar can also be swiped down to dismiss: a vertical drag up to 96 dp, committed at half the distance, calls `PlaybackController.dismiss()` (`nd.DISMISS`, 06). The drag is disabled while playing. Dismissal and `nowPlaying` becoming null are the only ways the bar disappears.
 
-`PlayerViewModel` (scoped to the Android activity or the desktop window, created by the shared root outside `NavDisplay` with the shell's `LocalMetroViewModelFactory`) combines `PlaybackStateSource` (`nowPlaying`, `sleepTimer`, `currentChapter`, `effectivePlayback`, `events`), `QueueRepository.observeUpNext()` (count and tab), `ChapterRepository.observe(current)`, `EpisodeRepository.observeShowNotes(current)` (only while the Notes tab is open), `ArtworkRepository.observeColors(now.artwork.key, fallbackPodcastId = now.podcastId)` (the episode art's colours, else the podcast cover's — a streamed episode's own art and a YouTube thumbnail are usually not in the store, [Colour extraction](#colour-extraction)), `YouTubeHealth.state` and the `playback.*`/`appearance.*` settings it displays, into one `PlayerUiState`. `positionTicks` (1 Hz) drive the mini player's progress line; the expanded scrubber runs a `withInfiniteAnimationFrameMillis` loop (honoring the host's infinite-animation policy) only while the full player is visible and `now.position.advancing` (06), and on each frame reads `now.position.positionAt(clock.elapsedRealtime())` (`:core:common`'s `Clock`: `SystemClock.elapsedRealtime()` on Android, a monotonic clock on the desktop, the same clock `sampledAtElapsedMs` uses, 06) — never the frame time itself: on Android, Choreographer frame times are in the `System.nanoTime()` (uptime) base, `PositionSnapshot.sampledAtElapsedMs` is elapsed realtime, and the two differ by the device's total deep-sleep time ([Choreographer.FrameCallback](https://developer.android.com/reference/android/view/Choreographer.FrameCallback#doFrame(long)), [SystemClock](https://developer.android.com/reference/android/os/SystemClock)). So no 60 Hz flow exists.
+TalkBack: one merged node "Now playing: {title}, {podcast}. {Playing|Paused}." with actions Play/Pause, Skip back {n} seconds, Skip forward {n} seconds, Open the radio and Dismiss (paused only). The transport buttons are merged into that node, so the actions are the screen-reader path. The metered-consent request (`MeteredConsent`) outlives the bar: `PlayerRoute` composes `MeteredConsentDialog` even on the radio home and with no `nowPlaying`, so a consent prompt is never lost.
 
-### Anchors and gestures
+`PlayerViewModel` (scoped to the Android activity or the desktop window, created by the shared root outside `NavDisplay`) combines `PlaybackStateSource` (`nowPlaying`, `sleepTimer`, `currentChapter`, `effectivePlayback`, `events`), `QueueRepository.observeUpNext()` (count), `ChapterRepository.observe(current)`, `ArtworkRepository.observeColors(now.artwork.key, fallbackPodcastId = now.podcastId)`, `YouTubeHealth.state` and the `playback.*`/`appearance.*` settings into one `PlayerUiState`; `positionTicks` (1 Hz) drive the progress line. `PlayerEpisodeViewModel` owns episode writes, the password dialog and the retained remote mark.
 
-- Anchors (px, measured in `BoxWithConstraints` over the full window, applied with `state.setAnchors` from a `LaunchedEffect` keyed on the measured values and both `now.isPlaying` and `now.playWhenReady`): `Expanded = 0`; `Collapsed = contentBottom − 64 dp − 8 dp`, where `contentBottom` is the bottom edge of the `NavDisplay` container measured while the navigation suite is shown (frozen while it is hidden, so anchors never jump); `Dismissed = Collapsed + 96 dp`, present only while `!now.isPlaying && !now.playWhenReady` (when playback starts while the sheet sits on `Dismissed`, `updateAnchors` moves it to the closest anchor, `Collapsed`).
-- `Modifier.anchoredDraggable(state.drag, Orientation.Vertical, flingBehavior = AnchoredDraggableDefaults.flingBehavior(state.drag, positionalThreshold = { it * 0.5f }, animationSpec = NeutrodyneMotion.spatial))` on the sheet surface (mini player: whole surface; full player: the top bar and artwork area, not the scrubber or the tabs panel). In foundation 1.12 thresholds live on the fling behaviour, not the state (the state constructor with thresholds is deprecated); the velocity threshold is the built-in 125 dp/s (`AnchoredDraggableMinFlingVelocity`, not configurable) ([foundation 1.12.1 sources](https://dl.google.com/android/maven2/androidx/compose/foundation/foundation-android/1.12.1/foundation-android-1.12.1-sources.jar)).
-- Settling at `Dismissed` calls `PlaybackController.dismiss()` (06 `nd.DISMISS`), then snaps back to `Collapsed` (the sheet disappears when `nowPlaying` becomes null).
-- No horizontal swipe-to-skip on the mini player (it would fight the Feeds pager).
-- Starting playback from the sheet is always `PlaybackController.play*` from visible UI ([D43](../PLAN.md#3-key-decisions)).
-- Desktop and mice: a click on the mini player expands; a mouse drag drives the same anchors; the collapse chevron, Esc and a click on the expanded sheet's top bar collapse; the wheel scrolls the tabs panel, never the sheet. Below 840 dp of window the desktop uses this sheet, above it the side panel ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)).
+### Navigation suite, insets and back
 
-### Morph mapping
-
-One composable owns both layouts; every property is a pure function of `p = state.progress` (`PlayerMorph.at(p, geometry)`, unit-tested), so drags, flings and predictive back all animate identically.
-
-| Property | `p = 0` (mini) | `p = 1` (full) | Curve |
-|---|---|---|---|
-| Sheet top | `Collapsed` anchor | 0 | follows the drag |
-| Horizontal inset | 8 dp | 0 | linear |
-| Corner radius | 16 dp | 0 | linear |
-| Background | `surfaceContainerHigh` blended 12 % toward the artwork `primaryContainer` | gradient artwork `primaryContainer` (0–35 % height) → `surface` | crossfade over `p` 0–0.3 |
-| Artwork size | 48 dp | `A = min(width − 48 dp, height × 0.45, 480 dp)` (16:9 width-limited box for YouTube episode art) | lerp |
-| Artwork position | start 8 dp, vertically centred in 64 dp | horizontally centred, top = status bar + 56 dp | lerp |
-| Artwork corners | 10 dp | 24 dp | lerp |
-| Artwork shadow (`Modifier.dropShadow`, ui 1.12) | none | radius 32 dp, seed colour at 45 % | alpha = `p` |
-| Mini texts, buttons, 2 dp progress line | alpha 1 | 0 | `1 − p / 0.2` |
-| Full controls | alpha 0, +24 dp offset | alpha 1, 0 | `(p − 0.6) / 0.4` |
-| Navigation suite | shown | hidden | events ([below](#navigation-suite-insets-and-back)) |
-
-With "Remove animations" on, flings settle instantly (snap spec) and the colour crossfade is skipped; dragging still follows the finger.
-
-### Mini player
-
-64 dp high, 8 dp side insets, 8 dp above the navigation bar (or the window bottom inset when a rail is used), 16 dp corners (`NeutrodyneShapes`). Contents: 48 dp `CoverArt` (10 dp corners; YouTube: centre crop of the 16:9 art), episode title `titleSmall` and podcast title `bodySmall` (one line each, ellipsis, no marquee), skip back, play/pause and skip forward, each 48 dp, 2 dp `primary` progress line on the bottom edge. Phases: `BUFFERING` → a 2 dp ring around the play button; `ERROR` or a non-null `issue` → an 8 dp `error` dot on the art; `NOT_LOADED` (service stopped, 06) → play resumes via `play()`. TalkBack: one node "Now playing: {title}, {podcast}. {Playing|Paused}." with actions Play/Pause, Skip back {n} seconds, Skip forward {n} seconds, Expand player, Dismiss (paused only).
-
-### Full player
-
-Compact portrait layout; other layouts in [Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop).
-
-```
-+--------------------------------------------------+
-| (v)   Now playing                          (:)   |  (v) collapse; status bar icons follow the scheme
-|       Playing from tech · newest first           |  NowPlaying.context; absent for EXTERNAL
-|      +------------------------------------+      |
-|      |                                    |      |
-|      |      ARTWORK  A x A, 24 dp corners |      |  chapter image crossfades over the cover
-|      |      tinted glow                   |      |
-|      +------------------------------------+      |
-|  Episode title in titleLarge, two lines max      |
-|  Podcast name  >                                 |  tap: collapse, then PodcastKey on the current tab
-|  Ch. 3 · The interview                  (list)   |  current chapter (M5)
-|  |------o------|----|---------|--------------|   |  NdSlider with chapter ticks
-|  12:04                                  -33:10   |  tap right label: remaining <-> total
-|       (-30)         ((  >||  ))        (+30)      |  72 dp play; seek by configured intervals
-|  (1.2x)      (sleep 23m)      (Up next 3)  (share)|
-|  1.5x from group 'news'                          |  attribution when not the app default
-+--------------------------------------------------+
-| ---- Up next (3) | Chapters (12) | Notes ----    |  tabs panel peek, 56 dp
-+--------------------------------------------------+
-```
-
-- Transport: back and forward seek by the configured intervals (30 seconds by default), with matching accessibility labels. Episode navigation remains in the overflow and chapters remain accessible through the chapter UI. The play button morphs between a rounded square and a circle (`graphics-shapes` 1.1.0) only when animations are enabled.
-- Compact transport: keep the 72 dp Play button and two seek actions disjoint with at least 48 dp touch targets at 320 dp.
-- Scrubber: `NdSlider`, chapter start ticks drawn in `drawBehind`; dragging shows the target time in a bubble and seeks on release (`seekTo`); `stateDescription` "12 minutes 4 seconds of 45 minutes"; custom actions Back/Forward {n} seconds; no live-region announcements of the position.
-- Secondary row: speed (label "1.2×" → `SpeedKey`), sleep (icon, or "23 min" while running → `SleepTimerKey`), Up next (count → opens the tabs panel), share (episode web link or YouTube watch URL; "Copy link" on the desktop). Desktop only: a volume button (`volume_up`, the level as `stateDescription`) that opens a vertical `NdSlider` popup (0–100 %, wheel and ↑/↓ adjust, the in-app volume of 11's `GainStage`, also Ctrl/Cmd+↑/↓ and the Playback menu); Android has no in-app volume (the system's volume keys) — the API for it is [Open questions](#open-questions) 24. No cast button: Chromecast is not planned ([PO-6](../PLAN.md#po-6-chromecast); Cast needs proprietary Play services).
-- Overflow: Previous episode, Next episode (when available), Go to episode (`EpisodeKey`), Go to podcast, Mark played and skip (`EpisodeRepository.setPlayed(listOf(id), true)` **only**: 06's projector advances when the current item is marked played, so an extra `skipToNext()` would skip two episodes, 06 open question 12), Download / Delete download (per [`RowCaps`](#episoderow); results through `DownloadRequestHandler`), Watch on YouTube (YouTube items, which play only with the engine; with `&t=` per 04), Stop and close (`dismiss()`).
-- Colours: the whole sheet is wrapped in `ArtworkTheme(colors?.seedArgb)` (M10; app scheme before).
-
-### Tabs panel
-
-A nested panel at the bottom of the full player with its own `AnchoredDraggableState` (Peek 56 dp ↔ Open = just below the top bar). Tabs: **Up next** (`UpNextList` with reorder, swipe-remove and the "Then: …" context header, same behaviour as the [Up next screen](#up-next)), **Chapters** (`ChapterList`: image 40 dp, title, start time, current chapter highlighted; tap seeks; hidden chapters excluded by 06), **Notes** ([show notes renderer](#show-notes-renderer) of the current episode). Tabs without content are hidden (no chapters → no Chapters tab). Back while Open → Peek. On the side panel the tabs are a regular `PrimaryTabRow` below the controls.
+- The bar has no Back handling of its own: Back on a screen with the mini player follows the ordinary order of [Back handling order](#back-handling-order) (a window-based sheet or dialog, selection mode, then the tab stack). Swiping a paused bar down is not a Back gesture.
+- The bar sits above the navigation bar (bar on compact), `WindowInsets.navigationBars` (rail) or the desktop window's bottom inset; `LocalMiniPlayerInset` reserves 80 dp in lists. The radio home is full-bleed and handles `WindowInsets.safeDrawing` itself.
+- Process death: no player-sheet value is saved; the bar re-docks from `nowPlaying` and the radio home is the Feeds root again.
 
 ### Speed and sleep sheets
+
+The radio Menu's items push these sheets unchanged:
 
 `SpeedKey` (M4):
 
@@ -2011,16 +1912,11 @@ Chips and the slider (on release) call `setSpeed(value, scope)`; the switch call
 
 ### Issues, results and events
 
+`NowPlaying.issue` no longer raises a banner: the bar paints the 8 dp error dot and a metered-consent request opens `MeteredConsentDialog`. Playback results and events still surface as the shared snackbars and dialogs:
+
 | Source | Value | UI |
 |---|---|---|
-| `NowPlaying.issue` | `NETWORK_LOST` | banner in the full player "Connection lost — playback resumes when you're back online" |
-| | `METERED_PAUSE` | banner "Continue on mobile data?" → Continue (`grantMeteredStreaming()` + `play()`) · Not now |
-| | `METERED_BLOCKED` | banner "Streaming on mobile data is off" → Settings (`SettingsKey(PLAYBACK)`) |
-| | `LOCAL_FILE_MISSING` | banner "The downloaded file is missing — streaming instead" |
-| | `YOUTUBE_RATE_LIMITED` | banner "YouTube is limiting requests from your network. Try again later." |
-| | `YOUTUBE_BREAKER_OPEN` | banner "YouTube playback is temporarily broken — Neutrodyne is checking for a fix" (R3.8; with engine updates Off, and in M9a builds, which have no engine updates yet: "YouTube playback is temporarily broken. Neutrodyne retries at {time}.") → Try now (`YouTubeHealth.retryNow()`) |
-| | `PLAYER_ERROR` | banner "Playback stopped because of an error" → Retry (`play()`) |
-| `PlayResult` | `Started` | nothing (the sheet appears or updates) |
+| `PlayResult` | `Started` | nothing (the bar appears or updates) |
 | | `NothingToPlay(false)` / `(true)` | snackbar "Nothing unplayed in '{context}'" / "Episodes in '{context}' open in YouTube" |
 | | `NeedsMeteredConsent` | "Stream on mobile data?" [dialog](#dialogs) |
 | | `MeteredBlocked` | snackbar "Streaming on mobile data is off" + Settings |
@@ -2030,29 +1926,11 @@ Chips and the slider (on release) call `setSpeed(value, scope)`; the switch call
 | `PlaybackStateSource.events` | `Skipped(id, title, reason)` | snackbar "Skipped “{title}”: {reason}" |
 | | `MarkedPlayed`, `SleepTimerFired` | nothing |
 
-### Navigation suite, insets and back
-
-- `NdNavigationSuiteScaffold` exposes 1.4.0's `NavigationSuiteScaffoldState`. When the sheet's `targetValue` becomes `Expanded` and the drag settles, `suiteState.hide()` runs (the bar slides out underneath the opaque sheet, invisible, and leaves the accessibility tree); as soon as a drag starts from `Expanded` or `targetValue` becomes `Collapsed`, `suiteState.show()` runs, so the bar is back before the sheet uncovers it. Neither happens mid-drag, avoiding the double inset animation.
-- Insets: the collapsed sheet sits above the navigation bar (bar on compact) or above `WindowInsets.navigationBars` (rail); the expanded sheet pads `WindowInsets.safeDrawing` itself (zero on the desktop). Lists pad `LocalMiniPlayerInset` (80 dp when the mini player shows; 88 dp while the [Continue on this device](#continue-on-this-device) card replaces it).
-- Back (Android): `PredictiveBackHandler(enabled = state.isExpanded || state.drag.targetValue == Expanded)` composed after `NavDisplay`; the gesture drags the sheet toward 20 % of the collapse distance with `progress`, commits by animating to `Collapsed`, and on cancel animates back to `Expanded` and rethrows the `CancellationException`. The handler is called unconditionally with `enabled`, never inside an `if` (activity-compose KDoc). Order with other consumers: [Back handling order](#back-handling-order).
-- Back (desktop): Esc reaches the same handler through the shared back chain ([Back handling order](#back-handling-order)) and animates to `Collapsed` without a gesture phase.
-- Process death and rotation: `rememberSaveable` keeps Collapsed/Expanded; the tabs panel restores to Peek. The desktop window keeps the value while it runs; a new start opens collapsed (the last session is restored paused, 11).
-
-### Side panel, medium widths and tabletop
-
-| Layout | Condition | Player |
-|---|---|---|
-| Compact portrait | width < 600 dp, height ≥ 480 dp | sheet as above |
-| Compact landscape | height < 480 dp | sheet; expanded = two columns: artwork (height-limited) start, controls end; tabs panel replaced by an Up next button |
-| Medium | 600 ≤ width < 840 dp | sheet; expanded in two columns when width > height |
-| Expanded and larger | width ≥ 840 dp and the panel is not hidden | `PlayerSidePanel` at the end edge: 360 dp (412 dp from 1,200 dp), full height, compact full player (artwork ≤ 320 dp, controls, secondary row) above the tabs; close button hides the panel (`ui.player_panel_hidden = true`); `ndPaneLayout` then reports `playerPanel = false`, so the ordinary `PlayerSheet` mini player appears at the bottom of the content area, and on ≥ 840 dp a tap or upward drag on it clears `ui.player_panel_hidden` (reopening the panel) instead of expanding the full-screen sheet. A new `nowPlaying` after a dismiss does not reset the flag |
-| Tabletop posture (Android) | `windowPosture.isTabletop` and the full player or panel is visible | artwork above the hinge (from `windowPosture.hingeList` bounds), title, scrubber and transport below it on the "table" |
-
-The side panel is part of the pane computation ([Pane directive](#pane-directive)); it has no back behaviour and no drag. On the desktop it is the usual player: the default 1,200 × 800 dp window shows it at 412 dp beside two content panes, and resizing the window across 840 dp switches between panel and sheet without changing playback.
+The YouTube engine banner lives on the Downloads screen and the Settings › YouTube status line ([04 Circuit breaker](04-youtube.md#circuit-breaker)); it is not shown in the mini player.
 
 ### Video (v1.x)
 
-v1.0 plays video enclosures as audio with a `videocam` badge (06 [Video](06-playback.md#video)). M14 replaces the artwork box with a `PlayerSurface` when the item is video and the surface toggle is on; the morph table is unchanged (the box keeps the video's aspect ratio). Nothing in v1.0 depends on it.
+v1.0 plays video enclosures as audio with a `videocam` badge (06 [Video](06-playback.md#video)). M14 introduces a `PlayerSurface` for video items; the mini player keeps its artwork and the radio home's cover becomes the surface when the item is video and the surface toggle is on. Nothing in v1.0 depends on it.
 
 ---
 
@@ -2280,7 +2158,7 @@ scrolling header and optional offline banner, use `peek`, and return `null` for
 day headers and placeholders. The reporter keeps the 10-item margin and clears
 the page's IDs when it leaves composition.
 
-The Feeds ViewModel keeps one set per composed page (at most 3) and feeds their union (≤ ~120 IDs) to `observe`; non-paged lists (Up next, Downloads, player tab) use an overload taking `List<Long>` of the list's item IDs and report their visible IDs the same way. The play-state of rows outside the window is never observed.
+The Feeds ViewModel keeps one set per composed page (at most 3) and feeds their union (≤ ~120 IDs) to `observe`; non-paged lists (Up next, Downloads) use an overload taking `List<Long>` of the list's item IDs and report their visible IDs the same way. The play-state of rows outside the window is never observed.
 
 ### Rendering rules
 
@@ -2325,7 +2203,7 @@ and its Kotlin port ship in the Android and desktop notices.
 | Layer | Used by | Source |
 |---|---|---|
 | 1. App scheme | everything by default | Android 12+: wallpaper dynamic colour (`appearance.dynamic_color`, on by default); Android below 12, Android with the switch off, and the desktop: the brand scheme |
-| 2. Artwork-scoped scheme | full player and side panel, mini player tint (12 % blend), podcast header, episode detail header | the artwork's `seedArgb` (persisted, [Colour extraction](#colour-extraction)) through MCU `SchemeContent` |
+| 2. Artwork-scoped scheme | radio home and mini player tint (12 % blend), podcast header, episode detail header | the artwork's `seedArgb` (persisted, [Colour extraction](#colour-extraction)) through MCU `SchemeContent` |
 | 3. Pure black | dark theme when `appearance.pure_black` | surfaces of layers 1 and 2 replaced; containers keep their tint |
 | Tones (not schemes) | monograms, group dots, stripes, containers | [`ArtColors`](#artcolors-tones-for-monograms-and-groups) |
 
@@ -2456,7 +2334,7 @@ Icons: Material **Symbols** Rounded, weight 400, as vector drawables in `:core:d
 
 ### Status bar and system bars
 
-`StatusBarAppearance(lightIcons: Boolean)` (`:core:designsystem`; called from common screens, it acts only through the `LocalSystemBars` controller `MainActivity` provides and does nothing on the desktop, which has no system bars) sets `WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars` while composed and restores the previous value on dispose (including a cancelled predictive back). The podcast header and the full player compute `lightIcons = luminance(topColour) > 0.5` from the artwork scheme's top colour and add a 48 dp top scrim (`verticalGradient(scrim 40 % → transparent)`) for busy banners. Navigation-bar icons follow the theme (edge-to-edge, transparent bars).
+`StatusBarAppearance(lightIcons: Boolean)` (`:core:designsystem`; called from common screens, it acts only through the `LocalSystemBars` controller `MainActivity` provides and does nothing on the desktop, which has no system bars) sets `WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars` while composed and restores the previous value on dispose (including a cancelled predictive back). The podcast header and the radio home compute `lightIcons = luminance(topColour) > 0.5` from the artwork scheme's top colour and add a 48 dp top scrim (`verticalGradient(scrim 40 % → transparent)`) for busy banners. Navigation-bar icons follow the theme (edge-to-edge, transparent bars).
 
 **Implementation note (2026-11-07, M10 podcast chrome).** The podcast toolbar over
 cover artwork uses a flat 60% black strip with white controls and status-bar
@@ -2464,8 +2342,7 @@ icons. For this strip, that replaces the 48 dp gradient and luminance-based icon
 choice above: it gives stable contrast over busy or entirely white covers. A
 rendered-pixel regression checks at least 4.5:1 contrast. The measured toolbar
 inset keeps episode rows below the controls; once the cover passes the toolbar,
-the toolbar returns to the opaque surface container. Coexisting panes and the
-player side panel retain opaque chrome.
+the toolbar returns to the opaque surface container. Coexisting panes retain opaque chrome.
 
 
 ### Brand assets
@@ -2722,7 +2599,7 @@ object Covers {
 }
 ```
 
-Coil 3's computed memory key omits the size unless transformations are set, so without explicit keys a hero request reuses (or misses) the thumb bitmap unpredictably; explicit keys let both tiers live in memory and the hero land on the thumb instantly, so shared-element transitions show no placeholder frame (M10 acceptance 5; [Coil MemoryCacheService](https://github.com/coil-kt/coil/blob/main/coil-core/src/commonMain/kotlin/coil3/memory/MemoryCacheService.kt)). THUMB is used by rows, tiles, mosaics and the mini player; HERO by the podcast header, episode detail and the full player. Hardware bitmaps stay enabled in Compose on Android (Unverified: that Compose shared elements need no `allowHardware(false)`, which Coil documents only for View transitions; M10 spike); the desktop decodes into Skia bitmaps and has no hardware-bitmap option.
+Coil 3's computed memory key omits the size unless transformations are set, so without explicit keys a hero request reuses (or misses) the thumb bitmap unpredictably; explicit keys let both tiers live in memory and the hero land on the thumb instantly, so shared-element transitions show no placeholder frame (M10 acceptance 5; [Coil MemoryCacheService](https://github.com/coil-kt/coil/blob/main/coil-core/src/commonMain/kotlin/coil3/memory/MemoryCacheService.kt)). THUMB is used by rows, tiles, mosaics and the mini player; HERO by the podcast header, episode detail and the radio home. Hardware bitmaps stay enabled in Compose on Android (Unverified: that Compose shared elements need no `allowHardware(false)`, which Coil documents only for View transitions; M10 spike); the desktop decodes into Skia bitmaps and has no hardware-bitmap option.
 
 ### YouTube thumbnails
 
@@ -2757,16 +2634,16 @@ A 384 px ARGB thumb is ≈ 590 KB, 20 visible tiles ≈ 12 MB; a 1024 px hero �
 
 ## Adaptive layouts
 
-Serves R5.7, R8.9, N7. Delivered in M0 (no locks, edge-to-edge, navigation suite; M0b the desktop window), M10 (panes, side panel, tabletop, landscape player; [PO-19](../PLAN.md#48-further-product-owner-decisions) default), MD4 (desktop window sizes, keyboard, mouse, context menus, scrollbars). The same width classes, pane directive and player layouts serve phones, tablets, foldables and desktop windows. Window classes come from `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)` (on the desktop computed from the window's size in dp; Unverified that the 1.3.0-rc01 desktop artefact accepts the parameter, spike S9); breakpoints (dp): compact < 600 ≤ medium < 840 ≤ expanded < 1,200 ≤ large < 1,600 ≤ extra-large; height compact < 480 ([window size classes](https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes)).
+Serves R5.7, R8.9, N7. Delivered in M0 (no locks, edge-to-edge, navigation suite; M0b the desktop window), M10 (panes and the mini player layouts; [PO-19](../PLAN.md#48-further-product-owner-decisions) default), MD4 (desktop window sizes, keyboard, mouse, context menus, scrollbars). The same width classes, pane directive and mini player layout serve phones, tablets, foldables and desktop windows. The 2026-11-15 owner revision removed the side panel, the tabletop player split and the landscape full player. Window classes come from `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)` (on the desktop computed from the window's size in dp; Unverified that the 1.3.0-rc01 desktop artefact accepts the parameter, spike S9); breakpoints (dp): compact < 600 ≤ medium < 840 ≤ expanded < 1,200 ≤ large < 1,600 ≤ extra-large; height compact < 480 ([window size classes](https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes)).
 
 ### Layout per width class
 
 | Width class | Navigation (suite default) | Feeds | Library | Podcast, episode | Player |
 |---|---|---|---|---|---|
-| Compact (< 600) | `ShortNavigationBarCompact` | pager, one column | grid, 3 columns at 100 dp | push navigation | mini + full sheet |
-| Medium (600–839) | `WideNavigationRailCollapsed` (96 dp) with the gear footer; `ShortNavigationBarMedium` when the height is compact (< 480) or in tabletop posture | pager; rows max width 720 dp, centred | grid 4–5 columns | list-detail when the [pane directive](#pane-directive) gives 2 partitions (window ≥ ≈ 696 dp with the rail), else push | mini + sheet; two-column full player when width > height |
-| Expanded (840–1199) | rail | list-detail feed ↔ episode, one pane while the side panel shows | grid ↔ podcast, one pane while the side panel shows | list-detail per the pane directive | side panel 360 dp |
-| Large, extra-large (≥ 1200) | rail | list-detail, episode as extra pane | grid ↔ podcast ↔ episode | three panes from 1,200 dp of content | side panel 412 dp |
+| Compact (< 600) | `ShortNavigationBarCompact` | pager, one column | grid, 3 columns at 100 dp | push navigation | mini player |
+| Medium (600–839) | `WideNavigationRailCollapsed` (96 dp) with the gear footer; `ShortNavigationBarMedium` when the height is compact (< 480) or in tabletop posture | pager; rows max width 720 dp, centred | grid 4–5 columns | list-detail when the [pane directive](#pane-directive) gives 2 partitions (window ≥ ≈ 696 dp with the rail), else push | mini player |
+| Expanded (840–1199) | rail | list-detail feed ↔ episode | grid ↔ podcast | list-detail per the pane directive | mini player |
+| Large, extra-large (≥ 1200) | rail | list-detail, episode as extra pane | grid ↔ podcast ↔ episode | three panes from 1,200 dp of content | mini player |
 
 The navigation suite type is always the 1.4.0 default for the current `WindowAdaptiveInfo`, never forced; `navChromeDp` in the pane directive is 96 for the rail types and 0 for bars.
 
@@ -2774,36 +2651,34 @@ The navigation suite type is always the 1.4.0 default for the current `WindowAda
 
 The desktop window is resizable between the minimum 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)) and the screen, starts at 1,200 × 800 dp and restores its last bounds (11 owns the window, [11 Window sizing](11-desktop.md#window-sizing)). Density follows the OS display scale, so a "dp" is a logical pixel on every OS. Consequences for the layouts above:
 
-| Window width | Content width (rail 96 dp; side panel when playing) | Layout |
+| Window width | Content width (rail 96 dp) | Layout |
 |---|---|---|
-| 600–695 dp (minimum) | 504–599 dp | One pane, push navigation; the player is the sheet; Feeds rows centred with their 720 dp maximum not reached |
-| 696–839 dp | 600–743 dp | Two panes (list-detail); the player is the sheet |
-| 840–1,199 dp | playing: 384–743 dp (panel 360 dp); idle: 744–1,103 dp | Playing: one pane below 1,056 dp of window, then two; idle: two panes |
-| 1,200 dp (the default) and wider | playing: 692 dp and more (panel 412 dp); idle: 1,104 dp and more | Two panes; three from 1,708 dp of window while playing and 1,296 dp idle (content ≥ 1,200 dp: Library → Podcast → Episode side by side) |
+| 600–695 dp (minimum) | 504–599 dp | One pane, push navigation; Feeds rows centred with their 720 dp maximum not reached |
+| 696–839 dp | 600–743 dp | Two panes (list-detail) |
+| 840–1,199 dp | 744–1,103 dp | Two panes |
+| 1,200 dp (the default) and wider | 1,104 dp and more | Two panes; three from 1,296 dp of window (content ≥ 1,200 dp: Library → Podcast → Episode side by side) |
 
-- Height is never compact (the minimum is 480 dp), so the expanded player stays in its portrait layout or, in the sheet below 840 dp, in two columns when the window is wider than tall; tabletop and book postures do not exist.
+- Height is never compact (the minimum is 480 dp), so the radio home is full-bleed and the mini player docks above the navigation chrome at every width; tabletop and book postures do not exist.
 - Window resizes recompute `ndPaneLayout` without recreating anything (no configuration change on the desktop); detail entries stay on their stacks when the pane count drops, exactly as on an unfolding phone.
 - Lists cap their row width at 720 dp and centre inside wider panes, as on tablets; the Library grid and the Discover rows use the extra width for more columns.
-- MD4 AC2's screenshot widths 600, 900 and 1,400 dp cover the one-pane, panel-plus-one-pane and two-pane-plus-panel cases.
+- MD4 AC2's screenshot widths 600, 900 and 1,400 dp cover the one-pane, two-pane and three-pane cases.
 
 ### Pane directive
 
 ```kotlin
-// :app — recomputed (remember keys) when the window size, suite type or player state changes; published as LocalPaneLayout
-fun ndPaneLayout(windowWidthDp: Int, navChromeDp: Int, hasNowPlaying: Boolean, panelHidden: Boolean): PaneLayout {
-    val panel = windowWidthDp >= 840 && hasNowPlaying && !panelHidden
-    val panelDp = if (!panel) 0 else if (windowWidthDp >= 1200) 412 else 360
-    val content = windowWidthDp - navChromeDp - panelDp
+// :core:ui — recomputed (remember keys) when the window size or suite type changes; published as LocalPaneLayout
+fun ndPaneLayout(windowWidthDp: Int, navChromeDp: Int): PaneLayout {
+    val content = windowWidthDp - navChromeDp
     val partitions = when { content >= 1200 -> 3; content >= 600 -> 2; else -> 1 }
-    return PaneLayout(partitions, panel, content)
+    return PaneLayout(partitions, content)
 }
 ```
 
-`partitions` becomes the `maxHorizontalPartitions` of the `PaneScaffoldDirective` handed to 01's `ListDetailSceneStrategy`: start from `calculatePaneScaffoldDirective(windowAdaptiveInfo, verticalHingePolicy = HingePolicy.AvoidSeparating)` (which supplies spacing and the hinge's `excludedBounds`) and replace only `maxHorizontalPartitions` (default pane width 360 dp). Unverified (spike S5): that `rememberListDetailSceneStrategy` in `adaptive-navigation3` 1.3.0 accepts a directive and that `PaneScaffoldDirective` offers a `copy`; fallback: the strategy's own directive (two panes from 840 dp of window) and the side panel only from 1,200 dp. Two panes therefore start at about 696 dp of window width with a 96 dp rail (tablets in portrait, large foldables), not at 600 dp, because two 252 dp panes cannot hold an episode row; a phone-sized inner foldable display keeps single-pane push navigation.
+`partitions` becomes the `maxHorizontalPartitions` of the `PaneScaffoldDirective` handed to 01's `ListDetailSceneStrategy`: start from `calculatePaneScaffoldDirective(windowAdaptiveInfo, verticalHingePolicy = HingePolicy.AvoidSeparating)` (which supplies spacing and the hinge's `excludedBounds`) and replace only `maxHorizontalPartitions` (default pane width 360 dp). Unverified (spike S5): that `rememberListDetailSceneStrategy` in `adaptive-navigation3` 1.3.0 accepts a directive and that `PaneScaffoldDirective` offers a `copy`; fallback: the strategy's own directive (two panes from 840 dp of window). Two panes therefore start at about 696 dp of window width with a 96 dp rail (tablets in portrait, large foldables), not at 600 dp, because two 252 dp panes cannot hold an episode row; a phone-sized inner foldable display keeps single-pane push navigation.
 
 ### Posture
 
-- (Android; desktop windows have no posture.) Tabletop (`windowPosture.isTabletop`, half-opened with a horizontal hinge): the full player or side panel splits at the hinge from `windowPosture.hingeList` — artwork above, title, scrubber and transport below ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)).
+- (Android; desktop windows have no posture.) Tabletop (`windowPosture.isTabletop`, half-opened with a horizontal hinge): the radio home lays out by width and the mini player docks normally; the removed full player no longer splits at the hinge.
 - Book posture with a separating vertical hinge: `HingePolicy.AvoidSeparating` puts the hinge in `excludedBounds`, so the list and detail panes sit on either side of it and no pane straddles it.
 - No `screenOrientation`, `resizeableActivity="false"` or aspect-ratio limits anywhere; a video full screen in v1.x must not rely on `setRequestedOrientation` ([Android 17 changes](https://developer.android.com/about/versions/17/behavior-changes-17)).
 
@@ -2838,7 +2713,6 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 | Selection mode | Ctrl/Cmd+A, Delete | select all loaded items; the mode's destructive action with its confirmation |
 | Lists and grids | Page Up / Page Down, Home / End | scroll by a viewport or to the ends (`animateScrollBy`/`scrollToItem` in `onKeyEvent` on the list), focus follows the first visible item |
 | Feeds tab row | ← / → | move between tabs (the tab row consumes them) |
-| Full player scrubber | ← / → | seek back / forward 5 s; Home / End to the chapter start / the next chapter |
 | Search and address fields | Enter, Esc | submit; clear, then back |
 
 **Implementation note (2026-11-06, MD4).** Compose text fields do not consume every key
@@ -2862,7 +2736,7 @@ as the fallback for menu-less compositions (the AC1 `runComposeUiTest` checklist
 | Downloads row | desktop: "Show in Explorer / Finder / Files" for completed rows |
 | Cover tile | "Refresh", "Podcast settings", "Mark all as played…" |
 | Group tile and tab | "Group settings", "Mark all as played…", "Download all unplayed…", "Export as OPML…" (desktop; Android shares), "Delete group" |
-| Mini player and full player artwork or title | "Go to episode", "Go to podcast", "Copy link", "Stop and close" (paused) |
+| Mini player | "Go to episode", "Go to podcast", "Open the radio", "Dismiss player" (paused) |
 | Show-notes link | "Open link", "Copy link" |
 | Text fields | Compose's built-in text menu on the desktop (Cut, Copy, Paste, Select all) and Android's text toolbar; nothing of ours |
 
@@ -2878,7 +2752,7 @@ its screen-reader actions cannot disagree. The Feeds group tab carries the catal
 Play/Refresh/Edit plus the Feeds screen's Mark all as played…, Download all unplayed…, Group
 settings and Export as OPML…; the Library group tile keeps its M2 menu (Edit, Manage groups,
 Export) and its Play/Refresh remain open, as do the catalogue extras that no surface wires yet
-(Episode row Copy link and Show in folder, the mini player's Copy link and Stop and close, the
+(Episode row Copy link and Show in folder, the
 show-notes link menu). The MS2/MS3 rows (Devices row, Continue on this device card) are
 classified as owned by their milestones in `KeyboardReachabilityChecklistTest`, because their
 screens are not in this codebase yet. The scrollbars hang `Modifier.ndScrollbar` off the list,
@@ -2887,11 +2761,11 @@ existing end padding rather than adding the 12 dp the wrapper note describes. Th
 screenshot matrix (MD4 AC2) captures the episode-row states in light and dark at 600, 900 and
 1,400 dp in the PR tier, so CI verifies the acceptance evidence on every change.
 
-**Drags.** In-list drags use the mouse exactly like touch: Up next and Manage groups reorder by their drag handles, the scrubber and sliders drag, the player sheet drags between its anchors. Nothing drags out of the app in v1.0; dropping files and links on the window is 11's ([11 Drag and drop](11-desktop.md#drag-and-drop)).
+**Drags.** In-list drags use the mouse exactly like touch: Up next and Manage groups reorder by their drag handles, the radio home's needle and every slider drag, and a paused mini player swipes down to dismiss. Nothing drags out of the app in v1.0; dropping files and links on the window is 11's ([11 Drag and drop](11-desktop.md#drag-and-drop)).
 
 ### Insets and edge-to-edge
 
-**Android.** `enableEdgeToEdge()` in `MainActivity` (01). Screens use `Scaffold` insets or `WindowInsets.safeDrawing`; list content pads `navigationBars` + `LocalMiniPlayerInset`; the expanded player pads `safeDrawing` itself; the IME pads text-field sheets (`imePadding()`; `adjustResize` is set by 01). Display cutouts are respected in landscape (`displayCutout` in `safeDrawing`). **Desktop:** the window has OS decorations and no insets (`WindowInsets` are zero), so the same code pads nothing; the IME is the OS's.
+**Android.** `enableEdgeToEdge()` in `MainActivity` (01). Screens use `Scaffold` insets or `WindowInsets.safeDrawing`; list content pads `navigationBars` + `LocalMiniPlayerInset`; the radio home pads `safeDrawing` itself; the IME pads text-field sheets (`imePadding()`; `adjustResize` is set by 01). Display cutouts are respected in landscape (`displayCutout` in `safeDrawing`). **Desktop:** the window has OS decorations and no insets (`WindowInsets` are zero), so the same code pads nothing; the IME is the OS's.
 
 ---
 
@@ -2907,19 +2781,19 @@ Serves N4, R5 (all), R8.10. Delivered with every UI milestone; audit and the ful
 | Rows and tiles | one focus stop each | `semantics(mergeDescendants = true)`, composed `contentDescription`, `stateDescription`, custom actions; inner buttons `clearAndSetSemantics {}` |
 | Swipe, drag, long-press | every such action has a custom action, and a keyboard or context-menu path | [Custom actions catalogue](#custom-actions-catalogue), [Context menus](#context-menus), [Keyboard and mouse](#keyboard-and-mouse) |
 | Tabs and pager | switch groups without swiping | `Tab` (`Role.Tab`, selected state); pager actions "Next group"/"Previous group"; All groups sheet |
-| Covers | no noise | decorative (`null`) when a title is adjacent; full-player art says "Chapter image: {title}" only when a chapter image replaces the cover |
+| Covers | no noise | decorative (`null`) when a title is adjacent; the radio home's cover is never replaced by a chapter image |
 | Text scaling | readable at 200 % | `sp` with `sp` line heights; no fixed heights; rows stack at `fontScale ≥ 1.5`; tabs ellipsize; navigation labels verified at 200 % (inactive labels may be dropped only if truncated, M3 allows icon-only for 4–5 destinations) |
 | Contrast | text ≥ 4.5:1, icons and graphics ≥ 3:1 | no text on raw artwork; scheme pairs from MCU contrast curves with the system contrast level; monogram and group tones by construction ([ArtColors](#artcolors-tones-for-monograms-and-groups)) |
 | Motion | honour "Remove animations" (Android) and the OS reduced-motion preference (desktop) | all specs from `NeutrodyneMotion` keyed on `SystemUiState.reducedMotion`; no auto-marquee; Coil crossfade off; equaliser glyph static |
 | Live updates | no chatter | the position tick is never announced; `liveRegion = Polite` only for state changes such as "Download failed" and banners |
-| Seek bar | operable | `stateDescription` "12 minutes 4 seconds of 45 minutes"; custom actions back/forward |
-| Player sheet | operable without dragging | actions Expand player, Collapse player, Dismiss (paused) |
-| Focus order | logical | top bar → tabs → header → list → mini player → navigation; `traversalIndex` only where layout order differs; on multi-pane layouts list pane → detail pane → side panel |
+| Seek bar | operable | the radio needle exposes `progressBarRangeInfo` and a `setProgress` action |
+| Mini player | operable without dragging | actions Open the radio, Dismiss (paused); transport in the bar's custom actions |
+| Focus order | logical | top bar → tabs → header → list → mini player → navigation; `traversalIndex` only where layout order differs; on multi-pane layouts list pane → detail pane |
 | Focus visible | the keyboard focus is always visible and never hidden under the mini player or a sheet (WCAG 2.4.7, 2.4.11) | M3 focus state layers plus `NdFocusIndication` on rows and tiles; lists bring the focused item into view above `LocalMiniPlayerInset`; dialogs and sheets take focus on open and return it to the opener on close |
 | Keyboard | every action reachable without a pointer (WCAG 2.1.1) | [Keyboard and mouse](#keyboard-and-mouse); the context menu of every element ([Context menus](#context-menus)) |
 | Errors and validation | announced | text-field errors via `isError` + `error(…)` semantics |
 | Language | correct pronunciation | `LocaleSpan` not used; the app's language set (Android per-app language, the desktop's `desktop.language`, 09) |
-| RTL | mirrored layouts | everything mirrors except transport icons and the scrubber, which keep LTR direction (Material bidirectionality guidance for media; Unverified wording, M10 review) |
+| RTL | mirrored layouts | everything mirrors except transport icons and the needle, which keep LTR direction (Material bidirectionality guidance for media; Unverified wording, M10 review) |
 
 ### Custom actions catalogue
 
@@ -2932,8 +2806,7 @@ Serves N4, R5 (all), R8.10. Delivered with every UI milestone; audit and the ful
 | Cover tile | Open; Select; Add to groups; Unsubscribe |
 | Group tile and tab | Open feed; Play; Refresh; Edit |
 | Feeds pager | Next group; Previous group |
-| Mini player | Play/Pause; Skip back {n} seconds; Skip forward {n} seconds; Expand player; Dismiss (paused) |
-| Full player | Collapse player; chapter next/previous when chapters exist |
+| Mini player | Play/Pause; Skip back {n} seconds; Skip forward {n} seconds; Open the radio; Dismiss (paused) |
 | Downloads row | Play; Pause/Resume; Download now; Use mobile data (Android); Cancel; Retry; Delete; Share file (`COMPLETED`, shareable root; desktop: Show in folder); Open episode (only the actions valid for the row's state) |
 | Continue on this device card (MS3) | Play; Dismiss |
 | Devices row (MS2) | Rename; Remove |
@@ -2960,7 +2833,7 @@ ATF checks remain unchanged.
 - A `CustomActionsTest` per list component asserts the catalogue above per state (M10 checklist test, common code run on both platforms); `ContextMenuCatalogueTest` (MD4) asserts that each element's context menu offers the same actions, and `KeyboardReachabilityTest` drives the destinations with key events only (`runComposeUiTest` on the desktop JVM, MD4 AC1).
 - Desktop: no Accessibility Test Framework exists for Compose desktop, so `DesktopSemanticsAuditTest` (`desktopTest`) walks the semantics tree of every destination and asserts that every clickable or focusable node has a label or text and a role, and that no two focus stops share a label within a row.
 - Screenshot tests at font scale 1.0, 1.5 and 2.0 ([Screenshot matrix](#screenshot-matrix)).
-- Manual before each release (09 checklist): TalkBack pass over every destination, Switch Access on the player, 200 % font, RTL (Arabic), keyboard only; from MD4 11's desktop checklist (VoiceOver, NVDA, Narrator recorded, Linux keyboard only, 200 % OS scaling, [11 MD4 manual checklist](11-desktop.md#md4-manual-checklist)).
+- Manual before each release (09 checklist): TalkBack pass over every destination, Switch Access on the mini player, 200 % font, RTL (Arabic), keyboard only; from MD4 11's desktop checklist (VoiceOver, NVDA, Narrator recorded, Linux keyboard only, 200 % OS scaling, [11 MD4 manual checklist](11-desktop.md#md4-manual-checklist)).
 
 ### Desktop screen readers
 
@@ -3173,7 +3046,9 @@ Portable keys are added to the backup whitelist automatically (05); `ui.*` keys 
 | `ui.feeds_selected_source` | Text (`all`, `ungrouped`, `group:{uuid}`) | `all` | `device_settings` | internal | M2 |
 | `ui.library_segment` | Choice `LibrarySegment` {PODCASTS, GROUPS} | PODCASTS | `device_settings` | internal | M2 |
 | `ui.library_group_filter` | Text (`""` = All, `ungrouped`, group uuid) | `""` | `device_settings` | internal | M2 |
-| `ui.player_panel_hidden` | Bool | false | `device_settings` | side panel close button | M10 |
+| `ui.player_panel_hidden` | Bool | false | `device_settings` | retained for stored-data and backup compatibility; no UI reads it since 2026-11-15 | M10 |
+
+`ui.player_panel_hidden` is retained only so existing stored values and backups stay readable; no shell reads it since the side panel was removed in the 2026-11-15 owner revision.
 
 Swipe actions `REMOVE_FROM_UP_NEXT` and `DELETE_DOWNLOAD` are fixed on Up next and Downloads and are not offered in the setting.
 
@@ -3198,13 +3073,11 @@ All in `commonTest` unless the module column names a platform source set.
 | `ArtColorsTest` (TestParameterInjector) | `:core:model` | every hue 0–359 × LIGHT/DARK/RASTER: monogram contrast ≥ 7.0 (LIGHT, DARK) and ≥ 5.3 (RASTER); group dot tones ≥ 3:1 on M3 baseline surfaces; in-gamut output; pinned ARGB values for 6 hues (regression) | M1, M2 |
 | `MonogramTest` | `:core:common` | initials: "The Daily" → TD, "99% Invisible" → 9I, "🎧 Commute" → 🎧C, "日本語ポッドキャスト" → 日, "Ärzte Talk" → ÄT, "בוקר טוב" → בט, "" and "  - " → #, ZWJ family emoji as one grapheme; hue identical for NFC and NFD input and case variants, and identical to Java's `String.hashCode` result for 50 sample titles (the common formula matches the JVM) | M1 |
 | `ArtworkKeysTest` | `:core:artwork` | scheme/host case, default ports, fragment and userinfo dropped, query kept; `m-`/`g-` formats; `VALID` rejects `../x`, upper-case hex, empty | M1 |
-| `PlayerMorphTest` | `:feature:player` | property table values at p = 0, 0.2, 0.6, 1; reduced motion; 16:9 art box | M4 |
-| `PaneLayoutTest` | `:core:ui` | widths 360, 600, 696, 840, 1,056, 1,200, 1,296, 1,600, 1,708 × panel shown/hidden/no playback → partitions and panel width (the [Desktop windows](#desktop-windows) table) | M10 |
+| `PaneLayoutTest` | `:core:ui` | widths 360, 600, 696, 840, 1,056, 1,200, 1,296, 1,600, 1,708 → partitions and content width (the [Desktop windows](#desktop-windows) table) | M10 |
 | `FeedSourceRefTest` | `:feature:feeds` | encode/decode round trip; garbage → All; unknown group → fallback rule | M2 |
 | String mapper tests | `:core:ui`, `:feature:settings` | every `WaitReason` (incl. `YOUTUBE_ENGINE_OFF` per `ExternalReason`), `DownloadError`, `Availability`, `FeedErrorKind`, `PlayResult`, `UnplayableReason` (incl. `YouTubeExternal` per reason), `PlaybackIssue`, `SettingSource`, `AddPodcastError`, `ExternalReason` (long and short), and from M9b/M11a every `EngineAvailability`, `EngineUpdateOutcome`, `EngineRejectReason`, `UpdateCheckState` shape, `UpdateDisabledReason` and `UpdateCheckError` value maps to a non-empty `UiText`, and `UpdateStatusText`'s API-level → Android-release table covers 26 to 37 and its install-kind hints cover every desktop `kind`; from MS2 every `SyncStatus`, `SyncProblem`, `LinkState` and `SyncError` value (short and long); `ExternalReasonText` with an Android and a desktop `PlatformInfo`; `EpisodeRowSummary` for 12 representative states | M1–M11a, MS2 |
 | `InstallHelpSectionTest` | `:feature:settings` | every Android and desktop `InstallHelpSection` name (including `BUILDS`) parses, and a name of the other platform opens all collapsed; unknown or empty → all collapsed; "Get the 64-bit version" only for an `armeabi-v7a` `BuildInfo` with a non-empty 64-bit ABI list; commands contain `BuildInfo.repoUrl`'s owner and the APK's ABI, and the available version instead of the installed one while the fake checker is `Available` with an APK; no command or text contains a certificate fingerprint | M11a |
 | `DayHeaderTest` | `:feature:feeds` | Today/Yesterday/weekday/date boundaries across a DST change and in `America/St_Johns` (09's test zone) | M2 |
-| `ScrubberClockTest` | `:feature:player` | interpolation uses `Clock.elapsedRealtime()` (`TestClock` with a deep-sleep offset between uptime and elapsed realtime yields the right position); stops when `advancing` is false | M4 |
 | `DownloadRequestHandlerTest` | `:core:ui` | every `RequestResult` shape → metered dialog, notification prompt, snackbar text per `RejectReason`, nothing for `alreadyPresent` only | M6 |
 | `CoversRequestTest` | `:core:designsystem` `desktopTest` (Coil 3.6.3 exposes `crossfadeMillis` only on desktop) | THUMB/HERO memory keys and `placeholderMemoryCacheKey`; `WIDE_16_9` THUMB requests 320 × 180; crossfade 0 with reduced motion | M1, M8 |
 
@@ -3220,15 +3093,16 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `YouTubeSettingsScreenTest` (`FakeYouTubeEngine`, `FakeYouTubeCapabilitiesSource`) | engine rows for each `EngineAvailability`; the reason card and its action for each `ExternalReason` ("Get the 64-bit version" only on a 32-bit APK with 64-bit ABIs, "Try again" calls `retryStart()`); switch off flips the fake's capabilities and the screen re-renders without restart; M9b: policy chooser writes `youtube.engine_updates`, "Check for engine update" hidden with Off, each `EngineUpdateOutcome` shows its snackbar, "Reset to bundled" only for `UPDATED` and after confirmation | M9a, M9b |
 | `UpdatesSettingsScreenTest` (`FakeAppUpdateChecker`; Robolectric for the Android intents, common for the rest) | one card per `UpdateCheckState` with its texts and actions; `Available`: notes with "More", size, the SHA-256 line of `apk.fileName` (copy puts exactly `apk.sha256` on the clipboard; "Copied" snackbar only below API 33), "Download APK for this device" and "Open release on GitHub" each start one `ACTION_VIEW` + `CATEGORY_BROWSABLE` intent whose data is exactly `apk.url` and `info.releaseUrl` (Robolectric `shadowOf(application).nextStartedActivity`); `apk == null` → only the release link and the no-APK line; `minSdk` above the device → only the release link; an ABI other than `BuildInfo.apkAbi` → the 64-bit line; `lastError` → the extra line with the card kept; `ActivityNotFoundException` → "No app can open this link" + Copy link; "Skip this version" calls `skip(versionCode)`; the switch writes `updates.check_enabled`, runs the notification prompt when turned on without the permission and is disabled for `DEV_BUILD` ("Update checks are off in debug builds"); "Check now" calls `checkNow()` also with the switch off and is hidden for `DEV_BUILD`; badge: `SettingsGearButton` in a top bar and the rail footer and the Settings home "Updates" row show the dot and the description "Settings, update available" only while the fake is `Available`; no text on the page promises an install, and nothing calls `PackageManager.canRequestPackageInstalls` or `PackageInstaller` | M11a |
 | `InstallHelpScreenTest` (Android sections on Robolectric; desktop sections common with a desktop `PlatformInfo`) | Android: the BUILDS card shows its two statements (public key, possible reinstall) and nothing about debuggable builds, USB debugging data access or smoothness; the ADVANCED card ends with "Turn USB debugging off again afterwards."; the CHECK card shows the three commands and no certificate value; `InstallHelpKey("ALLOW")` opens the browser-install steps expanded (PLAN M11 acceptance 13). Desktop: only desktop sections; the running OS's section first and expanded; the macOS section says "after every update" and offers the `xattr` command; the Windows section names SmartScreen "Run anyway" and Smart App Control; `SCREEN_READERS` carries the Java Access Bridge fallback and 11's Linux statement verbatim (MD4 AC4) | M11a, MD5 |
-| `UpdateNoticesRootTest` (`FakeUpdateNotices`) | `FIRST_RUN_CHOICE` → first-run card on Feeds (OK dismisses, Turn off writes `updates.check_enabled = false` with Undo writing `true`); `VERIFICATION_ENFORCEMENT` → `VerificationNoticeKey` once, pre- and post-enforcement variant by the timeline's global date, both buttons dismiss, no date without one from the timeline; nothing while the startup gate is up or the player is expanded; at most one notice per process start | M11a |
+| `UpdateNoticesRootTest` (`FakeUpdateNotices`) | `FIRST_RUN_CHOICE` → first-run card on Feeds (OK dismisses, Turn off writes `updates.check_enabled = false` with Undo writing `true`); `VERIFICATION_ENFORCEMENT` → `VerificationNoticeKey` once, pre- and post-enforcement variant by the timeline's global date, both buttons dismiss, no date without one from the timeline; nothing while the startup gate is up; at most one notice per process start | M11a |
 | `LibraryScreenTest` | density columns at 360 dp; chip filter including Ungrouped; selection → `AddToGroupsKey`; unsubscribe confirmation text | M1, M2 |
 | `GroupsManageScreenTest`, `GroupsManageViewModelTest` (`:feature:groups` desktop) | mouse drag previews without writes, one reorder call on drop; Alt+arrows and accessibility/context-menu moves; show-as-tab; editor/create navigation; delete/Undo; concurrent flow reconciliation and changed-list recovery | M2 |
 | `AddToGroupsSheetTest` | tri-state chips from memberships; only changed chips sent to `applyMembership`; inline group creation | M2 |
-| `PlayerSheetTest` | anchors from measured content bottom; expand/collapse by tap and fling; dismiss only while paused (the `Dismissed` anchor disappears when playback starts); suite hidden only after settle; back collapses the sheet before `NavDisplay` pops (fake `NavigationState`); saveable state; "Mark played and skip" calls only `setPlayed` (fake controller records no `skipToNext`); resizing across 840 dp switches between the side panel and the sheet without touching playback (desktop) | M4, MD1 |
+| `MiniPlayerTest` | the bar docks on a standard screen and hides on the radio home; tapping it opens the radio instead of expanding; transport and Open the radio reach the controller and the navigator through custom actions; Dismiss is offered only while paused and a downward swipe dismisses; the context menu lists Go to episode, Go to podcast, Open the radio and Dismiss; the consent dialog outlives the bar on the radio home and with no episode | M4 |
+| `DesktopMiniPlayerTest` (`:desktopApp` `test`) | the window docks the mini player above the navigation chrome with no side panel and no full player; transport accessibility actions pause and resume; tapping the bar opens the radio home and Back returns without touching the engine window | MD1a.2 |
 | `ExportAndBackupFlowTest` | `prepare` → private-links warning shown only when `privateLinks`/`passwords` > 0 → save via `FileSaver.create(export.fileName, export.mimeType)` (Android `CreateDocument`; desktop a fake save dialog) or, on Android, the share chooser; Cancel leaves no destination write; backup `preflight` → warning → `CreateDocument` → `createBackup`; `foreignPending` banner Restore/Discard | M3 |
 | `ImportReportTest` | every `ImportItemStatus` lands in 05's report section; `FETCH_FAILED(DEFERRED)` under "Will load later" without actions; Remove hidden for `ALREADY_SUBSCRIBED`/`MERGED`; restore preview defaults (Merge: history + Up next; Replace: all) | M3 |
 | `StartupGateTest` | `Pending` → "Updating your library…"; `Failed(DISK_FULL)` → storage text + Manage storage; other failures → Send report or Copy diagnostics; Try again calls `retry()` | M1 |
-| `KeyboardShortcutsTest` (common; platform-specific cases per `PlatformInfo`) | Space toggles play only when unconsumed; Ctrl/Cmd+arrows skip; plain arrows move focus on Android and skip on the desktop when unconsumed; Shift+arrows change chapter and Ctrl/Cmd+Shift+arrows the episode (desktop); Ctrl+Tab switches pages; Esc collapses the expanded player and never closes the window; Alt+↑/↓ move Up next and Manage groups rows; Delete removes an Up next row with Undo | M10, MD4 |
+| `KeyboardShortcutsTest` (common; platform-specific cases per `PlatformInfo`) | Space toggles play only when unconsumed; Ctrl/Cmd+arrows skip; plain arrows move focus on Android and skip on the desktop when unconsumed; Shift+arrows change chapter and Ctrl/Cmd+Shift+arrows the episode (desktop); Ctrl+Tab switches pages; Esc follows the back order and never closes the window; Alt+↑/↓ move Up next and Manage groups rows; Delete removes an Up next row with Undo | M10, MD4 |
 | `SpeedSheetTest` | scope options per context; `setSpeed` on release with the chosen scope; group option disabled outside a group context; attribution text | M4 |
 | `UpNextScreenTest` | drag-and-drop calls `move` once on drop; Move up/down actions call `move`; swipe remove with undo (M4 acceptance 14); "Stop after Up next"; empty-state chips | M4 |
 | `ShowNotesTest` | every block type; timestamp beyond duration is plain; tap timestamp → `seekTo` for the current episode, `playEpisodeAt` otherwise; images per `feeds.show_notes_images` and metered state | M1, M5 |
@@ -3245,7 +3119,7 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `DesktopSettingsScreenTest` (common with a fake `DesktopIntegration` and `PlatformInfo` = desktop; hidden on Android) | close behaviour writes `desktop.close_behaviour`; start at login reflects `loginItem` including `NEEDS_APPROVAL` and hides on `UNSUPPORTED`; "Change folder…" runs pick → `registerFolderRoot` → move dialog → `changeRoot`, and a `Rejected` keeps the old folder; links and applications-menu rows appear only when applicable | M0b, MD2, MD4 |
 | `ContextMenuCatalogueTest` (common) | for every element of the custom-actions catalogue in each state, the context menu offers exactly the valid custom actions plus the listed extras, destructive items last; a secondary click and Shift+F10 open it; Ctrl/Cmd-click enters selection mode (MD4 AC1) | MD4 |
 | `KeyboardReachabilityTest` (desktop, `runComposeUiTest`) | every action of the catalogue reachable with key events only, per destination; focus visible on every stop; Esc follows the back order; focus returns to the opener after a dialog | MD4 |
-| `DesktopSemanticsAuditTest` (desktop) | every clickable or focusable node in the five destinations, the player and Settings has a label and a role; one focus stop per row | MD4 |
+| `DesktopSemanticsAuditTest` (desktop) | every clickable or focusable node in the five destinations, the mini player and Settings has a label and a role; one focus stop per row | MD4 |
 | `DesktopUpdatesCardTest` (common, desktop `PlatformInfo`) | "Download for this computer" opens exactly `desktopAsset.url` through `ExternalUrlOpener`; the install-kind hint per kind; no asset → release link only; `minOs` above the OS → release link only; never an APK text | M11a |
 | `ArtworkSyncWorkerTest` (Android, WorkManager `TestDriver`) and `DesktopArtworkLaneTest` (desktop, `TestClock`) | the worker hosts the runner with the 8-min deadline and its continuation; the lane runs only when flagged and online, without a deadline, and yields after each batch; desktop monogram rasters exist for podcasts without artwork (the OS media sessions need them) | M4, MD1 |
 | `DesktopImageMemoryTest` (desktop) | the 96 MB cache; trimmed to a quarter while the window is hidden and restored on show | MD1 |
@@ -3259,13 +3133,13 @@ Two golden sets, both reviewed in PRs: the **Android set** (Roborazzi on Robolec
 | `EpisodeRow` | unplayed, new, in progress, now playing/paused, played, offline, every `DownloadState` and each `WaitReason`, failed, missing, video, YouTube (16:9 and avatar), external mode, unavailable (added by M9, whichever of M9 and M10 lands later, [PLAN 7.1](../PLAN.md#71-milestone-overview)) × light/dark/pure black × font scale 1.0/1.5/2.0 × LTR/RTL (`ar-XB` pseudo-locale) |
 | `DownloadEntryRow` | every `DownloadState`/`WaitReason`, failed with each error text, completed played/unplayed × light/dark × font 1.0/2.0 |
 | `CoverTile`, `GroupMosaic`, `GroupTabLabel`, monograms | 0–4 members, badges, long names, emoji names, pseudo-locale `en-XA` |
-| Mini and full player, side panel, tabletop | three synthetic reference artworks (colourful, monochrome, very light) × light/dark |
+| Mini player and radio home | three synthetic reference artworks (colourful, monochrome, very light) × light/dark |
 | Screens (Android set) | Feeds, Library (both segments), Podcast detail (RSS, YouTube with and without banner), Episode detail, Up next, Downloads, Discover, Import (preview, report), Settings home × compact, medium, expanded, large widths and tabletop posture (M10 acceptance 6) |
 | Settings › YouTube | engine present (`STOPPED`, breaker open; M9b: updated version, rollback outcome), each `ExternalReason` card × light/dark × font 1.0/2.0 (added by M9a) |
 | Settings › Updates and its overlays | status card per `UpdateCheckState` (`Available` with APK, with another ABI, without APK, with `minSdk` too high and with `lastError`), first-run card, gear badge on a top bar and the rail footer, verification notice (with and without date), Install & updates help (collapsed, with `GOOGLE_PLAY` open and with `BUILDS` open) × light/dark × font 1.0/2.0 × LTR/RTL (added by M11a) |
-| Sync screens (MS2, MS3) | Settings › Sync per `SyncStatus` (with a problem, with held changes), each link step (disclosure, code, first-link choice, merging), the approve sheet, the devices list, the held-changes dialog, the restore-while-linked prompt, the "Continue on this device" card above the mini player and in the side panel × light/dark × font 1.0/2.0 × LTR/RTL (Android); light/dark at 900 dp (desktop) |
+| Sync screens (MS2, MS3) | Settings › Sync per `SyncStatus` (with a problem, with held changes), each link step (disclosure, code, first-link choice, merging), the approve sheet, the devices list, the held-changes dialog, the restore-while-linked prompt, the "Continue on this device" card above the mini player × light/dark × font 1.0/2.0 × LTR/RTL (Android); light/dark at 900 dp (desktop) |
 | Brand (M0b, M10) | the in-app mark on the startup gate and in About × light/dark/pure black; the brand scheme's surfaces, primary and containers in a fixed sample screen × light/dark × contrast 0.0/1.0 (both sets) |
-| **Desktop set** (M10, MD4) | the shared components of M10 AC8 (`EpisodeRow` states × light/dark × font 1.0/1.5 via a density override, `CoverTile`, monograms, the players with the three reference artworks); the five destinations, Podcast detail, Settings home, Settings › Desktop, Settings › Updates (desktop card with each install kind, no asset, `minOs` too high) and the Install & updates help (macOS, Windows and Linux sections open) at window widths 600, 900 and 1,400 dp × light/dark (MD4 AC2); an open context menu on a row, hover and focus states of a row, the scrollbar on a list (MD4) |
+| **Desktop set** (M10, MD4) | the shared components of M10 AC8 (`EpisodeRow` states × light/dark × font 1.0/1.5 via a density override, `CoverTile`, monograms, the mini player and radio home with the three reference artworks); the five destinations, Podcast detail, Settings home, Settings › Desktop, Settings › Updates (desktop card with each install kind, no asset, `minOs` too high) and the Install & updates help (macOS, Windows and Linux sections open) at window widths 600, 900 and 1,400 dp × light/dark (MD4 AC2); an open context menu on a row, hover and focus states of a row, the scrollbar on a list (MD4) |
 
 **Implementation note (2026-11-08, M10 journeys):** M6b's `:benchmark` host
 gains the Macrobenchmark journeys, matched to `:app`'s `benchmarkRelease`.
@@ -3273,13 +3147,13 @@ Its shell-permissioned seed receiver refuses a nonempty unmarked installation
 and creates 300 locally pinned synthetic covers, 50,000 episodes, 20 groups
 and a durable paused item without starting audio. It exists only in
 `benchmarkRelease`. Journeys cover cold start, cover-grid/feed flings, group
-swipes and player expansion; `benchmark-dryrun` runs them on CI. Emulator
+swipes and the mini player opening the radio; `benchmark-dryrun` runs them on CI. Emulator
 timings do not prove PB3. Reference-phone jank measurement remains open
 until that device run.
 
 ### Performance journeys
 
-Defined here, run by 09's `:benchmark` module against `benchmarkRelease` — the published release configuration made profileable, the budgets' gate ([PLAN D2](../PLAN.md#3-key-decisions), [D96](../PLAN.md#3-key-decisions)) — each with a seeded database (02's `SeedDatabase`, 300 podcasts, 50,000 episodes, 20 groups; budgets PB1–PB5 and PB9 are 09's): `ColdStartToFeeds` (cold start to the first Feeds page; `ReportDrawnWhen` marks full display), `CoverGridFling` (3 flings over the 300-tile Library grid; jank < 1 %, M10 acceptance 7, from M10), `AllFeedFling` (flings through the All feed with day headers), `GroupPagerSwipe` (10 pager swipes across groups), `PlayerExpandCollapse` (5 expand/collapse cycles with a seeded current episode), `PodcastOpen` (Library tile → podcast screen content, M11b, PB9). UI Automator finds nodes through the root's `testTagsAsResourceId`; test tags: `feeds_pager`, `feed_list`, `feed_loading`, `feed_settled`, `library_grid`, `mini_player`, `player_sheet`, `podcast_list`. The startup journey waits for `feed_settled`, which uses the same refresh-settled predicate as `ReportDrawnWhen`; cached `feed_list` rows can remain visible under `feed_loading`. The same journeys drive `:benchmark`'s `BaselineProfileGenerator` (M11b), whose baseline and startup profiles ship in the release APKs ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)). The desktop has no Macrobenchmark: its first frame, RSS and playback-start budgets (PB24–PB28) are measured by 11 on the reference laptops with the smoke mode ([11 Budgets PB24–PB29](11-desktop.md#budgets-pb24pb29)); this document adds no desktop journey of its own.
+Defined here, run by 09's `:benchmark` module against `benchmarkRelease` — the published release configuration made profileable, the budgets' gate ([PLAN D2](../PLAN.md#3-key-decisions), [D96](../PLAN.md#3-key-decisions)) — each with a seeded database (02's `SeedDatabase`, 300 podcasts, 50,000 episodes, 20 groups; budgets PB1–PB5 and PB9 are 09's): `ColdStartToFeeds` (cold start to the first Feeds page; `ReportDrawnWhen` marks full display), `CoverGridFling` (3 flings over the 300-tile Library grid; jank < 1 %, M10 acceptance 7, from M10), `AllFeedFling` (flings through the All feed with day headers), `GroupPagerSwipe` (10 pager swipes across groups), `playerOpenRadio` (5 cycles of the mini player opening the radio home and Back returning to the seeded screen), `PodcastOpen` (Library tile → podcast screen content, M11b, PB9). UI Automator finds nodes through the root's `testTagsAsResourceId`; test tags: `feeds_pager`, `feed_list`, `feed_loading`, `feed_settled`, `library_grid`, `mini_player`, `player_sheet`, `radio_home`, `podcast_list`. The startup journey waits for `feed_settled`, which uses the same refresh-settled predicate as `ReportDrawnWhen`; cached `feed_list` rows can remain visible under `feed_loading`. The same journeys drive `:benchmark`'s `BaselineProfileGenerator` (M11b), whose baseline and startup profiles ship in the release APKs ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)). The desktop has no Macrobenchmark: its first frame, RSS and playback-start budgets (PB24–PB28) are measured by 11 on the reference laptops with the smoke mode ([11 Budgets PB24–PB29](11-desktop.md#budgets-pb24pb29)); this document adds no desktop journey of its own.
 
 ### Manual checks
 
@@ -3305,7 +3179,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 | Link has no handler | show notes, About, update card, Install & updates help | "No app can open this link" + Copy link |
 | Image fails | everywhere | monogram; never an error message ([Failure and fallback rules](#failure-and-fallback-rules)) |
 | Offline | everywhere | banner and dimmed play buttons; no spinner waits on the network |
-| Process death | everywhere | navigation stacks (01), feed selection (device settings), pager pages and list positions (saveable state holder), player sheet value, selections, sheet inputs (`rememberSaveable`) survive; transient previews re-resolve |
+| Process death | everywhere | navigation stacks (01), feed selection (device settings), pager pages and list positions (saveable state holder), selections, sheet inputs (`rememberSaveable`) survive; the mini player re-docks from `nowPlaying`; transient previews re-resolve |
 | Artwork worker stopped by quota (Android) | background | `APPEND_OR_REPLACE` continuation; partial batches are complete transactions; the desktop lane has no quota and resumes at the next tick after a quit |
 | `ArtworkProvider` called before the database opens (Android) | resumption card at boot | waits ≤ 2 s for `awaitOpen()`, else serves the placeholder |
 | Download request rejected or needs a decision | rows, episode detail, player, Downloads | `DownloadRequestHandler` ([EpisodeRow](#episoderow)): metered dialog, notification prompt or one snackbar per request |
@@ -3325,6 +3199,8 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 ---
 
 ## Delivery by milestone
+
+**Owner revision, 2026-11-15.** The full player sheet, its tabs, the desktop side panel and the player expansion journey are removed; the radio home is the only full player and every other screen keeps the docked mini player. The rows below record what each milestone delivered at the time.
 
 | Milestone | Delivered in this area |
 |---|---|
@@ -3427,7 +3303,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 | `DefaultArtworkStore`, `ArtworkStore.isPinned/pinnedPath/collectGarbage`, `ArtworkKeys`, `ArtworkSyncScheduler`, `ArtworkSyncRunner`, `ArtworkCodec`, `MonogramRenderer`, `ImageNetworkComponent`, `ImageMemoryPolicy`, `TinyImageInterceptor`, `LetterboxCrop169` (common); `ArtworkSyncWorker`, `MosaicRenderer`, `AndroidArtworkCodec`, `AndroidMonogramRenderer` (`androidMain`); `DesktopArtworkLane`, `SkiaArtworkCodec`, `SkiaMonogramRenderer` (`desktopMain`) | artwork pipeline | `:core:artwork` |
 | `ArtworkTheme`, `ArtworkSchemeCache`, `ArtworkRoles`, `GroupTones`, `NeutrodyneShapes`, `NeutrodyneType`, `NeutrodyneMotion`, `Covers`, `CoverTier`, `CoverAspect`, `StatusBarAppearance`, `LocalSystemBars`, `NdIcons`, `LocalArtworkTintEnabled`, `LocalReducedMotion`, `LocalSystemUiState`, `SystemUiState`, `BrandColors`, `AppearancePrefs`, `LocalScrollbars`, `NdContextMenu`, `NdMenuItem`, `NdScrollbar`, `NdFocusIndication`, `rememberAndroidSystemUiState`, `DesktopScrollbars`, all `Nd*` wrappers of [Nd wrappers and icons](#nd-wrappers-and-icons) | design system | `:core:designsystem` |
 | `EpisodeRowStyle`, `RowCaps`, `SwipeConfig`, `EpisodeAction` (incl. `CheckAvailability`), `DownloadStateButton`, `DownloadRequestHandler`, `GroupTabLabel`, `PodcastHeader`, `ChapterList`, `UpNextList`, `SelectionTopBar`, `FeedFilterChips`, `ReportVisibleEpisodeIds`, `EpisodeRowSummary`, `PlaybackMessages`, `DownloadStatusText`, `AvailabilityText`, `AttributionText`, `FeedErrorText`, `SharedKeys`, `LocalMiniPlayerInset`, `LocalSnackbarHost`, `rememberMonogram`, `LocalDrawnReporter`, `LocalUiClock`, `LocalPlatformKind`, `ContinueOnThisDeviceCard`, `SyncStatusText`, `PlatformActions`, `ExternalUrlOpener`, `OpenResult`, `ShareSheet`, `FilePicker`, `FileSaver`, `RevealInFolder`, `NotificationPermissionRequester` (replaces the former `rememberNotificationPermissionRequester()`), `LocalPlatformActions`, `rememberAndroidPlatformActions`, `rememberDesktopPlatformActions` | shared UI | `:core:ui` |
-| `PlayerSheetState`, `PlayerSheetValue`, `PlayerViewModel`, `PlayerUiState`, `PlayerMorph`, `PlayerSidePanel`, `MiniPlayer`, `FullPlayer` | player UI | `:feature:player` |
+| `PlayerViewModel`, `PlayerUiState`, `MiniPlayer`, `PlayerRoute` | player UI | `:feature:player` |
 | `FeedsUiState`, `FeedTabUi`, `FeedSourceRef`, `FeedItem`, `FeedsViewModel` | Feeds UI | `:feature:feeds` |
 | `DownloadEntryRow` | Downloads screen row over 07's `DownloadEntry` | `:feature:downloads` |
 | `ArtworkSyncScheduler.enqueueNow`, `ArtworkRepository.observeColors(key, fallbackPodcastId)` | artwork scheduling and colours | `:core:artwork`, `:core:domain` |

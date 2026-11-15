@@ -37,15 +37,14 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
-/** The shells supply queue content; player and queue features remain independent. */
+/** The docked mini player; the radio home is the full player (08 Mini player). */
 @Composable
 public fun PlayerRoute(
     slot: PlayerSlotState,
     modifier: Modifier = Modifier,
-    upNext: @Composable () -> Unit = {},
 ) {
     // Keep DI parameters private; the slot API must not expose internal ViewModels.
-    PlayerRouteContent(slot = slot, modifier = modifier, upNext = upNext)
+    PlayerRouteContent(slot = slot, modifier = modifier)
 }
 
 @Composable
@@ -54,17 +53,12 @@ private fun PlayerRouteContent(
     modifier: Modifier = Modifier,
     vm: PlayerViewModel = metroViewModel(),
     episodeVm: PlayerEpisodeViewModel = metroViewModel(),
-    upNext: @Composable () -> Unit,
 ) {
-    val engineHealth by
-        (vm.youtubeHealth?.state ?: androidx.compose.runtime.remember { kotlinx.coroutines.flow.flowOf(null) })
-            .collectAsStateWithLifecycle(null)
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val position by vm.position.collectAsStateWithLifecycle()
     val failed by episodeVm.writeFailed.collectAsStateWithLifecycle()
     val readFailed by episodeVm.readFailure.collectAsStateWithLifecycle()
     val password by episodeVm.passwordEpisode.collectAsStateWithLifecycle()
-    val detail by episodeVm.detail.collectAsStateWithLifecycle()
     val snackbar = LocalSnackbarHost.current
     val rootScope = LocalRootScope.current
     val scope = rememberCoroutineScope()
@@ -74,7 +68,6 @@ private fun PlayerRouteContent(
     val readFailureText = stringResource(Res.string.player_read_failed)
     val noHandler = stringResource(UiRes.string.no_handler)
     val copyLink = stringResource(UiRes.string.action_copy_link)
-    LaunchedEffect(ui.now?.episodeId) { episodeVm.displayEpisode(ui.now?.episodeId) }
     LaunchedEffect(failed) {
         if (failed) {
             rootScope.launch { snackbar.showSnackbar(writeFailureText) }
@@ -100,10 +93,6 @@ private fun PlayerRouteContent(
                 clipboard.setText(AnnotatedString(url))
             }
         }
-    }
-
-    fun openLink(url: String) {
-        if (platform.urls.open(url) == OpenResult.NO_HANDLER) reportNoHandler(url)
     }
 
     ShowUserMessages(ui.messages, vm::onMessageShown) { id ->
@@ -137,63 +126,18 @@ private fun PlayerRouteContent(
             }
         }
     }
-    val currentDetail = detail?.takeIf { it.id == ui.now?.episodeId }
-    val link = currentDetail?.let { it.link ?: it.externalMediaId?.let(YouTubeLinks::watch) }
-    val seekEpisodeId = ui.now?.episodeId
-    PlayerSheet(
-        engineNotice = {
-            if (ui.now?.sourceType == SourceType.YOUTUBE_CHANNEL) {
-                YouTubeHealthBanner(
-                    engineHealth?.breaker == BreakerState.OPEN,
-                    retry = { vm.youtubeHealth?.retryNow() },
-                )
-            }
-        },
+    MiniPlayer(
         ui = ui,
-        setPanelHidden = vm::setPanelHidden,
         position = position,
         slot = slot,
-        positionAt = vm::positionAt,
         toggle = vm::togglePlayPause,
-        retry = vm::retryPlayback,
         back = vm::skipBack,
         forward = vm::skipForward,
-        previous = vm::previous,
-        next = vm::next,
-        seek = { value -> vm.seekTo(value, seekEpisodeId) },
-        seekChapter = vm::onTimestamp,
-        nextEpisode = vm::nextEpisode,
-        previousEpisode = vm::previousEpisode,
         dismiss = vm::dismissPaused,
-        stop = vm::stopAndClose,
-        markPlayed = { ui.now?.let { episodeVm.markPlayed(it.episodeId) } },
         consent = vm::continueOnMobileData,
         declineConsent = vm::declineMobileData,
         consentAlways = vm::alwaysOnMobileData,
-        toggleTime = vm::toggleTimeDisplay,
-        share =
-            link?.let { url ->
-                {
-                    val sharing = platform.share
-                    if (sharing != null) {
-                        sharing.shareText(url, ui.now?.title.orEmpty())
-                    } else {
-                        clipboard.setText(AnnotatedString(url))
-                    }
-                }
-            },
         modifier = modifier,
-        upNext = upNext,
-        notes = {
-            ui.now?.let {
-                PlayerNotes(
-                    it.episodeId,
-                    it.position.durationMs,
-                    onLink = ::openLink,
-                    onTimestamp = vm::onTimestamp,
-                )
-            }
-        },
     )
     if (password != null) EnterPasswordDialog(episodeVm::submitPassword, episodeVm::dismissPassword)
 }

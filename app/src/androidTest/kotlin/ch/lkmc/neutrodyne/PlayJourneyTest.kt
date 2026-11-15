@@ -26,6 +26,7 @@ import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.espresso.Espresso.pressBack
@@ -184,34 +185,26 @@ class PlayJourneyTest {
             awaitNode(hasTestTag(TAG_MINI_PLAYER))
             compose.onNodeWithTag(TAG_MINI_PLAYER).assertIsDisplayed()
 
-            phase("player/expand")
-            compose.onNodeWithTag(TAG_MINI_PLAYER).performClick()
-            awaitNode(hasTestTag(TAG_FULL_PLAYER))
-            compose.onNodeWithTag(TAG_FULL_PLAYER).assertIsDisplayed()
-            compose
-                .onNode(
-                    hasText(groupName).and(hasAnyAncestor(hasTestTag(TAG_PLAYER_SHEET))),
-                ).assertIsDisplayed()
-            // The speed row ("Speed 1.0×"); count, not onNode, since the attribution line can repeat it.
-            awaitNode(
-                hasText("Speed ", substring = true)
-                    .and(hasAnyAncestor(hasTestTag(TAG_FULL_PLAYER))),
-            )
-
+            // The mini bar's transport lives in its accessibility actions; its buttons are merged.
             phase("player/transport")
-            val pauseAction = hasContentDescription("Pause").and(hasAnyAncestor(hasTestTag(TAG_FULL_PLAYER)))
-            val resumeAction = hasContentDescription("Play").and(hasAnyAncestor(hasTestTag(TAG_FULL_PLAYER)))
-            awaitNode(pauseAction)
-            compose.onNode(pauseAction).performClick()
+            compose.onNodeWithTag(TAG_MINI_PLAYER).performCustomAccessibilityActionWithLabel("Pause")
             await { nowPlaying()?.isPlaying == false && nowPlaying()?.playWhenReady == false }
-            awaitNode(resumeAction)
-            compose.onNode(resumeAction).performClick()
+            awaitNode(hasTestTag(TAG_MINI_PLAYER))
+            compose.onNodeWithTag(TAG_MINI_PLAYER).performCustomAccessibilityActionWithLabel("Play")
             await { nowPlaying()?.isPlaying == true }
 
-            phase("player/collapse")
-            pressBack()
+            // The radio home is the only full player: tapping the bar opens it.
+            phase("player/open-radio")
+            compose.onNodeWithTag(TAG_MINI_PLAYER).performClick()
+            awaitNode(hasTestTag("radio_home"))
+            compose.onNodeWithTag(TAG_MINI_PLAYER).assertDoesNotExist()
+            compose.onNodeWithTag("full_player").assertDoesNotExist()
+
+            phase("menu/library-again")
+            compose.onNodeWithTag("radio_menu").performClick()
+            awaitNode(hasTestTag("nav_library"))
+            compose.onNodeWithTag("nav_library").performClick()
             awaitDisplayed(TAG_MINI_PLAYER)
-            compose.onNodeWithTag(TAG_MINI_PLAYER).assertIsDisplayed()
 
             phase("notification/assert")
             val notification = awaitNotification(PLAYBACK_NOTIFICATION)
@@ -528,8 +521,6 @@ class PlayJourneyTest {
 
     private companion object {
         const val TAG_MINI_PLAYER = "mini_player"
-        const val TAG_PLAYER_SHEET = "player_sheet"
-        const val TAG_FULL_PLAYER = "full_player"
         const val HTTP_RANGE_NOT_SATISFIABLE = 416
         const val SYSTEM_UI_PACKAGE = "com.android.systemui"
         const val CHANNEL_PLAYBACK = "playback"

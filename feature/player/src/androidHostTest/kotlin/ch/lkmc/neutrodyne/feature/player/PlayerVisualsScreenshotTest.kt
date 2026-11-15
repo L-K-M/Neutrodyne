@@ -8,10 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performClick
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -40,23 +37,9 @@ class PlayerVisualsScreenshotTest {
 
     @Test fun miniBufferingDark() = capture(PlayerVisual.MINI_BUFFERING_DARK)
 
-    @Test fun full() = capture(PlayerVisual.FULL)
-
-    @Test fun fullDark() = capture(PlayerVisual.FULL_DARK)
-
-    @Test fun upNextPanel() = capture(PlayerVisual.UP_NEXT_PANEL)
-
-    @Test fun notesPanel() = capture(PlayerVisual.NOTES_PANEL)
-
-    @Test
-    @Config(qualifiers = "ar-rXB-w360dp-h640dp-mdpi")
-    fun fullStress() = capture(PlayerVisual.FULL_STRESS)
-
     @Test
     @Config(qualifiers = "en-rUS-w900dp-h640dp-mdpi")
     fun miniInset() = capture(PlayerVisual.MINI_INSET)
-
-    @Test fun wideArt() = capture(PlayerVisual.WIDE_ART)
 
     @Test fun speed() = capture(PlayerVisual.SPEED)
 
@@ -85,18 +68,6 @@ class PlayerVisualsScreenshotTest {
         if (visual.state == PlayerVisualState.MINI_BUFFERING) {
             rule.mainClock.autoAdvance = false
             rule.mainClock.advanceTimeByFrame()
-        }
-        rule.waitForIdle()
-        when (visual.state) {
-            PlayerVisualState.PANEL_UP_NEXT -> {
-                rule.onNodeWithContentDescription(PLAYER_EXPAND_PANEL_LABEL).performClick()
-            }
-
-            PlayerVisualState.PANEL_NOTES -> {
-                rule.onNodeWithText(PLAYER_NOTES_TAB_LABEL).performClick()
-            }
-
-            else -> {}
         }
         rule.waitForIdle()
         rule.onRoot().captureRoboImage("screenshots/android/player_${visual.name.lowercase()}.png")

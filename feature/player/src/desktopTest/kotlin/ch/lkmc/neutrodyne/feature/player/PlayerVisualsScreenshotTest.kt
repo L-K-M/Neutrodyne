@@ -6,12 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -23,7 +19,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 
-/** Desktop goldens; English locale so the panel's semantics labels resolve for the clicks. */
+/** Desktop goldens; English locale so the mini player's semantics labels resolve. */
 @OptIn(ExperimentalTestApi::class)
 class PlayerVisualsScreenshotTest {
     private var previousLocale = Locale.ENGLISH
@@ -62,18 +58,8 @@ class PlayerVisualsScreenshotTest {
                     mainClock.advanceTimeByFrame()
                 }
                 waitForIdle()
-                openPanel(visual)
                 onRoot().captureRoboImage("screenshots/desktop/player_${visual.name.lowercase()}.png")
             }
         }
-    }
-
-    private fun ComposeUiTest.openPanel(visual: PlayerVisual) {
-        when (visual.state) {
-            PlayerVisualState.PANEL_UP_NEXT -> onNodeWithContentDescription(PLAYER_EXPAND_PANEL_LABEL).performClick()
-            PlayerVisualState.PANEL_NOTES -> onNodeWithText(PLAYER_NOTES_TAB_LABEL).performClick()
-            else -> return
-        }
-        waitForIdle()
     }
 }

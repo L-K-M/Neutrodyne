@@ -10,7 +10,7 @@
     <string name="player_not_playable">Diese Episode kann nicht abgespielt werden</string>
     <string name="player_unavailable">Wiedergabe ist nicht verfügbar</string>
     <string name="player_write_failed">Die Änderung konnte nicht gespeichert werden. Versuche es erneut.</string>
-    <string name="player_expand">Player öffnen</string>
+    <string name="player_open_radio">Radio öffnen</string>
     <string name="player_collapse">Player einklappen</string>
     <string name="player_dismiss">Player schließen</string>
     <string name="player_play">Abspielen</string>

@@ -51,11 +51,11 @@ class BaselineProfileGenerator {
     }
 
     @Test
-    fun playerExpansion() {
+    fun playerOpenRadio() {
         baselineProfile.collect(packageName = PACKAGE) {
             with(JourneyActions) {
-                prepareJourney(Destination.FEEDS, "mini_player")
-                expandCollapsePlayer()
+                prepareJourney(Destination.LIBRARY, "mini_player")
+                openRadioFromMiniPlayer()
             }
         }
     }

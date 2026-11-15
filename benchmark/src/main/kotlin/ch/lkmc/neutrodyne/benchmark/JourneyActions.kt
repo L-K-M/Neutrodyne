@@ -98,13 +98,16 @@ object JourneyActions {
         }
     }
 
-    /** Five expand/collapse cycles with the seeded current episode. */
-    fun MacrobenchmarkScope.expandCollapsePlayer() {
+    /**
+     * Five cycles of the mini player opening the radio home (the only full player) and Back
+     * returning to the seeded screen.
+     */
+    fun MacrobenchmarkScope.openRadioFromMiniPlayer() {
         repeat(PLAYER_CYCLES) {
             checkNotNull(device.wait(Until.findObject(By.res("mini_player")), WAIT_MS)).click()
-            check(device.wait(Until.hasObject(By.res("full_player")), WAIT_MS)) { "Player did not expand" }
+            check(device.wait(Until.hasObject(By.res("radio_home")), WAIT_MS)) { "Radio did not open" }
             device.pressBack()
-            check(device.wait(Until.hasObject(By.res("mini_player")), WAIT_MS)) { "Player did not collapse" }
+            check(device.wait(Until.hasObject(By.res("mini_player")), WAIT_MS)) { "Mini player did not return" }
         }
     }
 

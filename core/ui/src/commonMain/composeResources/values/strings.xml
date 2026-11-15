@@ -690,6 +690,8 @@
 
     <!-- Owner radio home design, 2026-11-04. -->
     <string name="radio_menu">Menu</string>
+    <string name="radio_menu_speed">Playback speed</string>
+    <string name="radio_menu_sleep">Sleep timer</string>
     <string name="radio_episodes">Episodes</string>
     <string name="radio_removed">Removed from this playlist.</string>
     <string name="radio_ready">READY TO PLAY</string>

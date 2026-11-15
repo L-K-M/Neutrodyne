@@ -10,7 +10,7 @@
     <string name="player_not_playable">This episode cannot be played</string>
     <string name="player_unavailable">Playback is unavailable</string>
     <string name="player_write_failed">Could not save the change. Try again.</string>
-    <string name="player_expand">Expand player</string>
+    <string name="player_open_radio">Open the radio</string>
     <string name="player_collapse">Collapse player</string>
     <string name="player_dismiss">Dismiss player</string>
     <string name="player_play">Play</string>

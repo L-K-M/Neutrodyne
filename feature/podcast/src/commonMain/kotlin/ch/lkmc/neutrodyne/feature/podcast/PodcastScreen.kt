@@ -210,7 +210,7 @@ internal fun PodcastScreen(
     }
     val panes = LocalPaneLayout.current
     val overlayBody =
-        LocalHeaderSystemBarsEnabled.current && panes.partitions == 1 && !panes.playerPanel &&
+        LocalHeaderSystemBarsEnabled.current && panes.partitions == 1 &&
             state.loaded && detail != null && selectedIds.isEmpty() &&
             !hasPagingError(items) && !(items.loadState.refresh is LoadState.Loading && items.itemCount == 0)
     val artworkBar = overlayBody && !headerGone && !state.offline

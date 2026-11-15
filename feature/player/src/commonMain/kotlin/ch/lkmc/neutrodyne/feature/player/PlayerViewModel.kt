@@ -280,12 +280,6 @@ internal class PlayerViewModel(
         playbackActions.play(null) { controller.play() }
     }
 
-    fun setPanelHidden(hidden: Boolean) {
-        viewModelScope.launch {
-            if (settings.set(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN, hidden) is Outcome.Failure) writeFailed()
-        }
-    }
-
     fun skipBack() = controller.skipBack()
 
     fun skipForward() = controller.skipForward()

@@ -102,20 +102,16 @@ public enum class PlayerPresentation { STANDARD, RADIO_HOME }
 /** What the `player` slot needs: the current pane layout and how to navigate from the player. */
 @Immutable
 public data class PlayerSlotState(
-    /** The pane layout the root currently renders; the slot chooses sheet vs side panel from it. */
+    /** The pane layout the root currently renders; the mini player aligns with its content. */
     val layout: PaneLayout,
     /** Selects a top-level tab, or pushes another key onto the selected tab's stack. */
     val navigate: (NavKey) -> Unit,
+    /** The radio home hides the mini player: the radio is the player. */
     val presentation: PlayerPresentation = PlayerPresentation.STANDARD,
-    /** Content bottom in root pixels, held while the full player covers content. */
+    /** Opens the radio home, the only full player (the mini player's tap and Open radio). */
+    val openRadio: () -> Unit = {},
+    /** Content bottom in root pixels; the mini player docks above it. */
     val contentBottomPx: Float = 0f,
-    /** Repeated deep links and navigation requests must remain observable. */
-    val expandRequest: Int = 0,
-    val collapseRequest: Int = 0,
-    val revealPanel: (() -> Unit)? = null,
-    val hidePanel: () -> Unit = {},
-    /** The sheet hides navigation only after settling over it. */
-    val onExpandedSettled: (Boolean) -> Unit = {},
     /**
      * The root's back action (Esc; the desktop Go menu's Back), false when nothing handled it.
      * The shell attaches it to the menu through the player slot.
@@ -203,8 +199,6 @@ public class RootActions(
     public val onTextFieldFocusChange: (Boolean) -> Unit = {},
     /** Persist the pager selection through the shell's settings service before opening Feeds. */
     public val selectFeedSource: suspend (String?) -> Boolean = { false },
-    public val hidePlayerPanel: () -> Unit = {},
-    public val revealPlayerPanel: () -> Unit = {},
     /** The reconnect banner's "Not now" — the shell hides that exact profile for this process. */
     public val dismissReconnect: (ReconnectBanner) -> Unit = {},
     /**
@@ -215,7 +209,7 @@ public class RootActions(
 )
 
 /**
- * The slots the shells fill: [player] is `:feature:player`'s `PlayerSheet`/`PlayerSidePanel` (the
+ * The slots the shells fill: [player] is `:feature:player`'s docked mini player (the
  * shells obtain `PlayerViewModel` themselves — the root never sees it) and [userMessages] is the
  * merged snackbar flow (`SyncController.notices`, download results, …).
  */
@@ -236,12 +230,10 @@ public data class RootUiState(
     val heldChanges: HeldChangesBanner?,
     val remoteSession: RemoteSessionCard?,
     /**
-     * Whether a `NowPlaying` exists — `ndPaneLayout` chooses the side panel vs the sheet from it
-     * (08 Adaptive layouts). Mapped by the shell from `PlaybackStateSource.nowPlaying != null`.
+     * Whether a `NowPlaying` exists; the root reserves the mini player's inset from it (08 Mini
+     * player). Mapped by the shell from `PlaybackStateSource.nowPlaying != null`.
      */
     val hasNowPlaying: Boolean = false,
-    /** `ui.player_panel_hidden` — the side panel's close button sets it (08 Desktop windows). */
-    val playerPanelHidden: Boolean = false,
     /** The Library reconnect banner (08 priority 4); null unless `SyncStatus.Reconnect`. */
     val reconnect: ReconnectBanner? = null,
 ) {

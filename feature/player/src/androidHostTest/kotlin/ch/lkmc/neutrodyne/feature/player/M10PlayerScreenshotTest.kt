@@ -50,11 +50,7 @@ class M10PlayerScreenshotTest {
             try {
                 rule.waitUntil(timeoutMillis = 5_000) {
                     val pixels = rule.onNodeWithTag(case.sheetTag).captureToImage().toPixelMap()
-                    actual =
-                        pixels[
-                            if (case.viewport == PlayerViewport.MINI) pixels.width / 2 else pixels.width - 4,
-                            if (case.viewport == PlayerViewport.MINI) 8 else 32,
-                        ].toArgb()
+                    actual = pixels[pixels.width / 2, 8].toArgb()
                     actual == case.expectedSheetArgb()
                 }
             } catch (error: Throwable) {

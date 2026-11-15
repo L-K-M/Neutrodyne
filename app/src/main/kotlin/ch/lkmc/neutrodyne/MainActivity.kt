@@ -53,7 +53,6 @@ import ch.lkmc.neutrodyne.core.ui.root.dispatchPlaybackKey
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
-import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
@@ -108,9 +107,6 @@ class MainActivity : AppCompatActivity() {
                 .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
 
             val systemUi = rememberAndroidSystemUiState()
-            val panelHidden by graph.settingsRepository
-                .observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
-                .collectAsStateWithLifecycle(initialValue = false)
             val platformActions = rememberAndroidPlatformActions()
             val updates =
                 rememberUpdateRootPresentation(
@@ -138,7 +134,7 @@ class MainActivity : AppCompatActivity() {
                             // The sync bridge's navigator attachment: the player slot is composed
                             // under NeutrodyneRoot, where LocalAppNavigator exists.
                             syncRoot.feedback()
-                            PlayerRoute(slot, upNext = { PlayerUpNextRoute(slot.navigate) })
+                            PlayerRoute(slot)
                         },
                         userMessages = syncRoot.userMessages,
                         importResume = { available, open -> importResumeBanner(available, open) },
@@ -160,7 +156,6 @@ class MainActivity : AppCompatActivity() {
                         ROOT_STATE_BASE.copy(
                             startup = openState.toGateState(),
                             hasNowPlaying = nowPlaying != null,
-                            playerPanelHidden = panelHidden,
                             settingsBadge = updates.badge,
                             notice = updates.notice,
                             heldChanges = syncRoot.heldChanges,

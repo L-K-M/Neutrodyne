@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -20,6 +21,8 @@ import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_failed_badge
@@ -28,6 +31,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu
+import ch.lkmc.neutrodyne.core.ui.resources.radio_menu_sleep
+import ch.lkmc.neutrodyne.core.ui.resources.radio_menu_speed
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -47,6 +52,20 @@ public fun RadioDestinationMenu(
         title = stringResource(Res.string.radio_menu),
     ) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            // The radio is the only full player, so its playback sheets open from here.
+            listOf(
+                Triple(SpeedKey, Res.string.radio_menu_speed, "radio_speed"),
+                Triple(SleepTimerKey, Res.string.radio_menu_sleep, "radio_sleep_timer"),
+            ).forEach { (key, label, tag) ->
+                TextButton(
+                    onClick = {
+                        onDismiss()
+                        navigator.push(key)
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag(tag),
+                ) { Text(stringResource(label)) }
+            }
+            HorizontalDivider()
             val destinations =
                 listOf(
                     Triple(LibraryKey, Res.string.nav_library, "nav_library"),
