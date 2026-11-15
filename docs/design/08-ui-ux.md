@@ -159,9 +159,9 @@ The entire home is a physical radio in shared Compose code. Its cabinet has
 wooden side walls, thickness, plinth and feet. The natural 1100:423 valve deck
 spans the cabinet width. The speaker, textured metal programme faceplate,
 paper episode slips and guides, routed progress recess, single recessed Nixie
-glass slot and concave ivory Play/Pause key form one assembly. No nameplate,
+glass slot and ON/OFF play toggle switch form one assembly. No nameplate,
 visible discard button or extra decorative controls are added. Exactly one
-small physical Menu key, constructed like New playlist, opens existing
+small physical Menu key opens existing
 Library, Up next, Downloads, Discover and Settings destinations over home.
 The existing navigation keys, deep links, Add podcast, Import, notification
 routes and desktop menu items remain. Back returns through their existing
@@ -169,9 +169,7 @@ stacks to radio home. The existing mini/full player remains on other screens;
 home hides the mini player because the radio is the player.
 
 Playlists are groups with existing membership, sync and import/export. Your
-playlists lists real groups. New playlist uses the existing name validator:
-trimmed, normalized, nonempty, at most 40 Unicode code points, unique by name
-key, and at least one subscribed podcast. Its programme shows unplayed
+playlists lists real groups. Its programme shows unplayed
 episodes newest first. Discard calls the existing mark-played use case;
 one Undo marks the episode unplayed so chronology restores its place. The
 message is visible only for its affected playlist. Undo does not restore an
@@ -189,6 +187,18 @@ No selection darkens the counter. Below 100 minutes it displays MM:SS; from
 100 minutes it displays hours, H, colon and minutes, up to 9H:59. Accessible
 elapsed time always includes the full hours, minutes and seconds.
 
+**Owner revision, 2026-11-15.** The radio concentrates on playback and
+programme management. A small enamel sign centred above the slips names the
+playlist and opens Your playlists; the radio no longer creates playlists (no
+New playlist key or chooser entry; groups are created in the Library, and an
+empty chooser says so). The concave Play/Pause key is replaced by a panel
+toggle switch: a chrome bat lever through a hex nut on a plate printed ON
+(red, DE: EIN) and OFF (black, DE: AUS). Lever up means playing; a tap or a
+flick toward the other label toggles it, and it is announced as a switch
+named Play with the transport status. Each slip shows its podcast's cover,
+falling back to the monogram. The Swipe left to discard hint is removed;
+Release / to discard feedback during a swipe remains.
+
 **Production deviations from the prototype (2026-11-04).** Data comes from
 subscriptions, groups and episodes, never fixture content. Selecting an
 episode shows its saved resume position where the specification retains one,
@@ -200,9 +210,9 @@ retain their existing persistence and synchronization behavior.
 A left swipe commits only on release at
 `min(80, max(48, rowWidth * 0.28))` dp; threshold feedback is Release / to
 discard. Vertical scrolling and resize cancel it; a drag suppresses click.
-Focused episodes support Delete on desktop and hardware keyboards. Chooser
-and create inserts restore focus, dismiss on Escape/Back, block underlying
-interaction and keep the create header/action fixed while fields scroll.
+Focused episodes support Delete on desktop and hardware keyboards. The
+chooser insert restores focus, dismisses on Escape/Back, blocks underlying
+interaction and keeps its header fixed while the list scrolls.
 All supplied English labels follow brief section 5 exactly; German resources
 are supplied. Menu (Menü) is the single owner-added label.
 

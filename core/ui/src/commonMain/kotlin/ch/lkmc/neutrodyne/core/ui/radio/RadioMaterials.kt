@@ -188,19 +188,6 @@ internal val DialOpening: Shape =
         close()
     }
 
-internal fun Modifier.concaveIvory(): Modifier =
-    drawWithContent {
-        drawCircle(
-            Brush.radialGradient(
-                listOf(Color(0xFFFFF5D9), Color(0xFFEFE1BF), Color(0xFFB69E76)),
-                center = Offset(size.width * 0.61f, size.height * 0.77f),
-                radius = size.width * 0.7f,
-            ),
-            radius = size.width / 2 - 5.dp.toPx(),
-        )
-        drawContent()
-    }
-
 internal fun Modifier.dialPaper(): Modifier =
     drawWithContent {
         drawRect(

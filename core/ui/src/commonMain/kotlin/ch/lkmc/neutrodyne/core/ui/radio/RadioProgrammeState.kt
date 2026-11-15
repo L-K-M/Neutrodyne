@@ -7,55 +7,29 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 
-/** Kept above the responsive branches so a resize cannot discard a modal draft or list position. */
+/** Kept above the responsive branches so a resize cannot close the chooser or lose the list position. */
 internal class RadioProgrammeState {
-    var mode by mutableStateOf<RadioInsert?>(null)
-    var name by mutableStateOf("")
-    var chosen by mutableStateOf(emptySet<Long>())
-    var launcher = RadioInsert.CHOOSER
-    var creationBaseline: Long? = null
+    var chooserOpen by mutableStateOf(false)
     var playlistId: Long? = null
     var restoreFocus by mutableStateOf(false)
 
-    fun open(
-        next: RadioInsert,
-        createdPlaylistId: Long?,
-    ) {
-        if (mode == null) launcher = next
-        creationBaseline = createdPlaylistId
-        if (next == RadioInsert.CREATE && mode != next) {
-            name = ""
-            chosen = emptySet()
-        }
-        mode = next
+    fun open() {
+        chooserOpen = true
     }
 
     fun close() {
-        mode = null
+        chooserOpen = false
         restoreFocus = true
     }
 
     companion object {
         val Saver =
             listSaver<RadioProgrammeState, String>(
-                save = {
-                    listOf(
-                        it.mode?.name.orEmpty(),
-                        it.name,
-                        it.chosen.joinToString(","),
-                        it.launcher.name,
-                        it.creationBaseline?.toString().orEmpty(),
-                        it.playlistId?.toString().orEmpty(),
-                    )
-                },
+                save = { listOf(it.chooserOpen.toString(), it.playlistId?.toString().orEmpty()) },
                 restore = { saved ->
                     RadioProgrammeState().apply {
-                        mode = saved[0].takeIf { it.isNotEmpty() }?.let(RadioInsert::valueOf)
-                        name = saved[1]
-                        chosen = saved[2].split(',').mapNotNull { it.toLongOrNull() }.toSet()
-                        launcher = RadioInsert.valueOf(saved[3])
-                        creationBaseline = saved[4].toLongOrNull()
-                        playlistId = saved[5].toLongOrNull()
+                        chooserOpen = saved[0].toBoolean()
+                        playlistId = saved[1].toLongOrNull()
                     }
                 },
             )

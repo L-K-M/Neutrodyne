@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -24,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -43,6 +46,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -73,6 +77,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
@@ -88,13 +93,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_all_clear
 import ch.lkmc.neutrodyne.core.ui.resources.radio_discard
 import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu
-import ch.lkmc.neutrodyne.core.ui.resources.radio_new_playlist
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_release
 import ch.lkmc.neutrodyne.core.ui.resources.radio_removed
-import ch.lkmc.neutrodyne.core.ui.resources.radio_swipe
-import ch.lkmc.neutrodyne.core.ui.resources.radio_your_playlist
 import ch.lkmc.neutrodyne.core.ui.resources.settings_update_available
 import ch.lkmc.neutrodyne.core.ui.root.LocalSettingsBadge
 import org.jetbrains.compose.resources.pluralStringResource
@@ -107,9 +109,67 @@ internal enum class RadioRows(
     val titleSize: Int,
     val coverSize: Dp,
 ) {
-    COMPACT(64.dp, 13, 22.dp),
-    STANDARD(68.dp, 13, 22.dp),
-    WIDE(78.dp, 14, 24.dp),
+    COMPACT(64.dp, 13, 40.dp),
+    STANDARD(68.dp, 13, 44.dp),
+    WIDE(78.dp, 14, 52.dp),
+}
+
+private val SlipCoverShape = RoundedCornerShape(3.dp)
+
+/**
+ * The playlist selector is an enamel sign screwed above the slips: small, centred, and
+ * still a 48 dp target. Tapping it opens the playlist chooser.
+ */
+@Composable
+private fun PlaylistSign(
+    name: String,
+    compact: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        modifier
+            .heightIn(min = 48.dp)
+            .focusProperties { canFocus = true }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier
+                .shadow(3.dp, shape)
+                .background(Brush.verticalGradient(listOf(Color(0xFF2B3A4A), Color(0xFF16212D))), shape)
+                .border(2.dp, Brush.verticalGradient(listOf(Color(0xFFE2C98F), Brass, Color(0xFF6E5530))), shape)
+                .padding(horizontal = 8.dp, vertical = if (compact) 4.dp else 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            SignScrew()
+            RadioText(
+                name,
+                if (compact) 13 else 14,
+                modifier = Modifier.weight(1f, fill = false),
+                color = Cream,
+                bold = true,
+                maxLines = 1,
+            )
+            Icon(NdIcons.ArrowForwardIos, null, Modifier.size(11.dp).rotate(90f), tint = Cream)
+            SignScrew()
+        }
+    }
+}
+
+@Composable
+private fun SignScrew() {
+    Canvas(Modifier.size(7.dp)) {
+        drawCircle(Brush.radialGradient(listOf(Color(0xFFF6E7C1), Color(0xFF8A6D3E)), radius = size.minDimension))
+        drawLine(
+            Color(0xFF5A4424),
+            Offset(size.width * 0.2f, size.height * 0.8f),
+            Offset(size.width * 0.8f, size.height * 0.2f),
+            1.dp.toPx(),
+        )
+    }
 }
 
 @Composable
@@ -160,7 +220,6 @@ internal fun RadioProgramme(
         actions.visibleEpisodes,
     )
     val pickerFocus = remember { FocusRequester() }
-    val newFocus = remember { FocusRequester() }
     val windowFocused = LocalWindowInfo.current.isWindowFocused
     val inputMode = LocalInputModeManager.current
     LaunchedEffect(form.restoreFocus, windowFocused, inputMode) {
@@ -168,7 +227,7 @@ internal fun RadioProgramme(
             // Android returns from a modal in touch mode; click targets need keyboard focus restored explicitly.
             inputMode.requestInputMode(InputMode.Keyboard)
             withFrameNanos { }
-            if ((if (form.launcher == RadioInsert.CHOOSER) pickerFocus else newFocus).requestFocus()) {
+            if (pickerFocus.requestFocus()) {
                 form.restoreFocus = false
             }
         }
@@ -211,51 +270,16 @@ internal fun RadioProgramme(
     ) {
         Column(Modifier.fillMaxSize().padding(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Column(Modifier.weight(1f)) {
-                    if (!compact) {
-                        RadioText(
-                            stringResource(Res.string.radio_your_playlist).uppercase(),
-                            11,
-                            color = Cream,
-                            mono = false,
-                        )
-                    }
-                    MaterialPlate(
-                        RadioMaterial.PAPER,
-                        Modifier
-                            .fillMaxWidth()
-                            .recess()
-                            .focusRequester(pickerFocus)
-                            .focusProperties { canFocus = true }
-                            .clickable {
-                                form.open(
-                                    RadioInsert.CHOOSER,
-                                    state.createdPlaylistId,
-                                )
-                            }.testTag("radio_playlist"),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 7.dp).heightIn(min = 48.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioText(
-                                state.playlist?.name ?: stringResource(Res.string.radio_playlists),
-                                if (compact) 17 else 19,
-                                modifier = Modifier.weight(1f),
-                                bold = true,
-                                maxLines = 2,
-                            )
-                            Icon(NdIcons.ArrowForwardIos, null, Modifier.size(16.dp).rotate(90f), tint = Ink)
-                        }
-                    }
+                // Balances the Menu key so the sign stays centred over the slips.
+                Spacer(Modifier.width(radioKeyWidth()))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    PlaylistSign(
+                        state.playlist?.name ?: stringResource(Res.string.radio_playlists),
+                        compact,
+                        onClick = form::open,
+                        modifier = Modifier.focusRequester(pickerFocus).testTag("radio_playlist"),
+                    )
                 }
-                SmallRadioKey(
-                    stringResource(Res.string.radio_new_playlist),
-                    NdIcons.Add,
-                    "radio_new_playlist",
-                    onClick = { form.open(RadioInsert.CREATE, state.createdPlaylistId) },
-                    modifier = Modifier.focusRequester(newFocus),
-                )
                 SmallRadioKey(menuLabel, NdIcons.DragHandle, "radio_menu", actions.menu, modifier = menuNotice)
             }
             RadioText(
@@ -336,32 +360,12 @@ internal fun RadioProgramme(
                                 RadioText(stringResource(Res.string.action_undo), 12, bold = true)
                             }
                         }
-                    } else if (!state.loadError) {
-                        Row(
-                            Modifier.align(Alignment.End).padding(7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(NdIcons.ArrowBack, null, Modifier.size(16.dp), tint = Ink)
-                            RadioText(stringResource(Res.string.radio_swipe), 11)
-                        }
                     }
                 }
             }
         }
     }
-    form.mode?.let { mode ->
-        RadioInsertDialog(
-            mode,
-            form,
-            state,
-            actions,
-            bounds,
-            windowSize,
-            onMode = { form.open(it, state.createdPlaylistId) },
-            onDismiss = form::close,
-        )
-    }
+    if (form.chooserOpen) RadioInsertDialog(state, actions, bounds, windowSize, onDismiss = form::close)
 }
 
 @Composable
@@ -385,8 +389,7 @@ private fun RadioSlip(
             focusRestored()
         }
     }
-    val monogram = rememberMonogram(episode.podcast).initials
-    val initials = if ('&' in episode.podcast && monogram.length == 2) monogram.toList().joinToString("/") else monogram
+    val monogram = rememberMonogram(episode.podcast)
     BoxWithConstraints(Modifier.fillMaxWidth().clipToBounds().background(Color(0xFF38291B))) {
         val density = LocalDensity.current
         val threshold = with(density) { radioDiscardThreshold(maxWidth.value).dp.toPx() }
@@ -457,20 +460,18 @@ private fun RadioSlip(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(
-                    Modifier.size(rows.coverSize).border(1.dp, Color(0xFF806447), CircleShape).clearAndSetSemantics {},
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // Printed cover marks are decorative, like an icon; only the episode copy scales.
-                    Text(
-                        initials,
-                        color = Ink,
-                        fontFamily = courier(),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = (9f / density.fontScale).sp,
-                        lineHeight = (10.8f / density.fontScale).sp,
-                    )
-                }
+                // The cover is decorative; the podcast name beside it carries the meaning.
+                CoverArt(
+                    ref = episode.podcastArtwork,
+                    monogram = monogram,
+                    modifier =
+                        Modifier
+                            .size(rows.coverSize)
+                            .border(1.dp, Color(0xFF806447), SlipCoverShape)
+                            .clearAndSetSemantics {},
+                    shape = SlipCoverShape,
+                    avgArgb = episode.podcastArtworkAvgArgb,
+                )
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         RadioText(episode.podcast, 11, modifier = Modifier.weight(1f), maxLines = 1)
@@ -504,10 +505,9 @@ internal fun SmallRadioKey(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val labelWidth = (48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)).coerceAtMost(64.dp)
     Column(
         modifier
-            .width(labelWidth)
+            .width(radioKeyWidth())
             .heightIn(min = 48.dp)
             .focusProperties { canFocus = true }
             .clickable(onClick = onClick)
@@ -537,6 +537,9 @@ internal fun SmallRadioKey(
         )
     }
 }
+
+@Composable
+private fun radioKeyWidth(): Dp = (48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)).coerceAtMost(64.dp)
 
 @Composable
 internal fun RadioText(

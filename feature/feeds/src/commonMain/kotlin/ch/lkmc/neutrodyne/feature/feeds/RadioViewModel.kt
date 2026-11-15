@@ -12,7 +12,6 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
-import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -24,7 +23,6 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.Group
-import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
@@ -35,14 +33,10 @@ import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.radio.RadioEpisode
 import ch.lkmc.neutrodyne.core.ui.radio.RadioPlaylist
-import ch.lkmc.neutrodyne.core.ui.radio.RadioPodcast
 import ch.lkmc.neutrodyne.core.ui.radio.RadioState
 import ch.lkmc.neutrodyne.core.ui.radio.radioSelectionAfterRemoval
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
-import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_empty
-import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_long
-import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_taken
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.playback.api.PlayResult
@@ -145,12 +139,6 @@ public class RadioViewModel(
                     switchTo(id, if (initialized) PlaylistChange.PASSIVE else PlaylistChange.INITIAL)
                 }
                 initialized = true
-            }
-        }
-        viewModelScope.launch {
-            podcasts.observeLibraryTiles(null).collect { tiles ->
-                mutableState.value =
-                    state.value.copy(podcasts = tiles.map { RadioPodcast(it.podcastId, it.displayTitle) })
             }
         }
         viewModelScope.launch {
@@ -540,57 +528,6 @@ public class RadioViewModel(
                 }.onFailure { writeFailed() }
             writing = false
             deferredRows = null
-        }
-    }
-
-    public fun createPlaylist(
-        name: String,
-        members: Set<Long>,
-    ) {
-        if (state.value.creating || members.isEmpty() ||
-            !state.value.podcasts
-                .map { it.id }
-                .containsAll(members)
-        ) {
-            return
-        }
-        mutableState.value = state.value.copy(creating = true, createError = null)
-        viewModelScope.launch {
-            val result =
-                suspendRunCatching { groups.create(GroupDraft(name.trim()), members) }.getOrElse {
-                    mutableState.value =
-                        state.value.copy(creating = false, createError = UiText.Res(Res.string.write_failed))
-                    return@launch
-                }
-            when (result) {
-                is Outcome.Success -> {
-                    undo = null
-                    knownGroups = groups.observeGroups().first()
-                    val created = knownGroups.find { it.id == result.value }
-                    if (created == null) {
-                        mutableState.value =
-                            state.value.copy(creating = false, createError = UiText.Res(Res.string.write_failed))
-                        return@launch
-                    }
-                    // The repository observer can already have selected the first new group passively.
-                    // Creation remains an explicit switch, so it must still pause and select its first row.
-                    switchTo(created.id)
-                    persistSelection(created)
-                    mutableState.value = state.value.copy(createdPlaylistId = result.value)
-                }
-
-                is Outcome.Failure -> {
-                    val message =
-                        when (val error = result.error) {
-                            GroupError.NameEmpty -> UiText.Res(Res.string.group_edit_name_empty)
-                            is GroupError.NameTooLong -> UiText.Res(Res.string.group_edit_name_long, listOf(error.max))
-                            is GroupError.NameTaken -> UiText.Res(Res.string.group_edit_name_taken, listOf(name.trim()))
-                            else -> UiText.Res(Res.string.write_failed)
-                        }
-                    mutableState.value = state.value.copy(createError = message)
-                }
-            }
-            mutableState.value = state.value.copy(creating = false)
         }
     }
 

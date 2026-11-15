@@ -56,7 +56,17 @@ internal fun RadioRoute(model: RadioViewModel = metroViewModel()) {
         if (group != null && items.loadState.refresh is LoadState.NotLoading) {
             model.onRows(
                 group,
-                snapshot.items.map { RadioEpisode(it.id, it.title, it.podcastTitle, it.durationMs, it.sortDate) },
+                snapshot.items.map {
+                    RadioEpisode(
+                        it.id,
+                        it.title,
+                        it.podcastTitle,
+                        it.durationMs,
+                        it.sortDate,
+                        it.podcastArtwork,
+                        it.podcastArtworkAvgArgb,
+                    )
+                },
                 complete =
                     snapshot.placeholdersBefore == 0 && snapshot.placeholdersAfter == 0 &&
                         items.loadState.append.endOfPaginationReached,
@@ -72,7 +82,6 @@ internal fun RadioRoute(model: RadioViewModel = metroViewModel()) {
             togglePlay = model::togglePlay,
             seek = model::seek,
             selectPlaylist = model::selectPlaylist,
-            createPlaylist = model::createPlaylist,
             menu = { menu = true },
             loadEpisode = { index ->
                 state.episodes.getOrNull(index)?.id?.let { id ->

@@ -208,27 +208,6 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
-    @Test fun createUsesExistingNameRulesAndRealMembershipAndClearsUndo() =
-        runTest {
-            withRadio { model, first ->
-                model.discard(3)
-                runCurrent()
-                model.createPlaylist("  Evening  ", setOf(1))
-                runCurrent()
-                val created = groups.groups.value.single { it.name == "Evening" }
-                assertEquals(setOf(1L), groups.members.value[created.id])
-                assertEquals(created.id, model.state.value.playlistId)
-                assertNull(model.state.value.removed)
-                model.createPlaylist("evening", setOf(1))
-                runCurrent()
-                assertTrue(model.state.value.createError != null)
-                model.createPlaylist("x".repeat(41), setOf(1))
-                runCurrent()
-                assertEquals(2, groups.groups.value.size)
-                assertTrue(first != created.id)
-            }
-        }
-
     @Test fun queueAutoAdvanceOutsideGroupStillDrivesRadioAndResumesContext() =
         runTest {
             withRadio { model, id ->
@@ -359,38 +338,6 @@ class RadioViewModelTest : MainDispatcherTest() {
                 runCurrent()
                 assertEquals(1L, model.state.value.selectedId)
                 assertTrue(model.state.value.playing)
-            }
-        }
-
-    @Test fun creatingTheFirstPlaylistPausesEvenWhenItsObserverRunsFirst() =
-        runTest {
-            val yielding =
-                object : ch.lkmc.neutrodyne.core.domain.GroupRepository by groups {
-                    override suspend fun create(
-                        draft: GroupDraft,
-                        memberIds: Set<Long>,
-                    ): Outcome<Long, ch.lkmc.neutrodyne.core.domain.GroupError> {
-                        val result = groups.create(draft, memberIds)
-                        kotlinx.coroutines.yield()
-                        return result
-                    }
-                }
-            withRadio(repository = yielding) { model, id ->
-                groups.delete(id)
-                runCurrent()
-                controller.state.nowPlaying.value = testNowPlaying(99).copy(isPlaying = true, context = null)
-                runCurrent()
-                val before = controller.calls.size
-                model.createPlaylist("Morning", setOf(1))
-                runCurrent()
-                assertEquals(before + 1, controller.calls.size)
-                assertEquals(
-                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
-                    controller.calls.last(),
-                )
-                model.onRows(requireNotNull(model.state.value.playlistId), rows)
-                assertEquals(1L, model.state.value.selectedId)
-                assertFalse(model.state.value.playing)
             }
         }
 

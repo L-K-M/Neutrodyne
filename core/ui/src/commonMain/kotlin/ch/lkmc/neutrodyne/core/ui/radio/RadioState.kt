@@ -2,7 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
-import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 
 /** Immutable presentation data; production adapters retain repository IDs, never fixture indices. */
 public data class RadioEpisode(
@@ -11,17 +11,15 @@ public data class RadioEpisode(
     val podcast: String,
     val durationMs: Long? = null,
     val sortDate: Long = 0,
+    /** The podcast's cover printed on the slip; null falls back to the podcast's monogram. */
+    val podcastArtwork: ArtworkRef? = null,
+    val podcastArtworkAvgArgb: Int? = null,
 )
 
 public data class RadioPlaylist(
     val id: Long,
     val name: String,
     val podcastCount: Int,
-)
-
-public data class RadioPodcast(
-    val id: Long,
-    val name: String,
 )
 
 public data class RadioState(
@@ -38,10 +36,6 @@ public data class RadioState(
     val playing: Boolean = false,
     val hasPlayed: Boolean = false,
     val removed: RadioEpisode? = null,
-    val podcasts: List<RadioPodcast> = emptyList(),
-    val creating: Boolean = false,
-    val createError: UiText? = null,
-    val createdPlaylistId: Long? = null,
 ) {
     public val playlist: RadioPlaylist? get() = playlists.find { it.id == playlistId }
     public val selected: RadioEpisode? get() =

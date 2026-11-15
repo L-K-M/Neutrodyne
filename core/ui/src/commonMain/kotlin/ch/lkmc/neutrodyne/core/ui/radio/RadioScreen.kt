@@ -59,7 +59,6 @@ public data class RadioActions(
     val togglePlay: () -> Unit = {},
     val seek: (Long) -> Unit = {},
     val selectPlaylist: (Long) -> Unit = {},
-    val createPlaylist: (String, Set<Long>) -> Unit = { _, _ -> },
     val menu: () -> Unit = {},
     val loadEpisode: (Int) -> Unit = {},
     val visibleEpisodes: (Set<Long>) -> Unit = {},

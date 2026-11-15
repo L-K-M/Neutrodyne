@@ -17,10 +17,4 @@ internal fun radioFixture(playing: Boolean = false): RadioState =
         elapsedMs = if (playing) 642_000 else 0,
         playing = playing,
         hasPlayed = playing,
-        podcasts =
-            listOf(
-                RadioPodcast(1, "Signal & Sound"),
-                RadioPodcast(2, "Side Streets"),
-                RadioPodcast(3, "Open Circuit"),
-            ),
     )

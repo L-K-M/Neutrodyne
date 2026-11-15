@@ -2,16 +2,21 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,22 +25,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -43,9 +57,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.chapter_seek
 import ch.lkmc.neutrodyne.core.ui.resources.radio_choose_other
@@ -53,12 +70,16 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_cleared
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_nothing
-import ch.lkmc.neutrodyne.core.ui.resources.radio_pause
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
 import ch.lkmc.neutrodyne.core.ui.resources.radio_play
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playing
 import ch.lkmc.neutrodyne.core.ui.resources.radio_ready
+import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_off
+import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_on
 import org.jetbrains.compose.resources.stringResource
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 internal fun RadioPlayer(
@@ -176,56 +197,184 @@ internal fun RadioPlayer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Nixie(state.elapsedMs, selected != null, compact, Modifier.weight(1f))
-                val label = stringResource(if (state.playing) Res.string.radio_pause else Res.string.radio_play)
-                Box(
-                    Modifier
-                        .size((if (compact) 64.dp else 70.dp) * capScale)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(
-                                    Color(0xFF0D120E),
-                                    Color(0xFF5B5038),
-                                ),
-                            ),
-                            CircleShape,
-                        ).border(
-                            1.dp,
-                            Brass,
-                            CircleShape,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        Modifier
-                            .offset(y = if (state.playing) 1.dp else (-2).dp)
-                            .alpha(if (selected == null) 0.56f else 1f)
-                            .size((if (compact) 56.dp else 60.dp) * capScale)
-                            .background(Brush.linearGradient(listOf(Color(0xFFFFF8E7), Color(0xFFB99B68))), CircleShape)
-                            .border(1.dp, Color(0xFFFFF4D6), CircleShape)
-                            .concaveIvory()
-                            .clickable(enabled = selected != null, onClick = actions.togglePlay)
-                            .semantics {
-                                contentDescription = "$label ${selected?.title.orEmpty()}"
-                                stateDescription =
-                                    statusText
-                            }.testTag("radio_play"),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Box(Modifier.padding(4.dp)) {
-                            Icon(
-                                if (state.playing) NdIcons.Pause else NdIcons.PlayArrow,
-                                null,
-                                Modifier.size(22.dp),
-                                tint = Ink,
-                            )
-                        }
-                        RadioText(label, 11, mono = false)
-                    }
-                }
+                PlaySwitch(
+                    on = state.playing,
+                    enabled = selected != null,
+                    description = "${stringResource(Res.string.radio_play)} ${selected?.title.orEmpty()}",
+                    status = statusText,
+                    compact = compact,
+                    scale = capScale,
+                    onToggle = actions.togglePlay,
+                )
             }
         }
     }
+}
+
+/**
+ * Play/pause is a panel toggle switch: a chrome bat lever through a hex nut on a plate
+ * printed ON (red) and OFF (black). Lever up means playing. Tap, or flick the lever toward
+ * the other label.
+ */
+@Composable
+private fun PlaySwitch(
+    on: Boolean,
+    enabled: Boolean,
+    description: String,
+    status: String,
+    compact: Boolean,
+    scale: Float,
+    onToggle: () -> Unit,
+) {
+    val reducedMotion = LocalReducedMotion.current
+    // -1 is lever up (ON), +1 is lever down (OFF).
+    val lever by animateFloatAsState(
+        if (on) -1f else 1f,
+        if (reducedMotion) snap() else spring(dampingRatio = 0.55f, stiffness = 900f),
+    )
+    val currentOn by rememberUpdatedState(on)
+    val toggle by rememberUpdatedState(onToggle)
+    // The switch keeps the footprint of the key it replaced, so the radio's layout budget is unchanged.
+    val width = (if (compact) 54.dp else 58.dp) * scale
+    val height = (if (compact) 64.dp else 70.dp) * scale
+    val tab = height * SWITCH_TAB_FRACTION
+    Box(
+        Modifier
+            .size(width, height)
+            .alpha(if (enabled) 1f else 0.56f)
+            .toggleable(on, enabled = enabled, role = Role.Switch) { toggle() }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                var travel = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { travel = 0f },
+                    onVerticalDrag = { change, amount ->
+                        change.consume()
+                        travel += amount
+                    },
+                    onDragEnd = {
+                        val threshold = 12.dp.toPx()
+                        if ((travel < -threshold && !currentOn) || (travel > threshold && currentOn)) toggle()
+                    },
+                )
+            }.semantics {
+                contentDescription = description
+                stateDescription = status
+            }.testTag("radio_play"),
+    ) {
+        Canvas(Modifier.matchParentSize()) { drawSwitchPlate(tab.toPx()) }
+        Column(Modifier.matchParentSize()) {
+            SwitchLabel(stringResource(Res.string.radio_switch_on), tab)
+            Spacer(Modifier.weight(1f))
+            SwitchLabel(stringResource(Res.string.radio_switch_off), tab)
+        }
+        Canvas(Modifier.matchParentSize()) { drawSwitchLever(lever) }
+    }
+}
+
+@Composable
+private fun SwitchLabel(
+    text: String,
+    height: Dp,
+) {
+    Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
+        // Printed on the plate, so it scales with the plate rather than with the text size.
+        Text(
+            text,
+            color = Color(0xFFF7F1E3),
+            fontFamily = barlow(),
+            fontWeight = FontWeight.Bold,
+            fontSize = (height.value * 0.52f / LocalDensity.current.fontScale).sp,
+            lineHeight = (height.value * 0.6f / LocalDensity.current.fontScale).sp,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+private fun DrawScope.drawSwitchPlate(tab: Float) {
+    val corner = CornerRadius(5.dp.toPx())
+    drawRoundRect(
+        Brush.verticalGradient(listOf(Color(0xFFF1F0EA), Color(0xFFB4B2A8), Color(0xFFDCDAD2), Color(0xFF9C9A90))),
+        cornerRadius = corner,
+    )
+    drawRoundRect(Color(0xFF6E6C64), cornerRadius = corner, style = Stroke(1.dp.toPx()))
+    val inset = 3.dp.toPx()
+    drawRoundRect(
+        Color(0xFFCB2A22),
+        Offset(inset, inset),
+        Size(size.width - inset * 2, tab - inset),
+        CornerRadius(3.dp.toPx()),
+    )
+    drawRoundRect(
+        Color(0xFF1C1B19),
+        Offset(inset, size.height - tab),
+        Size(size.width - inset * 2, tab - inset),
+        CornerRadius(3.dp.toPx()),
+    )
+    val center = Offset(size.width / 2, size.height / 2)
+    val nut = minOf(size.width, size.height - tab * 2) * 0.46f
+    val hexagon =
+        Path().apply {
+            for (corner in 0..5) {
+                val angle = (corner * 60.0) * PI / 180.0
+                val point = Offset(center.x + nut * cos(angle).toFloat(), center.y + nut * sin(angle).toFloat())
+                if (corner == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
+            }
+            close()
+        }
+    drawPath(hexagon, Color(0x55000000), style = Stroke(2.dp.toPx()))
+    drawPath(
+        hexagon,
+        Brush.linearGradient(
+            listOf(Color(0xFFFAFAF6), Color(0xFFA7A59C), Color(0xFFE6E4DC), Color(0xFF7F7D74)),
+            center - Offset(nut, nut),
+            center + Offset(nut, nut),
+        ),
+    )
+    drawPath(hexagon, Color(0xFF6A685F), style = Stroke(0.75.dp.toPx()))
+    // Threaded bushing: concentric rings around the lever's pivot hole.
+    val bushing = nut * 0.68f
+    drawCircle(
+        Brush.radialGradient(listOf(Color(0xFFE9E7E0), Color(0xFF8D8B82)), center, bushing),
+        bushing,
+        center,
+    )
+    for (ring in 1..3) {
+        drawCircle(Color(0x66504E46), bushing * (1f - ring * 0.18f), center, style = Stroke(0.75.dp.toPx()))
+    }
+    drawCircle(Color(0xFF2A2925), bushing * 0.34f, center)
+}
+
+private fun DrawScope.drawSwitchLever(position: Float) {
+    val center = Offset(size.width / 2, size.height / 2)
+    // The tip stops just short of the printed tabs so ON and OFF stay legible.
+    val reach = size.height * 0.17f
+    val base = size.width * 0.07f
+    val tip = size.width * 0.11f
+    val end = Offset(center.x, center.y + position * reach)
+    val shadow = Offset(1.5.dp.toPx(), 2.dp.toPx())
+
+    fun bat(offset: Offset): Path =
+        Path().apply {
+            moveTo(center.x - base + offset.x, center.y + offset.y)
+            lineTo(end.x - tip + offset.x, end.y + offset.y)
+            lineTo(end.x + tip + offset.x, end.y + offset.y)
+            lineTo(center.x + base + offset.x, center.y + offset.y)
+            close()
+        }
+    drawPath(bat(shadow), Color(0x40000000))
+    drawCircle(Color(0x40000000), tip, end + shadow)
+    val chrome =
+        Brush.horizontalGradient(
+            listOf(Color(0xFF6F6D66), Color(0xFFFBFBF8), Color(0xFFBDBBB3), Color(0xFF5E5C55)),
+            end.x - tip,
+            end.x + tip,
+        )
+    drawCircle(chrome, base * 1.3f, center)
+    drawPath(bat(Offset.Zero), chrome)
+    drawCircle(chrome, tip, end)
+    drawCircle(Color(0xCCFFFFFF), tip * 0.35f, end - Offset(tip * 0.3f, tip * 0.3f))
 }
 
 @Composable
@@ -401,6 +550,8 @@ private fun Nixie(
         }
     }
 }
+
+private const val SWITCH_TAB_FRACTION = 0.22f
 
 // Unlit wire behind each digit, a material glyph rather than localized copy.
 private const val CATHODE_GHOST = '8'

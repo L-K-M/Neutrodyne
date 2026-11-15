@@ -294,9 +294,9 @@ class RadioHomeDeviceTest {
             graph.playbackStateSource.nowPlaying.value
                 ?.isPlaying == false
         }
-        compose.onNodeWithTag("radio_new_playlist").performClick()
-        compose.onNodeWithTag("radio_name").assertIsFocused()
-        compose.onNodeWithTag("radio_create").assertIsDisplayed()
+        compose.onNodeWithTag("radio_new_playlist").assertDoesNotExist()
+        compose.onNodeWithTag("radio_playlist").performClick()
+        compose.onNodeWithTag("radio_insert").assertIsDisplayed()
         if (capture == "phone") {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             check(
@@ -313,10 +313,6 @@ class RadioHomeDeviceTest {
             compose.onAllNodes(hasTestTag("radio_insert")).fetchSemanticsNodes().isEmpty()
         }
         compose.onNodeWithTag("radio_insert").assertDoesNotExist()
-        compose.waitUntil(15_000) {
-            compose.onNodeWithTag("radio_new_playlist").fetchSemanticsNode().config[SemanticsProperties.Focused]
-        }
-        compose.onNodeWithTag("radio_new_playlist").assertIsFocused()
         compose.onNodeWithTag("radio_playlist").performClick()
         compose.onNodeWithTag("radio_playlist_option_${groupIds.first()}").assertIsFocused()
         pressBack()
