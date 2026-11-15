@@ -45,8 +45,6 @@ import ch.lkmc.neutrodyne.feature.settings.resources.appearance_artwork_tint
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_artwork_tint_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color_summary
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_pure_black
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_pure_black_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme
@@ -85,9 +83,6 @@ internal fun AppearancePage(
         settings
             .observe(AppearanceSettingKeys.DYNAMIC_COLOR)
             .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.DYNAMIC_COLOR.default)
-    val miniPlayerSkip by settings
-        .observe(AppearanceSettingKeys.MINI_PLAYER_SKIP)
-        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.MINI_PLAYER_SKIP.default)
     val tint by settings
         .observe(AppearanceSettingKeys.ARTWORK_TINT)
         .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.ARTWORK_TINT.default)
@@ -146,12 +141,6 @@ internal fun AppearancePage(
                 summary = stringResource(Res.string.appearance_pure_black_summary),
                 checked = black,
                 onCheckedChange = { save(AppearanceSettingKeys.PURE_BLACK, it) },
-            )
-            SettingsSwitchRow(
-                title = stringResource(Res.string.appearance_mini_player_skip),
-                summary = stringResource(Res.string.appearance_mini_player_skip_summary),
-                checked = miniPlayerSkip,
-                onCheckedChange = { save(AppearanceSettingKeys.MINI_PLAYER_SKIP, it) },
             )
             if (channelsExist) {
                 SettingsRow(
