@@ -179,6 +179,10 @@ class ExternalYouTubeModeTest {
                 ) { onAllNodesWithText("MKBHD & Studio").fetchSemanticsNodes().isNotEmpty() }
                 assertEquals(emptyList(), runBlocking { db.podcastDao().allForExport() })
                 val checkbox = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
+                // The title can already be visible in the preview while the add sheet loads.
+                waitUntil(timeoutMillis = 20_000) {
+                    onAllNodes(hasText("Journey group") and checkbox).fetchSemanticsNodes().isNotEmpty()
+                }
                 onNode(hasText("Journey group") and checkbox).performClick()
                 onNodeWithText("Subscribe").performClick()
                 waitUntil(timeoutMillis = 30_000) {
@@ -280,7 +284,8 @@ class ExternalYouTubeModeTest {
                             }
                         },
                 )
-                println(onRoot().printToString())
+                // A preview and sheet can expose multiple roots; keep the original failure.
+                runCatching { println(onRoot().printToString()) }
                 throw error
             } finally {
                 runOnIdle { showing = false }
