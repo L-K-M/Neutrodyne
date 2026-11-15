@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -67,14 +69,16 @@ class MainActivitySyncHandoffTest {
 
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Continue on this device")
+                .onAllNodesWithContentDescription(CARD_DESCRIPTION)
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
-        composeRule.onNodeWithText("Episode 7 · 23:14 · from Pixel 8").assertExists()
+        composeRule.onNodeWithText("Episode 7 · 23:14 · from Pixel 8", useUnmergedTree = true).assertExists()
         assertThat(app.syncResolutions).isGreaterThan(0)
 
-        composeRule.onNode(hasText("Play") and isEnabled()).performClick()
+        composeRule
+            .onNode(hasText("Play") and hasAnyAncestor(hasContentDescription(CARD_DESCRIPTION)), useUnmergedTree = true)
+            .performClick()
         composeRule.waitUntil(TIMEOUT_MS) {
             app.playback.calls.contains(
                 FakePlaybackController.Call.Transport(FakePlaybackController.Action.PLAY),
@@ -85,17 +89,21 @@ class MainActivitySyncHandoffTest {
         app.sync.remoteSession.value = OFFER
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Continue on this device")
+                .onAllNodesWithContentDescription(CARD_DESCRIPTION)
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
-        composeRule.onNodeWithText("Dismiss").performClick()
+        composeRule
+            .onNode(
+                hasText("Dismiss") and hasAnyAncestor(hasContentDescription(CARD_DESCRIPTION)),
+                useUnmergedTree = true,
+            ).performClick()
         composeRule.waitUntil(TIMEOUT_MS) {
             app.sync.remoteSessionDismissals.size == 1
         }
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Continue on this device")
+                .onAllNodesWithContentDescription(CARD_DESCRIPTION)
                 .fetchSemanticsNodes()
                 .isEmpty()
         }
@@ -114,7 +122,7 @@ class MainActivitySyncHandoffTest {
 
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Continue on this device")
+                .onAllNodesWithContentDescription(CARD_DESCRIPTION)
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
@@ -122,7 +130,7 @@ class MainActivitySyncHandoffTest {
         app.playback.state.nowPlaying.value = testNowPlaying().copy(isPlaying = true)
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Continue on this device")
+                .onAllNodesWithContentDescription(CARD_DESCRIPTION)
                 .fetchSemanticsNodes()
                 .isEmpty()
         }
@@ -132,7 +140,7 @@ class MainActivitySyncHandoffTest {
             testNowPlaying().copy(isPlaying = false, playWhenReady = false)
         composeRule.waitUntil(TIMEOUT_MS) {
             composeRule
-                .onAllNodesWithText("Continue on this device")
+                .onAllNodesWithContentDescription(CARD_DESCRIPTION)
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
@@ -190,6 +198,9 @@ class MainActivitySyncHandoffTest {
 
     private companion object {
         const val TIMEOUT_MS = 15_000L
+
+        /** The card's single accessibility node (08), worded from OFFER. */
+        const val CARD_DESCRIPTION = "Continue on this device: Episode 7 at 23 minutes 14 seconds, from Pixel 8"
         const val RECONNECT_URL = "https://sync.example.org/personal"
         const val RECONNECT_MESSAGE = "Reconnect to sync.example.org to keep syncing"
 

@@ -24,8 +24,12 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
-/** 08 Continue on this device: one polite accessibility node with Play and Dismiss. */
+/**
+ * 08 Continue on this device: one polite accessibility node with Play (click) and Dismiss. Dismiss
+ * is the standard action because Compose Desktop does not expose custom actions to screen readers.
+ */
 @OptIn(ExperimentalTestApi::class)
 class ContinueOnThisDeviceCardTest {
     private lateinit var previousLocale: Locale
@@ -50,18 +54,15 @@ class ContinueOnThisDeviceCardTest {
             val node = onNodeWithContentDescription(DESCRIPTION).fetchSemanticsNode()
             assertEquals(LiveRegionMode.Polite, node.config.getOrNull(SemanticsProperties.LiveRegion))
             assertEquals("Play", node.config.getOrNull(SemanticsActions.OnClick)?.label)
-            assertEquals(
-                listOf("Dismiss"),
-                node.config.getOrNull(SemanticsActions.CustomActions)?.map { it.label },
-            )
+            assertEquals("Dismiss", node.config.getOrNull(SemanticsActions.Dismiss)?.label)
+            assertNull(node.config.getOrNull(SemanticsActions.CustomActions))
             // The texts and buttons draw but expose no nodes of their own to accessibility services.
             for (text in listOf("Continue on this device", "Episode 7 · 23:14 · from Pixel 8", "Play", "Dismiss")) {
                 onAllNodesWithText(text).assertCountEquals(0)
             }
 
             onNodeWithContentDescription(DESCRIPTION).performSemanticsAction(SemanticsActions.OnClick)
-            val dismiss = node.config[SemanticsActions.CustomActions].single()
-            runOnIdle { dismiss.action() }
+            onNodeWithContentDescription(DESCRIPTION).performSemanticsAction(SemanticsActions.Dismiss)
             assertEquals(listOf("continue", "dismiss"), calls)
         }
 

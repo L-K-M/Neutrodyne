@@ -13,13 +13,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
@@ -147,28 +145,24 @@ internal fun ContinueOnThisDeviceCard(
         )
     val playLabel = stringResource(Res.string.play)
     val dismissLabel = stringResource(Res.string.dismiss)
-    // 08: one accessibility node carries the whole offer and announces itself politely; its
-    // actions replace the buttons' own nodes. A tap anywhere on the card continues here like Play.
+    // 08: one accessibility node carries the whole offer and announces itself politely; the
+    // texts and buttons inside expose no nodes of their own. A tap anywhere on the card, or the
+    // node's click action, continues here like Play. Dismiss is the standard dismiss action, not a
+    // custom one: Compose Desktop's accessibility bridge exposes only the standard actions.
     Card(
         modifier =
             modifier
                 .fillMaxWidth()
                 .padding(CARD_MARGIN)
+                .clickable(onClickLabel = playLabel, onClick = actions.continueHere)
                 .clearAndSetSemantics {
                     contentDescription = description
                     liveRegion = LiveRegionMode.Polite
-                    onClick(label = playLabel) {
-                        actions.continueHere()
+                    dismiss(label = dismissLabel) {
+                        actions.dismissRemoteSession()
                         true
                     }
-                    customActions =
-                        listOf(
-                            CustomAccessibilityAction(dismissLabel) {
-                                actions.dismissRemoteSession()
-                                true
-                            },
-                        )
-                }.clickable(onClickLabel = playLabel, onClick = actions.continueHere),
+                },
     ) {
         Column(Modifier.padding(CARD_PADDING)) {
             Text(

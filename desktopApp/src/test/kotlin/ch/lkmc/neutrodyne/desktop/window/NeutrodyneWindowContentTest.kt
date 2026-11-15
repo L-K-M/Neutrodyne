@@ -7,9 +7,10 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -290,11 +291,12 @@ class NeutrodyneWindowContentTest {
 
             runOnIdle { sync.remoteSession.value = OFFER }
             waitUntil("the continue card shows", TIMEOUT_MS) {
-                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+                onAllNodesWithContentDescription(CARD_DESCRIPTION).fetchSemanticsNodes().isNotEmpty()
             }
-            onNodeWithText("Episode 7 · 23:14 · from Pixel 8").assertExists()
+            onNodeWithText("Episode 7 · 23:14 · from Pixel 8", useUnmergedTree = true).assertExists()
 
-            onNode(hasText("Play") and isEnabled()).performClick()
+            onNode(hasText("Play") and hasAnyAncestor(hasContentDescription(CARD_DESCRIPTION)), useUnmergedTree = true)
+                .performClick()
             waitUntil("the resume reached play()", TIMEOUT_MS) {
                 playback.calls.contains(
                     FakePlaybackController.Call.Transport(FakePlaybackController.Action.PLAY),
@@ -304,14 +306,17 @@ class NeutrodyneWindowContentTest {
 
             runOnIdle { sync.remoteSession.value = OFFER }
             waitUntil("the card shows again", TIMEOUT_MS) {
-                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+                onAllNodesWithContentDescription(CARD_DESCRIPTION).fetchSemanticsNodes().isNotEmpty()
             }
-            onNodeWithText("Dismiss").performClick()
+            onNode(
+                hasText("Dismiss") and hasAnyAncestor(hasContentDescription(CARD_DESCRIPTION)),
+                useUnmergedTree = true,
+            ).performClick()
             waitUntil("the dismissal reached the service", TIMEOUT_MS) {
                 sync.remoteSessionDismissals.size == 1
             }
             waitUntil("the cleared offer hides the card", TIMEOUT_MS) {
-                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isEmpty()
+                onAllNodesWithContentDescription(CARD_DESCRIPTION).fetchSemanticsNodes().isEmpty()
             }
         }
 
@@ -385,12 +390,12 @@ class NeutrodyneWindowContentTest {
                 sync.remoteSession.value = OFFER
             }
             waitUntil("the card shows beside the paused mini-player", TIMEOUT_MS) {
-                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+                onAllNodesWithContentDescription(CARD_DESCRIPTION).fetchSemanticsNodes().isNotEmpty()
             }
 
             runOnIdle { playback.state.nowPlaying.value = testNowPlaying() }
             waitUntil("live playback hides the card", TIMEOUT_MS) {
-                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isEmpty()
+                onAllNodesWithContentDescription(CARD_DESCRIPTION).fetchSemanticsNodes().isEmpty()
             }
             assertThat(sync.remoteSession.value).isEqualTo(OFFER)
 
@@ -399,7 +404,7 @@ class NeutrodyneWindowContentTest {
                     testNowPlaying().copy(isPlaying = false, playWhenReady = false)
             }
             waitUntil("pausing re-shows the card", TIMEOUT_MS) {
-                onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()
+                onAllNodesWithContentDescription(CARD_DESCRIPTION).fetchSemanticsNodes().isNotEmpty()
             }
         }
 
@@ -595,6 +600,9 @@ class NeutrodyneWindowContentTest {
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+
+        /** The card's single accessibility node (08), worded from OFFER. */
+        const val CARD_DESCRIPTION = "Continue on this device: Episode 7 at 23 minutes 14 seconds, from Pixel 8"
         const val RECONNECT_URL = "https://sync.example.org/personal"
         const val RECONNECT_MESSAGE = "Reconnect to sync.example.org to keep syncing"
 
