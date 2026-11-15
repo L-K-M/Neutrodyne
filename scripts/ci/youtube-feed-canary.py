@@ -29,7 +29,7 @@ def fetch(url):
     # Redirects (including consent) are diagnostics, never an unbounded follow chain.
     request = urllib.request.Request(url, headers={
         "User-Agent": "Neutrodyne/feed-canary (+https://github.com/L-K-M/Neutrodyne)",
-        "Accept": "application/atom+xml", "Cookie": "SOCS=CAE=",
+        "Accept": "application/atom+xml", "Cookie": "SOCS=CAE",
     })
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=TIMEOUT) as response:

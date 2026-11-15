@@ -32,8 +32,10 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import okhttp3.Interceptor
 import org.junit.After
 import org.junit.Before
@@ -136,7 +138,7 @@ class LayerAReplayTest {
             assertEquals(listOf(HttpClientKind.FEED), kinds)
             val request = server.takeRequest()
             assertEquals("/@mkbhd", request.url.encodedPath)
-            assertEquals("SOCS=CAE=", request.headers["Cookie"])
+            assertEquals("SOCS=CAE", request.headers["Cookie"])
             assertEquals("de-CH, en;q=0.5", request.headers["Accept-Language"])
             assertEquals("text/html", request.headers["Accept"])
             assertTrue(request.headers["User-Agent"]!!.startsWith("Neutrodyne/"))
@@ -174,8 +176,31 @@ class LayerAReplayTest {
                 assertEquals("/@TheTechReportTR", server.takeRequest().url.encodedPath)
                 val mobile = server.takeRequest()
                 assertEquals("/@TheTechReportTR", mobile.url.encodedPath)
-                assertEquals("SOCS=CAE=", mobile.headers["Cookie"])
+                assertEquals("SOCS=CAE", mobile.headers["Cookie"])
             }
+        }
+
+    @Test fun reportedHandleLinkGetsPastTheConsentWall() =
+        runBlocking {
+            // YouTube's live rule since November 2026 (PROVENANCE.md): any base64-padded SOCS value,
+            // such as CAE=, CAI= or CAESAA==, redirects to the consent wall; unpadded values do not.
+            server.dispatcher =
+                object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        val socs = request.headers["Cookie"]?.substringAfter("SOCS=", "").orEmpty()
+                        if (socs.isEmpty() || socs.endsWith('=')) {
+                            return MockResponse
+                                .Builder()
+                                .code(302)
+                                .addHeader("Location", "https://consent.youtube.com/m?continue=x")
+                                .build()
+                        }
+                        return MockResponse.Builder().body(fixture("mobile-channel.html")).build()
+                    }
+                }
+            val ref =
+                checkNotNull(YouTubeUrlClassifier().classify("https://www.youtube.com/@TheTechReportTR?app=desktop"))
+            assertEquals("UCPiMR-Ize9p3dgjzZ8bo9ZQ", resolved(resolver().resolve(ref)).channelId)
         }
 
     @Test fun unicodeHandleIsEncodedOnlyInRequest() =

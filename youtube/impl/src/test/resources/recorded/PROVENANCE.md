@@ -42,3 +42,18 @@ handle, identified `https://www.youtube.com/@TheTechReportTR` as `author_url`.
 The replay test supplies only that author URL and public author name. These
 captures explain why both inputs reached the same unreadable-page failure;
 they do not establish a channel-head median or guarantee live availability.
+
+## Consent cookie padding
+
+Measured 2026-11-15 from Switzerland (consent redirects named `gl=CH`) with
+Neutrodyne Android and macOS User-Agents, `Accept: text/html` and de-CH, en
+and fr-FR locales. Requests for `/@TheTechReportTR` and
+`/channel/UCPiMR-Ize9p3dgjzZ8bo9ZQ` that sent a base64-padded SOCS value
+(`CAE=`, `CAI=`, `CAESAA==`, or `"CAE="` quoted) were redirected to
+`consent.youtube.com` on both the `www` and `m` hosts: six of six repeats for
+`CAE=`. The unpadded forms of the same bytes (`CAE`, `CAI`, `CAESAA`) returned
+the channel page with its RSS `channel_id` link: six of six repeats for `CAE`.
+Atom feeds and the watch page answered either form without consent. The
+2026-10-19 consent redirects above were made with the padded value; the
+unpadded value was not tried then. `reportedHandleLinkGetsPastTheConsentWall`
+replays this rule. No response body from these checks is stored.

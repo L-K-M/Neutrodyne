@@ -92,7 +92,7 @@ internal class RecordedYouTubeTraffic(
         assertTrue(unexpected.isEmpty(), "Unplanned replay requests: $unexpected")
         requests.forEach { println("E8 application-client replay: ${it.url.host}${it.url.encodedPath}") }
         val page = requests.first { it.url.encodedPath.startsWith("/@") }
-        assertEquals("SOCS=CAE=", page.header("Cookie"))
+        assertEquals("SOCS=CAE", page.header("Cookie"))
         assertTrue(page.header("User-Agent").orEmpty().startsWith("Neutrodyne/"))
         assertTrue(page.header("Accept-Language").orEmpty().isNotBlank())
         assertTrue(requests.any { it.url.encodedPath == "/feeds/videos.xml" })

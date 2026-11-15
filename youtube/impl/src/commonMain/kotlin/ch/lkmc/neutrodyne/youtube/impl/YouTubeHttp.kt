@@ -57,7 +57,7 @@ internal class YouTubeHttp(
                 clients.client(HttpClientKind.FEED).prepareGet(current) {
                     header(HttpHeaders.Accept, accept)
                     header(HttpHeaders.AcceptLanguage, "${appLocale()}, en;q=0.5")
-                    if (kind == HttpClientKind.FEED) header(HttpHeaders.Cookie, "SOCS=CAE=")
+                    if (kind == HttpClientKind.FEED) header(HttpHeaders.Cookie, CONSENT_COOKIE)
                 }
             val result =
                 request.execute { response ->
@@ -101,6 +101,14 @@ internal class YouTubeHttp(
         private const val MAX_REDIRECTS = 5
         private const val LOOP_STATUS = 508
         private const val CONSENT_HOST = "consent.youtube.com"
+
+        /**
+         * "Reject all" (SOCS field 1 = 1), as the unpadded base64 YouTube issues itself. Since
+         * November 2026 YouTube redirects any padded value, such as the former `CAE=`, to
+         * [CONSENT_HOST] (design 04, Layer A).
+         */
+        private const val CONSENT_COOKIE = "SOCS=CAE"
+
         private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
         private val PAGE_HOSTS = setOf("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com")
         const val FEED_CAP = 2 * 1024 * 1024
