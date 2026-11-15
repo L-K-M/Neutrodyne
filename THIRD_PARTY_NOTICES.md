@@ -148,7 +148,7 @@ pinned version:
 - **xz (liblzma) 5.8.4**: public domain ("liblzma is in the public domain", xz COPYING; Lasse
   Collin and the XZ Utils authors), recorded as 0BSD.
 - **bzip2 1.0.8**: bzip2-1.0.6; Copyright (C) 1996-2019 Julian R Seward.
-- **zlib 1.3.2**: Zlib; Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler.
+- **zlib 1.3.2**: Zlib; Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler.
 - **libedit 20240808-3.1**: BSD-3-Clause; Copyright (c) 1992, 1993 The Regents of the
   University of California; derived from software contributed to Berkeley by Christos Zoulas of
   Cornell University.
