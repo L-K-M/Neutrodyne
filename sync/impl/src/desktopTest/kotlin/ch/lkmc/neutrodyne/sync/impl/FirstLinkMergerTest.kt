@@ -2665,6 +2665,127 @@ class FirstLinkMergerTest {
         )
     }
 
+    /**
+     * "Use this device's library everywhere" step 2: the port runs under LINK_HISTORY, the
+     * episode fields the local side won are re-sent at their frozen pre-merge timestamps, the
+     * library itself uploads with fresh full captures, and the prune is bound to the staged
+     * cursor before `linkedAt` lands. Server records the choice does not apply (a setting, the
+     * history of a podcast this device lacks) never reach `sync_clock`.
+     */
+    @Test
+    fun useDeviceRunsLinkHistoryAndCapturesEpisodeWinnersAtTheirOwnTimes() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                // The local row carries the record's own ID, so the seed and the received
+                // record fold per field; its episode mark (after October) beats the record's.
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(
+                                    podcastId = podcastId,
+                                    identityKey = "g:one",
+                                ) { copy(guid = "one") },
+                            ),
+                        ).single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        EpisodeStateEntity(episodeId, playedAt = october + 100_000L, updatedAt = october + 100_000L),
+                    )
+                val otherSyncId = "00000000-0000-4000-8000-0000000000bb"
+                val otherEpisode =
+                    episodeRecord().copy(
+                        id =
+                            buildJsonObject {
+                                put("p", otherSyncId)
+                                put("k", "g:two")
+                            },
+                    )
+                val setting = settingRecord(PlaybackSettingKeys.SKIP_BACK_MS, 15_000L, Hlc.of(october, 1, remote))
+                val client = CountingClient(listOf(podcastRecord(), episodeRecord(), otherEpisode, setting))
+                val merger = mergerOf(db, client, library)
+
+                val result = merger.merge(FirstLinkChoice.USE_DEVICE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertEquals(MergePolicy.LINK_HISTORY, library.calls.single().policy)
+                val sent = client.pushed
+                assertTrue(sent.any { it.coll == "podcast" && "feedUrl" in it.fields }, "sent=$sent")
+                // The local-won played pair re-sends at its own frozen timestamp, not `now`.
+                val played = sent.single { it.coll == "episode" && "played" in it.fields }.fields.getValue("played")
+                assertEquals(october + 100_000L, Hlc.parse(checkNotNull(played.c)).millis)
+                assertEquals(JsonPrimitive(true), played.v)
+                // The server-won `pos` (the record's October position) is never echoed.
+                assertTrue(sent.none { it.coll == "episode" && "pos" in it.fields }, "sent=$sent")
+                // Records this choice does not apply leave no raw state behind.
+                assertNull(db.syncClockDao().get("setting", PlaybackSettingKeys.SKIP_BACK_MS.name))
+                assertNull(db.syncClockDao().get("episode", otherSyncId + "g:two"))
+                // Prune last, bound to the staged cursor, then the link completes.
+                assertEquals(1, client.resetCalls)
+                assertEquals("c:00000001:1", client.resetBeforeCursor)
+                assertNotNull(db.syncStateDao().get()?.linkedAt)
+                assertEquals(0, db.syncOutboxDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * "Use this device's library everywhere" step 3 for settings: the choice folds no server
+     * setting, so the controller's post-link reconcile queues this device's value as an
+     * account-absent key, with a clock above every clock of the snapshot, and the server's
+     * value never lands here.
+     */
+    @Test
+    fun useDeviceLeavesThisDevicesSettingsToUploadAfterTheLink() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                db.podcastDao().insertPodcast(
+                    podcastEntity(
+                        syncId = podcastSyncId,
+                        feedUrl = "https://example.com/feed",
+                        feedKey = "https://example.com/feed",
+                        title = "Example",
+                    ),
+                )
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val serverClock = Hlc.of(october, 1, remote)
+                val port = FakeSettingsSyncPort().apply { current[key.name] = "30000" }
+                val client = CountingClient(listOf(podcastRecord(), settingRecord(key, 15_000L, serverClock)))
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+
+                val result = merger.merge(FirstLinkChoice.USE_DEVICE)
+                // The controller runs this reconcile once the choice completes (10 Settings capture).
+                SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.reconcile()
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val intent = assertNotNull(db.syncOutboxDao().get("setting", key.name, "v"))
+                assertEquals("30000", intent.value)
+                assertTrue(intent.hlc > serverClock.packed, "the upload outranks the snapshot")
+                assertTrue(port.applied.none { it.first == key }, "applied=${port.applied}")
+            } finally {
+                db.close()
+            }
+        }
+
     // --- Fixtures -----------------------------------------------------------------------------------
 
     private fun mergerOf(
@@ -3209,6 +3330,12 @@ private class CountingClient(
     var changesCalls = 0
         private set
 
+    var resetCalls = 0
+        private set
+
+    var resetBeforeCursor: String? = null
+        private set
+
     override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
 
     override suspend fun login(
@@ -3291,7 +3418,24 @@ private class CountingClient(
         confirm: String,
         mode: String,
         beforeCursor: String?,
-    ): AccountSummary = unsupported()
+    ): AccountSummary {
+        resetCalls++
+        resetBeforeCursor = beforeCursor
+        return AccountSummary(
+            username = "anna",
+            counts =
+                ch.lkmc.neutrodyne.sync.protocol.dto.LibraryCountsDto(
+                    podcasts = 0,
+                    groups = 0,
+                    episodes = 0,
+                    upnext = 0,
+                    settings = 0,
+                ),
+            devices = 1,
+            quotaRecords = 0,
+            records = 0,
+        )
+    }
 
     private fun unsupported(): Nothing = throw UnsupportedOperationException()
 }

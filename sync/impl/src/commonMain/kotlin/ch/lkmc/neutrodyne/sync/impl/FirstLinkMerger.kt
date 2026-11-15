@@ -102,8 +102,10 @@ private data class EpisodeParkHints(
  * land in a staging file on disk (`sync-link-<deviceId>.jsonl` in the cache directory, so a
  * 50,000-record account never sits in memory), are mapped to the staging directory's four
  * archive-named entries, and merge under the `LINK_*` policies — the one rules table that
- * serves restores and the first link (D92). "Use this device's library everywhere" uploads
- * first, pushes until the outbox drains and prunes last, unchanged.
+ * serves restores and the first link (D92). "Use this device's library everywhere" runs the
+ * same port under `LINK_HISTORY` first (step 2: matched podcasts and groups adopt the
+ * server's IDs, the episode history merges by time), then uploads this device's library and
+ * prunes last.
  *
  * Staging resume (10 Merge step 1): a run interrupted after the pull finds the staging file
  * complete (its end marker carries the cursor) and reuses it instead of pulling again; the
@@ -418,11 +420,34 @@ class FirstLinkMerger(
         roundId: Long,
         onProgress: (LinkPhase, Int, Int) -> Unit,
     ): FirstLinkResult {
-        // Upload first: stage the server snapshot (never applied), adopt its cursor and clocks,
-        // then capture this device's whole library.
+        // Upload first: stage the server snapshot, adopt its IDs and merge its episode history
+        // into this device's rows (step 2), then capture this device's whole library (step 3).
         val pull = pullStaged(roundId, resume = true, onProgress)
+        // The seeds freeze the pre-merge values and timestamps: after the history merge only
+        // the episode fields the local side won still carry this node's stamps.
+        seedLocalRows()
+        val staged = mapToStagingDirectory(pull, MergePolicy.LINK_HISTORY)
+        val hints = staged.parkHints
+        val outcome =
+            libraryMerger.mergeStaged(
+                stagingDir = staged.dir.toString(),
+                policy = MergePolicy.LINK_HISTORY,
+                onUnmatched = { podcastSyncId, identityKey -> park(podcastSyncId, identityKey, hints) },
+                progress = { done, total -> onProgress(LinkPhase.DOWNLOADING, done, total) },
+            )
+        if (outcome !is ch.lkmc.neutrodyne.core.common.Outcome.Success<*>) {
+            return FirstLinkResult.Failed("mergeStaged failed: $outcome")
+        }
+        // Only the episode records of podcasts this device has are folded into `sync_clock`:
+        // every other server record is not applied (step 2). Its podcast, group, member and
+        // Up next records are re-asserted from this device's rows below, and its settings and
+        // passwords never stage effects here, so no server value can land on this device.
+        mergeReceivedClocks(localEpisodeRecords(pull.records))
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalLibrary()
+        // Episode state the local side won is re-sent at its own frozen timestamp; records the
+        // full capture above already queued are skipped, so nothing is captured twice.
+        captureLocalWinners()
         pushOutbox(onProgress)
         // Prune last: the server drops everything this upload did not re-assert, so no device can
         // observe a half-replaced library.
@@ -430,6 +455,19 @@ class FirstLinkMerger(
         completeLink()
         discardStaging()
         return FirstLinkResult.Completed(0)
+    }
+
+    /**
+     * The staged `episode` records whose podcast this device has (by `syncId`, after step 2's
+     * ID adoption): the listening history "Use this device's library everywhere" merges.
+     */
+    private suspend fun localEpisodeRecords(records: List<RecordDto>): List<RecordDto> {
+        val local = db.podcastDao().allForExport().mapTo(HashSet()) { it.syncId }
+        return records.filter { dto ->
+            if (dto.coll != SyncCollection.EPISODE.wire) return@filter false
+            val id = runCatching { RecordId.fromWire(SyncCollection.EPISODE, dto.id) }.getOrNull()
+            (id as? RecordId.Episode)?.podcast?.value in local
+        }
     }
 
     // --- The staging pull with resume (10 Merge step 1) --------------------------------------------

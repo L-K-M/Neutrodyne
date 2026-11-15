@@ -103,7 +103,7 @@ internal class LibraryMergerImpl(
         progress: (done: Int, total: Int) -> Unit,
         onApplied: (suspend (MergedRecord) -> Unit)?,
     ): Outcome<MergeSummary, BackupError> {
-        if (policy != MergePolicy.LINK_MERGE && policy != MergePolicy.LINK_REPLACE) {
+        if (policy !in LINK_POLICIES) {
             return Outcome.Failure(BackupError.Unsupported)
         }
         val dir = stagingDir.toPath()
@@ -130,7 +130,14 @@ internal class LibraryMergerImpl(
                     onUnmatched = onUnmatched,
                     onApplied = onApplied,
                 )
-            val settingCounts = settings.reportLinked(staged.settings(), createdAt, onApplied)
+            // LINK_HISTORY applies no settings record (10 "Use this device's library
+            // everywhere" step 2); every other link policy reports their winners.
+            val settingCounts =
+                if (policy == MergePolicy.LINK_HISTORY) {
+                    null
+                } else {
+                    settings.reportLinked(staged.settings(), createdAt, onApplied)
+                }
             Outcome.Success(
                 MergeSummary(
                     podcastsAdded = settled.summary.podcastsAdded,
@@ -140,7 +147,7 @@ internal class LibraryMergerImpl(
                     episodeLines = episodeResult.summary.episodeLines,
                     stubs = episodeResult.summary.stubs,
                     unmatched = episodeResult.summary.unmatched,
-                    skippedLines = episodeResult.summary.skippedLines + settingCounts.skipped,
+                    skippedLines = episodeResult.summary.skippedLines + (settingCounts?.skipped ?: 0),
                 ),
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -164,6 +171,8 @@ internal class LibraryMergerImpl(
 
     private companion object {
         val ALL_CATEGORIES = setOf(RestoreCategory.HISTORY, RestoreCategory.UP_NEXT, RestoreCategory.SETTINGS)
+        val LINK_POLICIES =
+            setOf(MergePolicy.LINK_MERGE, MergePolicy.LINK_REPLACE, MergePolicy.LINK_HISTORY)
         val STAGING_META_REGEX = Regex(""""createdAt"\s*:\s*(\d+)""")
     }
 }

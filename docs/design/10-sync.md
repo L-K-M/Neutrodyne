@@ -1461,6 +1461,37 @@ runs the upload/push/prune steps in the restore's finish before the
 session commits — a failure there leaves the durable request, and a
 re-run replays the idempotent restore and this step.
 
+**Implementation note (2026-11-15, "Use this device's library everywhere"
+step 2).** The first-link choice now runs step 2. `FirstLinkMerger` seeds
+this device's rows into `sync_clock` at their own timestamps, then runs
+`LibraryMerger.mergeStaged` under the new `MergePolicy.LINK_HISTORY`.
+Under it, `RestoreMerger` only adopts the record IDs of matched podcasts
+and `nameKey`-matched groups, a matched server tombstone included (the
+upload revives that record). It removes, inserts and rewrites nothing
+local, restores no credential and never merges local groups.
+`RestoreEpisodeMerger` merges the episode lines of podcasts this device
+has by the First-link timestamp rules; unmatched lines stub or park as in
+Merge, and the staged Up next list, session and settings are not applied.
+Deviations:
+
+- Only the received `episode` records of podcasts this device has fold
+  into `sync_clock`. The other records are not applied, so they leave no
+  raw state: step 3's `captureAll` re-asserts the podcast, group, member
+  and Up next records from this device's rows, and no server setting or
+  password stages a durable effect on this device.
+- Step 3's setting captures are not taken inside the choice. With no
+  account value folded, the controller's post-link
+  `SettingsCapture.reconcile()` queues each synced key's current value as
+  an account-absent key (gated by the "Sync playback settings" switch),
+  with a fresh clock above every clock of the snapshot, and the next
+  round pushes it. The library prune never removes `setting` records, so
+  pushing them after step 5 still makes this device's values win.
+- 05's Replace for all synced devices (`restoreEverywhere`) still runs
+  steps 3 to 5 without step 2. It runs on a device that was already
+  linked: its `sync_clock` holds accepted server clocks and its rows carry
+  the backup's timestamps, so merging the server history there needs its
+  own rules and tests.
+
 ### Use the server's library on this device
 
 05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). The setup screen implements this at the current UI boundary: the backup is prepared and saved through `BackupRepository` and `PlatformActions.saver` (with 05's R1.9 warning when the prepared artifact carries private links or passwords) and the flow stops there; only the explicit Replace then calls `chooseFirstLink(USE_SERVER)`. A cancelled or failed backup leaves the choice unconfirmed. All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.

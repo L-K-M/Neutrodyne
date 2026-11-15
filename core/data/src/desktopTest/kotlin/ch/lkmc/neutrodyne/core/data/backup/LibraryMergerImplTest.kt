@@ -547,6 +547,67 @@ class LibraryMergerImplTest {
             assertNotNull(db.groupDao().groupById(local), "a newer local update survives the tombstone")
         }
 
+    /**
+     * 10 "Use this device's library everywhere" step 2: this device's library wins, so a
+     * server tombstone newer than the local row removes nothing under LINK_HISTORY. The
+     * matched rows only adopt the record's IDs, so the upload revives those records.
+     */
+    @Test
+    fun linkHistoryKeepsLocalRowsTheServerTombstoned() =
+        runTest {
+            val localSyncId = "99999999-9999-4999-8999-999999999999"
+            val podcast =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/feed", syncId = localSyncId, subscribedAt = june),
+                )
+            val group =
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database.groupEntity(
+                        uuid = "22222222-2222-4222-8222-222222222222",
+                        name = "Group",
+                        orderKey = "0.5",
+                        updatedAt = june,
+                    ),
+                )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId).copy(removedAt = playedAt)),
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = "11111111-1111-4111-8111-111111111111",
+                                name = "Group",
+                                sortOrder = 0,
+                                orderKey = "0.7",
+                                removedAt = playedAt,
+                            ),
+                        ),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+            val applied = ArrayList<MergedRecord>()
+
+            val outcome =
+                impl.mergeStaged(
+                    dir.toString(),
+                    MergePolicy.LINK_HISTORY,
+                    { _, _ -> },
+                    { _, _ -> },
+                    onApplied = { applied += it },
+                )
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertEquals(syncId, db.podcastDao().byId(podcast)?.syncId, "the kept podcast adopts the record's syncId")
+            assertEquals(
+                "11111111-1111-4111-8111-111111111111",
+                db.groupDao().groupById(group)?.uuid,
+                "the kept group adopts the record's uuid",
+            )
+            assertEquals("0.5", db.groupDao().groupById(group)?.orderKey, "no group field is applied")
+            assertTrue(downloads.removals.isEmpty(), "nothing is unsubscribed")
+            assertTrue(applied.isEmpty(), "LINK_HISTORY reports no library record")
+        }
+
     /** A server-won membership tombstone removes the local membership; a newer local add survives. */
     @Test
     fun linkMergeAppliesAServerWonMemberTombstone() =

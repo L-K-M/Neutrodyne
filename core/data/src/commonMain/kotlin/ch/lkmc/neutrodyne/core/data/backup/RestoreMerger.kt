@@ -115,10 +115,13 @@ internal class RestoreMerger(
         onApplied: (suspend (MergedRecord) -> Unit)? = null,
     ): LibraryMergeResult {
         val link = policy == MergePolicy.LINK_MERGE || policy == MergePolicy.LINK_REPLACE
+        // 10 "Use this device's library everywhere" step 2: ID adoption and episode history
+        // only; no podcast, group, member, Up next or settings record is applied.
+        val adoptOnly = policy == MergePolicy.LINK_HISTORY
         // Linked writes (link policies, linked restore) suppress the capture triggers; the
         // explicit captures below still land — captureAt/captureLiteral answer to `enabled`
         // alone, never `applying`.
-        val suppress = link || captureWithBackupTimes || suppressCapture
+        val suppress = link || adoptOnly || captureWithBackupTimes || suppressCapture
         val library = staged.library()
         val now = clock.now()
 
@@ -130,10 +133,10 @@ internal class RestoreMerger(
         val matchedGroupIds = matchStagedGroups(stagedGroups)
 
         // The local rows' IDs before transaction A's ID adoption, for the post-commit rekey of
-        // the first-link seed and pending captures (link policies only).
+        // the first-link seed and pending captures (link policies and LINK_HISTORY only).
         val podcastSyncIds = HashMap<Long, String>()
         val groupUuids = HashMap<Long, String>()
-        if (link) {
+        if (link || adoptOnly) {
             for (podcast in podcastDao.allForExport()) podcastSyncIds[podcast.id] = podcast.syncId
             for (group in groupDao.groupsInOrder()) groupUuids[group.id] = group.uuid
         }
@@ -231,7 +234,8 @@ internal class RestoreMerger(
         val total = stagedPodcasts.size + stagedGroups.count { it.foldedInto == null }
 
         coordinator.withCredentialCommit {
-            if (!link) restoreCredentials(library.credentials, policy, credentialIds)
+            // A link policy stages no credential (10 Passwords); LINK_HISTORY applies none.
+            if (!link && !adoptOnly) restoreCredentials(library.credentials, policy, credentialIds)
             db.withWriteTransaction {
                 val block: suspend () -> Unit = {
                     // Replace frees the nameKeys of every surviving local group first, so a
@@ -252,16 +256,25 @@ internal class RestoreMerger(
                         if (group.foldedInto != null) continue
                         // A tombstone the pre-step removed writes nothing; a local-won one keeps
                         // its row and adopts the record's uuid; an unmatched one is never inserted.
+                        // LINK_HISTORY runs no pre-step: a matched tombstone only adopts the uuid.
                         if (group.primary.removedAt != null) {
                             val localId = group.localId
                             if (localId != null && localId !in removedGroupIds) {
                                 group.resolvedId = localId
                                 groupsMatched++
                                 adoptGroupUuid(group, localId, uuidChanges)
-                                writeGroupSettings(localId, group.primary.settings, policy)
-                                onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
+                                if (!adoptOnly) {
+                                    writeGroupSettings(localId, group.primary.settings, policy)
+                                    onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
+                                }
                             }
                             // A removed or unmatched tombstone still consumed a `total` slot.
+                            progress(++done, total)
+                            continue
+                        }
+                        // LINK_HISTORY applies no group record: a staged group nobody holds
+                        // locally is about to be pruned server-side, never inserted.
+                        if (adoptOnly && group.localId == null) {
                             progress(++done, total)
                             continue
                         }
@@ -300,15 +313,17 @@ internal class RestoreMerger(
                                     )
                                 }
 
-                                MergePolicy.LINK_MERGE -> {
+                                MergePolicy.LINK_MERGE, MergePolicy.LINK_HISTORY -> {
                                     adoptGroupUuid(group, localId, uuidChanges)
                                 }
 
                                 else -> {}
                             }
                         }
-                        writeGroupSettings(localId, group.primary.settings, policy)
-                        onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
+                        if (!adoptOnly) {
+                            writeGroupSettings(localId, group.primary.settings, policy)
+                            onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
+                        }
                         progress(++done, total)
                     }
 
@@ -323,8 +338,10 @@ internal class RestoreMerger(
                                 adoptPodcastSyncId(localId, podcast)
                                 podcastIdByKey[podcast.key] = localId
                                 for (alias in podcast.aliases) podcastIdByKey.putIfAbsent(alias, localId)
-                                writePodcastSettings(localId, podcast.settings, policy)
-                                onApplied?.invoke(podcastRecord(localId, podcast, policy, matched = true))
+                                if (!adoptOnly) {
+                                    writePodcastSettings(localId, podcast.settings, policy)
+                                    onApplied?.invoke(podcastRecord(localId, podcast, policy, matched = true))
+                                }
                             }
                             progress(++done, total)
                             continue
@@ -334,6 +351,12 @@ internal class RestoreMerger(
                         // match pass (or a second staged copy) still resolves to the live row.
                         if (localId == null) localId = podcastDao.byFeedKey(podcast.key)?.id
                         val matched = localId != null
+                        // LINK_HISTORY adopts the record's ID on a match; a podcast this device
+                        // lacks stays absent (the prune removes its record).
+                        if (adoptOnly && localId == null) {
+                            progress(++done, total)
+                            continue
+                        }
                         if (localId == null) {
                             localId = insertPodcast(podcast, now, credentialIds)
                             podcastsAdded++
@@ -341,27 +364,31 @@ internal class RestoreMerger(
                             if (captureWithBackupTimes) captureNewPodcast(localId, podcast)
                         } else {
                             podcastsMatched++
-                            applyMatchedPodcast(localId, podcast, policy)
-                            if (link) adoptPodcastSyncId(localId, podcast)
+                            if (!adoptOnly) applyMatchedPodcast(localId, podcast, policy)
+                            if (link || adoptOnly) adoptPodcastSyncId(localId, podcast)
                         }
                         podcastIdByKey[podcast.key] = localId
                         for (alias in podcast.aliases) podcastIdByKey.putIfAbsent(alias, localId)
-                        recordAmbiguousGuids(localId, podcast)
-                        restoreAliases(localId, podcast.aliases, staged.createdAtMs, policy)
-                        writePodcastSettings(localId, podcast.settings, policy)
-                        onApplied?.invoke(podcastRecord(localId, podcast, policy, matched))
+                        if (!adoptOnly) {
+                            recordAmbiguousGuids(localId, podcast)
+                            restoreAliases(localId, podcast.aliases, staged.createdAtMs, policy)
+                            writePodcastSettings(localId, podcast.settings, policy)
+                            onApplied?.invoke(podcastRecord(localId, podcast, policy, matched))
+                        }
                         progress(++done, total)
                     }
 
-                    writeMembers(
-                        stagedGroups,
-                        policy,
-                        staged.createdAtMs,
-                        podcastIdByKey,
-                        now,
-                        orderKeyPlan.members,
-                        captureWithBackupTimes,
-                    )
+                    if (!adoptOnly) {
+                        writeMembers(
+                            stagedGroups,
+                            policy,
+                            staged.createdAtMs,
+                            podcastIdByKey,
+                            now,
+                            orderKeyPlan.members,
+                            captureWithBackupTimes,
+                        )
+                    }
                 }
                 // Linked execution suppresses the triggers (05): link policies and a linked
                 // Merge restore run transaction A inside `withApplying`.
@@ -375,8 +402,9 @@ internal class RestoreMerger(
 
         // Post-commit: folded groups' local rows merge into their survivors (one committed
         // transaction and channel sweep each), then the channel-only effects of Replace.
+        // LINK_HISTORY applies no group record, so it never merges local groups.
         for (group in stagedGroups) {
-            if (group.foldedInto != null) continue
+            if (adoptOnly || group.foldedInto != null) continue
             val survivor = group.resolvedId ?: continue
             for (loser in group.absorbedLocalIds) {
                 if (loser == survivor) continue
@@ -395,8 +423,9 @@ internal class RestoreMerger(
         // The adoption above changed matched rows' IDs; move the first-link seed and any
         // pending captures to the adopted identity so the shared field merge and the capture
         // pass see the local winners under the record's rid, never a stray one (10 Merge
-        // steps 3–5). Link policies only: a restore's own ID rules are unchanged.
-        if (link) rekeyAdoptedIds(podcastSyncIds, groupUuids)
+        // steps 3–5). Link policies and LINK_HISTORY only: a restore's own ID rules are
+        // unchanged.
+        if (link || adoptOnly) rekeyAdoptedIds(podcastSyncIds, groupUuids)
 
         // Transaction A's settled staged-`uuid` → survivor map: canonical, folded and
         // absorbed staged uuids all land on their root's resolved row (Merge's fresh
@@ -411,6 +440,8 @@ internal class RestoreMerger(
             ) {
                 continue
             }
+            // LINK_HISTORY inserts no group: a staged group this device lacks has no row.
+            if (adoptOnly && root.resolvedId == null) continue
             val survivor =
                 checkNotNull(root.resolvedId) {
                     "staged group '${group.primary.uuid}' left transaction A unresolved"
@@ -824,6 +855,9 @@ internal class RestoreMerger(
                     youtubeVariants = podcast.youtubeVariants ?: DEFAULT_YOUTUBE_VARIANTS,
                 )
             }
+
+            // LINK_HISTORY never reaches here: its loop adopts the ID without applying fields.
+            MergePolicy.LINK_HISTORY -> {}
         }
     }
 
@@ -932,6 +966,9 @@ internal class RestoreMerger(
                 val overrides = staged?.toScopeOverrides() ?: ScopeOverrides()
                 if (overrides == ScopeOverrides()) delete() else upsert(overrides)
             }
+
+            // LINK_HISTORY never reaches here: its loop applies no settings record.
+            MergePolicy.LINK_HISTORY -> {}
         }
     }
 
