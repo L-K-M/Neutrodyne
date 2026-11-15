@@ -433,12 +433,31 @@ class NeutrodyneRootTest {
     @Test
     fun radioMenuOpensThePlaybackSheets() =
         runComposeUiTest {
-            setRootContent()
+            var dispatcher: NavigationEventDispatcher? = null
+            val input = DirectNavigationEventInput()
+            setContent {
+                TestRoot(
+                    slots =
+                        RootSlots(player = {
+                            dispatcher =
+                                checkNotNull(LocalNavigationEventDispatcherOwner.current).navigationEventDispatcher
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { checkNotNull(dispatcher).addInput(input) }
             onNodeWithTag("radio_menu").performClick()
             onNodeWithTag("radio_sleep_timer").assertIsDisplayed()
             onNodeWithTag("radio_speed").performClick()
             onNodeWithText("speed-sheet").assertIsDisplayed()
             onNodeWithTag("radio_destinations").assertDoesNotExist()
+
+            // Back closes only the sheet; the radio home stays underneath.
+            runOnIdle {
+                input.backStarted(NavigationEvent())
+                input.backCompleted()
+            }
+            onNodeWithText("speed-sheet").assertDoesNotExist()
+            onNodeWithTag("radio_menu").assertIsDisplayed()
         }
 
     @Test

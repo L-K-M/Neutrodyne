@@ -122,7 +122,7 @@ import org.jetbrains.compose.resources.getString
  *
  * Contract deltas from 01's sketch (recorded in 08 "Navigation", 2026-10-06): [prefs] and
  * [systemUi] moved in so the theme lives inside the root; [platform] gates the desktop-only key
- * chords; `RootUiState` gained `hasNowPlaying`/`playerPanelHidden` for `ndPaneLayout`; `RootActions`
+ * chords; `RootUiState` gained `hasNowPlaying` for `ndPaneLayout`; `RootActions`
  * gained `manageStorage`, `reportStartupFailure` and `disableUpdateChecks` for the gate and the
  * first-run card.
  */
