@@ -1377,6 +1377,8 @@ class RestoreEpisodeMergerTest {
                 EpisodeStateEntity(episodeId = e, playedAt = june, updatedAt = june),
             )
             db.queueDao().insert(queueEntryEntity(seedEpisode(p, "g:local"), orderKey = "a1"))
+            // An idle session: Merge would apply the staged one here.
+            seedSession(current = null)
             val staged =
                 staged(
                     staging = true,
@@ -1384,6 +1386,16 @@ class RestoreEpisodeMergerTest {
                     episodeLines =
                         listOf(
                             line("https://a/feed", "g:e", pl = null, ts = october, fc = mapOf("played" to october)),
+                            // Unknown episodes of a known podcast: in progress stubs (the
+                            // First-link stub rule), played-only parks for the next ingest.
+                            line("https://a/feed", "g:new", u = "https://a/new.mp3", pos = 100, posAt = october),
+                            line(
+                                "https://a/feed",
+                                "g:old",
+                                pl = october,
+                                ts = october,
+                                fc = mapOf("played" to october),
+                            ),
                             // The unknown podcast's in-progress line would stub under
                             // LINK_MERGE; LINK_HISTORY has no podcast to stub into.
                             line("https://b/feed", "g:away", u = "https://b/e.mp3", pos = 100, posAt = october),
@@ -1405,12 +1417,15 @@ class RestoreEpisodeMergerTest {
                 )
 
             assertNull(db.episodeStateDao().byEpisode(e)!!.playedAt, "the newer remote unplayed wins")
-            assertTrue(unmatched.isEmpty(), "unknown-podcast lines are skipped, not parked: $unmatched")
+            // Only the known podcast's played-only line parks; unknown-podcast lines are skipped.
+            assertEquals(listOf("g:old"), unmatched.map { it.second }, "$unmatched")
             assertEquals(1, summary.skippedLines)
-            assertEquals(0, summary.stubs)
+            assertEquals(1, summary.stubs)
             // Up next keeps the local list; the session row is untouched.
             assertEquals(1, db.queueDao().entries().size)
-            assertNull(db.playSessionDao().get()?.currentEpisodeId)
+            val session = db.playSessionDao().get()!!
+            assertNull(session.currentEpisodeId)
+            assertEquals(5L, session.generation)
             assertTrue(db.syncOutboxDao().rows().isEmpty(), "rows=${db.syncOutboxDao().rows()}")
         }
 

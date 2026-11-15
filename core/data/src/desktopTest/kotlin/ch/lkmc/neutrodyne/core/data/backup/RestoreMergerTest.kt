@@ -467,7 +467,8 @@ class RestoreMergerTest {
                 stagedOf(
                     podcasts =
                         listOf(
-                            podcastV1("https://a/feed").copy(syncId = recordSyncId, customTitle = "Record"),
+                            podcastV1("https://a/feed", credentialOrigin = "https://a")
+                                .copy(syncId = recordSyncId, customTitle = "Record"),
                             // Server-only podcast: the prune removes it, never a local insert.
                             podcastV1("https://b/feed"),
                         ),
@@ -476,6 +477,7 @@ class RestoreMergerTest {
                             groupV1(uuid = recordUuid, name = "News", orderKey = "0.7"),
                             groupV1(uuid = "00000000-0000-4000-8000-0000000000ee", name = "New group"),
                         ),
+                    credentials = listOf(CredentialV1("https://a", "user", "pass")),
                 )
 
             // The local inserts above were captured while linked; the merge may only re-key them.
@@ -491,6 +493,8 @@ class RestoreMergerTest {
             assertEquals(1, db.groupDao().groupsInOrder().size, "the server-only group is not inserted")
             assertEquals("0.5", db.groupDao().groupById(localGroup)!!.orderKey, "the local look stays")
             assertEquals(0, countSql("SELECT COUNT(*) FROM podcast_url_alias"))
+            assertNull(secrets.get("https://a"), "no credential is restored")
+            assertNull(db.podcastDao().byId(local)!!.credentialId)
             assertEquals(1, summary.podcastsMatched)
             assertEquals(0, summary.podcastsAdded)
             assertEquals(1, summary.groupsMatched)

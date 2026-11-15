@@ -2719,6 +2719,7 @@ class FirstLinkMergerTest {
                     )
                 val setting = settingRecord(PlaybackSettingKeys.SKIP_BACK_MS, 15_000L, Hlc.of(october, 1, remote))
                 val client = CountingClient(listOf(podcastRecord(), episodeRecord(), otherEpisode, setting))
+                client.allowReset = true
                 val merger = mergerOf(db, client, library)
 
                 val result = merger.merge(FirstLinkChoice.USE_DEVICE)
@@ -2770,13 +2771,15 @@ class FirstLinkMergerTest {
                 val serverClock = Hlc.of(october, 1, remote)
                 val port = FakeSettingsSyncPort().apply { current[key.name] = "30000" }
                 val client = CountingClient(listOf(podcastRecord(), settingRecord(key, 15_000L, serverClock)))
+                client.allowReset = true
                 val merger = mergerOf(db, client, FakeLibraryMerger())
 
                 val result = merger.merge(FirstLinkChoice.USE_DEVICE)
-                // The controller runs this reconcile once the choice completes (10 Settings capture).
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                // SyncControllerImpl.beginMerge runs this reconcile once any choice completes
+                // (10 Settings capture).
                 SettingsCapture(db, port, TestSettingsWriteCoordinator()) { true }.reconcile()
 
-                assertTrue(result is FirstLinkResult.Completed, "$result")
                 val intent = assertNotNull(db.syncOutboxDao().get("setting", key.name, "v"))
                 assertEquals("30000", intent.value)
                 assertTrue(intent.hlc > serverClock.packed, "the upload outranks the snapshot")
@@ -3336,6 +3339,9 @@ private class CountingClient(
     var resetBeforeCursor: String? = null
         private set
 
+    /** Only the prune-exercising tests opt in; any other reset fails loudly. */
+    var allowReset = false
+
     override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
 
     override suspend fun login(
@@ -3419,6 +3425,7 @@ private class CountingClient(
         mode: String,
         beforeCursor: String?,
     ): AccountSummary {
+        check(allowReset) { "unexpected reset: mode=$mode" }
         resetCalls++
         resetBeforeCursor = beforeCursor
         return AccountSummary(
