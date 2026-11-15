@@ -499,6 +499,43 @@ class QueueProjectorTest {
             }
         }
 
+    /** The same late echo after a foreign generation installed the arrival commits nothing. */
+    @Test fun aLateDiscontinuityEchoOfAForeignWriteCommitsNothing() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val ids = f.seed(2)
+                f.attach()
+                f.start(listOf(ids[0]), 0)
+                awaitAdapter { f.player.ids() == listOf(ids[0]) }
+
+                val row = f.db.playSessionDao().get()!!
+                f.positions.save(ids[1], 91_000, null, PositionSource.STREAM, f.clock.now(), 0) { true }
+                f.db.playSessionDao().write(row.copy(currentEpisodeId = ids[1], generation = row.generation + 1))
+                awaitAdapter { f.player.episodeIdOrNull() == ids[1] }
+                assertEquals(91_000L, f.player.currentPosition)
+                val generation = f.sessions.virtualQueue(20).generation
+
+                val outgoingItem = f.factory.build(f.lookup.get(ids[0])!!)
+                val arrivalItem = f.factory.build(f.lookup.get(ids[1])!!)
+                val outgoing =
+                    Player.PositionInfo(null, 0, outgoingItem, null, 0, 30_000, 30_000, C.INDEX_UNSET, C.INDEX_UNSET)
+                val arrival =
+                    Player.PositionInfo(null, 0, arrivalItem, null, 0, 91_000, 91_000, C.INDEX_UNSET, C.INDEX_UNSET)
+                f.projector.onPositionDiscontinuity(outgoing, arrival, Player.DISCONTINUITY_REASON_SEEK)
+                awaitAdapter { true }
+
+                assertEquals("the echo must not move the foreign position", 91_000L, f.player.currentPosition)
+                assertEquals(
+                    "the echo must not commit a second transition",
+                    generation,
+                    f.sessions.virtualQueue(20).generation,
+                )
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun groupDeletionKeepsPlayingCurrentWithoutReload() =
         runTest {
             val f = AdapterFixture(this)
