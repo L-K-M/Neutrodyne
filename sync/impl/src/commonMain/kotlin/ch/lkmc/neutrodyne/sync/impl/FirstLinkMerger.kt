@@ -6,6 +6,8 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
+import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.LibraryMerger
 import ch.lkmc.neutrodyne.core.model.MergePolicy
@@ -1088,31 +1090,50 @@ class FirstLinkMerger(
                 }
                 for (episode in db.episodeDao().all()) {
                     val podcast = db.podcastDao().byId(episode.podcastId) ?: continue
-                    val state = db.episodeStateDao().byEpisode(episode.id)
-                    val position = db.positionDao().byEpisode(episode.id)
-                    val fields = mutableMapOf<String, FieldState>()
-                    if (state != null) {
-                        val at = localTime(maxOf(state.updatedAt, position?.updatedAt ?: 0L))
-                        fields["played"] = fieldBool(state.playedAt != null, at, nodeId)
-                        fields["playedAt"] =
-                            FieldState(state.playedAt?.let(::JsonPrimitive) ?: JsonNull, stamp(at, nodeId))
-                        fields["fav"] = fieldBool(state.isFavorite, at, nodeId)
-                        if (state.playCount > 0) fields["playCount"] = fieldLong(state.playCount.toLong(), at, nodeId)
-                        state.lastPlayedAt?.let { fields["lastPlayedAt"] = fieldLong(it, at, nodeId) }
-                    }
-                    if (position != null && position.positionMs > 0) {
-                        fields["pos"] =
-                            FieldState(
-                                JsonObject(buildMap { put("ms", JsonPrimitive(position.positionMs)) }),
-                                stamp(localTime(position.updatedAt), nodeId),
-                            )
-                    }
+                    val fields =
+                        episodeSeedFields(
+                            db.episodeStateDao().byEpisode(episode.id),
+                            db.positionDao().byEpisode(episode.id),
+                            nodeId,
+                        ) { localTime(it) }
                     if (fields.isNotEmpty()) {
                         writeSeed(SyncCollection.EPISODE, podcast.syncId + episode.identityKey, fields)
                     }
                 }
             }
         }
+    }
+
+    /**
+     * One episode row's seed, stamped at the local times 10 Merge step 3 decides each field by,
+     * as the row merge does: the played pair at `playedAt` (else `episode_state.updatedAt`), the
+     * other state fields at `updatedAt` and the position at its own `updatedAt`. A seed that
+     * took a later time than the row merge would push a winner this device's row never kept.
+     */
+    private fun episodeSeedFields(
+        state: EpisodeStateEntity?,
+        position: EpisodePositionEntity?,
+        nodeId: NodeId,
+        localTime: (Long) -> Long,
+    ): Map<String, FieldState> {
+        val fields = LinkedHashMap<String, FieldState>()
+        if (state != null) {
+            val at = localTime(state.updatedAt)
+            val playedClock = stamp(localTime(state.playedAt ?: state.updatedAt), nodeId)
+            fields["played"] = FieldState(JsonPrimitive(state.playedAt != null), playedClock)
+            fields["playedAt"] = FieldState(state.playedAt?.let(::JsonPrimitive) ?: JsonNull, playedClock)
+            fields["fav"] = fieldBool(state.isFavorite, at, nodeId)
+            if (state.playCount > 0) fields["playCount"] = fieldLong(state.playCount.toLong(), at, nodeId)
+            state.lastPlayedAt?.let { fields["lastPlayedAt"] = fieldLong(it, at, nodeId) }
+        }
+        if (position != null && position.positionMs > 0) {
+            fields["pos"] =
+                FieldState(
+                    JsonObject(buildMap { put("ms", JsonPrimitive(position.positionMs)) }),
+                    stamp(localTime(position.updatedAt), nodeId),
+                )
+        }
+        return fields
     }
 
     /**

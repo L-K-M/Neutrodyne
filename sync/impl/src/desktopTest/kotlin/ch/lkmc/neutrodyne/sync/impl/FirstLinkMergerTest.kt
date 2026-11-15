@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.database.CredentialEntity
+import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.core.domain.LibraryMerger
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.MergePolicy
+import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLibraryMerger
@@ -767,6 +769,70 @@ class FirstLinkMergerTest {
                 // Inspect the frozen wire payload after its real acknowledgement drained the outbox.
                 assertTrue(sent.any { it.coll == "podcast" && "title" in it.fields })
                 assertEquals(0, db.syncOutboxDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Merge step 3 decides the played mark at `playedAt` (else `episode_state.updatedAt`),
+     * as the row merge does. A later position write must not lift the local June mark over the
+     * server's October "unplayed", or the pushed winner would disagree with this device's row.
+     */
+    @Test
+    fun aNewerPositionDoesNotLiftAnOlderPlayedMarkOverTheServer() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(
+                                    podcastId = podcastId,
+                                    identityKey = "g:one",
+                                ) { copy(guid = "one") },
+                            ),
+                        ).single()
+                db
+                    .episodeStateDao()
+                    .ensure(EpisodeStateEntity(episodeId = episodeId, playedAt = june, updatedAt = june))
+                db
+                    .positionDao()
+                    .insertIfAbsent(
+                        EpisodePositionEntity(
+                            episodeId = episodeId,
+                            positionMs = 42_000L,
+                            positionSource = PositionSource.STREAM,
+                            updatedAt = october + 100_000L,
+                        ),
+                    )
+                val client = CountingClient(listOf(podcastRecord(), episodeRecord()))
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+
+                val result = merger.merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val raw = assertNotNull(db.syncClockDao().get("episode", podcastSyncId + "g:one"))
+                assertEquals(JsonPrimitive(false), decodeEpisode(raw.clocks).fields.getValue("played").v)
+                val sent = client.pushed.filter { it.coll == "episode" }
+                assertTrue(sent.none { "played" in it.fields }, "sent=$sent")
+                // The newer local position still wins, at its own timestamp.
+                val pos = sent.single { "pos" in it.fields }.fields.getValue("pos")
+                assertEquals(october + 100_000L, Hlc.parse(checkNotNull(pos.c)).millis)
             } finally {
                 db.close()
             }
