@@ -624,7 +624,7 @@ class ProbeTest(unittest.TestCase):
             self.assertIn('avd-name: nd-bmgr-api${{ matrix.api }}-probe', job)
             self.assertIn("BMGR_DISPOSABLE_API28", job)
             self.assertIn("BMGR_DISPOSABLE_API29", job)
-            self.assertIn("setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0", job)
+            self.assertIn("setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0", job)
             self.assertLess(job.index(".py build"), job.index("android-emulator-runner@"))
             self.assertEqual(1, job.count("script: python3 scripts/ci/bmgr-api29-probe.py probe"))
             self.assertIn("if: always()", job)
