@@ -439,6 +439,7 @@ internal fun RemoteSessionOffer.toCard(): RemoteSessionCard =
         title = title,
         podcastTitle = podcastTitle,
         positionText = playerTime(positionMs),
+        positionMs = positionMs,
         deviceName = deviceName,
     )
 

@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
@@ -30,7 +38,12 @@ import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_off
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_ok
 import ch.lkmc.neutrodyne.core.ui.resources.play
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
+import ch.lkmc.neutrodyne.core.ui.resources.remote_session_a11y
 import ch.lkmc.neutrodyne.core.ui.resources.remote_session_detail
+import ch.lkmc.neutrodyne.core.ui.resources.remote_session_hours
+import ch.lkmc.neutrodyne.core.ui.resources.remote_session_minutes
+import ch.lkmc.neutrodyne.core.ui.resources.remote_session_seconds
+import ch.lkmc.neutrodyne.core.ui.resources.remote_session_time_join
 import ch.lkmc.neutrodyne.core.ui.resources.remote_session_title
 import ch.lkmc.neutrodyne.core.ui.resources.review
 import ch.lkmc.neutrodyne.core.ui.resources.sync_not_now
@@ -125,7 +138,38 @@ internal fun ContinueOnThisDeviceCard(
     actions: RootActions,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier = modifier.fillMaxWidth().padding(CARD_MARGIN)) {
+    val description =
+        stringResource(
+            Res.string.remote_session_a11y,
+            remoteSession.title,
+            spokenPosition(remoteSession.positionMs),
+            remoteSession.deviceName,
+        )
+    val playLabel = stringResource(Res.string.play)
+    val dismissLabel = stringResource(Res.string.dismiss)
+    // 08: one accessibility node carries the whole offer and announces itself politely; its
+    // actions replace the buttons' own nodes. A tap anywhere on the card continues here like Play.
+    Card(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(CARD_MARGIN)
+                .clearAndSetSemantics {
+                    contentDescription = description
+                    liveRegion = LiveRegionMode.Polite
+                    onClick(label = playLabel) {
+                        actions.continueHere()
+                        true
+                    }
+                    customActions =
+                        listOf(
+                            CustomAccessibilityAction(dismissLabel) {
+                                actions.dismissRemoteSession()
+                                true
+                            },
+                        )
+                }.clickable(onClickLabel = playLabel, onClick = actions.continueHere),
+    ) {
         Column(Modifier.padding(CARD_PADDING)) {
             Text(
                 stringResource(Res.string.remote_session_title),
@@ -153,6 +197,35 @@ internal fun ContinueOnThisDeviceCard(
         }
     }
 }
+
+/**
+ * Words a position for speech ("23 minutes 14 seconds", 08), omitting zero parts; a position under
+ * one second reads as "0 seconds".
+ */
+@Composable
+private fun spokenPosition(positionMs: Long): String {
+    val totalSeconds = positionMs.coerceAtLeast(0) / MILLIS_PER_SECOND
+    val hours = (totalSeconds / SECONDS_PER_HOUR).toInt()
+    val minutes = (totalSeconds % SECONDS_PER_HOUR / SECONDS_PER_MINUTE).toInt()
+    val seconds = (totalSeconds % SECONDS_PER_MINUTE).toInt()
+    val parts =
+        buildList {
+            if (hours > 0) add(pluralStringResource(Res.plurals.remote_session_hours, hours, hours))
+            if (minutes > 0) add(pluralStringResource(Res.plurals.remote_session_minutes, minutes, minutes))
+            if (seconds > 0 || isEmpty()) {
+                add(pluralStringResource(Res.plurals.remote_session_seconds, seconds, seconds))
+            }
+        }
+    var spoken = parts.first()
+    for (part in parts.drop(1)) {
+        spoken = stringResource(Res.string.remote_session_time_join, spoken, part)
+    }
+    return spoken
+}
+
+private const val MILLIS_PER_SECOND = 1_000L
+private const val SECONDS_PER_MINUTE = 60L
+private const val SECONDS_PER_HOUR = 3_600L
 
 private const val MAX_BANNERS = 2
 

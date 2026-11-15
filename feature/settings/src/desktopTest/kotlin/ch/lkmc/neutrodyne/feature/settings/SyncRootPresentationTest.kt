@@ -89,6 +89,7 @@ class SyncRootPresentationTest {
                     title = "Episode 7",
                     podcastTitle = "Show",
                     positionText = "23:14",
+                    positionMs = 1_394_000,
                     deviceName = "Pixel 8",
                 ),
                 probe.presentation?.remoteSession,

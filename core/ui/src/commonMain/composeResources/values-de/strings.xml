@@ -66,6 +66,20 @@
     <string name="sync_not_now">Nicht jetzt</string>
     <string name="remote_session_title">Auf diesem Gerät fortsetzen</string>
     <string name="remote_session_detail">%1$s · %2$s · von %3$s</string>
+    <string name="remote_session_a11y">Auf diesem Gerät fortsetzen: %1$s bei %2$s, von %3$s</string>
+    <string name="remote_session_time_join">%1$s %2$s</string>
+    <plurals name="remote_session_hours">
+        <item quantity="one">%1$d Stunde</item>
+        <item quantity="other">%1$d Stunden</item>
+    </plurals>
+    <plurals name="remote_session_minutes">
+        <item quantity="one">%1$d Minute</item>
+        <item quantity="other">%1$d Minuten</item>
+    </plurals>
+    <plurals name="remote_session_seconds">
+        <item quantity="one">%1$d Sekunde</item>
+        <item quantity="other">%1$d Sekunden</item>
+    </plurals>
 
     <string name="date_today">Heute</string>
     <string name="date_yesterday">Gestern</string>

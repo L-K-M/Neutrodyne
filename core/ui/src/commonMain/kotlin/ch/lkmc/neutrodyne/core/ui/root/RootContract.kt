@@ -67,6 +67,8 @@ public data class RemoteSessionCard(
     val podcastTitle: String,
     /** The remote position, formatted for display ("23:14") by the shell. */
     val positionText: String,
+    /** The raw remote position; the card words it for its accessibility text (08). */
+    val positionMs: Long,
     val deviceName: String,
 )
 
