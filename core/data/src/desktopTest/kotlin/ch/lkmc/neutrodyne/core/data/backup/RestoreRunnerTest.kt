@@ -839,6 +839,26 @@ class RestoreRunnerTest {
             assertEquals(1, linkedSync.delegate.unlinks.size)
         }
 
+    /** The finish names the restored categories, so step 8 re-decides only restored history. */
+    @Test
+    fun aLinkedReplaceAllDevicesHandsItsCategoriesToTheFinish() =
+        runTest {
+            link()
+            val categories = setOf(RestoreCategory.UP_NEXT, RestoreCategory.SETTINGS)
+            val sessionId =
+                session(
+                    writeArchive(),
+                    mode = RestoreMode.REPLACE,
+                    categories = categories,
+                    reach = LinkedRestoreReach.ALL_DEVICES,
+                )
+            db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(linkedAt = null))
+            linkedSync.delegate.linkedHost = null
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+            assertEquals(listOf(categories), linkedSync.delegate.completions)
+        }
+
     @Test
     fun aClaimedAllDevicesRestoreKeepsItsResolvedUnlinkedAnswer() =
         runTest {
@@ -1563,7 +1583,8 @@ private class TestLinkedRestoreCoordinator(
         return delegate.unlinkForRestore()
     }
 
-    override suspend fun completeAllDevicesRestore() = delegate.completeAllDevicesRestore()
+    override suspend fun completeAllDevicesRestore(restored: Set<RestoreCategory>) =
+        delegate.completeAllDevicesRestore(restored)
 
     override suspend fun previewAllDevicesReach(
         backupPodcastKeys: Set<String>,

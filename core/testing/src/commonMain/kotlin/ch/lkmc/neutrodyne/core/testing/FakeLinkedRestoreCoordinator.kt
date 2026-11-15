@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AllDevicesReachEffect
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
+import ch.lkmc.neutrodyne.core.model.RestoreCategory
 
 /**
  * A [LinkedRestoreCoordinator] fixture: records every call, scripts the answers. The
@@ -13,7 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
  */
 class FakeLinkedRestoreCoordinator : LinkedRestoreCoordinator {
     val unlinks = mutableListOf<Unit>()
-    val completions = mutableListOf<Unit>()
+    val completions = mutableListOf<Set<RestoreCategory>>()
     val previews = mutableListOf<Pair<Set<String>, Set<String>>>()
 
     var unlinkResult: Outcome<Unit, BackupError> = Outcome.Success(Unit)
@@ -34,8 +35,8 @@ class FakeLinkedRestoreCoordinator : LinkedRestoreCoordinator {
         return unlinkResult
     }
 
-    override suspend fun completeAllDevicesRestore(): Outcome<Unit, BackupError> {
-        completions += Unit
+    override suspend fun completeAllDevicesRestore(restored: Set<RestoreCategory>): Outcome<Unit, BackupError> {
+        completions += restored
         return completeResult
     }
 

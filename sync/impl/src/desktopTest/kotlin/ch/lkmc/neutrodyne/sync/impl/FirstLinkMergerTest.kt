@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.PositionSource
+import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLibraryMerger
@@ -881,8 +882,12 @@ class FirstLinkMergerTest {
 
                 assertTrue(result is FirstLinkResult.Completed, "$result")
                 val sent = client.pushed.filter { it.coll == "episode" }.flatMap { it.fields.entries }
-                assertEquals(JsonPrimitive(5L), sent.single { it.key == "playCount" }.value.v, "sent=$sent")
-                assertEquals(JsonPrimitive(localLastPlay), sent.single { it.key == "lastPlayedAt" }.value.v)
+                val playCount = sent.single { it.key == "playCount" }.value
+                assertEquals(JsonPrimitive(5L), playCount.v, "sent=$sent")
+                assertEquals(october, Hlc.parse(checkNotNull(playCount.c)).millis)
+                val lastPlayed = sent.single { it.key == "lastPlayedAt" }.value
+                assertEquals(JsonPrimitive(localLastPlay), lastPlayed.v)
+                assertEquals(october, Hlc.parse(checkNotNull(lastPlayed.c)).millis)
             } finally {
                 db.close()
             }
@@ -2933,7 +2938,7 @@ class FirstLinkMergerTest {
                     db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(enabled = true))
                 }
 
-                val result = merger.restoreEverywhere()
+                val result = merger.restoreEverywhere(RestoreCategory.entries.toSet())
 
                 assertTrue(result is FirstLinkResult.Completed, "$result")
                 assertEquals(MergePolicy.LINK_HISTORY, library.calls.single().policy)
@@ -3006,12 +3011,80 @@ class FirstLinkMergerTest {
                     db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(enabled = true))
                 }
 
-                val result = merger.restoreEverywhere()
+                val result = merger.restoreEverywhere(RestoreCategory.entries.toSet())
 
                 assertTrue(result is FirstLinkResult.Completed, "$result")
                 val sent = client.pushed.filter { it.coll == "episode" }.flatMap { it.fields.entries }
-                assertEquals(JsonPrimitive(5L), sent.single { it.key == "playCount" }.value.v, "sent=$sent")
-                assertEquals(JsonPrimitive(restoredLastPlay), sent.single { it.key == "lastPlayedAt" }.value.v)
+                val playCount = sent.single { it.key == "playCount" }.value
+                assertEquals(JsonPrimitive(5L), playCount.v, "sent=$sent")
+                assertEquals(october, Hlc.parse(checkNotNull(playCount.c)).millis)
+                val lastPlayed = sent.single { it.key == "lastPlayedAt" }.value
+                assertEquals(JsonPrimitive(restoredLastPlay), lastPlayed.v)
+                assertEquals(october, Hlc.parse(checkNotNull(lastPlayed.c)).millis)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * A Replace for all synced devices without listening history leaves the episode rows as
+     * they were, so their times are not the backup's: a device-local write can have moved
+     * `updatedAt` past a newer play from another device that this device has not pulled yet.
+     * Step 2 must not re-seed such rows, so the server's history keeps deciding.
+     */
+    @Test
+    fun restoreEverywhereWithoutHistoryLeavesTheServersHistoryDeciding() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(podcastId = podcastId, identityKey = "g:one") { copy(guid = "one") },
+                            ),
+                        ).single()
+                db.episodeStateDao().ensure(EpisodeStateEntity(episodeId, updatedAt = october + 100_000L))
+                SyncClockStore(db).put(
+                    "episode",
+                    podcastSyncId + "g:one",
+                    staleEpisode(played = false, Hlc.of(june, 1, remote)),
+                )
+                val playedElsewhere =
+                    episodeRecord().copy(
+                        fields =
+                            mapOf(
+                                "played" to FieldValue(JsonPrimitive(true), clock(october)),
+                                "playedAt" to FieldValue(JsonPrimitive(october), clock(october)),
+                            ),
+                    )
+                val client = CountingClient(listOf(podcastRecord(), playedElsewhere))
+                client.allowReset = true
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+                db.withWriteTransaction {
+                    db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(enabled = true))
+                }
+
+                val result = merger.restoreEverywhere(setOf(RestoreCategory.UP_NEXT, RestoreCategory.SETTINGS))
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val sent = client.pushed.filter { it.coll == "episode" }
+                assertTrue(sent.isEmpty(), "sent=$sent")
+                val raw = assertNotNull(db.syncClockDao().get("episode", podcastSyncId + "g:one"))
+                assertEquals(JsonPrimitive(true), decodeEpisode(raw.clocks).fields.getValue("played").v)
             } finally {
                 db.close()
             }

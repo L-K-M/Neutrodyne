@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.LibraryMerger
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.MergedRecord
+import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.feeds.backup.EpisodeLineV1
@@ -228,9 +229,11 @@ class FirstLinkMerger(
      * this device's library everywhere" steps 2 to 5 — stage the snapshot, adopt its IDs and
      * merge its episode history into the replaced library, capture the library with fresh
      * clocks and the restored history winners at the backup's times, push until the outbox
-     * drains, prune by the snapshot cursor, `linkedAt`.
+     * drains, prune by the snapshot cursor, `linkedAt`. [restored] names the categories the
+     * Replace wrote: without HISTORY the episode rows were not restored and keep the records
+     * this device already shares with the server.
      */
-    suspend fun restoreEverywhere(): FirstLinkResult {
+    suspend fun restoreEverywhere(restored: Set<RestoreCategory>): FirstLinkResult {
         val roundId = clock.now()
         activity.begin()
         return try {
@@ -240,7 +243,7 @@ class FirstLinkMerger(
             val pull = pullStaged(roundId, resume = false) { _, _, _ -> }
             // Step 2 on a linked device: the seeds replace the accepted pre-Replace records,
             // so the restored rows decide against the snapshot at the backup's own times.
-            val seeds = reseedRestoredEpisodes()
+            val seeds = if (RestoreCategory.HISTORY in restored) reseedRestoredEpisodes() else emptyMap()
             mergeServerHistory(pull) { _, _, _ -> }?.let { return it }
             adoptPulledState(pull.cursor, pull.maxClockPacked)
             captureLocalLibrary()
@@ -514,8 +517,9 @@ class FirstLinkMerger(
      * `sync_clock` still holds the server's records as they stood before the Replace, and the
      * first-link seed (written only where no record exists) would leave them deciding. Each
      * restored episode row instead re-seeds its record's fields at the row's own times (the
-     * backup's), keeping the server-confirmed record as `accepted`. A record with pending
-     * outbox rows keeps its state: those rows carry newer local intents and push as they are.
+     * backup's), keeping the server-confirmed record as `accepted`. The Replace discarded the
+     * restored podcasts' pending episode rows, so a record that still has some was written
+     * after the Replace; it keeps its state and its rows push as they are.
      *
      * Returns the seeded clocks by episode row: the only fields step 3 may send again, since
      * anything else this node once wrote is already an accepted server value.

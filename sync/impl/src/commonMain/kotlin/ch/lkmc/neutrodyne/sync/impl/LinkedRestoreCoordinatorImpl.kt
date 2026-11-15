@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.AllDevicesReachEffect
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
+import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import dev.zacsweers.metro.ContributesBinding
@@ -66,8 +67,8 @@ class LinkedRestoreCoordinatorImpl(
             Outcome.Success(Unit)
         }
 
-    override suspend fun completeAllDevicesRestore(): Outcome<Unit, BackupError> =
-        when (val result = merger.restoreEverywhere()) {
+    override suspend fun completeAllDevicesRestore(restored: Set<RestoreCategory>): Outcome<Unit, BackupError> =
+        when (val result = merger.restoreEverywhere(restored)) {
             is FirstLinkResult.Completed -> Outcome.Success(Unit)
             is FirstLinkResult.Failed -> Outcome.Failure(BackupError.Io)
         }

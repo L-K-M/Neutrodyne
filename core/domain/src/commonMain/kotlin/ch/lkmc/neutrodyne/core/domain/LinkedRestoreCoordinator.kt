@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.domain
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.model.RestoreCategory
 
 /**
  * The sync-side cooperations of a restore on a linked device (05 Restore while linked, MS2).
@@ -34,9 +35,10 @@ interface LinkedRestoreCoordinator {
      * Replace with reach ALL_DEVICES: 05's step 8 runs 10's "Use this device's library
      * everywhere" steps 2–5 — capture the replaced library with fresh clocks, push until
      * the outbox drains, prune the server by the staged snapshot cursor, write `linkedAt`.
-     * Idempotent: a crash re-runs the restore and this step.
+     * Idempotent: a crash re-runs the restore and this step. [restored] names the categories
+     * the Replace wrote; only restored listening history is decided again against the server.
      */
-    suspend fun completeAllDevicesRestore(): Outcome<Unit, BackupError>
+    suspend fun completeAllDevicesRestore(restored: Set<RestoreCategory>): Outcome<Unit, BackupError>
 
     /**
      * The ALL_DEVICES second confirmation's effect (05): pull and stage the server library,
@@ -61,7 +63,7 @@ object NoLinkedRestoreCoordinator : LinkedRestoreCoordinator {
 
     override suspend fun unlinkForRestore(): Outcome<Unit, BackupError> = Outcome.Failure(BackupError.Unsupported)
 
-    override suspend fun completeAllDevicesRestore(): Outcome<Unit, BackupError> =
+    override suspend fun completeAllDevicesRestore(restored: Set<RestoreCategory>): Outcome<Unit, BackupError> =
         Outcome.Failure(BackupError.Unsupported)
 
     override suspend fun previewAllDevicesReach(

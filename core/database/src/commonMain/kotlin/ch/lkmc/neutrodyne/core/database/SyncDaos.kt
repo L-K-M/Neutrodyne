@@ -166,6 +166,18 @@ abstract class SyncOutboxDao(
     ): List<SyncOutboxEntity>
 
     /**
+     * 05 Replace pre-step with HISTORY: a podcast's pending `episode` rows go with the history
+     * the Replace deletes. A row without a literal would push the restored value at the old
+     * intent's newer clock; one with a literal would push the replaced value.
+     */
+    @Query(
+        "DELETE FROM sync_outbox WHERE coll = 'episode' AND rid IN " +
+            "(SELECT p.syncId || e.identityKey FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE p.id = :podcastId)",
+    )
+    abstract suspend fun deleteEpisodeRowsOfPodcast(podcastId: Long): Int
+
+    /**
      * 10 Scheduling: rows that push on the 2-s debounce — every change except the coalesced
      * `pos` saves and `session` records, which wait for a playback boundary or a playing tick.
      */

@@ -302,6 +302,41 @@ class RestoreMergerTest {
             assertTrue(db.syncOutboxDao().rowsFor("episode", listOf(recordSyncId + "g:e")).isNotEmpty())
         }
 
+    /**
+     * 05 Replace with HISTORY on a linked device: the matched podcast's pending `episode`
+     * intents go with the history the pre-step deletes, so step 8's push cannot send a value
+     * from the replaced library. Without HISTORY the history stays, and so do its intents.
+     */
+    @Test
+    fun aReplaceOfHistoryDiscardsTheReplacedEpisodesPendingIntents() =
+        runTest {
+            link()
+            val syncId = "99999999-9999-4999-8999-999999999999"
+            val podcast =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://a/feed", syncId = syncId),
+                )
+            db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:e"))
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity("episode", syncId + "g:e", "pos", 1L shl 16, "0000000000000001"),
+            )
+            val staged = stagedOf(podcasts = listOf(podcastV1("https://a/feed").copy(syncId = syncId)))
+
+            merger.mergeLibrary(
+                staged,
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES - RestoreCategory.HISTORY,
+                suppressCapture = true,
+            )
+            assertTrue(db.syncOutboxDao().rowsFor("episode", listOf(syncId + "g:e")).isNotEmpty())
+
+            merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES, suppressCapture = true)
+            assertTrue(
+                db.syncOutboxDao().rowsFor("episode", listOf(syncId + "g:e")).isEmpty(),
+                "rows=${db.syncOutboxDao().rows()}",
+            )
+        }
+
     /** The member seed rides the adopted group uuid and podcast syncId. */
     @Test
     fun linkMergeRekeysTheMemberSeedToTheAdoptedIds() =

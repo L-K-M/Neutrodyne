@@ -303,7 +303,7 @@ internal class RestoreRunner(
             // 05 step 8, reach ALL_DEVICES: 10's upload/prune steps run before the session
             // commits, so a failure there re-runs the whole (idempotent) restore.
             if (request.completeAllDevices) {
-                when (val outcome = linkedSync.completeAllDevicesRestore()) {
+                when (val outcome = linkedSync.completeAllDevicesRestore(request.categories)) {
                     is Outcome.Failure -> return RestoreRunResult.Retry(sessionId, outcome.error)
                     is Outcome.Success -> Unit
                 }

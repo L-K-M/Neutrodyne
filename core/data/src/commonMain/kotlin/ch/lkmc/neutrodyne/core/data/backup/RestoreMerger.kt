@@ -543,6 +543,9 @@ internal class RestoreMerger(
                     val block: suspend () -> Unit = {
                         backupDao.deleteStateOfPodcast(podcastId)
                         backupDao.deletePositionsOfPodcast(podcastId)
+                        // A linked Replace for all synced devices pushes in step 8: intents
+                        // queued before it describe the history deleted here.
+                        db.syncOutboxDao().deleteEpisodeRowsOfPodcast(podcastId)
                     }
                     if (suppressCapture) db.syncStateDao().withApplying { block() } else block()
                 }
