@@ -224,8 +224,10 @@ class FirstLinkMerger(
 
     /**
      * 05 Restore while linked, Replace ALL_DEVICES: the restore runner's step 8 runs 10's "Use
-     * this device's library everywhere" steps — stage the snapshot, capture the replaced library
-     * with fresh clocks, push until the outbox drains, prune by the snapshot cursor, `linkedAt`.
+     * this device's library everywhere" steps 2 to 5 — stage the snapshot, adopt its IDs and
+     * merge its episode history into the replaced library, capture the library with fresh
+     * clocks and the restored history winners at the backup's times, push until the outbox
+     * drains, prune by the snapshot cursor, `linkedAt`.
      */
     suspend fun restoreEverywhere(): FirstLinkResult {
         val roundId = clock.now()
@@ -235,8 +237,13 @@ class FirstLinkMerger(
             // A fresh pull: the prune must bound to a snapshot that covers everything the
             // server holds now, and this run's uploads re-assert every surviving record.
             val pull = pullStaged(roundId, resume = false) { _, _, _ -> }
+            // Step 2 on a linked device: the seeds replace the accepted pre-Replace records,
+            // so the restored rows decide against the snapshot at the backup's own times.
+            val seeds = reseedRestoredEpisodes()
+            mergeServerHistory(pull) { _, _, _ -> }?.let { return it }
             adoptPulledState(pull.cursor, pull.maxClockPacked)
             captureLocalLibrary()
+            captureRestoredWinners(seeds)
             pushOutbox { _, _, _ -> }
             client.reset(DELETE_CONFIRMATION, RESET_MODE_LIBRARY, pull.cursor)
             completeLink()
@@ -456,6 +463,31 @@ class FirstLinkMerger(
         // The seeds freeze the pre-merge values and timestamps: after the history merge only
         // the episode fields the local side won still carry this node's stamps.
         seedLocalRows()
+        mergeServerHistory(pull, onProgress)?.let { return it }
+        adoptPulledState(pull.cursor, pull.maxClockPacked)
+        captureLocalLibrary()
+        // Episode state the local side won is re-sent at its own frozen timestamp; records the
+        // full capture above already queued are skipped, so nothing is captured twice.
+        captureLocalWinners()
+        pushOutbox(onProgress)
+        // Prune last: the server drops everything this upload did not re-assert, so no device can
+        // observe a half-replaced library.
+        client.reset(DELETE_CONFIRMATION, RESET_MODE_LIBRARY, pull.cursor)
+        completeLink()
+        discardStaging()
+        return FirstLinkResult.Completed(0)
+    }
+
+    /**
+     * "Use this device's library everywhere" step 2 over the staged snapshot, after the caller
+     * seeded this device's rows: the port runs under LINK_HISTORY (matched podcasts and groups
+     * adopt the server's IDs, the episode history merges by time), then the received episode
+     * records fold into `sync_clock`. Returns the failure, or null once the step completed.
+     */
+    private suspend fun mergeServerHistory(
+        pull: StagedPull,
+        onProgress: (LinkPhase, Int, Int) -> Unit,
+    ): FirstLinkResult.Failed? {
         val staged = mapToStagingDirectory(pull, MergePolicy.LINK_HISTORY)
         val hints = staged.parkHints
         val outcome =
@@ -470,21 +502,72 @@ class FirstLinkMerger(
         }
         // Only the episode records of podcasts this device has are folded into `sync_clock`:
         // every other server record is not applied (step 2). Its podcast, group, member and
-        // Up next records are re-asserted from this device's rows below, and its settings and
-        // passwords never stage effects here, so no server value can land on this device.
+        // Up next records are re-asserted from this device's rows in step 3, and its settings
+        // and passwords never stage effects here, so no server value can land on this device.
         mergeReceivedClocks(localEpisodeRecords(pull.records))
-        adoptPulledState(pull.cursor, pull.maxClockPacked)
-        captureLocalLibrary()
-        // Episode state the local side won is re-sent at its own frozen timestamp; records the
-        // full capture above already queued are skipped, so nothing is captured twice.
-        captureLocalWinners()
-        pushOutbox(onProgress)
-        // Prune last: the server drops everything this upload did not re-assert, so no device can
-        // observe a half-replaced library.
-        client.reset(DELETE_CONFIRMATION, RESET_MODE_LIBRARY, pull.cursor)
-        completeLink()
-        discardStaging()
-        return FirstLinkResult.Completed(0)
+        return null
+    }
+
+    /**
+     * Step 2's seed for 05's Replace for all synced devices. The device was linked, so
+     * `sync_clock` still holds the server's records as they stood before the Replace, and the
+     * first-link seed (written only where no record exists) would leave them deciding. Each
+     * restored episode row instead re-seeds its record's fields at the row's own times (the
+     * backup's), keeping the server-confirmed record as `accepted`. A record with pending
+     * outbox rows keeps its state: those rows carry newer local intents and push as they are.
+     *
+     * Returns the seeded clocks by episode row: the only fields step 3 may send again, since
+     * anything else this node once wrote is already an accepted server value.
+     */
+    private suspend fun reseedRestoredEpisodes(): Map<Long, Map<String, Hlc>> {
+        val nodeId = nodeId()
+        val coll = SyncCollection.EPISODE
+        val seeds = HashMap<Long, Map<String, Hlc>>()
+        db.withWriteTransaction {
+            val correctedNow = correctedSeedNow()
+            db.syncStateDao().withApplying {
+                for (episode in db.episodeDao().all()) {
+                    val podcast = db.podcastDao().byId(episode.podcastId) ?: continue
+                    val fields =
+                        episodeSeedFields(
+                            db.episodeStateDao().byEpisode(episode.id),
+                            db.positionDao().byEpisode(episode.id),
+                            nodeId,
+                        ) { seedTime(it, correctedNow) }
+                    if (fields.isEmpty()) continue
+                    val rid = podcast.syncId + episode.identityKey
+                    if (db.syncOutboxDao().rowsFor(coll.wire, listOf(rid)).isNotEmpty()) continue
+                    val stored = clockStore.get(coll.wire, rid)
+                    val confirmed = stored?.confirmed() ?: AcceptedSyncRecord(RecordState(coll), 0L)
+                    val base = stored ?: RawSyncRecord(RecordState(coll))
+                    clockStore.put(
+                        coll.wire,
+                        rid,
+                        base
+                            .copy(
+                                state = base.state.copy(fields = base.state.fields + fields),
+                            ).withConfirmed(confirmed),
+                    )
+                    seeds[episode.id] = fields.mapNotNull { (name, field) -> field.c?.let { name to it } }.toMap()
+                }
+            }
+        }
+        return seeds
+    }
+
+    /**
+     * Step 3 for a restore: sends the restored episode fields that kept their seeded clocks
+     * through the field merge — the local winners — at the backup's times, under the rid the
+     * row holds after step 2's ID adoption.
+     */
+    private suspend fun captureRestoredWinners(seeds: Map<Long, Map<String, Hlc>>) {
+        for ((episodeId, clocks) in seeds) {
+            val episode = db.episodeDao().byId(episodeId) ?: continue
+            val podcast = db.podcastDao().byId(episode.podcastId) ?: continue
+            val row =
+                db.syncClockDao().get(SyncCollection.EPISODE.wire, podcast.syncId + episode.identityKey) ?: continue
+            captureOwnedFields(row) { name, stamp -> clocks[name] == stamp }
+        }
     }
 
     /**
@@ -1040,15 +1123,9 @@ class FirstLinkMerger(
     private suspend fun seedLocalRows() {
         val nodeId = nodeId()
         db.withWriteTransaction {
-            val offset = checkNotNull(db.syncStateDao().get()).clockOffsetMs
-            val correctedNow =
-                adjustedSyncWallMs(clock.now(), offset)
-                    ?: throw ProtocolException(
-                        SyncErrorCode.CLOCK_SKEW,
-                        "Corrected device time cannot seed local sync clocks",
-                    )
+            val correctedNow = correctedSeedNow()
 
-            fun localTime(at: Long): Long = at.coerceIn(SYNC_MIN_CLOCK_MS, maxOf(SYNC_MIN_CLOCK_MS, correctedNow))
+            fun localTime(at: Long): Long = seedTime(at, correctedNow)
 
             db.syncStateDao().withApplying {
                 for (podcast in db.podcastDao().allForExport()) {
@@ -1103,6 +1180,19 @@ class FirstLinkMerger(
             }
         }
     }
+
+    /** Corrected device time, the cap for every local seed stamp (an uncorrectable clock fails). */
+    private suspend fun correctedSeedNow(): Long {
+        val offset = checkNotNull(db.syncStateDao().get()).clockOffsetMs
+        return adjustedSyncWallMs(clock.now(), offset)
+            ?: throw ProtocolException(SyncErrorCode.CLOCK_SKEW, "Corrected device time cannot seed local sync clocks")
+    }
+
+    /** A row timestamp clamped to the admitted clock range, never past corrected now. */
+    private fun seedTime(
+        at: Long,
+        correctedNow: Long,
+    ): Long = at.coerceIn(SYNC_MIN_CLOCK_MS, maxOf(SYNC_MIN_CLOCK_MS, correctedNow))
 
     /**
      * One episode row's seed, stamped at the local times 10 Merge step 3 decides each field by,
@@ -1212,30 +1302,42 @@ class FirstLinkMerger(
     private suspend fun captureLocalWinners() {
         val nodeId = nodeId().value
         for (row in db.syncClockDao().all()) {
-            val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: continue
-            if (db.syncOutboxDao().rowsFor(row.coll, listOf(row.rid)).isNotEmpty()) continue
-            db.withWriteTransaction {
-                db.syncStateDao().withApplying {
-                    val played = raw.state.fields["played"]
-                    val playedAt = raw.state.fields["playedAt"]
-                    for ((name, field) in raw.state.fields) {
-                        val stampClock = field.c ?: continue
-                        if (stampClock.nodeId.value != nodeId) continue
-                        val at = stampClock.millis
-                        if (name == "playedAt") continue
-                        if (name == "played") {
-                            val literal =
-                                JsonObject(
-                                    buildMap {
-                                        put("played", played?.v ?: JsonNull)
-                                        put("playedAt", playedAt?.v ?: JsonNull)
-                                    },
-                                ).toString()
-                            db.syncOutboxDao().captureAt(row.coll, row.rid, "played", at, literal)
-                            continue
-                        }
-                        db.syncOutboxDao().captureAt(row.coll, row.rid, name, at, field.v.toString())
+            captureOwnedFields(row) { _, stamp -> stamp.nodeId.value == nodeId }
+        }
+    }
+
+    /**
+     * Captures the fields of one `sync_clock` record that [owns] claims, each at its own clock's
+     * time with its literal value, the played pair as one literal. A record with pending outbox
+     * rows is left alone.
+     */
+    private suspend fun captureOwnedFields(
+        row: ch.lkmc.neutrodyne.core.database.SyncClockEntity,
+        owns: (String, Hlc) -> Boolean,
+    ) {
+        val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: return
+        if (db.syncOutboxDao().rowsFor(row.coll, listOf(row.rid)).isNotEmpty()) return
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                val played = raw.state.fields["played"]
+                val playedAt = raw.state.fields["playedAt"]
+                for ((name, field) in raw.state.fields) {
+                    val stampClock = field.c ?: continue
+                    if (!owns(name, stampClock)) continue
+                    val at = stampClock.millis
+                    if (name == "playedAt") continue
+                    if (name == "played") {
+                        val literal =
+                            JsonObject(
+                                buildMap {
+                                    put("played", played?.v ?: JsonNull)
+                                    put("playedAt", playedAt?.v ?: JsonNull)
+                                },
+                            ).toString()
+                        db.syncOutboxDao().captureAt(row.coll, row.rid, "played", at, literal)
+                        continue
                     }
+                    db.syncOutboxDao().captureAt(row.coll, row.rid, name, at, field.v.toString())
                 }
             }
         }
