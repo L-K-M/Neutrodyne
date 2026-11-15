@@ -209,6 +209,10 @@ class RadioInteractionTest {
             onNodeWithTag("radio_play").performTouchInput { swipeDown() }
             assertEquals(2, toggles)
             onNodeWithTag("radio_play").assertIsOff()
+            // A short flick just past touch slop still switches it on.
+            onNodeWithTag("radio_play").performTouchInput { swipeUp(centerY, centerY - 24f, 120) }
+            assertEquals(3, toggles)
+            onNodeWithTag("radio_play").assertIsOn()
         }
 
     @Test fun playSwitchIsDisabledWithoutASelection() =

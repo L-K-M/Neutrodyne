@@ -200,7 +200,7 @@ internal fun RadioPlayer(
                 PlaySwitch(
                     on = state.playing,
                     enabled = selected != null,
-                    description = "${stringResource(Res.string.radio_play)} ${selected?.title.orEmpty()}",
+                    description = "${stringResource(Res.string.radio_play)} ${selected?.title.orEmpty()}".trim(),
                     status = statusText,
                     compact = compact,
                     scale = capScale,
@@ -252,9 +252,11 @@ private fun PlaySwitch(
                         change.consume()
                         travel += amount
                     },
+                    // Crossing touch slop already cancelled the tap, so any flick toward the other
+                    // label toggles; a further threshold would swallow short flicks. On a scrolling
+                    // (very short) radio, a drag that starts on the switch moves the lever, not the page.
                     onDragEnd = {
-                        val threshold = 12.dp.toPx()
-                        if ((travel < -threshold && !currentOn) || (travel > threshold && currentOn)) toggle()
+                        if ((travel < 0f && !currentOn) || (travel > 0f && currentOn)) toggle()
                     },
                 )
             }.semantics {
