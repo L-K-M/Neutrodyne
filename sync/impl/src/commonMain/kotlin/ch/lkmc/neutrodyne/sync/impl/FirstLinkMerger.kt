@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkPhase
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.protocol.FieldKind
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
@@ -556,9 +557,9 @@ class FirstLinkMerger(
     }
 
     /**
-     * Step 3 for a restore: sends the restored episode fields that kept their seeded clocks
-     * through the field merge — the local winners — at the backup's times, under the rid the
-     * row holds after step 2's ID adoption.
+     * Step 3 for a restore: sends the restored episode fields that won the field merge, under
+     * the rid the row holds after step 2's ID adoption. An LWW winner kept its seeded clock and
+     * goes at the backup's time; a maximum is decided by value (see [captureOwnedFields]).
      */
     private suspend fun captureRestoredWinners(seeds: Map<Long, Map<String, Hlc>>) {
         for ((episodeId, clocks) in seeds) {
@@ -566,7 +567,7 @@ class FirstLinkMerger(
             val podcast = db.podcastDao().byId(episode.podcastId) ?: continue
             val row =
                 db.syncClockDao().get(SyncCollection.EPISODE.wire, podcast.syncId + episode.identityKey) ?: continue
-            captureOwnedFields(row) { name, stamp -> clocks[name] == stamp }
+            captureOwnedFields(row, sends = { it in clocks }) { name, stamp -> clocks[name] == stamp }
         }
     }
 
@@ -1297,7 +1298,8 @@ class FirstLinkMerger(
      * The capture pass (10 Merge step 5): every field whose clock carries this node — the
      * local-won fields and every field of a record the server lacks — is captured at its own
      * timestamp, the played pair as one literal. Fields the server won carry the server's
-     * origin node and are never re-stamped. Records with pending outbox rows are left alone.
+     * origin node and are never re-stamped; a minimum or maximum is decided by value instead.
+     * Records with pending outbox rows are left alone.
      */
     private suspend fun captureLocalWinners() {
         val nodeId = nodeId().value
@@ -1307,23 +1309,34 @@ class FirstLinkMerger(
     }
 
     /**
-     * Captures the fields of one `sync_clock` record that [owns] claims, each at its own clock's
-     * time with its literal value, the played pair as one literal. A record with pending outbox
-     * rows is left alone.
+     * Captures the fields of one `sync_clock` record that the local side won, each at its merged
+     * clock's time with its literal value, the played pair as one literal. [ownsClock] decides an
+     * LWW field by its merged clock. A minimum or maximum keeps the newer clock whichever value
+     * wins, so a local winner there is a value the server has not confirmed. [sends] limits both
+     * to the fields this pass may send. A record with pending outbox rows is left alone.
      */
     private suspend fun captureOwnedFields(
         row: ch.lkmc.neutrodyne.core.database.SyncClockEntity,
-        owns: (String, Hlc) -> Boolean,
+        sends: (String) -> Boolean = { true },
+        ownsClock: (String, Hlc) -> Boolean,
     ) {
         val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: return
         if (db.syncOutboxDao().rowsFor(row.coll, listOf(row.rid)).isNotEmpty()) return
+        val confirmed by lazy { raw.confirmed().state.fields }
+        val specs = raw.state.coll.fields
         db.withWriteTransaction {
             db.syncStateDao().withApplying {
                 val played = raw.state.fields["played"]
                 val playedAt = raw.state.fields["playedAt"]
                 for ((name, field) in raw.state.fields) {
                     val stampClock = field.c ?: continue
-                    if (!owns(name, stampClock)) continue
+                    if (!sends(name)) continue
+                    val won =
+                        when (specs[name]?.kind) {
+                            FieldKind.MIN_FIELD, FieldKind.MAX_FIELD -> field.v != confirmed[name]?.v
+                            else -> ownsClock(name, stampClock)
+                        }
+                    if (!won) continue
                     val at = stampClock.millis
                     if (name == "playedAt") continue
                     if (name == "played") {

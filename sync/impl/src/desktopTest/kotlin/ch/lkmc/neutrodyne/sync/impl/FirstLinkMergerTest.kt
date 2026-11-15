@@ -841,6 +841,54 @@ class FirstLinkMergerTest {
         }
 
     /**
+     * `playCount` and `lastPlayedAt` merge as maximums: the higher local value wins but takes
+     * the server's newer clock, so 10 Merge step 5 must decide it by value. Otherwise the
+     * server keeps its lower count while this device's row keeps the higher one.
+     */
+    @Test
+    fun aLocalMaximumAboveTheServersIsSentDespiteTheNewerServerClock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(podcastId = podcastId, identityKey = "g:one") { copy(guid = "one") },
+                            ),
+                        ).single()
+                val localLastPlay = june + 5_000L
+                db.episodeStateDao().ensure(
+                    EpisodeStateEntity(episodeId, playCount = 5, lastPlayedAt = localLastPlay, updatedAt = june),
+                )
+                val client = CountingClient(listOf(podcastRecord(), episodeRecordWithLowerMaximums()))
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+
+                val result = merger.merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val sent = client.pushed.filter { it.coll == "episode" }.flatMap { it.fields.entries }
+                assertEquals(JsonPrimitive(5L), sent.single { it.key == "playCount" }.value.v, "sent=$sent")
+                assertEquals(JsonPrimitive(localLastPlay), sent.single { it.key == "lastPlayedAt" }.value.v)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
      * The staging resume (10 Merge step 1): a pull that already completed is reused — the
      * second merge issues no further `changes` calls — and an interrupted pull (no end
      * marker) is re-pulled.
@@ -2913,6 +2961,63 @@ class FirstLinkMergerTest {
         }
 
     /**
+     * A restored maximum above the server's wins the field merge but takes the server's newer
+     * clock, so the restore's step 3 must still send it, or the server keeps its lower count
+     * while this device's row keeps the restored one.
+     */
+    @Test
+    fun restoreEverywhereSendsARestoredMaximumAboveTheServers() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                episodeEntity(podcastId = podcastId, identityKey = "g:one") { copy(guid = "one") },
+                            ),
+                        ).single()
+                val restoredLastPlay = june + 5_000L
+                db.episodeStateDao().ensure(
+                    EpisodeStateEntity(episodeId, playCount = 5, lastPlayedAt = restoredLastPlay, updatedAt = june),
+                )
+                SyncClockStore(db).put(
+                    "episode",
+                    podcastSyncId + "g:one",
+                    staleEpisode(played = false, Hlc.of(june, 1, remote)),
+                )
+                val client = CountingClient(listOf(podcastRecord(), episodeRecordWithLowerMaximums()))
+                client.allowReset = true
+                val merger = mergerOf(db, client, FakeLibraryMerger())
+                db.withWriteTransaction {
+                    db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(enabled = true))
+                }
+
+                val result = merger.restoreEverywhere()
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val sent = client.pushed.filter { it.coll == "episode" }.flatMap { it.fields.entries }
+                assertEquals(JsonPrimitive(5L), sent.single { it.key == "playCount" }.value.v, "sent=$sent")
+                assertEquals(JsonPrimitive(restoredLastPlay), sent.single { it.key == "lastPlayedAt" }.value.v)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
      * "Use this device's library everywhere" step 3 for settings: the choice folds no server
      * setting, so the controller's post-link reconcile queues this device's value as an
      * account-absent key, with a clock above every clock of the snapshot, and the server's
@@ -3461,6 +3566,18 @@ class FirstLinkMergerTest {
                 ),
             match = MatchHints(guid = "one", title = "One"),
             matchClocks = mapOf("guid" to clock(october).toString()),
+        )
+
+    /** The server's `g:one` with October clocks on a lower play count and an older last play. */
+    private fun episodeRecordWithLowerMaximums(): RecordDto =
+        episodeRecord().copy(
+            fields =
+                mapOf(
+                    "played" to FieldValue(JsonPrimitive(false), clock(october)),
+                    "playedAt" to FieldValue(JsonNull, clock(october)),
+                    "playCount" to FieldValue(JsonPrimitive(3L), clock(october)),
+                    "lastPlayedAt" to FieldValue(JsonPrimitive(june - 5_000L), clock(october)),
+                ),
         )
 
     private fun clock(atMs: Long): String = Hlc.of(atMs, 1, remote).toString()
