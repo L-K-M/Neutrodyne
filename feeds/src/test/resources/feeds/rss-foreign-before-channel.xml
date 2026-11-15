@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet type="text/xsl" href="/global/feed/rss.xslt" ?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+   <script src="https://feeds.example.com/global/feed/xslt-polyfill.min.js" xmlns="http://www.w3.org/1999/xhtml"></script>
+   <channel>
+      <title>Foreign Before Channel</title>
+      <link>https://example.com/foreign-before-channel</link>
+      <itunes:author>Example Host</itunes:author>
+      <item>
+         <title>Stylesheet and script before the channel</title>
+         <guid isPermaLink="false">fbc-1</guid>
+         <enclosure url="https://cdn.example.com/fbc-1.mp3" length="10" type="audio/mpeg"/>
+      </item>
+   </channel>
+</rss>

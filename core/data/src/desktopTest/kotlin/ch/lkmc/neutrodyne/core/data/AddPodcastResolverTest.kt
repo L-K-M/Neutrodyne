@@ -378,6 +378,22 @@ class AddPodcastResolverTest {
             assertTrue(bundle.cache.get(preview.previewId) != null)
         }
 
+    /** Acast's shape: an `xml-stylesheet` instruction, then an XHTML `<script>` before `<channel>`. */
+    @Test
+    fun rssWithAStylesheetAndScriptBeforeTheChannelPreviews() =
+        runTest {
+            val body =
+                """<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet type="text/xsl" href="/global/feed/rss.xslt" ?>
+<rss version="2.0"><script src="https://feeds.example.com/p.js" xmlns="http://www.w3.org/1999/xhtml"></script>
+<channel><title>Styled Show</title>${rssItem("e1", title = "First")}</channel></rss>"""
+            server.enqueue(mockResponse(body = body))
+
+            val preview = assertIs<AddResolution.Feed>(bundle.resolver.resolve(feedUrl())).preview
+            assertEquals("Styled Show", preview.title)
+            assertEquals("First", preview.episodes.single().title)
+        }
+
     @Test
     fun sniffedNonFeedsFailWithTheRightError() =
         runBlocking {

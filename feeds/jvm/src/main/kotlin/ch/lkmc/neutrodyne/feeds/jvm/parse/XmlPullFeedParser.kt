@@ -351,10 +351,20 @@ private class ParseSession(
         val channel = ChannelBuilder(base)
         val items = mutableListOf<ParsedEpisode>()
 
-        // Descend to <channel>; an <rss> root without one is not a feed.
+        // Descend to the first <channel> child; an <rss> root without one is not a feed. Other
+        // children are skipped whole: Acast puts an XHTML <script> before the channel, and a
+        // <channel> nested inside such an element is not the feed's channel.
+        val rootDepth = parser.depth
         var event = nextEvent(parser)
-        while (event != XmlPullParser.START_TAG && event != XmlPullParser.END_DOCUMENT) event = nextEvent(parser)
-        if (event == XmlPullParser.END_DOCUMENT || !parser.name.equals("channel", ignoreCase = true)) return null
+        while (true) {
+            if (event == XmlPullParser.END_DOCUMENT) return null
+            if (event == XmlPullParser.END_TAG && parser.depth == rootDepth) return null
+            if (event == XmlPullParser.START_TAG) {
+                if (parser.name.equals("channel", ignoreCase = true)) break
+                skipElement(parser)
+            }
+            event = nextEvent(parser)
+        }
         channel.base = baseOf(parser, base)
 
         val channelDepth = parser.depth
