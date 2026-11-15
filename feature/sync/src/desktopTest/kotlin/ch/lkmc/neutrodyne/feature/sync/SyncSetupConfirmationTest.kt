@@ -230,6 +230,20 @@ class SyncSetupConfirmationTest {
         }
 
     @Test
+    fun useDeviceConfirmationNamesSingleRemovalsInTheSingular() =
+        runComposeUiTest {
+            val harness = Harness()
+            setPage(harness)
+
+            showDeviceConfirmation(harness, removedPodcasts = 1, removedGroups = 1)
+
+            onNodeWithText(
+                "Other devices will remove 1 podcast and 1 group when they next sync; " +
+                    "devices ask first when this exceeds their limits.",
+            ).assertIsDisplayed()
+        }
+
+    @Test
     fun useDeviceCancelLeavesThroughTheService() =
         runComposeUiTest {
             val harness = Harness()
@@ -311,9 +325,13 @@ class SyncSetupConfirmationTest {
     }
 
     /** The service's answer to the USE_DEVICE choice: its staged second confirmation. */
-    private fun ComposeUiTest.showDeviceConfirmation(harness: Harness) {
+    private fun ComposeUiTest.showDeviceConfirmation(
+        harness: Harness,
+        removedPodcasts: Int = 4,
+        removedGroups: Int = 2,
+    ) {
         harness.link.setState(
-            LinkState.ConfirmReplaceEverywhere(harness.choices, removedPodcasts = 4, removedGroups = 2),
+            LinkState.ConfirmReplaceEverywhere(harness.choices, removedPodcasts, removedGroups),
         )
         waitForIdle()
     }

@@ -59,7 +59,7 @@
   <string name="sync_setup_replace_server_backup">Zuerst eine Sicherung speichern</string>
   <string name="sync_setup_replace_server_confirm">Ersetzen</string>
   <string name="sync_setup_replace_device_title">Bibliothek dieses Geräts überall verwenden?</string>
-  <string name="sync_setup_replace_device_body">Andere Geräte entfernen bei ihrem nächsten Synchronisieren %1$d Podcasts und %2$d Gruppen; Geräte fragen zuerst, wenn das ihre Grenzwerte überschreitet.</string>
+  <string name="sync_setup_replace_device_body">Andere Geräte entfernen bei ihrem nächsten Synchronisieren %1$s und %2$s; Geräte fragen zuerst, wenn das ihre Grenzwerte überschreitet.</string>
   <string name="sync_setup_replace_device_confirm">Überall ersetzen</string>
   <string name="sync_setup_backup_working">Sicherung wird gespeichert…</string>
   <string name="sync_setup_backup_saved">Sicherung gespeichert.</string>

@@ -66,6 +66,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.export_err_destination
 import ch.lkmc.neutrodyne.core.ui.resources.export_err_storage
 import ch.lkmc.neutrodyne.core.ui.resources.export_passwords
 import ch.lkmc.neutrodyne.core.ui.resources.export_private_links
+import ch.lkmc.neutrodyne.core.ui.resources.group_count
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_address_hint
@@ -868,7 +870,12 @@ private fun ReplaceEverywhereDialog(
     NdDialog(
         onDismissRequest = onCancel,
         title = stringResource(Res.string.sync_setup_replace_device_title),
-        text = stringResource(Res.string.sync_setup_replace_device_body, removedPodcasts, removedGroups),
+        text =
+            stringResource(
+                Res.string.sync_setup_replace_device_body,
+                pluralStringResource(UiRes.plurals.podcast_count, removedPodcasts, removedPodcasts),
+                pluralStringResource(UiRes.plurals.group_count, removedGroups, removedGroups),
+            ),
         confirm =
             NdDialogAction(
                 stringResource(Res.string.sync_setup_replace_device_confirm),
