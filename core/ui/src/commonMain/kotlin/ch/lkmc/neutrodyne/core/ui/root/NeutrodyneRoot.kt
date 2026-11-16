@@ -99,6 +99,7 @@ import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
 import ch.lkmc.neutrodyne.core.ui.navigation.NeutrodyneNavHost
+import ch.lkmc.neutrodyne.core.ui.navigation.PageFrame
 import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
 import ch.lkmc.neutrodyne.core.ui.resolve
@@ -457,6 +458,7 @@ private fun ReadyRoot(
                                     installers = installers,
                                     directive = directive,
                                     modifier = Modifier.fillMaxSize(),
+                                    pageFrame = PageFrame.RADIO_CABINET,
                                 )
                             }
                         }

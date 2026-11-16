@@ -44,6 +44,18 @@ import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
 
 /**
+ * How the host frames each page. The app root builds every page except the radio home into the
+ * radio's cabinet (PO-55); navigation tests that probe transition pixels use bare pages.
+ */
+public enum class PageFrame {
+    /** Pages fill their scene edge to edge. */
+    NONE,
+
+    /** Pages stand in [RadioCabinetPage]; the radio home and overlays stay unframed. */
+    RADIO_CABINET,
+}
+
+/**
  * The shared `NavDisplay` (01 AppNavigator and per-tab back stacks). Every tab's stack is decorated
  * on every composition in the fixed tab order — a stack skipped for a frame would lose its
  * saveable state and ViewModel stores — and `LocalNavTab` is stamped per entry. Scene strategies
@@ -58,6 +70,7 @@ public fun NeutrodyneNavHost(
     installers: Set<EntryProviderInstaller>,
     directive: PaneScaffoldDirective,
     modifier: Modifier = Modifier,
+    pageFrame: PageFrame = PageFrame.NONE,
 ) {
     // The DI graph's multibound installer set is rebuilt on every access, so the parameter's
     // identity churns on each recomposition while its bindings stay fixed for the process.
@@ -81,8 +94,8 @@ public fun NeutrodyneNavHost(
                             rememberViewModelStoreNavEntryDecorator(),
                             rememberTabLocalNavEntryDecorator(tab),
                             rememberPaneFocusDecorator(),
-                            rememberHeaderBarDecorator(state, tab, directive.maxHorizontalPartitions),
-                            rememberCabinetDecorator(directive.maxHorizontalPartitions),
+                            rememberHeaderBarDecorator(state, tab, directive.maxHorizontalPartitions, pageFrame),
+                            rememberCabinetDecorator(directive.maxHorizontalPartitions, pageFrame),
                         ),
                     entryProvider = { key -> withPaneRole(key, provider(key), tab) },
                 )
@@ -328,12 +341,13 @@ private fun rememberHeaderBarDecorator(
     state: NavigationState,
     tab: TopLevelKey,
     partitions: Int,
+    pageFrame: PageFrame,
 ): NavEntryDecorator<NavKey> =
-    remember(state, tab, partitions) {
+    remember(state, tab, partitions, pageFrame) {
         NavEntryDecorator { entry ->
             CompositionLocalProvider(
                 LocalHeaderSystemBarsEnabled provides (
-                    !inCabinet(entry) && partitions == 1 && state.selectedTab == tab &&
+                    !inCabinet(entry, pageFrame) && partitions == 1 && state.selectedTab == tab &&
                         state.stack(tab).lastOrNull() == entry.metadata[PANE_NAV_KEY]
                 ),
             ) { entry.Content() }
@@ -346,10 +360,13 @@ private fun rememberHeaderBarDecorator(
  * the row, carries the valve deck, so a two-pane window shows one deck as one radio would.
  */
 @Composable
-private fun rememberCabinetDecorator(partitions: Int): NavEntryDecorator<NavKey> =
-    remember(partitions) {
+private fun rememberCabinetDecorator(
+    partitions: Int,
+    pageFrame: PageFrame,
+): NavEntryDecorator<NavKey> =
+    remember(partitions, pageFrame) {
         NavEntryDecorator { entry ->
-            if (inCabinet(entry)) {
+            if (inCabinet(entry, pageFrame)) {
                 val role = entry.metadata[NdSceneMetadata.KEY_PANE]
                 val deck =
                     if (partitions == 1 || role == null || role == NdSceneMetadata.PANE_LIST) {
@@ -372,5 +389,10 @@ private val CabinetBackKey: @Composable () -> Unit = { NavBackButton() }
  * Cabinet pages sit below the valve deck on the charcoal stage, so the status bar always has
  * light icons there and no page header leases it.
  */
-private fun inCabinet(entry: NavEntry<NavKey>): Boolean =
-    entry.metadata[PANE_NAV_KEY] != FeedsKey && entry.metadata[NdSceneMetadata.KEY_OVERLAY] == null
+private fun inCabinet(
+    entry: NavEntry<NavKey>,
+    pageFrame: PageFrame,
+): Boolean =
+    pageFrame == PageFrame.RADIO_CABINET &&
+        entry.metadata[PANE_NAV_KEY] != FeedsKey &&
+        entry.metadata[NdSceneMetadata.KEY_OVERLAY] == null
