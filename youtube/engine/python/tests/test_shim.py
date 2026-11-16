@@ -8,13 +8,15 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from yt_dlp.networking import common
 from yt_dlp.networking.common import Request, Response
 from yt_dlp.networking.exceptions import HTTPError, TransportError
 from yt_dlp.utils import DownloadError, ExtractorError, GeoRestrictedError
 
-from neutrodyne_ytx.bridge import Bridge, CallState, call_scope, current_call, fixed_options, DESCRIPTION_BYTES
+from neutrodyne_ytx.bridge import (Bridge, CallState, call_scope, current_call, fixed_options, DESCRIPTION_BYTES,
+                                   RESULT_BYTES)
 from neutrodyne_ytx.errors import Code, ShimError, classify
 from neutrodyne_ytx.okhttp_rh import install, NeutrodyneOkHttpRH
 from neutrodyne_ytx.replay import ReplayRH, Mode, request_key, scrub
@@ -221,6 +223,57 @@ class BridgeTests(unittest.TestCase):
                'vcodec': 'none', 'acodec': 'aac'}
         with self.assertRaisesRegex(ShimError, 'EXTRACTION'):
             invoke(Bridge(ydl_factory=FakeYdl({'formats': [fmt] * 10})), videoId=VIDEO_ID)
+
+    @staticmethod
+    def dubbed_formats(languages, original=True):
+        # An automatically dubbed upload as resolve sees it (LegalEagle, 2026-11): each audio itag
+        # once per track, every URL a ~1.2 KB signed link whose xtags name the track.
+        tracks = [(f'acont=dubbed-auto:lang=l{n:02d}', -1) for n in range(languages)]
+        if original:
+            tracks.append(('acont=original:lang=en-US', 10))
+        formats = []
+        for itag, codec in (('139', 'mp4a.40.5'), ('140', 'mp4a.40.2'), ('249', 'opus'),
+                            ('250', 'opus'), ('251', 'opus')):
+            for xtags, preference in tracks:
+                query = urlencode({'itag': itag, 'xtags': xtags, 'sig': 'x' * 1100})
+                formats.append({'format_id': itag, 'url': 'https://rr1.googlevideo.com/videoplayback?' + query,
+                                'vcodec': 'none', 'acodec': codec, 'language_preference': preference})
+        return formats
+
+    @staticmethod
+    def xtags(fmt):
+        return parse_qs(urlsplit(fmt['url']).query)['xtags'][0]
+
+    def test_resolve_drops_dubbed_tracks_beside_the_original(self):
+        info = {'formats': self.dubbed_formats(languages=20)}
+        result = invoke(Bridge(ydl_factory=FakeYdl(info)), videoId=VIDEO_ID)
+        self.assertEqual([f['formatId'] for f in result['formats']], ['139', '140', '249', '250', '251'])
+        self.assertEqual({self.xtags(f) for f in result['formats']}, {'acont=original:lang=en-US'})
+        # The Android host also bounds the result as UTF-16 plus framing (BinderPayloads.fits).
+        text = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
+        self.assertLessEqual(len(text) * 2 + 1024, RESULT_BYTES)
+
+    def test_resolve_keeps_dubbed_tracks_when_nothing_else_is_selectable(self):
+        formats = self.dubbed_formats(languages=3, original=False)
+        result = invoke(Bridge(ydl_factory=FakeYdl({'formats': formats})), videoId=VIDEO_ID)
+        self.assertEqual(len(result['formats']), len(formats))
+
+        # A remaining track the app cannot play (codec) must not displace the dubbed ones.
+        exotic = {'format_id': '380', 'url': 'https://rr1.googlevideo.com/videoplayback?itag=380',
+                  'vcodec': 'none', 'acodec': 'ec-3'}
+        result = invoke(Bridge(ydl_factory=FakeYdl({'formats': formats + [exotic]})), videoId=VIDEO_ID)
+        self.assertEqual(len(result['formats']), len(formats) + 1)
+
+    def test_resolve_drops_descriptive_tracks_by_preference_or_format_xtags(self):
+        plain = {'format_id': '251', 'url': 'https://rr1.googlevideo.com/videoplayback?itag=251',
+                 'vcodec': 'none', 'acodec': 'opus', 'language_preference': -1}
+        described = dict(plain, language_preference=-10)
+        tagged = dict(plain, xtags='acont=descriptive:lang=en')
+        secondary = dict(plain, xtags='acont=secondary:lang=en', language_preference=-10)
+        info = {'formats': [described, plain, tagged, secondary]}
+        result = invoke(Bridge(ydl_factory=FakeYdl(info)), videoId=VIDEO_ID)
+        self.assertEqual([(f['languagePreference'], f['xtags']) for f in result['formats']],
+                         [(-1, None), (-10, 'acont=secondary:lang=en')])
 
     def test_format_trim_identity_and_seconds(self):
         fmt = {'format_id': '140-drc-dub', 'url': 'https://example.invalid/audio',
