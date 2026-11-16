@@ -282,7 +282,8 @@ The deck also stows if its natural height leaves fewer than about two rows,
 computed from available space independently of episode count and without
 feedback from the hidden result. Extremely short narrow surfaces scroll
 outside; font scaling must not clip or hide controls. Materials ignore theme
-and dynamic colour; other screens retain Appearance. Bundle Barlow
+and dynamic colour; other screens retained Appearance until PO-55 (2026-11-17) gave every
+screen the radio's materials ([Theming and colour](#theming-and-colour)). Bundle Barlow
 400/500/600/700, Courier Prime 400/700 and Dosis 300 with their own OFL texts
 in Android and desktop notices. Owner assets need no third-party notices;
 reference photographs and their branding must never be shipped.
@@ -2198,6 +2199,30 @@ Android. Pure black follows the surface ramp below. Android dynamic colour
 remains the default where supported. Component-owned licence texts for MCU
 and its Kotlin port ship in the Android and desktop notices.
 
+**Owner decision PO-55 (2026-11-17), radio-wide look:** every screen wears the
+radio's materials; there is no Material mode and no theme choice. Superseding the
+layers below, the app scheme is `RadioScheme`'s fixed paper and ink (enamel navy
+primary, brass secondary, signal-red tertiary and error), checked for WCAG AA on every
+paper tone by `RadioThemeTest`; only the OS contrast request (darker ink and outlines)
+and reduced motion still apply. The `appearance.theme`, `dynamic_color`,
+`pure_black` and `artwork_tint` keys are retained but ignored, `ArtworkTheme` falls
+back to the app scheme everywhere, and Settings › Appearance now holds Cover size,
+Show titles, YouTube row art and the gestures. The type scale keeps the M3 sizes with
+Courier Prime Bold for display, headline and title roles and Barlow for body and
+label roles. The radio's textures, fonts, `MaterialPlate`, `ValveDeck`, `EnamelSign`
+and `IvoryKeyCap` moved to `:core:designsystem`. Every navigation entry except the
+radio home (`FeedsKey`) and overlays renders inside `RadioCabinetPage`: the charcoal
+stage, an 84 dp valve deck on the cabinet roof (stowed below 560 dp of height and on
+later panes of a pane row), walnut walls and a recessed paper tray. The frame consumes
+the status bar, cutout and navigation bar insets, so the status bar keeps light icons
+on every page and page headers no longer lease it. `NdTopAppBar` is a metal faceplate
+with the title on an enamel sign; `NdIconButton` and `NdTooltipIconButton` on a
+faceplate draw ivory key caps, and a page without its own navigation key gets the
+cabinet's Back key, which returns to the radio from a destination's root. Mockups:
+owner-held `/Users/lkm/nd-wt/design/radio-wide/`. Later PRs replace the remaining
+Material controls screen by screen (keys, bat-handle toggles, glass dials, paper slips
+with the radio's left-swipe discard).
+
 ### Layers
 
 | Layer | Used by | Source |
@@ -3030,12 +3055,12 @@ Portable keys are added to the backup whitelist automatically (05); `ui.*` keys 
 
 | Key | Type | Default | File | UI location | Milestone |
 |---|---|---|---|---|---|
-| `appearance.theme` | Choice `ThemeMode` {SYSTEM, LIGHT, DARK} | SYSTEM | `settings` | Appearance › Theme | M0 |
-| `appearance.dynamic_color` | Bool | true | `settings` | Appearance › Use wallpaper colours (API 31+) | M0 |
-| `appearance.artwork_tint` | Bool | true | `settings` | Appearance › Tint with artwork colours | M10 |
-| `appearance.pure_black` | Bool | false | `settings` | Appearance › Pure black dark theme | M10 |
-| `appearance.library_density` | Choice `LibraryDensity` {SMALL = 72 dp, MEDIUM = 100 dp, LARGE = 152 dp} | MEDIUM | `settings` | Library overflow › Grid size | M10 |
-| `appearance.library_titles` | Bool | false | `settings` | Library overflow › Show titles | M1 |
+| `appearance.theme` | Choice `ThemeMode` {SYSTEM, LIGHT, DARK} | SYSTEM | `settings` | Legacy value retained for settings and backup compatibility; ignored since PO-55 (2026-11-17) | M0 |
+| `appearance.dynamic_color` | Bool | true | `settings` | Legacy value retained for settings and backup compatibility; ignored since PO-55 | M0 |
+| `appearance.artwork_tint` | Bool | true | `settings` | Legacy value retained for settings and backup compatibility; ignored since PO-55 | M10 |
+| `appearance.pure_black` | Bool | false | `settings` | Legacy value retained for settings and backup compatibility; ignored since PO-55 | M10 |
+| `appearance.library_density` | Choice `LibraryDensity` {SMALL = 72 dp, MEDIUM = 100 dp, LARGE = 152 dp} | MEDIUM | `settings` | Library overflow › Grid size; Appearance › Cover size (PO-55) | M10 |
+| `appearance.library_titles` | Bool | false | `settings` | Library overflow › Show titles; Appearance › Show titles (PO-55) | M1 |
 | `appearance.library_sort` | Choice `LibrarySort` {TITLE, RECENTLY_UPDATED, MOST_UNPLAYED, RECENTLY_ADDED} | TITLE | `settings` | Library › Sort | M1 |
 | `appearance.feeds_row_swipe` | Bool | false | `settings` | Appearance › Gestures › Swipe episodes in Feeds | M2 |
 | `appearance.swipe_start_action` | Choice `SwipeAction` {ADD_UP_NEXT, MARK_PLAYED, DOWNLOAD, NONE}: action of a start-to-end swipe | ADD_UP_NEXT | `settings` | Appearance › Gestures | M2 |

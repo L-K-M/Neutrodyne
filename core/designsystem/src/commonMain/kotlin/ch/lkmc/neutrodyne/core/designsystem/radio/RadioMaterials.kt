@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 
-package ch.lkmc.neutrodyne.core.ui.radio
+package ch.lkmc.neutrodyne.core.designsystem.radio
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -30,28 +30,36 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.barlow_bold
-import ch.lkmc.neutrodyne.core.ui.resources.barlow_medium
-import ch.lkmc.neutrodyne.core.ui.resources.barlow_regular
-import ch.lkmc.neutrodyne.core.ui.resources.barlow_semibold
-import ch.lkmc.neutrodyne.core.ui.resources.courierprime_bold
-import ch.lkmc.neutrodyne.core.ui.resources.courierprime_regular
-import ch.lkmc.neutrodyne.core.ui.resources.dosis_light
-import ch.lkmc.neutrodyne.core.ui.resources.radio_metal
-import ch.lkmc.neutrodyne.core.ui.resources.radio_paper
-import ch.lkmc.neutrodyne.core.ui.resources.radio_wood
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_bold
+import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_medium
+import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_regular
+import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_semibold
+import ch.lkmc.neutrodyne.core.designsystem.resources.courierprime_bold
+import ch.lkmc.neutrodyne.core.designsystem.resources.courierprime_regular
+import ch.lkmc.neutrodyne.core.designsystem.resources.dosis_light
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_metal
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_paper
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_valve_deck
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_wood
 import org.jetbrains.compose.resources.Font
 import org.jetbrains.compose.resources.imageResource
 import org.jetbrains.compose.resources.painterResource
 
-internal val Ink = Color(0xFF4B3521)
-internal val Cream = Color(0xFFEAD7B5)
-internal val Brass = Color(0xFFA98C58)
-internal val Chassis = Color(0xFF302F26)
+/** Ink printed on the radio's paper and keys. */
+public val Ink: Color = Color(0xFF4B3521)
+
+/** Unprinted paper, ivory key caps and enamel lettering. */
+public val Cream: Color = Color(0xFFEAD7B5)
+
+/** Lips of routed openings, bezels and screws. */
+public val Brass: Color = Color(0xFFA98C58)
+
+/** The olive-black metal of faceplates and the valve deck. */
+public val Chassis: Color = Color(0xFF302F26)
 
 @Composable
-internal fun barlow(): FontFamily =
+public fun barlow(): FontFamily =
     FontFamily(
         Font(Res.font.barlow_regular, FontWeight.Normal),
         Font(Res.font.barlow_medium, FontWeight.Medium),
@@ -60,20 +68,21 @@ internal fun barlow(): FontFamily =
     )
 
 @Composable
-internal fun courier(): FontFamily =
+public fun courier(): FontFamily =
     FontFamily(
         Font(Res.font.courierprime_regular, FontWeight.Normal),
         Font(Res.font.courierprime_bold, FontWeight.Bold),
     )
 
 @Composable
-internal fun dosis(): FontFamily = FontFamily(Font(Res.font.dosis_light, FontWeight.Light))
+public fun dosis(): FontFamily = FontFamily(Font(Res.font.dosis_light, FontWeight.Light))
 
-internal enum class RadioMaterial { WOOD, WOOD_EDGE, PAPER, METAL }
+/** The physical surfaces of the radio; each has its own texture and light gradient. */
+public enum class RadioMaterial { WOOD, WOOD_EDGE, PAPER, METAL }
 
 /** Physical materials deliberately do not consume MaterialTheme or dynamic colours. */
 @Composable
-internal fun MaterialPlate(
+public fun MaterialPlate(
     material: RadioMaterial,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit,
@@ -155,8 +164,24 @@ internal fun MaterialPlate(
     }
 }
 
+/** Light catches the cabinet's top edge and left wall; the right wall and base fall into shade. */
+public fun Modifier.cabinetEdges(): Modifier =
+    drawWithContent {
+        drawContent()
+        drawRect(Brush.horizontalGradient(listOf(Color(0x88311507), Color.Transparent, Color(0x88230E06))))
+        drawLine(Color(0xBFE8B56E), Offset.Zero, Offset(size.width, 0f), 2.dp.toPx())
+        drawLine(Color(0x992D1609), Offset(0f, size.height), Offset(size.width, size.height), 5.dp.toPx())
+        drawLine(Color(0x88D39C58), Offset(5.dp.toPx(), 20.dp.toPx()), Offset(5.dp.toPx(), size.height), 3.dp.toPx())
+        drawLine(
+            Color(0xBB32170B),
+            Offset(size.width - 5.dp.toPx(), 20.dp.toPx()),
+            Offset(size.width - 5.dp.toPx(), size.height),
+            5.dp.toPx(),
+        )
+    }
+
 /** Shadow falls inside a routed opening, over the contents beneath its wooden lip. */
-internal fun Modifier.recess(shape: Shape = RoundedCornerShape(3.dp)): Modifier =
+public fun Modifier.recess(shape: Shape = RoundedCornerShape(3.dp)): Modifier =
     clip(shape).border(1.dp, Brass, shape).drawWithContent {
         drawContent()
         drawRect(Brush.verticalGradient(listOf(Color(0xB31C1006), Color.Transparent), endY = 10.dp.toPx()))
@@ -164,7 +189,7 @@ internal fun Modifier.recess(shape: Shape = RoundedCornerShape(3.dp)): Modifier 
     }
 
 /** A reflection is drawn over the recessed scale and digits, under their retaining lip. */
-internal fun Modifier.radioGlass(): Modifier =
+public fun Modifier.radioGlass(): Modifier =
     drawWithContent {
         drawContent()
         val reflection =
@@ -178,7 +203,7 @@ internal fun Modifier.radioGlass(): Modifier =
         drawPath(reflection, Color(0x16FFFEF3))
     }
 
-internal val DialOpening: Shape =
+public val DialOpening: Shape =
     GenericShape { size, _ ->
         val lip = size.height * 0.1f
         moveTo(0f, lip)
@@ -188,7 +213,7 @@ internal val DialOpening: Shape =
         close()
     }
 
-internal fun Modifier.dialPaper(): Modifier =
+public fun Modifier.dialPaper(): Modifier =
     drawWithContent {
         drawRect(
             Brush.radialGradient(
@@ -200,7 +225,7 @@ internal fun Modifier.dialPaper(): Modifier =
         drawContent()
     }
 
-internal fun Modifier.radioStage(): Modifier =
+public fun Modifier.radioStage(): Modifier =
     drawBehind {
         drawRect(
             Brush.radialGradient(
@@ -210,3 +235,15 @@ internal fun Modifier.radioStage(): Modifier =
             ),
         )
     }
+
+/** Width over height of the valve deck artwork (tubes, chassis and their shadow). */
+public const val VALVE_DECK_ASPECT: Float = 1100f / 423f
+
+/**
+ * The radio's valve deck: two glowing tubes on a metal chassis. The home shows it across the
+ * cabinet; every other page carries a smaller one on its cabinet roof (owner decision 2026-11-17).
+ */
+@Composable
+public fun ValveDeck(modifier: Modifier = Modifier) {
+    Image(painterResource(Res.drawable.radio_valve_deck), null, modifier, contentScale = ContentScale.Fit)
+}

@@ -5,7 +5,7 @@
 
     <!-- Settings home rows (the M0a subset of 08 Settings). -->
     <string name="settings_appearance">Appearance</string>
-    <string name="settings_appearance_summary">Theme, dynamic colour and contrast</string>
+    <string name="settings_appearance_summary">Cover size, titles and gestures</string>
     <string name="settings_backup">Backup</string>
     <string name="settings_backup_summary">Export subscriptions, back up or restore your library</string>
     <string name="settings_about">About</string>
@@ -37,13 +37,13 @@
     <string name="sync_account_help_sessions">Review the active web sessions and revoke any you don’t recognize.</string>
     <string name="sync_account_help_password">Change the account password. Changing it signs out every other web session.</string>
 
-    <!-- Settings › Appearance (M0a rows of 08 Settings screen structure). -->
-    <string name="appearance_theme">Theme</string>
-    <string name="appearance_theme_system">System default</string>
-    <string name="appearance_theme_light">Light</string>
-    <string name="appearance_theme_dark">Dark</string>
-    <string name="appearance_dynamic_color">Use wallpaper colours</string>
-    <string name="appearance_dynamic_color_summary">Colours from your wallpaper</string>
+    <!-- Settings › Appearance (08 Settings screen structure). -->
+    <string name="appearance_cover_size">Cover size</string>
+    <string name="appearance_cover_small">Small</string>
+    <string name="appearance_cover_medium">Medium</string>
+    <string name="appearance_cover_large">Large</string>
+    <string name="appearance_titles">Show titles</string>
+    <string name="appearance_titles_summary">Podcast names under the covers in the Library</string>
 
     <!-- Settings › About (01 About statements: the licence statement is one per platform). -->
     <string name="about_version">Version %1$s (%2$d)</string>
@@ -110,11 +110,6 @@
     <string name="swipe_left">Swipe left</string>
     <string name="swipe_mark_played">Mark played / unplayed</string>
     <string name="swipe_none">None</string>
-    <string name="appearance_artwork_tint">Use artwork colours</string>
-    <string name="appearance_artwork_tint_summary">Tint the player and headers with cover colours</string>
-    <string name="appearance_pure_black">Pure black</string>
-    <string name="appearance_pure_black_summary">Use black surfaces in the dark theme</string>
-
     <string name="settings_desktop">Desktop</string>
     <string name="desktop_section_window">Window</string>
     <string name="desktop_section_downloads">Downloads</string>

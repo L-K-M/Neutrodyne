@@ -60,7 +60,7 @@ class YouTubeRowArtSettingsTest {
                     LocalAppNavigator provides RecordingAppNavigator(),
                     LocalSnackbarHost provides SnackbarHostState(),
                 ) {
-                    AppearancePage(settings, DynamicColorSupport.UNAVAILABLE, PlatformKind.DESKTOP, channels)
+                    AppearancePage(settings, PlatformKind.DESKTOP, channels)
                 }
             }
             onNodeWithText("YouTube row artwork").assertDoesNotExist()

@@ -21,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.radio.IvoryKeyCap
+import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
 
 /**
  * The colour role of a text action (08 Dialogs: destructive confirms draw in the error colour;
@@ -107,7 +109,7 @@ public fun NdIconButton(
         modifier = modifier.sizeIn(minWidth = ICON_BUTTON_MINIMUM_SIZE, minHeight = ICON_BUTTON_MINIMUM_SIZE),
         enabled = enabled,
     ) {
-        Icon(icon, contentDescription = contentDescription)
+        NdIconButtonGlyph(icon, contentDescription, enabled)
     }
 }
 
@@ -134,8 +136,22 @@ public fun NdTooltipIconButton(
             modifier = modifier.sizeIn(minWidth = ICON_BUTTON_MINIMUM_SIZE, minHeight = ICON_BUTTON_MINIMUM_SIZE),
             enabled = enabled,
         ) {
-            Icon(icon, contentDescription = tooltip)
+            NdIconButtonGlyph(icon, tooltip, enabled)
         }
+    }
+}
+
+/** On a radio faceplate the glyph sits on an ivory key cap; elsewhere it is a plain icon. */
+@Composable
+private fun NdIconButtonGlyph(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+) {
+    if (LocalRadioFaceplate.current) {
+        IvoryKeyCap(icon, contentDescription, enabled = enabled)
+    } else {
+        Icon(icon, contentDescription = contentDescription)
     }
 }
 

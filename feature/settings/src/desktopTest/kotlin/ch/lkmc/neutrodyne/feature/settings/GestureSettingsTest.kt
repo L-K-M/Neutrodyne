@@ -119,7 +119,7 @@ class GestureSettingsTest {
                 LocalLayoutDirection provides direction,
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    AppearancePage(settings, DynamicColorSupport.UNAVAILABLE, platform)
+                    AppearancePage(settings, platform)
                 }
             }
         }

@@ -7,8 +7,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 
-/** Measures pinned chrome before content, so artwork can extend behind it without an inset jump. */
+/**
+ * Measures pinned chrome before content, so artwork can extend behind it without an inset jump.
+ * Transparent, so the cabinet's paper tray shows behind the page.
+ */
 @Composable
 public fun NdScaffold(
     topBar: @Composable () -> Unit,
@@ -18,7 +22,8 @@ public fun NdScaffold(
     Scaffold(
         modifier = modifier,
         topBar = topBar,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         content = content,
     )
 }

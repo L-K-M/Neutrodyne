@@ -7,26 +7,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-
-internal fun Modifier.cabinetEdges(): Modifier =
-    drawWithContent {
-        drawContent()
-        drawRect(Brush.horizontalGradient(listOf(Color(0x88311507), Color.Transparent, Color(0x88230E06))))
-        drawLine(Color(0xBFE8B56E), Offset.Zero, Offset(size.width, 0f), 2.dp.toPx())
-        drawLine(Color(0x992D1609), Offset(0f, size.height), Offset(size.width, size.height), 5.dp.toPx())
-        drawLine(Color(0x88D39C58), Offset(5.dp.toPx(), 20.dp.toPx()), Offset(5.dp.toPx(), size.height), 3.dp.toPx())
-        drawLine(
-            Color(0xBB32170B),
-            Offset(size.width - 5.dp.toPx(), 20.dp.toPx()),
-            Offset(size.width - 5.dp.toPx(), size.height),
-            5.dp.toPx(),
-        )
-    }
+import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 
 @Composable
 internal fun Speaker(

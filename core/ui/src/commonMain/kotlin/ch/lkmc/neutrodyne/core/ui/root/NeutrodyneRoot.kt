@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -23,7 +21,6 @@ import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.HingePolicy
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
-import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -72,7 +69,8 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.StatusBarAppearance
-import ch.lkmc.neutrodyne.core.designsystem.statusBarAppearanceFor
+import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
+import ch.lkmc.neutrodyne.core.designsystem.radio.radioStage
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -82,7 +80,6 @@ import ch.lkmc.neutrodyne.core.model.HingeState
 import ch.lkmc.neutrodyne.core.model.WindowHinge
 import ch.lkmc.neutrodyne.core.model.WindowPosture
 import ch.lkmc.neutrodyne.core.model.WindowRectDp
-import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -151,12 +148,6 @@ public fun NeutrodyneRoot(
     val snackbarHost = remember { SnackbarHostState() }
     val rootScope = rememberCoroutineScope()
 
-    val dark =
-        when (prefs.theme) {
-            ThemeMode.SYSTEM -> systemUi.dark
-            ThemeMode.LIGHT -> false
-            ThemeMode.DARK -> true
-        }
     NeutrodyneTheme(prefs = prefs, system = systemUi) {
         CompositionLocalProvider(
             LocalAppNavigator provides navigation,
@@ -168,7 +159,8 @@ public fun NeutrodyneRoot(
         ) {
             when (val gate = state.startup) {
                 StartupGateState.Pending, is StartupGateState.Failed -> {
-                    PlatformSystemBarAppearance(statusBarAppearanceFor(dark))
+                    // The gate is printed on the theme's paper, so its status icons are dark.
+                    PlatformSystemBarAppearance(StatusBarAppearance.DarkIcons)
                     StartupGate(gate, actions, modifier)
                 }
 
@@ -221,7 +213,6 @@ public fun NeutrodyneRoot(
                         navigation,
                         snackbarHost,
                         platform,
-                        statusBarAppearanceFor(dark),
                         modifier,
                         failedDownloads,
                     )
@@ -241,7 +232,6 @@ private fun ReadyRoot(
     navigation: NavigationState,
     snackbarHost: SnackbarHostState,
     platform: BuildInfo.Platform,
-    appBarAppearance: StatusBarAppearance,
     modifier: Modifier = Modifier,
     failedDownloads: Flow<Int> = emptyFlow(),
 ) {
@@ -254,7 +244,8 @@ private fun ReadyRoot(
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
     var viewportBottomPx by remember { mutableFloatStateOf(0f) }
     val radioHome = navigation.selectedTab == FeedsKey && navigation.stack(FeedsKey).lastOrNull() == FeedsKey
-    PlatformSystemBarAppearance(if (radioHome) StatusBarAppearance.LightIcons else appBarAppearance)
+    // Every page stands on the radio's charcoal stage, under the home deck or a cabinet's.
+    PlatformSystemBarAppearance(StatusBarAppearance.LightIcons)
     val windowInfo = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
     val density = LocalDensity.current
     val dockBottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
@@ -375,11 +366,12 @@ private fun ReadyRoot(
         navigation.selectedTab == DiscoverKey && discoverSearchFocus.request()
     }
     val miniInset = if (!radioHome && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
-    // 08 Contrast: the shell paints the themed background and gives uncoloured content its colour,
-    // as the navigation suite's Surface did. Without them a page's plain `Text` drew Material's
-    // default black and its empty areas showed the transparent window, black on Android.
+    // 08 Contrast: the shell paints the radio's stage and gives uncoloured content the cream it
+    // needs there; each cabinet page sets the paper's ink colour for its own content. Without them
+    // a page's plain `Text` drew Material's default black and its empty areas showed the
+    // transparent window, black on Android.
     CompositionLocalProvider(
-        LocalContentColor provides contentColorFor(MaterialTheme.colorScheme.background),
+        LocalContentColor provides Cream,
         LocalDiscoverSearchFocus provides discoverSearchFocus,
         ch.lkmc.neutrodyne.core.ui.radio.LocalFailedDownloadCount provides failedDownloadCount,
         LocalPaneLayout provides layout,
@@ -390,7 +382,7 @@ private fun ReadyRoot(
             modifier =
                 modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background)
+                    .radioStage()
                     .testTagsAsResourceId()
                     .focusRequester(rootKeyFocus)
                     .onFocusChanged { rootHasFocus = it.hasFocus }

@@ -26,6 +26,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
@@ -59,8 +60,10 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.CABINET_DECK_TAG
+import ch.lkmc.neutrodyne.core.designsystem.radio.CABINET_TRAY_TAG
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
-import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
+import ch.lkmc.neutrodyne.core.designsystem.theme.RadioScheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
@@ -130,14 +133,15 @@ class NeutrodyneRootTest {
     }
 
     /**
-     * 08 Contrast: pages draw on the shell's themed background, and plain `Text` takes its
-     * content colour. Without them the Library's and Settings' uncoloured text was black on the
-     * dark theme's black, and dark on the transparent window's black in the light theme.
+     * 08 Contrast and the owner's radio-wide decision (2026-11-17): every page other than the
+     * radio home stands in the radio's cabinet, with the valve deck on its roof, and plain `Text`
+     * takes the paper's ink in either OS dark mode. Outside the cabinet the shell paints the
+     * opaque charcoal stage, never the transparent window (black on Android).
      */
     @Test
-    fun theShellPaintsTheThemedBackgroundAndContentColour() {
+    fun pagesStandInTheRadioCabinetWithInkOnPaper() {
+        val ink = RadioScheme.colors(0.0).onSurface
         for (dark in listOf(false, true)) {
-            val scheme = BrandColors.scheme(dark, 0.0)
             runDesktopComposeUiTest(width = 400, height = 600) {
                 setContent {
                     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
@@ -155,6 +159,8 @@ class NeutrodyneRootTest {
                     }
                 }
                 waitForIdle()
+                onNodeWithTag(CABINET_TRAY_TAG).assertExists()
+                onNodeWithTag(CABINET_DECK_TAG).assertExists()
                 val layouts = mutableListOf<TextLayoutResult>()
                 onNodeWithText("count:0", useUnmergedTree = true)
                     .fetchSemanticsNode()
@@ -163,20 +169,17 @@ class NeutrodyneRootTest {
                     ?.action
                     ?.invoke(layouts)
                 kotlin.test.assertEquals(
-                    scheme.onBackground,
+                    ink,
                     layouts
                         .single()
                         .layoutInput.style.color,
                     "dark=$dark",
                 )
                 val pixels = onNodeWithTag("root-box").captureToImage().toPixelMap()
-                // The bottom corner is below the stub page's content: only the shell paints there.
-                val corner = pixels[pixels.width - 2, pixels.height - 2].toArgb()
-                kotlin.test.assertEquals(
-                    scheme.background.toArgb(),
-                    corner,
-                    "bottom-right pixel painted #${"%08X".format(corner)}, dark=$dark",
-                )
+                // The top corner is beside the deck, outside the cabinet: only the stage paints there.
+                val corner = pixels[1, 1]
+                kotlin.test.assertEquals(1f, corner.alpha, "dark=$dark")
+                kotlin.test.assertTrue(corner.luminance() < STAGE_MAX_LUMINANCE, "corner $corner, dark=$dark")
             }
         }
     }
@@ -1145,3 +1148,6 @@ private fun TestTopBar(title: StringResource) {
         actions = { SettingsGearButton() },
     )
 }
+
+// The stage's radial gradient stays darker than this everywhere; paper is far above it.
+private const val STAGE_MAX_LUMINANCE = 0.1f

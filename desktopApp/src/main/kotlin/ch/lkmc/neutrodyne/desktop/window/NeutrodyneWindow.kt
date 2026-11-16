@@ -43,8 +43,8 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
-import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
+import ch.lkmc.neutrodyne.core.designsystem.theme.RadioScheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
@@ -53,7 +53,6 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
-import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -275,14 +274,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
         }
         if (settings == null) value = AppearancePrefs() else settings.observeAppearance().collect { value = it }
     }
-    val osDark = isSystemInDarkTheme()
     val prefs = appearance ?: AppearancePrefs()
-    val dark =
-        when (prefs.theme) {
-            ThemeMode.SYSTEM -> osDark
-            ThemeMode.DARK -> true
-            ThemeMode.LIGHT -> false
-        }
 
     // The Compose-side `hidden` owns visibility; a hand-off reveal clears it first, so the
     // activator's direct `isVisible` never fights the next recomposition.
@@ -324,14 +316,9 @@ internal fun ApplicationScope.NeutrodyneWindow(
         },
     ) {
         // Set the AWT background during apply, before Window's visibility side effect.
-        DisposableEffect(window, dark, prefs.pureBlack) {
-            val argb =
-                if (dark && prefs.pureBlack) {
-                    0xFF000000.toInt()
-                } else {
-                    BrandColors.scheme(dark, 0.0).background.toArgb()
-                }
-            window.background = java.awt.Color(argb, true)
+        // The radio's stage, which every page stands on, so a resize never flashes another colour.
+        DisposableEffect(window) {
+            window.background = java.awt.Color(RadioScheme.Stage.toArgb(), true)
             onDispose { }
         }
         // 10 Scheduling on the desktop: a refocus after > 60 s away pokes the `sync` lane; the

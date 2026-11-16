@@ -35,7 +35,6 @@ import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.domain.DesktopIntegration
-import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
@@ -44,7 +43,6 @@ import ch.lkmc.neutrodyne.core.model.LoginItemState
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
-import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -122,7 +120,7 @@ class SettingsScreensTest {
             openSettings()
             // "Appearance" is also the detail placeholder's title, so the row is told by its summary.
             onAllNodesWithText("Appearance").onFirst().assertExists()
-            onNodeWithText("Theme, dynamic colour and contrast").assertExists()
+            onNodeWithText("Cover size, titles and gestures").assertExists()
             onNodeWithText("About").assertExists()
             onNodeWithText("Licences").assertExists()
         }
@@ -281,25 +279,6 @@ class SettingsScreensTest {
         }
 
     @Test
-    fun appearanceChoosesAndPersistsTheme() =
-        runComposeUiTest {
-            val settings = FakeSettingsRepository()
-            setSettingsRoot(settingsRepository = settings)
-            openSettings()
-            onAllNodesWithText("Appearance").onFirst().performClick()
-            waitForIdle()
-
-            onNodeWithText("System default").assertIsDisplayed()
-            onNodeWithText("Theme").performClick()
-            waitForIdle()
-            onNodeWithText("Dark").performClick()
-            waitForIdle()
-
-            onNodeWithText("Dark").assertIsDisplayed()
-            assertEquals(ThemeMode.DARK, runBlocking { settings.get(AppearanceSettingKeys.THEME) })
-        }
-
-    @Test
     fun obsoleteMiniPlayerSkipPreferenceIsRetainedButNotShown() =
         runComposeUiTest {
             val settings = FakeSettingsRepository()
@@ -309,71 +288,6 @@ class SettingsScreensTest {
             onAllNodesWithText("Appearance").onFirst().performClick()
             onNodeWithText("Mini player skip button").assertDoesNotExist()
             assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.MINI_PLAYER_SKIP) })
-        }
-
-    @Test
-    fun aFailedAppearanceWriteSaysSoAndKeepsTheTheme() =
-        runComposeUiTest {
-            val settings = FakeSettingsRepository().apply { failNextSet = SettingsError.WriteFailed }
-            setSettingsRoot(settingsRepository = settings)
-            openSettings()
-            onAllNodesWithText("Appearance").onFirst().performClick()
-            waitForIdle()
-
-            onNodeWithText("Theme").performClick()
-            waitForIdle()
-            onNodeWithText("Dark").performClick()
-            waitForIdle()
-
-            onNodeWithText("Couldn’t save the setting").assertIsDisplayed()
-            onNodeWithText("System default").assertIsDisplayed()
-            assertEquals(ThemeMode.SYSTEM, runBlocking { settings.get(AppearanceSettingKeys.THEME) })
-        }
-
-    @Test
-    fun appearanceHidesWallpaperRowWithoutPlatformSupport() =
-        runComposeUiTest {
-            setSettingsRoot()
-            openSettings()
-            onAllNodesWithText("Appearance").onFirst().performClick()
-            waitForIdle()
-
-            onNodeWithText("Use wallpaper colours").assertDoesNotExist()
-        }
-
-    @Test
-    fun appearanceWallpaperRowWritesOnSupportedAndroid() =
-        runComposeUiTest {
-            val settings = FakeSettingsRepository()
-            setSettingsRoot(
-                settingsRepository = settings,
-                platformInfo = FakePlatformInfo.ANDROID,
-            )
-            openSettings()
-            onAllNodesWithText("Appearance").onFirst().performClick()
-            waitForIdle()
-
-            onNodeWithText("Use wallpaper colours").performClick()
-            waitForIdle()
-
-            assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.DYNAMIC_COLOR) })
-        }
-
-    @Test fun artworkAndBlackSwitchesPersistAndReportFailedWrites() =
-        runComposeUiTest {
-            val settings = FakeSettingsRepository()
-            setSettingsRoot(settingsRepository = settings)
-            openSettings()
-            onAllNodesWithText("Appearance").onFirst().performClick()
-            onNodeWithText("Use artwork colours").performClick()
-            onNodeWithText("Pure black").performClick()
-            waitForIdle()
-            assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.ARTWORK_TINT) })
-            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
-            settings.failNextSet = SettingsError.WriteFailed
-            onNodeWithText("Pure black").performClick()
-            onNodeWithText("Couldn’t save the setting").assertIsDisplayed()
-            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
         }
 
     @Test

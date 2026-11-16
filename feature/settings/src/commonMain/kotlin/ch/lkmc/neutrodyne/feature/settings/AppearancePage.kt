@@ -3,54 +3,39 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
-import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_artwork_tint
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_artwork_tint_summary
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color_summary
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_pure_black
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_pure_black_summary
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_dark
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_light
-import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_system
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_cover_large
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_cover_medium
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_cover_size
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_cover_small
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_titles
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_titles_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_youtube_channel_avatar
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_youtube_row_art
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_youtube_video_thumbnail
@@ -63,41 +48,34 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Settings › Appearance (08 Settings screen structure, M0a): the Theme chooser and, where the
- * platform offers wallpaper dynamic colour (Android API 31+; hidden below and on the desktop),
- * its switch. Both rows write `appearance.*` keys straight through [SettingsRepository]; the
- * shell collects them into `AppearancePrefs`, so a change re-themes at once.
+ * Settings › Appearance (08 Settings screen structure, M0a): the Library's cover size and title
+ * switch, the YouTube row-art chooser where channels exist, and the Android gesture rows. The
+ * rows write `appearance.*` keys straight through [SettingsRepository]. The retired theme,
+ * wallpaper-colour, artwork-tint and pure-black preferences have no UI here any more.
  */
 @Composable
 internal fun AppearancePage(
     settings: SettingsRepository,
-    dynamicColorSupport: DynamicColorSupport,
     platform: PlatformKind = LocalPlatformKind.current,
     hasChannels: Flow<Boolean> = flowOf(false),
 ) {
-    val theme by
+    val density by
         settings
-            .observe(AppearanceSettingKeys.THEME)
-            .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.THEME.default)
-    val dynamicColor by
+            .observe(AppearanceSettingKeys.LIBRARY_DENSITY)
+            .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.LIBRARY_DENSITY.default)
+    val titles by
         settings
-            .observe(AppearanceSettingKeys.DYNAMIC_COLOR)
-            .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.DYNAMIC_COLOR.default)
-    val tint by settings
-        .observe(AppearanceSettingKeys.ARTWORK_TINT)
-        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.ARTWORK_TINT.default)
-    val black by settings
-        .observe(AppearanceSettingKeys.PURE_BLACK)
-        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.PURE_BLACK.default)
+            .observe(AppearanceSettingKeys.LIBRARY_TITLES)
+            .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.LIBRARY_TITLES.default)
     val channelsExist by hasChannels.collectAsStateWithLifecycle(initialValue = false)
     val rowArt by settings
         .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
         .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
+    var showDensityDialog by rememberSaveable { mutableStateOf(false) }
     var showRowArtDialog by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbarHost = LocalSnackbarHost.current
     val saveFailed = stringResource(Res.string.settings_save_failed)
-    var showThemeDialog by rememberSaveable { mutableStateOf(false) }
 
     // A failed write leaves the stored value, which the rows show, unchanged; the snackbar says so.
     fun <T : Any> save(
@@ -125,22 +103,16 @@ internal fun AppearancePage(
                 .ndScrollbar(scroll, bars, barColor),
         ) {
             SettingsRow(
-                icon = NdIcons.Palette,
-                title = stringResource(Res.string.appearance_theme),
-                summary = stringResource(themeLabel(theme)),
-                onClick = { showThemeDialog = true },
+                icon = NdIcons.GridView,
+                title = stringResource(Res.string.appearance_cover_size),
+                summary = stringResource(densityLabel(density)),
+                onClick = { showDensityDialog = true },
             )
             SettingsSwitchRow(
-                title = stringResource(Res.string.appearance_artwork_tint),
-                summary = stringResource(Res.string.appearance_artwork_tint_summary),
-                checked = tint,
-                onCheckedChange = { save(AppearanceSettingKeys.ARTWORK_TINT, it) },
-            )
-            SettingsSwitchRow(
-                title = stringResource(Res.string.appearance_pure_black),
-                summary = stringResource(Res.string.appearance_pure_black_summary),
-                checked = black,
-                onCheckedChange = { save(AppearanceSettingKeys.PURE_BLACK, it) },
+                title = stringResource(Res.string.appearance_titles),
+                summary = stringResource(Res.string.appearance_titles_summary),
+                checked = titles,
+                onCheckedChange = { save(AppearanceSettingKeys.LIBRARY_TITLES, it) },
             )
             if (channelsExist) {
                 SettingsRow(
@@ -151,17 +123,22 @@ internal fun AppearancePage(
                 )
             }
             if (platform == PlatformKind.ANDROID) GestureSettings(settings)
-            if (dynamicColorSupport == DynamicColorSupport.AVAILABLE) {
-                SettingsSwitchRow(
-                    title = stringResource(Res.string.appearance_dynamic_color),
-                    summary = stringResource(Res.string.appearance_dynamic_color_summary),
-                    checked = dynamicColor,
-                    onCheckedChange = { checked ->
-                        save(AppearanceSettingKeys.DYNAMIC_COLOR, checked)
-                    },
-                )
-            }
         }
+    }
+
+    if (showDensityDialog) {
+        SettingsChoiceDialog(
+            icon = NdIcons.GridView,
+            title = stringResource(Res.string.appearance_cover_size),
+            options = AppearanceSettingKeys.LIBRARY_DENSITY.values,
+            selected = density,
+            label = { stringResource(densityLabel(it)) },
+            onSelect = {
+                showDensityDialog = false
+                save(AppearanceSettingKeys.LIBRARY_DENSITY, it)
+            },
+            onDismissRequest = { showDensityDialog = false },
+        )
     }
 
     if (showRowArtDialog && channelsExist) {
@@ -178,67 +155,14 @@ internal fun AppearancePage(
             onDismissRequest = { showRowArtDialog = false },
         )
     }
-
-    if (showThemeDialog) {
-        ThemeDialog(
-            selected = theme,
-            onSelect = { mode ->
-                showThemeDialog = false
-                save(AppearanceSettingKeys.THEME, mode)
-            },
-            onDismissRequest = { showThemeDialog = false },
-        )
-    }
 }
 
-/** Whether the platform serves wallpaper dynamic colour (Android 12+), which shows its switch. */
-internal enum class DynamicColorSupport { AVAILABLE, UNAVAILABLE }
-
-@Composable
-private fun ThemeDialog(
-    selected: ThemeMode,
-    onSelect: (ThemeMode) -> Unit,
-    onDismissRequest: () -> Unit,
-) {
-    NdDialog(
-        onDismissRequest = onDismissRequest,
-        icon = NdIcons.Palette,
-        title = stringResource(Res.string.appearance_theme),
-    ) {
-        Column {
-            for (mode in AppearanceSettingKeys.THEME.values) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = mode == selected,
-                                onClick = { onSelect(mode) },
-                                role = Role.RadioButton,
-                            ).padding(vertical = RADIO_ROW_GAP),
-                ) {
-                    RadioButton(selected = mode == selected, onClick = null)
-                    Text(
-                        stringResource(themeLabel(mode)),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(start = RADIO_LABEL_GAP),
-                    )
-                }
-            }
-        }
+private fun densityLabel(choice: LibraryDensity): StringResource =
+    when (choice) {
+        LibraryDensity.SMALL -> Res.string.appearance_cover_small
+        LibraryDensity.MEDIUM -> Res.string.appearance_cover_medium
+        LibraryDensity.LARGE -> Res.string.appearance_cover_large
     }
-}
-
-private fun themeLabel(mode: ThemeMode): StringResource =
-    when (mode) {
-        ThemeMode.SYSTEM -> Res.string.appearance_theme_system
-        ThemeMode.LIGHT -> Res.string.appearance_theme_light
-        ThemeMode.DARK -> Res.string.appearance_theme_dark
-    }
-
-private val RADIO_ROW_GAP = 6.dp
-private val RADIO_LABEL_GAP = 16.dp
 
 private fun rowArtLabel(choice: YouTubeRowArt): StringResource =
     when (choice) {

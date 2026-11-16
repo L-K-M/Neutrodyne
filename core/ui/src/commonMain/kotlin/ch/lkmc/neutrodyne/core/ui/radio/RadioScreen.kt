@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,16 +40,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.radio_valve_deck
-import org.jetbrains.compose.resources.painterResource
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.Chassis
+import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
+import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
+import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.ValveDeck
+import ch.lkmc.neutrodyne.core.designsystem.radio.cabinetEdges
+import ch.lkmc.neutrodyne.core.designsystem.radio.radioStage
 
 public data class RadioActions(
     val selectEpisode: (Long) -> Unit = {},
@@ -133,9 +137,7 @@ private fun RadioCabinet(
             val contentHeight = maxOf(height, minimumHeight)
             Column(Modifier.height(contentHeight).fillMaxWidth().padding(horizontal = if (narrow) 10.dp else 12.dp)) {
                 if (deckVisible) {
-                    Image(
-                        painterResource(Res.drawable.radio_valve_deck),
-                        null,
+                    ValveDeck(
                         Modifier
                             .testTag("radio_valve_deck")
                             .requiredWidth(
@@ -143,7 +145,6 @@ private fun RadioCabinet(
                             ).height(naturalDeck)
                             .align(Alignment.CenterHorizontally)
                             .offset(y = 5.dp),
-                        contentScale = ContentScale.Fit,
                     )
                 } else {
                     Spacer(Modifier.height(8.dp))

@@ -62,6 +62,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
+import ch.lkmc.neutrodyne.core.designsystem.radio.DialOpening
+import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.barlow
+import ch.lkmc.neutrodyne.core.designsystem.radio.dialPaper
+import ch.lkmc.neutrodyne.core.designsystem.radio.dosis
+import ch.lkmc.neutrodyne.core.designsystem.radio.radioGlass
+import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.chapter_seek

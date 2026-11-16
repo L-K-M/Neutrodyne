@@ -6,7 +6,6 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
-import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.domain.DesktopIntegration
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -82,22 +81,12 @@ public object SettingsNavigation {
                             .distinctUntilChanged(),
                     )
                 }
-            // 08: the wallpaper-colour row exists only where Android 12+ can serve it.
-            val dynamicColorSupport =
-                if (platformInfo.kind == PlatformKind.ANDROID &&
-                    (platformInfo.androidSdkInt ?: 0) >= DYNAMIC_COLOR_MIN_SDK
-                ) {
-                    DynamicColorSupport.AVAILABLE
-                } else {
-                    DynamicColorSupport.UNAVAILABLE
-                }
             entry<SettingsHomeKey>(
                 metadata =
                     NdSceneMetadata.paneList(
                         detailPlaceholder = {
                             AppearancePage(
                                 settingsRepository,
-                                dynamicColorSupport,
                                 platformInfo.kind,
                                 hasChannels,
                             )
@@ -117,7 +106,6 @@ public object SettingsNavigation {
                     key,
                     buildInfo,
                     settingsRepository,
-                    dynamicColorSupport,
                     platformInfo.kind,
                     runtime.target,
                     desktopIntegration,
@@ -151,7 +139,4 @@ public object SettingsNavigation {
                 SyncAccountHelpPage()
             }
         }
-
-    /** Android API 31 (S): the first version with wallpaper dynamic colour. */
-    private const val DYNAMIC_COLOR_MIN_SDK = 31
 }

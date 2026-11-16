@@ -29,7 +29,6 @@ internal fun SettingsRoute(
     key: SettingsKey,
     buildInfo: BuildInfo,
     settings: SettingsRepository,
-    dynamicColorSupport: DynamicColorSupport,
     platform: PlatformKind,
     updateTarget: UpdateRuntimeTarget,
     desktopIntegration: DesktopIntegration?,
@@ -44,7 +43,7 @@ internal fun SettingsRoute(
         }
 
         SettingsPage.APPEARANCE -> {
-            AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
+            AppearancePage(settings, platform, hasChannels)
         }
 
         SettingsPage.FEEDS -> {
@@ -87,7 +86,7 @@ internal fun SettingsRoute(
         }
 
         else -> {
-            AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
+            AppearancePage(settings, platform, hasChannels)
         }
     }
 }
