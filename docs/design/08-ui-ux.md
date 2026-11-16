@@ -1873,6 +1873,19 @@ the desktop part of the M4 boundary below and adds no home/navigation design.
 
 ### The docked bar
 
+**Mini radio (PO-55, 2026-11-17).** The bar is a mini radio set into the cabinet's
+base: a metal plate with a brass edge, lined up with the paper tray (15 dp side
+insets), holding the recessed cover, the episode typed on a paper label with
+the podcast below and a small needle window (`NeedleWindow`) showing progress,
+and the radio's ON/OFF bat-handle switch (`BatToggle`, shared with the radio home)
+for play/pause. Below 520 dp of bar width it shows no skip keys, as in the
+owner-approved mockups; skip back and forward stay custom accessibility actions
+and keyboard shortcuts, and wider bars add small ivory "-30"/"+30" keys. While
+the stream buffers, an amber pilot lamp beside the switch glows instead of the
+ring. Artwork no longer tints the bar. Tap, context menu, swipe-to-dismiss,
+TalkBack node and actions are unchanged.
+
+
 `PlayerRoute` (`:feature:player`, hosted by `NeutrodyneRoot` beside `NavDisplay`) renders the mini player on every screen except the radio home: the root passes `PlayerPresentation.RADIO_HOME` when the selected tab is Feeds and its stack is the root, and the bar hides because the radio is the player. The bar is 64 dp high with 8 dp side insets and 16 dp corners (`NeutrodyneShapes`), floating 8 dp above the navigation chrome (the navigation bar on compact, `WindowInsets.navigationBars` under a rail, the window bottom inset on the desktop). Contents: 48 dp `CoverArt` (10 dp corners; YouTube and other non-RSS items use the 16:9 crop), episode title `titleSmall` and podcast title `bodySmall` (one line each, ellipsis, no marquee), skip back, play/pause and skip forward, each 48 dp, and a 2 dp `primary` progress line on the bottom edge driven by `positionTicks`. Lists reserve `LocalMiniPlayerInset` (80 dp while the bar shows; 88 dp while the [Continue on this device](#continue-on-this-device) card replaces it).
 
 Phases: `BUFFERING` → a 2 dp ring around the play button; `ERROR` or a non-null `issue` → an 8 dp `error` dot on the art; `NOT_LOADED` (service stopped, 06) → play resumes via `play()`. The bar shows no banners; playback results and events still surface as the snackbars of [Issues, results and events](#issues-results-and-events).

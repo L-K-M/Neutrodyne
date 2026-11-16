@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.feature.player
 
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
@@ -28,8 +27,8 @@ class M10PlayerScreenshotTest {
                     setContent { M10PlayerContent(visual) }
                     waitForIdle()
                     waitUntil(timeoutMillis = 5_000) {
-                        val pixels = onNodeWithTag(visual.sheetTag).captureToImage().toPixelMap()
-                        pixels[pixels.width / 2, 8].toArgb() == visual.expectedSheetArgb()
+                        val pixels = onNodeWithTag(COVER_TAG).captureToImage().toPixelMap()
+                        coverMatches(pixels[pixels.width / 2, pixels.height / 2], visual.expectedCoverCentre())
                     }
                     onRoot().captureRoboImage("screenshots/desktop/m10-player-${visual.name}.png")
                 }
