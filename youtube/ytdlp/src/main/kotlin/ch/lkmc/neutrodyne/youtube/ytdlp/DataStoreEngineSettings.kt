@@ -20,13 +20,20 @@ import kotlinx.coroutines.launch
  * App-process adapter. Failure counts belong to this installed bundled version only; the update
  * policy is portable while check state (`last_check_at`, `last_outcome`, `heartbeat_at`) is
  * device-bound — sync never carries it.
+ *
+ * [installedAt] is the APK's last install or update time. Every build of a version shares its
+ * versionCode (debug builds, a reinstalled release), so without it a count reached by an older
+ * build would keep a newly installed one external until the user taps Try now (04 Failed starts).
+ * It is read once, off the caller's thread, when the settings load.
  */
 class DataStoreEngineSettings(
     private val portable: SettingsStore,
     private val device: DeviceSettingsStore,
     private val identity: CompileMarker,
+    installedAt: () -> Long,
     scope: CoroutineScope,
 ) : EngineSettings {
+    private val installStamp by lazy(installedAt)
     private val mutableState = MutableStateFlow(EngineSettingsSnapshot())
     override val state = mutableState.asStateFlow()
     private val loaded = CompletableDeferred<Unit>()
@@ -96,5 +103,5 @@ class DataStoreEngineSettings(
     }
 
     private fun identityKey(marker: CompileMarker) =
-        "${marker.appVersionCode}|${marker.engineVersion}|${marker.pythonMinor}"
+        "${marker.appVersionCode}|${marker.engineVersion}|${marker.pythonMinor}|$installStamp"
 }

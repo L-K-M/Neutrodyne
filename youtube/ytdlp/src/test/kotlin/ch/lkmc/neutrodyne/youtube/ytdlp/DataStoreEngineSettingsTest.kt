@@ -46,7 +46,7 @@ class DataStoreEngineSettingsTest {
         runTest(dispatcher) {
             val adapterScope = CoroutineScope(SupervisorJob() + dispatcher)
             val first = stores()
-            val settings = DataStoreEngineSettings(first.first, first.second, identity, adapterScope)
+            val settings = DataStoreEngineSettings(first.first, first.second, identity, { INSTALLED_AT }, adapterScope)
             settings.awaitLoaded()
             settings.recordCheck(42L, EngineUpdateOutcome.Activated("2026.11.05"))
             settings.recordHeartbeat(777L)
@@ -60,7 +60,7 @@ class DataStoreEngineSettingsTest {
             first.third.cancel()
             val second = stores()
             val restarted =
-                DataStoreEngineSettings(second.first, second.second, identity, adapterScope)
+                DataStoreEngineSettings(second.first, second.second, identity, { INSTALLED_AT }, adapterScope)
             restarted.awaitLoaded()
             assertEquals(42L, restarted.state.value.lastCheckAtMs)
             assertEquals(
@@ -78,17 +78,37 @@ class DataStoreEngineSettingsTest {
         runTest(dispatcher) {
             val adapterScope = CoroutineScope(SupervisorJob() + dispatcher)
             val first = stores()
-            val settings = DataStoreEngineSettings(first.first, first.second, identity, adapterScope)
+            val settings = DataStoreEngineSettings(first.first, first.second, identity, { INSTALLED_AT }, adapterScope)
             settings.awaitLoaded()
             settings.recordStartFailures(identity, 4)
             first.third.cancel()
             val upgraded = CompileMarker(1, "2026.11.05", "3.14")
             val second = stores()
             val restarted =
-                DataStoreEngineSettings(second.first, second.second, upgraded, adapterScope)
+                DataStoreEngineSettings(second.first, second.second, upgraded, { INSTALLED_AT }, adapterScope)
             restarted.awaitLoaded()
             assertEquals(0, restarted.state.value.startFailures)
             assertEquals(upgraded, restarted.state.value.failureIdentity)
+            second.third.cancel()
+            adapterScope.cancel()
+        }
+
+    @Test fun failureCountsResetWhenTheSameVersionIsInstalledAgain() =
+        runTest(dispatcher) {
+            val adapterScope = CoroutineScope(SupervisorJob() + dispatcher)
+            val first = stores()
+            val settings = DataStoreEngineSettings(first.first, first.second, identity, { INSTALLED_AT }, adapterScope)
+            settings.awaitLoaded()
+            settings.recordStartFailures(identity, 3)
+            first.third.cancel()
+            // Every build of a version shares its versionCode, so only the install time tells
+            // a newly installed APK from the one whose starts failed.
+            val second = stores()
+            val reinstalled =
+                DataStoreEngineSettings(second.first, second.second, identity, { INSTALLED_AT + 1 }, adapterScope)
+            reinstalled.awaitLoaded()
+            assertEquals(0, reinstalled.state.value.startFailures)
+            assertEquals(identity, reinstalled.state.value.failureIdentity)
             second.third.cancel()
             adapterScope.cancel()
         }
@@ -97,7 +117,7 @@ class DataStoreEngineSettingsTest {
         runTest(dispatcher) {
             val adapterScope = CoroutineScope(SupervisorJob() + dispatcher)
             val (portable, device, storeScope) = stores()
-            val settings = DataStoreEngineSettings(portable, device, identity, adapterScope)
+            val settings = DataStoreEngineSettings(portable, device, identity, { INSTALLED_AT }, adapterScope)
             settings.awaitLoaded()
             assertTrue(settings.state.value.enabled)
             assertEquals(EngineUpdatePolicy.APPROVED, settings.state.value.updatePolicy)
@@ -112,6 +132,10 @@ class DataStoreEngineSettingsTest {
             storeScope.cancel()
             adapterScope.cancel()
         }
+
+    private companion object {
+        const val INSTALLED_AT = 1_763_300_000_000L
+    }
 
     /** A store pair on the shared files; the returned scope owns both registrations. */
     private fun stores(): Triple<SettingsStore, DeviceSettingsStore, CoroutineScope> {

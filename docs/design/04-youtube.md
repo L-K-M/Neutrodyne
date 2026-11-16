@@ -885,7 +885,12 @@ process obtains only its isolated network graph and immutable build/platform
 information. A device-bound `youtube.engine_failure_identity` scopes persisted
 start failures to the app version, engine version and Python minor. It is
 registered alongside `youtube.engine_start_failures` and stays outside backup
-and sync.
+and sync. Implementation note (2026-11-16): on Android the identity also
+holds the APK's last install or update time (`PackageInfo.lastUpdateTime`).
+Every build of a version shares its versionCode, debug builds always and a
+reinstalled release too, so a count reached by an older build kept a newly
+installed one external until the user tapped Try now. A new install now gets
+three fresh starts. The desktop keeps the version-only identity.
 
 M9a uses bundled-only engine status and automatic-retry breaker wording.
 M9b owns runtime updates and the optional JS provider. MD3 owns the desktop

@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.youtube
 
 import android.app.Application
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Process
@@ -108,11 +109,12 @@ object YouTubeBindingsModule {
     @Provides
     @SingleIn(AppScope::class)
     fun settings(
+        app: Application,
         portable: SettingsStore,
         device: DeviceSettingsStore,
         identity: CompileMarker,
         @ApplicationScope scope: CoroutineScope,
-    ): EngineSettings = DataStoreEngineSettings(portable, device, identity, scope)
+    ): EngineSettings = DataStoreEngineSettings(portable, device, identity, { installedAt(app) }, scope)
 
     @Provides
     @SingleIn(AppScope::class)
@@ -394,6 +396,15 @@ object YouTubeBindingsModule {
         health: YouTubeHealth,
         @ApplicationScope scope: CoroutineScope,
     ): AppInitializer = YouTubeBreakerNotifier(app, health, scope)
+
+    /** The APK's last install or update time, which scopes the start-failure count (04). */
+    private fun installedAt(app: Application): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            app.packageManager.getPackageInfo(app.packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION") // the int-flag overload is the only one below API 33
+            app.packageManager.getPackageInfo(app.packageName, 0)
+        }.lastUpdateTime
 
     private const val BUNDLED_VERSION = "2026.08.19"
 }
