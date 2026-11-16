@@ -10,23 +10,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
-import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
+import ch.lkmc.neutrodyne.core.designsystem.theme.RadioScheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
-import com.materialkolor.hct.Hct
-import com.materialkolor.palettes.TonalPalette
-import com.materialkolor.scheme.SchemeContent
-import kotlin.math.max
 
 internal enum class ReferenceArt(
     val color: Int,
@@ -108,20 +102,12 @@ internal fun M10PlayerContent(visual: M10PlayerVisual) {
     }
 }
 
-/** Await the rendered target, rather than timing a screenshot against Default-dispatcher work. */
-internal fun M10PlayerVisual.expectedSheetArgb(): Int {
-    val app = BrandColors.scheme(dark, 0.0)
-    if (art == ReferenceArt.MONOCHROME) return app.surfaceContainerHigh.toArgb()
-    val hct = Hct.fromInt(art.color)
-    val content = SchemeContent(hct, dark, 0.0)
-    val container =
-        if (dark && Hct.fromInt(content.primaryContainer).tone > 40.0) {
-            TonalPalette.fromHueAndChroma(hct.hue, max(hct.chroma, 16.0)).tone(30)
-        } else {
-            content.primaryContainer
-        }
-    return lerp(app.surfaceContainerHigh, Color(container), 0.12f).toArgb()
-}
+/**
+ * Await the rendered target. Since PO-55 the radio's paper is the only scheme and artwork no
+ * longer tints the bar, so every case expects the radio's own container colour.
+ */
+@Suppress("UnusedReceiverParameter")
+internal fun M10PlayerVisual.expectedSheetArgb(): Int = RadioScheme.colors(0.0).surfaceContainerHigh.toArgb()
 
 internal val M10PlayerVisual.sheetTag: String
     get() = "player_sheet"
