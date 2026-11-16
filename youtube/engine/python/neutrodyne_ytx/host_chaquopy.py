@@ -32,8 +32,12 @@ def configure(cache_dir, py_http=None, replay_directory=None):
                 raise ShimError(Code.ENGINE_UNAVAILABLE)
             install(NeutrodyneOkHttpRH, execute)
         from .selftest import probe
-        if not probe()['ok']:
-            raise ShimError(Code.ENGINE_UNAVAILABLE)
+        errors = []
+        result = probe(errors=errors)
+        if not result['ok']:
+            # :ytx logs this message and returns it to the app, the only way a phone without
+            # adb can show why the engine did not start. No request has run yet.
+            raise RuntimeError('Engine probe failed: ' + ', '.join(result['missing'] + errors))
         _bridge = Bridge(cache_dir=cache_dir)
 
 

@@ -10,10 +10,12 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import ch.lkmc.neutrodyne.core.common.AppInitializer
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.youtube.engine.EnginePlatformPreflight
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
 import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.EngineStore
+import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
 import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxDeadline
 import ch.lkmc.neutrodyne.youtube.engine.YtxLimits
@@ -67,24 +69,44 @@ class EnginePrepareWorker(
     private val pingRequest: YtxControlRequest,
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
+        var step = PrepareStep.SETTINGS
         return try {
             settings.awaitLoaded()
             if (!settings.state.value.enabled || preflight.limitation() != null) {
                 return Result.success(workDataOf("preparation" to "skipped-ineligible"))
             }
+            step = PrepareStep.EXTRACT
             store.prepareBundled()
             // The ping waits for W4's worker-owned compile/import and final marker. Values provisional.
+            step = PrepareStep.COMPILE
             transport.call(
                 YtxMethod.PING,
                 pingRequest.toJson(),
                 YtxDeadline(SystemClock.elapsedRealtime() + YtxLimits.COMPILE_MS + YtxLimits.START_MS),
             )
+            step = PrepareStep.STATUS
             store.loadStatus()
-            if (store.preparation.value == EnginePreparation.COMPILED) Result.success() else Result.retry()
+            if (store.preparation.value == EnginePreparation.COMPILED) return Result.success()
+            Log.w(TAG) { "Engine preparation found no compiled engine after the ping; retrying" }
+            Result.retry()
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            // A failed extraction makes the engine FAILED ("couldn't start") with nothing else
+            // logged; the in-app Diagnostics log is the only place a phone shows it. A failed
+            // compile was already logged by the transport with its step and cause.
+            val cause = (failure as? YtxCallException)?.code ?: failure::class.simpleName
+            Log.w(TAG, failure.takeUnless { it is YtxCallException }) {
+                "Engine preparation failed at $step: $cause; retrying"
+            }
             Result.retry()
         }
+    }
+
+    /** Where a preparation run stopped; logged with its failure. */
+    private enum class PrepareStep { SETTINGS, EXTRACT, COMPILE, STATUS }
+
+    private companion object {
+        const val TAG = "EnginePrepareWorker"
     }
 }

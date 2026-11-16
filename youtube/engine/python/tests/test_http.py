@@ -137,6 +137,15 @@ class HostTests(unittest.TestCase):
         with self.assertRaisesRegex(ShimError, 'ENGINE_UNAVAILABLE'):
             self.host.configure(False, stub)
 
+    def test_failed_probe_names_what_is_missing_and_the_import_error(self):
+        stub = SimpleNamespace(execute=lambda *args: None)
+        # None in sys.modules makes `from yt_dlp_ejs import version` raise ModuleNotFoundError.
+        with patch.dict('sys.modules', yt_dlp_ejs=None):
+            with self.assertRaisesRegex(
+                    RuntimeError, r'^Engine probe failed: yt_dlp_api, ModuleNotFoundError: .*yt_dlp_ejs'):
+                self.host.configure(False, stub)
+        self.assertIsNone(self.host._bridge)
+
     def test_host_adapter_resolve_through_strict_replay(self):
         from neutrodyne_ytx.replay import ReplayRH
         self.host.configure(False, replay_directory=FIXTURES / 'resolve')

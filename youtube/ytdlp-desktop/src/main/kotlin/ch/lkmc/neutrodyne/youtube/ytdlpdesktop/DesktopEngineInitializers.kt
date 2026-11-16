@@ -3,10 +3,12 @@ package ch.lkmc.neutrodyne.youtube.ytdlpdesktop
 
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.youtube.engine.EnginePlatformPreflight
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
 import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.EngineStore
+import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
 import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxDeadline
 import ch.lkmc.neutrodyne.youtube.engine.YtxLimits
@@ -68,8 +70,15 @@ class DesktopEnginePreparationObserver(
             store.loadStatus()
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            // A failed prepare leaves the store's own state; the first real call retries.
+        } catch (failure: Exception) {
+            // A failed prepare leaves the store's own state; the first real call retries. A
+            // failed extraction is otherwise logged nowhere (a failed compile is, by the host).
+            val cause = (failure as? YtxCallException)?.code ?: failure::class.simpleName
+            Log.w(TAG, failure.takeUnless { it is YtxCallException }) { "Engine preparation failed: $cause" }
         }
+    }
+
+    private companion object {
+        const val TAG = "DesktopEnginePreparation"
     }
 }

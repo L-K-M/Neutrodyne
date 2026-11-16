@@ -7,9 +7,10 @@ import platform
 import ssl
 
 
-def probe(ydl=None, expected_handlers=None):
+def probe(ydl=None, expected_handlers=None, errors=None):
     # Each host names its approved transport keys: Chaquopy runs NeutrodyneOkHttp,
     # the stdio child runs NeutrodyneUrllib, and both run Replay/Recording in tests.
+    # A host that passes `errors` also gets the import error behind 'yt_dlp_api'.
     if expected_handlers is None:
         expected_handlers = ('NeutrodyneOkHttp', 'Replay', 'Recording')
     missing = []
@@ -38,8 +39,10 @@ def probe(ydl=None, expected_handlers=None):
                 missing.append('worker.exclusive_handler')
         if not version or not all((YoutubeIE, YoutubeTabIE, YoutubeSearchIE, Request, Response)):
             missing.append('extractor_api')
-    except Exception:
+    except Exception as error:
         missing.append('yt_dlp_api')
+        if errors is not None:
+            errors.append(f'{type(error).__name__}: {error}')
     return {'ok': not missing, 'missing': missing}
 
 

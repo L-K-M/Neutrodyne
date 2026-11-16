@@ -124,6 +124,29 @@ class BinderYtxTransportTest {
             }
         }
 
+    @Test fun failedStartLogsWhatTheHostSaidAboutThePing() =
+        runTest {
+            val records = mutableListOf<Pair<LogLevel, String>>()
+            Log.install(LogSink { level, tag, message -> if (tag == "BinderYtxTransport") records += level to message })
+            try {
+                val f = Fixture(this)
+                f.endpoint.pingError = "PyException: RuntimeError: Engine probe failed: yt_dlp_api"
+                runCatching { f.call(40_000) }
+
+                assertEquals(HostExit.START_FAILED, f.transport.status.value.lastExit)
+                assertEquals(
+                    listOf(
+                        LogLevel.WARN to
+                            "Engine host start failed at PING after 0 ms: ENGINE_UNAVAILABLE " +
+                            "(PyException: RuntimeError: Engine probe failed: yt_dlp_api)",
+                    ),
+                    records,
+                )
+            } finally {
+                Log.install()
+            }
+        }
+
     @Test fun settingsThatNeverLoadFailTheStartWithinTheStartLimit() =
         runTest {
             val records = mutableListOf<Pair<LogLevel, String>>()
@@ -282,6 +305,7 @@ class BinderYtxTransportTest {
     private class Endpoint : IYtxEngine.Stub() {
         var answer = false
         var ping = true
+        var pingError: String? = null
         val cancelled = mutableListOf<Long>()
         val calls = mutableListOf<Long>()
 
@@ -295,7 +319,10 @@ class BinderYtxTransportTest {
             callback: IYtxCallback?,
         ) {
             if (method != "ping") calls += id
-            if (method == "ping" && ping) callback?.onResult(id, """{"ready":true}""")
+            if (method == "ping") {
+                pingError?.let { callback?.onError(id, "ENGINE_UNAVAILABLE", it) }
+                if (pingError == null && ping) callback?.onResult(id, """{"ready":true}""")
+            }
             if (method != "ping" && answer) callback?.onResult(id, "{}")
         }
 

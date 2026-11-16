@@ -12,6 +12,9 @@ import androidx.work.impl.WorkManagerImpl
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
@@ -22,6 +25,7 @@ import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
 import ch.lkmc.neutrodyne.youtube.engine.EngineStore
 import ch.lkmc.neutrodyne.youtube.engine.PreparedEngine
+import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
 import ch.lkmc.neutrodyne.youtube.engine.YtxContext
 import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
@@ -37,6 +41,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -160,6 +165,40 @@ class EnginePreparationTest {
             assertEquals(ListenableWorker.Result.retry(), worker().doWork())
             transport.answer = { throw CancellationException("stop") }
             assertFailsWith<CancellationException> { worker().doWork() }
+        }
+
+    @Test fun workerLogsWhereAFailedPreparationStopped() =
+        runTest {
+            val records = mutableListOf<Pair<LogLevel, String>>()
+            Log.install(
+                LogSink { level, tag, message ->
+                    if (tag == "EnginePrepareWorker") records += level to message
+                },
+            )
+            try {
+                store.prepare = { throw IOException("No space left on device") }
+                assertEquals(ListenableWorker.Result.retry(), worker().doWork())
+                store.prepare = { PreparedEngine("/prepared/lib".toPath(), CompileMarker(1, "2026.08.19", "3.14")) }
+                transport.answer = { throw YtxCallException("ENGINE_UNAVAILABLE") }
+                assertEquals(ListenableWorker.Result.retry(), worker().doWork())
+
+                // An extraction failure is logged nowhere else, so it carries its trace; the
+                // transport has already logged a failed compile's step and cause.
+                val (extract, compile) = records
+                assertEquals(LogLevel.WARN, extract.first)
+                assertEquals(
+                    "Engine preparation failed at EXTRACT: IOException; retrying",
+                    extract.second.lineSequence().first(),
+                )
+                assertTrue("No space left on device" in extract.second)
+                assertEquals(
+                    LogLevel.WARN to "Engine preparation failed at COMPILE: ENGINE_UNAVAILABLE; retrying",
+                    compile,
+                )
+                assertEquals(2, records.size)
+            } finally {
+                Log.install()
+            }
         }
 
     @Test fun queuedWorkRechecksEligibilityBeforePreparingOrBinding() =

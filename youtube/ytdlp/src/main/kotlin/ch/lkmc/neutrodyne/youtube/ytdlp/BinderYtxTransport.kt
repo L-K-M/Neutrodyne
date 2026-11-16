@@ -49,6 +49,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import java.util.concurrent.atomic.AtomicReference
 
 /** Owns one binding and process generation. Cancelled calls retain their hang watchdog until reply. */
 class BinderYtxTransport internal constructor(
@@ -183,6 +184,8 @@ class BinderYtxTransport internal constructor(
         return scope
             .async(start = CoroutineStart.LAZY) {
                 var step = StartStep.SETTINGS
+                // What :ytx said about a failed ping (the Python error's type and first line).
+                val hostDetail = AtomicReference<String?>()
                 try {
                     Result.success(
                         withTimeout(if (compiling) YtxLimits.COMPILE_MS else YtxLimits.START_MS) {
@@ -227,6 +230,7 @@ class BinderYtxTransport internal constructor(
                                         code: String,
                                         message: String?,
                                     ) {
+                                        hostDetail.set(message?.take(YtxService.DETAIL_CHARS))
                                         ready.completeExceptionally(YtxCallException(code))
                                     }
                                 },
@@ -259,11 +263,13 @@ class BinderYtxTransport internal constructor(
                     synchronized(lock) {
                         if (epoch == generation) {
                             // A counted failed start (three make the engine FAILED until the user
-                            // retries) names its step, time and cause; codes and types carry no payload.
+                            // retries) names its step, time and cause; codes and types carry no payload,
+                            // and :ytx only details errors raised before any request reached the network.
                             val elapsed = clock.elapsedRealtime() - startedAt
                             val cause = (failure as? YtxCallException)?.code ?: failure::class.simpleName
+                            val detail = hostDetail.get()?.let { " ($it)" }.orEmpty()
                             val trace = failure.takeUnless { it is YtxCallException || it is CancellationException }
-                            Log.w(TAG, trace) { "Engine host start failed at $step after $elapsed ms: $cause" }
+                            Log.w(TAG, trace) { "Engine host start failed at $step after $elapsed ms: $cause$detail" }
                             starting = null
                             stop(HostExit.START_FAILED)
                         }
