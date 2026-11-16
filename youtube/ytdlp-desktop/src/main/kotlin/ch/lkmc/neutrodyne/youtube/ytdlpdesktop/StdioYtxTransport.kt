@@ -251,7 +251,9 @@ class StdioYtxTransport(
         return scope
             .async(start = CoroutineStart.LAZY) {
                 try {
-                    settings.awaitLoaded()
+                    // Bounded like the spawn: a settings load that never completes is a counted
+                    // failed start rather than a host stuck in STARTING.
+                    withTimeout(startTimeoutMs) { settings.awaitLoaded() }
                     if (!settings.state.value.enabled) fail("ENGINE_UNAVAILABLE")
                     Result.success(
                         run {

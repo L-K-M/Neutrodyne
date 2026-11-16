@@ -184,16 +184,19 @@ class BinderYtxTransport internal constructor(
             .async(start = CoroutineStart.LAZY) {
                 var step = StartStep.SETTINGS
                 try {
-                    settings.awaitLoaded()
-                    if (!settings.state.value.enabled) fail("ENGINE_UNAVAILABLE")
                     Result.success(
                         withTimeout(if (compiling) YtxLimits.COMPILE_MS else YtxLimits.START_MS) {
+                            // Inside the budget: a settings load that never completes is a
+                            // counted, logged failed start rather than a host stuck in STARTING.
+                            settings.awaitLoaded()
+                            if (!settings.state.value.enabled) fail("ENGINE_UNAVAILABLE")
                             step = StartStep.PREPARED
                             if (store.hostPrepared() == null) fail("ENGINE_UNAVAILABLE")
                             step = StartStep.BIND
                             val endpoint =
                                 connection.bind { synchronized(lock) { if (epoch == generation) stop(HostExit.CRASH) } }
                             step = StartStep.PING
+                            val connectedAt = clock.elapsedRealtime()
                             synchronized(lock) {
                                 if (epoch != generation) fail("ENGINE_UNAVAILABLE")
                                 service = endpoint
@@ -237,6 +240,12 @@ class BinderYtxTransport internal constructor(
                                 fail("ENGINE_UNAVAILABLE")
                             }
                             step = StartStep.STATUS
+                            val answeredAt = clock.elapsedRealtime()
+                            Log.d(TAG) {
+                                "Engine host ready: connected after ${connectedAt - startedAt} ms, " +
+                                    "ping answered after ${answeredAt - connectedAt} ms" +
+                                    if (compiling) " (first compile)" else ""
+                            }
                             store.loadStatus()
                             synchronized(lock) {
                                 if (epoch != generation) fail("ENGINE_UNAVAILABLE")

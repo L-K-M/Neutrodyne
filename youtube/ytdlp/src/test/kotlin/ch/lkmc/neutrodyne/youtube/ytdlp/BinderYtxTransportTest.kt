@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
+import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.HostExit
 import ch.lkmc.neutrodyne.youtube.engine.HostState
 import ch.lkmc.neutrodyne.youtube.engine.YtxCallException
@@ -20,6 +21,7 @@ import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
 import ch.lkmc.neutrodyne.youtube.ytdlp.ytx.IYtxCallback
 import ch.lkmc.neutrodyne.youtube.ytdlp.ytx.IYtxEngine
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -122,6 +124,48 @@ class BinderYtxTransportTest {
             }
         }
 
+    @Test fun settingsThatNeverLoadFailTheStartWithinTheStartLimit() =
+        runTest {
+            val records = mutableListOf<Pair<LogLevel, String>>()
+            Log.install(LogSink { level, tag, message -> if (tag == "BinderYtxTransport") records += level to message })
+            try {
+                val f = Fixture(this, settingsLoad = { awaitCancellation() })
+                f.transport.prewarm(PrewarmReason.SCREEN)
+                advanceTimeBy(YtxLimits.START_MS + 1)
+
+                assertEquals(HostExit.START_FAILED, f.transport.status.value.lastExit)
+                assertEquals(0, f.connection.binds)
+                assertEquals(
+                    listOf(
+                        LogLevel.WARN to
+                            "Engine host start failed at SETTINGS after ${YtxLimits.START_MS} ms: " +
+                            "TimeoutCancellationException",
+                    ),
+                    records,
+                )
+            } finally {
+                Log.install()
+            }
+        }
+
+    @Test fun readyStartLogsWhenItConnectedAndWhenThePingAnswered() =
+        runTest {
+            val records = mutableListOf<Pair<LogLevel, String>>()
+            Log.install(LogSink { level, tag, message -> if (tag == "BinderYtxTransport") records += level to message })
+            try {
+                val f = Fixture(this)
+                f.endpoint.answer = true
+                f.call(1000)
+
+                assertEquals(
+                    listOf(LogLevel.DEBUG to "Engine host ready: connected after 0 ms, ping answered after 0 ms"),
+                    records,
+                )
+            } finally {
+                Log.install()
+            }
+        }
+
     @Test fun deathBeforeStartupPingIsAnEngineFailureAndAllowsRestart() =
         runTest {
             val f = Fixture(this)
@@ -186,6 +230,7 @@ class BinderYtxTransportTest {
 
     private class Fixture(
         scope: TestScope,
+        settingsLoad: suspend () -> Unit = {},
     ) {
         val settings = FakeEngineSettings()
         val endpoint = Endpoint()
@@ -203,7 +248,9 @@ class BinderYtxTransportTest {
                 clock,
                 scope.backgroundScope,
                 YtxControlRequest(YtxContext("en", "US", "test")),
-                settings,
+                object : EngineSettings by settings {
+                    override suspend fun awaitLoaded() = settingsLoad()
+                },
             )
 
         suspend fun call(budget: Long) =

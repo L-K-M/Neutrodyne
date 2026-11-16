@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
+import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.HostExit
 import ch.lkmc.neutrodyne.youtube.engine.HostState
 import ch.lkmc.neutrodyne.youtube.engine.YtDlpErrorMapper
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -362,6 +364,40 @@ class YtxProcessTest {
             val code = codeOf { transport.callForTest("_echo", ECHOED, fixture.deadline(10_000)) }
             assertEquals("ENGINE_UNAVAILABLE", code)
             assertEquals(HostState.UNUSABLE, transport.status.value.state)
+        }
+
+    @Test fun settingsThatNeverLoadFailTheStartWithoutSpawning() =
+        runBlocking {
+            val fixture = fixture()
+            val spawns = CopyOnWriteArrayList<String>()
+            val transport =
+                StdioYtxTransport(
+                    object : YtxSpawner {
+                        override fun start(
+                            libDir: File,
+                            engineVersion: String,
+                            replayDir: File?,
+                            debugHooks: Boolean,
+                            listener: YtxChild.Listener,
+                        ): YtxChild {
+                            spawns += engineVersion
+                            throw PythonUnavailableException()
+                        }
+                    },
+                    fixture.store,
+                    object : EngineSettings by fixture.settings {
+                        override suspend fun awaitLoaded(): Unit = awaitCancellation()
+                    },
+                    arming = null,
+                    debugHooks = true,
+                    clock = fixture.clock,
+                    scope = fixture.scope,
+                    ping = fixture.ping,
+                    startTimeoutMs = 200,
+                )
+            transport.prewarm(PrewarmReason.SCREEN)
+            withTimeout(10_000) { transport.status.first { it.lastExit == HostExit.START_FAILED } }
+            assertTrue(spawns.isEmpty())
         }
 
     /** `YtxChild` reads: an overlong line is a violation, never a dispatch. */
