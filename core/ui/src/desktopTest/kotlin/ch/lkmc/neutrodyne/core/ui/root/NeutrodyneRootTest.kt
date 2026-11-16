@@ -26,13 +26,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -46,6 +50,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventDispatcher
@@ -54,6 +59,9 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
+import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
+import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
@@ -119,6 +127,57 @@ class NeutrodyneRootTest {
     @AfterTest
     fun tearDown() {
         Locale.setDefault(previousLocale)
+    }
+
+    /**
+     * 08 Contrast: pages draw on the shell's themed background, and plain `Text` takes its
+     * content colour. Without them the Library's and Settings' uncoloured text was black on the
+     * dark theme's black, and dark on the transparent window's black in the light theme.
+     */
+    @Test
+    fun theShellPaintsTheThemedBackgroundAndContentColour() {
+        for (dark in listOf(false, true)) {
+            val scheme = BrandColors.scheme(dark, 0.0)
+            runDesktopComposeUiTest(width = 400, height = 600) {
+                setContent {
+                    CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
+                        NeutrodyneRoot(
+                            state = RootUiState.READY,
+                            actions = testActions { true },
+                            slots = TestSlots,
+                            installers = TestInstallers,
+                            prefs = AppearancePrefs(dynamicColor = false),
+                            systemUi = SystemUiState(dark, 0.0, true),
+                            platform = BuildInfo.Platform.DESKTOP,
+                            initialTab = LibraryKey,
+                            modifier = Modifier.testTag("root-box"),
+                        )
+                    }
+                }
+                waitForIdle()
+                val layouts = mutableListOf<TextLayoutResult>()
+                onNodeWithText("count:0", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .config
+                    .getOrNull(SemanticsActions.GetTextLayoutResult)
+                    ?.action
+                    ?.invoke(layouts)
+                kotlin.test.assertEquals(
+                    scheme.onBackground,
+                    layouts
+                        .single()
+                        .layoutInput.style.color,
+                    "dark=$dark",
+                )
+                val pixels = onNodeWithTag("root-box").captureToImage().toPixelMap()
+                // The bottom corner is below the stub page's content: only the shell paints there.
+                kotlin.test.assertEquals(
+                    scheme.background.toArgb(),
+                    pixels[pixels.width - 2, pixels.height - 2].toArgb(),
+                    "dark=$dark",
+                )
+            }
+        }
     }
 
     @Test

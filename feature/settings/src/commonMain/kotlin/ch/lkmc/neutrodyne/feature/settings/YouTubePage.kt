@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -16,6 +17,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
@@ -109,8 +111,10 @@ internal fun YouTubePage(
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         NdTopAppBar(title = stringResource(Res.string.youtube_title), navigation = { SettingsBackButton() })
-        caps?.externalReason?.let { Text(downloadExternalReasonText(it, platform).asString()) }
-        if (caps == null) Text(downloadExternalReasonText(ExternalReason.NOT_YET_AVAILABLE, platform).asString())
+        caps?.externalReason?.let { Text(downloadExternalReasonText(it, platform).asString(), TextInset) }
+        if (caps == null) {
+            Text(downloadExternalReasonText(ExternalReason.NOT_YET_AVAILABLE, platform).asString(), TextInset)
+        }
         status?.let { state ->
             if (state.availability != EngineAvailability.NOT_YET_AVAILABLE) {
                 if (state.availability != EngineAvailability.NOT_IN_THIS_APK) {
@@ -133,8 +137,8 @@ internal fun YouTubePage(
                         { save(YouTubeSettingKeys.VOLUME_LEVELLING, it) },
                     )
                 }
-                state.version?.let { Text(stringResource(Res.string.youtube_engine_version, it)) }
-                Text(stringResource(engineStatusText(state.availability)))
+                state.version?.let { Text(stringResource(Res.string.youtube_engine_version, it), TextInset) }
+                Text(stringResource(engineStatusText(state.availability)), TextInset)
                 if (state.availability == EngineAvailability.FAILED) {
                     TextButton(onClick = { engine?.retryStart() }) {
                         Text(stringResource(Res.string.youtube_engine_retry))
@@ -143,10 +147,10 @@ internal fun YouTubePage(
             }
         }
         if ((engineHealth?.rateLimitedUntil ?: 0) > LocalUiClock.current.now()) {
-            Text(stringResource(Res.string.youtube_rate_limited))
+            Text(stringResource(Res.string.youtube_rate_limited), TextInset)
         }
         if (engineHealth?.breaker == BreakerState.OPEN) {
-            Text(stringResource(Res.string.youtube_breaker_open))
+            Text(stringResource(Res.string.youtube_breaker_open), TextInset)
             TextButton(onClick = { health?.retryNow() }) {
                 Text(stringResource(Res.string.youtube_engine_retry))
             }
@@ -179,6 +183,9 @@ internal fun YouTubePage(
         )
     }
 }
+
+/** Free text lines up with the rows' 16 dp text inset (as on the Playback page). */
+private val TextInset = Modifier.padding(horizontal = 16.dp)
 
 private fun engineStatusText(status: EngineAvailability): StringResource =
     when (status) {
