@@ -56,6 +56,15 @@ class YtxServiceControlPathTest {
         assertEquals("IllegalStateException: Engine not prepared", lastMessage.get())
     }
 
+    @Test
+    fun startFailureDetailKeepsOneBoundedLine() {
+        val traced = RuntimeException("Engine probe failed: yt_dlp_api\nTraceback (most recent call last):\n  File x")
+        assertEquals("RuntimeException: Engine probe failed: yt_dlp_api", YtxService.startFailureDetail(traced))
+        val long = YtxService.startFailureDetail(IllegalStateException("x".repeat(1_000)))
+        assertEquals(YtxService.DETAIL_CHARS, long.length)
+        assertTrue(long.startsWith("IllegalStateException: xx"))
+    }
+
     private fun bind(): IYtxEngine {
         val controller = Robolectric.buildService(YtxService::class.java).create()
         service = controller

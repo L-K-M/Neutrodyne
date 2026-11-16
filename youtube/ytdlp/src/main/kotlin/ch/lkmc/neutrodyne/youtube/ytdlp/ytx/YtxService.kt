@@ -64,6 +64,9 @@ class YtxService : Service() {
                 if (::http.isInitialized) http.begin(engineId)
                 executor.execute {
                     running.incrementAndGet()
+                    // Per call, unlike the service-wide [ready] another bind's call may set: only
+                    // this call's own configure decides whether its failure came before the host.
+                    var configured = false
                     try {
                         if (deadlineAtMs > 0 && SystemClock.elapsedRealtime() >= deadlineAtMs) {
                             // The ID is freed before every terminal answer: a woken caller
@@ -90,6 +93,7 @@ class YtxService : Service() {
                                 }
                             } else {
                                 python.configure(configuration, http, replay?.first)
+                                configured = true
                                 ready = true
                                 if (method != "ping") {
                                     when (replay?.second) {
@@ -121,7 +125,7 @@ class YtxService : Service() {
                         // only as ENGINE_UNAVAILABLE. No request has reached the network yet, and
                         // Log redacts the trace anyway. The message goes to the main process too:
                         // only it feeds the in-app Diagnostics log, and phones rarely reach adb.
-                        val startFailure = !ready && failure !is YtxCallException
+                        val startFailure = !configured && failure !is YtxCallException
                         if (startFailure) {
                             Log.w(TAG, failure) { "Engine host call $method failed before the host was configured" }
                         }
