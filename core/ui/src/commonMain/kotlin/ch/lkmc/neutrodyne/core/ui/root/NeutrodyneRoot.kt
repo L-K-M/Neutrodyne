@@ -23,6 +23,7 @@ import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.HingePolicy
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -378,7 +379,7 @@ private fun ReadyRoot(
     // as the navigation suite's Surface did. Without them a page's plain `Text` drew Material's
     // default black and its empty areas showed the transparent window, black on Android.
     CompositionLocalProvider(
-        LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+        LocalContentColor provides contentColorFor(MaterialTheme.colorScheme.background),
         LocalDiscoverSearchFocus provides discoverSearchFocus,
         ch.lkmc.neutrodyne.core.ui.radio.LocalFailedDownloadCount provides failedDownloadCount,
         LocalPaneLayout provides layout,

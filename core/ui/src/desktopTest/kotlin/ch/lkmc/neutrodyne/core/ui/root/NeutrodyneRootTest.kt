@@ -171,10 +171,11 @@ class NeutrodyneRootTest {
                 )
                 val pixels = onNodeWithTag("root-box").captureToImage().toPixelMap()
                 // The bottom corner is below the stub page's content: only the shell paints there.
+                val corner = pixels[pixels.width - 2, pixels.height - 2].toArgb()
                 kotlin.test.assertEquals(
                     scheme.background.toArgb(),
-                    pixels[pixels.width - 2, pixels.height - 2].toArgb(),
-                    "dark=$dark",
+                    corner,
+                    "bottom-right pixel painted #${"%08X".format(corner)}, dark=$dark",
                 )
             }
         }
