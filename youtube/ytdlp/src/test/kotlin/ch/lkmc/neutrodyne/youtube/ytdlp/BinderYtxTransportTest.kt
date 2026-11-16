@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.ytdlp
 
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -94,6 +97,29 @@ class BinderYtxTransportTest {
             advanceTimeBy(YtxLimits.START_MS + 1)
             assertEquals("ENGINE_UNAVAILABLE", (call.await() as YtxCallException).code)
             assertEquals(HostExit.START_FAILED, f.transport.status.value.lastExit)
+        }
+
+    @Test fun countedStartFailureLogsItsStepElapsedTimeAndCause() =
+        runTest {
+            val records = mutableListOf<Pair<LogLevel, String>>()
+            Log.install(LogSink { level, tag, message -> if (tag == "BinderYtxTransport") records += level to message })
+            try {
+                val f = Fixture(this)
+                f.endpoint.ping = false
+                val call = async { runCatching { f.call(40_000) }.exceptionOrNull() }
+                advanceTimeBy(YtxLimits.START_MS + 1)
+                call.await()
+
+                assertEquals(
+                    listOf(
+                        LogLevel.WARN to
+                            "Engine host start failed at PING after ${YtxLimits.START_MS} ms: TimeoutCancellationException",
+                    ),
+                    records,
+                )
+            } finally {
+                Log.install()
+            }
         }
 
     @Test fun deathBeforeStartupPingIsAnEngineFailureAndAllowsRestart() =

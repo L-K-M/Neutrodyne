@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.YtxGraphHolder
 import ch.lkmc.neutrodyne.core.common.YtxScope
 import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
@@ -115,6 +116,12 @@ class YtxService : Service() {
                         val code =
                             (failure as? YtxCallException)?.code
                                 ?: if (ready) "EXTRACTION" else "ENGINE_UNAVAILABLE"
+                        // Before the host is configured the failure is the interpreter start, the
+                        // compile or the import, which the app sees only as ENGINE_UNAVAILABLE. No
+                        // request has reached the network yet, and Log redacts the trace anyway.
+                        if (!ready && failure !is YtxCallException) {
+                            Log.w(TAG, failure) { "Engine host could not start Python for $method" }
+                        }
                         runCatching { callback.onError(id, code, null) }
                     } finally {
                         calls.remove(id, engineId)
@@ -182,6 +189,7 @@ class YtxService : Service() {
         const val LIB_DIR = "ytx.lib"
         const val APP_VERSION = "ytx.appVersion"
         const val ENGINE_VERSION = "ytx.engineVersion"
+        private const val TAG = "YtxService"
         private const val WORKERS = 2
         private const val TEST_HANG_MS = 10 * 60_000L
     }

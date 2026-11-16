@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Process
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
 import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
@@ -175,19 +176,24 @@ class BinderYtxTransport internal constructor(
     private fun start(): Deferred<Result<IYtxEngine>> {
         starting?.let { return it }
         val epoch = generation
+        val startedAt = clock.elapsedRealtime()
         val compiling = store.preparation.value != EnginePreparation.COMPILED
         mutableStatus.value =
             mutableStatus.value.copy(state = if (compiling) HostState.COMPILING else HostState.STARTING)
         return scope
             .async(start = CoroutineStart.LAZY) {
+                var step = StartStep.SETTINGS
                 try {
                     settings.awaitLoaded()
                     if (!settings.state.value.enabled) fail("ENGINE_UNAVAILABLE")
                     Result.success(
                         withTimeout(if (compiling) YtxLimits.COMPILE_MS else YtxLimits.START_MS) {
+                            step = StartStep.PREPARED
                             if (store.hostPrepared() == null) fail("ENGINE_UNAVAILABLE")
+                            step = StartStep.BIND
                             val endpoint =
                                 connection.bind { synchronized(lock) { if (epoch == generation) stop(HostExit.CRASH) } }
+                            step = StartStep.PING
                             synchronized(lock) {
                                 if (epoch != generation) fail("ENGINE_UNAVAILABLE")
                                 service = endpoint
@@ -230,6 +236,7 @@ class BinderYtxTransport internal constructor(
                             ) {
                                 fail("ENGINE_UNAVAILABLE")
                             }
+                            step = StartStep.STATUS
                             store.loadStatus()
                             synchronized(lock) {
                                 if (epoch != generation) fail("ENGINE_UNAVAILABLE")
@@ -242,6 +249,12 @@ class BinderYtxTransport internal constructor(
                 } catch (failure: Exception) {
                     synchronized(lock) {
                         if (epoch == generation) {
+                            // A counted failed start (three make the engine FAILED until the user
+                            // retries) names its step, time and cause; codes and types carry no payload.
+                            val elapsed = clock.elapsedRealtime() - startedAt
+                            val cause = (failure as? YtxCallException)?.code ?: failure::class.simpleName
+                            val trace = failure.takeUnless { it is YtxCallException || it is CancellationException }
+                            Log.w(TAG, trace) { "Engine host start failed at $step after $elapsed ms: $cause" }
                             starting = null
                             stop(HostExit.START_FAILED)
                         }
@@ -335,7 +348,11 @@ class BinderYtxTransport internal constructor(
         }
     }
 
+    /** Where a host start stopped; logged with a counted failure. */
+    private enum class StartStep { SETTINGS, PREPARED, BIND, PING, STATUS }
+
     private companion object {
+        const val TAG = "BinderYtxTransport"
         const val WORKERS = 2
         const val START_CALL_ID = -1L
 
