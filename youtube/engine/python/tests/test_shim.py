@@ -232,10 +232,11 @@ class BridgeTests(unittest.TestCase):
         if original:
             tracks.append(('acont=original:lang=en-US', 10))
         formats = []
-        for itag, codec in (('139', 'mp4a.40.5'), ('140', 'mp4a.40.2'), ('249', 'opus'),
-                            ('250', 'opus'), ('251', 'opus')):
+        for itag, codec, mime in (('139', 'mp4a.40.5', 'audio/mp4'), ('140', 'mp4a.40.2', 'audio/mp4'),
+                                  ('249', 'opus', 'audio/webm'), ('250', 'opus', 'audio/webm'),
+                                  ('251', 'opus', 'audio/webm')):
             for xtags, preference in tracks:
-                query = urlencode({'itag': itag, 'xtags': xtags, 'sig': 'x' * 1100})
+                query = urlencode({'itag': itag, 'mime': mime, 'xtags': xtags, 'sig': 'x' * 1100})
                 formats.append({'format_id': itag, 'url': 'https://rr1.googlevideo.com/videoplayback?' + query,
                                 'vcodec': 'none', 'acodec': codec, 'language_preference': preference})
         return formats
@@ -264,9 +265,17 @@ class BridgeTests(unittest.TestCase):
         result = invoke(Bridge(ydl_factory=FakeYdl({'formats': formats + [exotic]})), videoId=VIDEO_ID)
         self.assertEqual(len(result['formats']), len(formats) + 1)
 
+        # Nor may one whose MIME type or codec YtDlpAudioMapper rejects.
+        for rejected in (dict(exotic, acodec='opus', ext='mp3'),
+                         dict(exotic, acodec='opus', url=exotic['url'] + '&mime=audio%2Fogg', ext='webm'),
+                         dict(exotic, acodec='mp4a.' + 'a' * 124, ext='m4a')):
+            with self.subTest(rejected=rejected):
+                result = invoke(Bridge(ydl_factory=FakeYdl({'formats': formats + [rejected]})), videoId=VIDEO_ID)
+                self.assertEqual(len(result['formats']), len(formats) + 1)
+
     def test_resolve_drops_descriptive_tracks_by_preference_or_format_xtags(self):
         plain = {'format_id': '251', 'url': 'https://rr1.googlevideo.com/videoplayback?itag=251',
-                 'vcodec': 'none', 'acodec': 'opus', 'language_preference': -1}
+                 'vcodec': 'none', 'acodec': 'opus', 'ext': 'webm', 'language_preference': -1}
         described = dict(plain, language_preference=-10)
         tagged = dict(plain, xtags='acont=descriptive:lang=en')
         secondary = dict(plain, xtags='acont=secondary:lang=en', language_preference=-10)

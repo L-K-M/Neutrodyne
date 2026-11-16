@@ -117,10 +117,11 @@ class YtxService : Service() {
                             (failure as? YtxCallException)?.code
                                 ?: if (ready) "EXTRACTION" else "ENGINE_UNAVAILABLE"
                         // Before the host is configured the failure is the interpreter start, the
-                        // compile or the import, which the app sees only as ENGINE_UNAVAILABLE. No
-                        // request has reached the network yet, and Log redacts the trace anyway.
+                        // compile, the import or a call to an unprepared bind, which the app sees
+                        // only as ENGINE_UNAVAILABLE. No request has reached the network yet, and
+                        // Log redacts the trace anyway.
                         if (!ready && failure !is YtxCallException) {
-                            Log.w(TAG, failure) { "Engine host could not start Python for $method" }
+                            Log.w(TAG, failure) { "Engine host call $method failed before the host was configured" }
                         }
                         runCatching { callback.onError(id, code, null) }
                     } finally {
