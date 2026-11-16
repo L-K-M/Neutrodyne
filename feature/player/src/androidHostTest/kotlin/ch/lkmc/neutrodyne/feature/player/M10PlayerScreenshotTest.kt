@@ -9,7 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -46,17 +46,15 @@ class M10PlayerScreenshotTest {
         for (case in cases) {
             rule.runOnIdle { visual = case }
             rule.waitForIdle()
-            var actual = 0
+            var actual = Color.Unspecified
             try {
                 rule.waitUntil(timeoutMillis = 5_000) {
-                    val pixels = rule.onNodeWithTag(case.sheetTag).captureToImage().toPixelMap()
-                    actual = pixels[pixels.width / 2, 8].toArgb()
-                    actual == case.expectedSheetArgb()
+                    val pixels = rule.onNodeWithTag(COVER_TAG).captureToImage().toPixelMap()
+                    actual = pixels[pixels.width / 2, pixels.height / 2]
+                    coverMatches(actual, case.expectedCoverCentre())
                 }
             } catch (error: Throwable) {
-                val expected = case.expectedSheetArgb().toUInt().toString(16)
-                val observed = actual.toUInt().toString(16)
-                throw AssertionError("${case.name}: expected $expected, actual $observed", error)
+                throw AssertionError("${case.name}: cover centre ${case.expectedCoverCentre()}, actual $actual", error)
             }
             rule.onRoot().captureRoboImage("screenshots/android/m10-player-${case.name}.png")
         }

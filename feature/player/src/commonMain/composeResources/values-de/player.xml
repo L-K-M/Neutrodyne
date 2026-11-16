@@ -62,4 +62,6 @@
         <item quantity="other">%1$d Sekunden</item>
     </plurals>
     <string name="player_hide_panel">Player-Seitenbereich ausblenden</string>
+    <string name="player_switch_on">EIN</string>
+    <string name="player_switch_off">AUS</string>
 </resources>

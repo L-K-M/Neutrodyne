@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -30,11 +31,16 @@ import kotlin.test.assertTrue
 private val COMPACT_WINDOW_WIDTH = 320.dp
 private val MINIMUM_TOUCH_TARGET = 48.dp
 
-/** Stable en-US fixture labels. */
-private val TRANSPORT_LABELS =
-    listOf("Back 30 seconds", "Play", "Forward 30 seconds")
+/** Stable en-US fixture labels: the mini radio's play switch. */
+private val TRANSPORT_LABELS = listOf("Play")
 
-/** At 320dp, transport targets must stay large enough and disjoint. */
+/** Skips have no keys on a compact mini radio; they stay reachable as accessibility actions. */
+private val SKIP_ACTIONS = listOf("Back 30 seconds", "Forward 30 seconds")
+
+/**
+ * At 320dp, transport targets must stay large enough and disjoint. The compact mini radio
+ * shows only its ON/OFF switch (PO-55 mockups); skips remain custom accessibility actions.
+ */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [36], qualifiers = "en-rUS-w320dp-h640dp-mdpi")
@@ -77,6 +83,13 @@ class PlayerCompactTransportTest {
         targets.forEachIndexed { index, first ->
             targets.drop(index + 1).forEach { other -> assertTrue(!first.overlaps(other), "$first overlaps $other") }
         }
+        val actions =
+            rule
+                .onNodeWithTag("mini_player")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .map { it.label }
+        assertTrue(actions.containsAll(SKIP_ACTIONS), "skip actions missing from $actions")
     }
 }
 

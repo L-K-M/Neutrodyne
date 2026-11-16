@@ -62,4 +62,7 @@
         <item quantity="other">%1$d seconds</item>
     </plurals>
     <string name="player_hide_panel">Hide player panel</string>
+    <!-- The mini radio's play switch is printed like the radio's (PO-55). -->
+    <string name="player_switch_on">ON</string>
+    <string name="player_switch_off">OFF</string>
 </resources>

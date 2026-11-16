@@ -10,17 +10,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
-import ch.lkmc.neutrodyne.core.designsystem.theme.RadioScheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
+import kotlin.math.abs
 
 internal enum class ReferenceArt(
     val color: Int,
@@ -52,7 +52,8 @@ internal fun m10PlayerCases(full: Boolean): List<M10PlayerVisual> =
     buildList {
         for (viewport in PlayerViewport.entries) {
             for (art in ReferenceArt.entries) {
-                for (dark in listOf(false, true)) add(M10PlayerVisual(viewport, art, dark))
+                // The radio's materials ignore the OS dark mode (PO-55), so one case per art.
+                add(M10PlayerVisual(viewport, art, dark = false))
             }
         }
         if (full) {
@@ -103,11 +104,23 @@ internal fun M10PlayerContent(visual: M10PlayerVisual) {
 }
 
 /**
- * Await the rendered target. Since PO-55 the radio's paper is the only scheme and artwork no
- * longer tints the bar, so every case expects the radio's own container colour.
+ * The colour the loaded cover shows at its centre: the reference art's middle pixel. Screenshots
+ * wait for it, rather than timing a capture against the image loader's dispatch.
  */
-@Suppress("UnusedReceiverParameter")
-internal fun M10PlayerVisual.expectedSheetArgb(): Int = RadioScheme.colors(0.0).surfaceContainerHigh.toArgb()
+internal fun M10PlayerVisual.expectedCoverCentre(): Color {
+    val middle = REFERENCE_ART_SIDE / 2
+    return Color(referencePixels(art)[middle * REFERENCE_ART_SIDE + middle])
+}
 
-internal val M10PlayerVisual.sheetTag: String
-    get() = "player_sheet"
+/** Whether every channel of [actual] is within [COVER_TOLERANCE] of [expected] (resampling blur). */
+internal fun coverMatches(
+    actual: Color,
+    expected: Color,
+): Boolean =
+    abs(actual.red - expected.red) <= COVER_TOLERANCE &&
+        abs(actual.green - expected.green) <= COVER_TOLERANCE &&
+        abs(actual.blue - expected.blue) <= COVER_TOLERANCE
+
+private const val COVER_TOLERANCE = 0.06f
+
+internal const val COVER_TAG: String = "playerArtwork"
