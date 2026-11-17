@@ -319,6 +319,9 @@ private fun KeyCap(
             text.uppercase(),
             Modifier.clearAndSetSemantics { this.text = AnnotatedString(spokenText) },
             color = Ink,
+            // The key's content width is measured at fontSize, so it stays the full size: without
+            // it a content-sized key would be as wide as a label in the theme's larger body text.
+            fontSize = KEY_LABEL_SIZE,
             autoSize = TextAutoSize.StepBased(minFontSize = KEY_LABEL_MIN_SIZE, maxFontSize = KEY_LABEL_SIZE),
             fontFamily = barlow(),
             fontWeight = FontWeight.SemiBold,
