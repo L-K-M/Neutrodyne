@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Whether a page's cabinet carries the valve deck on its roof. */
@@ -42,8 +41,9 @@ public enum class CabinetDeck {
  * header ([ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar]) at the top of the tray.
  *
  * The frame consumes the status bar, display cutout and navigation bar insets, so a page's own
- * inset handling sees them as already applied. The deck stows on short windows (below
- * [DECK_MIN_HEIGHT] of usable height), like the home radio's deck, to keep the content readable.
+ * inset handling sees them as already applied. The deck spans the cabinet like the home radio's,
+ * and stows on short windows (below [DECK_MIN_HEIGHT] of usable height) to keep the content
+ * readable.
  */
 @Composable
 public fun RadioCabinetPage(
@@ -57,8 +57,13 @@ public fun RadioCabinetPage(
             .radioStage()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
     ) {
+        // The deck is the cabinet's lid, as on the home: as wide as the cabinet with a little
+        // overhang, its height following the width up to a share of the window's height (beyond
+        // that its chassis grows longer instead).
+        val deckWidth = maxWidth - CABINET_SIDE_GAP * 2 + DECK_OVERHANG
+        val deckHeight = minOf(deckWidth / VALVE_DECK_ASPECT, maxHeight * DECK_HEIGHT_SHARE)
         val showDeck = deck == CabinetDeck.SHOWN && maxHeight >= DECK_MIN_HEIGHT
-        val roof = if (showDeck) DECK_HEIGHT - DECK_OVERLAP else CABINET_TOP_GAP
+        val roof = if (showDeck) deckHeight * (1f - DECK_OVERLAP_SHARE) else CABINET_TOP_GAP
         MaterialPlate(
             RadioMaterial.WOOD,
             Modifier
@@ -87,8 +92,8 @@ public fun RadioCabinetPage(
             ValveDeck(
                 Modifier
                     .align(Alignment.TopCenter)
-                    .height(DECK_HEIGHT)
-                    .width(deckWidth(DECK_HEIGHT))
+                    .requiredWidth(deckWidth)
+                    .height(deckHeight)
                     .testTag(CABINET_DECK_TAG),
             )
         }
@@ -101,13 +106,14 @@ public const val CABINET_TRAY_TAG: String = "radio_cabinet_tray"
 /** Test tag of a page's valve deck. */
 public const val CABINET_DECK_TAG: String = "radio_cabinet_deck"
 
-private fun deckWidth(height: Dp): Dp = height * VALVE_DECK_ASPECT
+// The deck overhangs the cabinet's walls a little, and takes at most this share of the window's
+// height, as on the home.
+private val DECK_OVERHANG = 18.dp
+private const val DECK_HEIGHT_SHARE = 0.22f
 
-// The deck is about 11 % of a typical phone's height, as in the owner-approved renders.
-private val DECK_HEIGHT = 84.dp
-
-// The chassis plate's lower edge sits this far into the artwork's bottom margin.
-private val DECK_OVERLAP = 10.dp
+// The chassis plate's lower edge rests on the roof: this share of the artwork's height is its
+// bottom margin and shadow, which overlap the cabinet.
+private const val DECK_OVERLAP_SHARE = 0.12f
 private val DECK_MIN_HEIGHT = 560.dp
 private val CABINET_TOP_GAP = 6.dp
 private val CABINET_SIDE_GAP = 6.dp
