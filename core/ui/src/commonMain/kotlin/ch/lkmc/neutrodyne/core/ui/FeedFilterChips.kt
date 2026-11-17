@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -41,7 +40,7 @@ public fun FeedFilterChips(
             effective.media != MediaFilter.ALL ||
             effective.minSortDate != null
 
-    PianoKeySlot(modifier.horizontalScroll(rememberScrollState())) {
+    PianoKeySlot(modifier, rememberScrollState()) {
         PianoKey(
             stringResource(Res.string.filter_unplayed),
             pressed = effective.unplayedOnly,

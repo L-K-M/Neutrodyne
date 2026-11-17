@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.designsystem.radio
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -87,19 +88,30 @@ public fun <T> PianoKeys(
 
 /**
  * The metal slot that holds a bank of [PianoKey]s side by side. Keys that should share the width
- * take `Modifier.weight(1f)`; a bank of latching keys whose labels vary in length can pass a
- * `horizontalScroll` [modifier] instead so long translations stay whole.
+ * take `Modifier.weight(1f)`; a bank of keys whose labels vary in length can pass a [scroll]
+ * state instead, so long translations stay whole: the keys then slide sideways inside the slot's
+ * opening while its frame stays put.
  */
 @Composable
 public fun PianoKeySlot(
     modifier: Modifier = Modifier,
+    scroll: ScrollState? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     // The rendered riveted slot (owner-approved renders, 2026-11-17), stretched without
     // distorting its screwed corners.
     Box(modifier.ninePatch(imageResource(Res.drawable.radio_key_slot), SLOT_SRC_INSET, SLOT_INSET)) {
+        val keys =
+            if (scroll == null) {
+                Modifier.padding(SlotPadding)
+            } else {
+                Modifier
+                    .padding(horizontal = SLOT_OPENING_INSET)
+                    .horizontalScroll(scroll)
+                    .padding(ScrolledKeysPadding)
+            }
         Row(
-            Modifier.padding(SlotPadding).selectableGroup(),
+            keys.selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(KEY_GAP),
             content = content,
         )
@@ -153,7 +165,7 @@ public fun KeyBank(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    PianoKeySlot(modifier.horizontalScroll(rememberScrollState()), content = content)
+    PianoKeySlot(modifier, rememberScrollState(), content)
 }
 
 /** A momentary piano key: a button that springs back, without a lamp. */
@@ -328,6 +340,11 @@ private val RAISED_LIP = 4.5.dp
 private val PRESSED_LIP = 1.5.dp
 private val KEY_DROP = 2.dp
 private val SlotPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+
+// The slot's opening starts this far inside the picture; scrolled keys are cut off there, under
+// the frame, rather than at the picture's outer edge.
+private val SLOT_OPENING_INSET = 8.dp
+private val ScrolledKeysPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp)
 
 // The action bank keeps its drawn metal edge, whose thin rim needs less room than the rendered
 // slot's frame, so a phone's four episode actions still share one row.
