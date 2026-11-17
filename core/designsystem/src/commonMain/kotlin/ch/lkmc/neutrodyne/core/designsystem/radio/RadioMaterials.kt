@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -125,7 +126,7 @@ public fun MaterialPlate(
             val bitmap = imageResource(texture)
             val brush = remember(bitmap) { ShaderBrush(ImageShader(bitmap, TileMode.Repeated, TileMode.Repeated)) }
             Canvas(Modifier.matchParentSize()) {
-                val tileWidth = if (material == RadioMaterial.PAPER) 256.dp else 160.dp
+                val tileWidth = if (material == RadioMaterial.PAPER) PAPER_TILE_WIDTH else 160.dp
                 val scale = tileWidth.toPx() / bitmap.width
                 withTransform({ scale(scale, scale, Offset.Zero) }) {
                     drawRect(brush, size = Size(size.width / scale, size.height / scale))
@@ -149,7 +150,7 @@ public fun MaterialPlate(
                         }
 
                         RadioMaterial.PAPER -> {
-                            listOf(Color(0x1F695123), Color.Transparent, Color(0x2EFFF2D0))
+                            PaperLight
                         }
                     },
                 ),
@@ -176,6 +177,35 @@ public fun MaterialPlate(
         }
     }
 }
+
+/** The radio's paper texture, for surfaces drawn with [paper]. */
+@Composable
+public fun paperTexture(): ImageBitmap = imageResource(Res.drawable.radio_paper)
+
+/**
+ * Draws the radio's paper ([texture], from [paperTexture]) behind a node, as [MaterialPlate] does
+ * for [RadioMaterial.PAPER], for surfaces built from modifiers such as a list's slips. [tint]
+ * washes over the paper, to mark a slip.
+ */
+public fun Modifier.paper(
+    texture: ImageBitmap,
+    tint: Color = Color.Transparent,
+): Modifier =
+    drawWithCache {
+        val grain = ShaderBrush(ImageShader(texture, TileMode.Repeated, TileMode.Repeated))
+        val scale = PAPER_TILE_WIDTH.toPx() / texture.width
+        val light = Brush.linearGradient(PaperLight)
+        onDrawBehind {
+            withTransform({ scale(scale, scale, Offset.Zero) }) {
+                drawRect(grain, size = Size(size.width / scale, size.height / scale))
+            }
+            drawRect(light)
+            drawRect(tint)
+        }
+    }
+
+private val PAPER_TILE_WIDTH = 256.dp
+private val PaperLight = listOf(Color(0x1F695123), Color.Transparent, Color(0x2EFFF2D0))
 
 /** Light catches the cabinet's top edge and left wall; the right wall and base fall into shade. */
 public fun Modifier.cabinetEdges(): Modifier =

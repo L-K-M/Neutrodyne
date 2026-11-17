@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -52,14 +51,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -93,6 +88,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.SlipKeyCap
 import ch.lkmc.neutrodyne.core.designsystem.radio.barlow
 import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
@@ -432,10 +428,7 @@ private fun RadioSlip(
     }
 }
 
-/**
- * A slip's own play key: a concave ivory cap in a turned brass ring, the owner's favourite from the
- * earlier prototypes (2026-11-17). On the slip that is playing it pauses.
- */
+/** A slip's own play key (the shared ivory slip key); on the slip that is playing it pauses. */
 @Composable
 private fun SlipPlayKey(
     playing: Boolean,
@@ -451,80 +444,12 @@ private fun SlipPlayKey(
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(SLIP_KEY_CAP)) {
-            drawIvoryKey(center, size.minDimension / 2)
-            if (playing) {
-                // Two solid bars: the outlined pause symbol reads as "00" at this size.
-                val bar = Size(size.width * 0.1f, size.height * 0.3f)
-                val gap = size.width * 0.07f
-                for ((x, color) in listOf(1.dp.toPx() to Color(0xB3FFFBEF), 0f to Ink)) {
-                    for (side in listOf(-1f, 1f)) {
-                        val left = center.x + side * (gap + bar.width / 2f) - bar.width / 2f
-                        drawRoundRect(
-                            color,
-                            Offset(left, center.y - bar.height / 2f + x * 0.75f),
-                            bar,
-                            CornerRadius(bar.width / 3f),
-                        )
-                    }
-                }
-            }
-        }
-        if (!playing) {
-            // Engraved: the cut's lower wall catches the light just below the ink.
-            val glyph = Modifier.size(SLIP_KEY_CAP * SLIP_GLYPH_FRACTION)
-            Icon(NdIcons.PlayArrow, null, glyph.offset(y = 0.75.dp), tint = Color(0xB3FFFBEF))
-            Icon(NdIcons.PlayArrow, null, glyph, tint = Ink)
-        }
+        SlipKeyCap(if (playing) NdIcons.Pause else NdIcons.PlayArrow, null, Modifier.size(SLIP_KEY_CAP))
     }
-}
-
-/**
- * A round ivory key in its socket: a turned brass ring lit from the top left, the dark gap of the
- * socket and a concave ivory cap whose dish is shaded at the top (its rim shades it) and lit
- * toward the bottom.
- */
-private fun DrawScope.drawIvoryKey(
-    center: Offset,
-    radius: Float,
-) {
-    drawCircle(Color(0x80000000), radius, center + Offset(radius * 0.03f, radius * 0.08f))
-    drawCircle(
-        Brush.linearGradient(
-            listOf(Color(0xFFF8E7B8), Color(0xFFC09A5A), Color(0xFF6E5128), Color(0xFF3E2C14)),
-            center - Offset(radius, radius),
-            center + Offset(radius, radius),
-        ),
-        radius * 0.98f,
-        center,
-    )
-    drawCircle(Color(0xFF1A130A), radius * 0.86f, center)
-    val cap = radius * 0.8f
-    drawCircle(
-        Brush.linearGradient(
-            listOf(Color(0xFFFFF9EA), Color(0xFFEADBB6), Color(0xFFB59B6C)),
-            center - Offset(cap, cap),
-            center + Offset(cap * 0.8f, cap),
-        ),
-        cap,
-        center,
-    )
-    val dish = cap * 0.8f
-    drawCircle(
-        Brush.linearGradient(
-            listOf(Color(0xFFCDB68A), Color(0xFFEFE2C2), Color(0xFFFFF8E6)),
-            center - Offset(dish * 0.6f, dish),
-            center + Offset(dish * 0.6f, dish),
-        ),
-        dish,
-        center,
-    )
-    drawCircle(Color(0x33604A26), dish, center, style = Stroke(radius * 0.025f))
 }
 
 private val SLIP_KEY_TARGET = 48.dp
 private val SLIP_KEY_CAP = 36.dp
-private const val SLIP_GLYPH_FRACTION = 0.5f
 
 @Composable
 internal fun SmallRadioKey(

@@ -14,13 +14,17 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
@@ -47,6 +51,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -62,8 +68,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverAspect
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
@@ -71,6 +79,10 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
+import ch.lkmc.neutrodyne.core.designsystem.radio.SlipKeyCap
+import ch.lkmc.neutrodyne.core.designsystem.radio.courier
+import ch.lkmc.neutrodyne.core.designsystem.radio.paper
+import ch.lkmc.neutrodyne.core.designsystem.radio.paperTexture
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
@@ -154,11 +166,13 @@ public fun EpisodeRow(
     var focused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
-    val container =
+    // A slip of the radio's paper; the chosen or playing slip is washed in amber.
+    val paper = paperTexture()
+    val mark =
         if (selected == true || live?.isNowPlaying == true) {
-            MaterialTheme.colorScheme.secondaryContainer
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MARK_ALPHA)
         } else {
-            MaterialTheme.colorScheme.surfaceContainerLowest
+            Color.Transparent
         }
     val menuActions =
         rowMenuActions(row, live, caps, style).map { (label, action) ->
@@ -230,7 +244,7 @@ public fun EpisodeRow(
                     ).padding(horizontal = SLIP_INSET, vertical = SLIP_GAP)
                     .shadow(SLIP_ELEVATION, SlipShape)
                     .clip(SlipShape)
-                    .background(container)
+                    .paper(paper, mark)
                     .indication(interactionSource, LocalIndication.current)
                     .border(SLIP_EDGE, Brass.copy(alpha = SLIP_EDGE_ALPHA), SlipShape)
                     .padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
@@ -546,28 +560,46 @@ private fun LeadingSlot(
 }
 
 /**
- * The PODCAST style's date block: day `titleMedium` over month `labelSmall`, at least 48 dp (08).
- * A minimum, not a fixed size — at 200 % text the two lines grow past 48 dp and a fixed box
- * would clip the month (08's "no fixed heights" accessibility rule).
+ * The PODCAST style's date block, stamped on the slip like the radio's prototypes: the day in
+ * large bold type over the month, ruled off from the title. At least 48 dp (08), a minimum
+ * rather than a fixed size: at 200 % text the two lines grow past it, and a fixed box would clip
+ * the month (08's "no fixed heights" accessibility rule).
  */
 @Composable
 private fun DateBlock(row: EpisodeRow) {
     val epochMs = row.pubDate ?: row.sortDate
     val (day, month) = remember(epochMs) { FeedDates.dayMonth(epochMs) }
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier =
+    Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier =
+                Modifier
+                    .defaultMinSize(minWidth = DATE_BLOCK_SIZE, minHeight = DATE_BLOCK_SIZE)
+                    .testTag(DATE_BLOCK_TAG),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                day,
+                fontFamily = courier(),
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                lineHeight = 24.sp,
+                maxLines = 1,
+            )
+            Text(
+                month,
+                fontFamily = courier(),
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+        }
+        Box(
             Modifier
-                .defaultMinSize(minWidth = DATE_BLOCK_SIZE, minHeight = DATE_BLOCK_SIZE)
-                .testTag(DATE_BLOCK_TAG),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(day, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-        Text(
-            month,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+                .padding(start = DATE_RULE_GAP)
+                .fillMaxHeight(DATE_RULE_HEIGHT)
+                .width(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = DATE_RULE_ALPHA)),
         )
     }
 }
@@ -741,15 +773,14 @@ private fun TrailingSlot(
         if (row.sourceType != SourceType.RSS && !caps.inAppPlayback) {
             // External mode (08): `open_in_new` replaces both buttons; a row without a video id
             // (malformed/legacy YouTube rows) gets a disabled affordance rather than a dead one.
-            NdIconButton(
+            SlipKey(
+                icon = NdIcons.OpenInNew,
+                contentDescription = stringResource(Res.string.action_watch_on_youtube),
                 onClick = {
                     row.externalMediaId?.let { id ->
                         onAction(EpisodeAction.WatchOnYouTube(row.id, id))
                     }
                 },
-                icon = NdIcons.OpenInNew,
-                contentDescription = stringResource(Res.string.action_watch_on_youtube),
-                modifier = Modifier.clearAndSetSemantics {},
                 enabled = row.externalMediaId != null,
             )
         } else {
@@ -765,19 +796,15 @@ private fun TrailingSlot(
 
             val playing = live?.isNowPlaying == true && live.isPlaying
             val icon = if (playing) NdIcons.Pause else NdIcons.PlayArrow
-            val label = playActionLabel(row, live)
             // Offline and not downloaded: the affordance stays enabled as `cloud_off` at 60 %
             // alpha (08's row table) — the tap still dispatches PlayToggle so the screen answers
             // with the offline snackbar instead of a dead button.
             val offlineBlocked = caps.offline && downloadState != DownloadState.COMPLETED
-            NdIconButton(
-                onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
+            SlipKey(
                 icon = if (offlineBlocked) NdIcons.CloudOff else icon,
-                contentDescription = label,
-                modifier =
-                    Modifier
-                        .clearAndSetSemantics {}
-                        .alpha(if (offlineBlocked) DIMMED_ALPHA else 1f),
+                contentDescription = playActionLabel(row, live),
+                onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
+                modifier = Modifier.alpha(if (offlineBlocked) DIMMED_ALPHA else 1f),
             )
         }
 
@@ -789,6 +816,33 @@ private fun TrailingSlot(
                 modifier = Modifier.clearAndSetSemantics {},
             )
         }
+    }
+}
+
+/**
+ * A slip's round ivory key (PO-55): the play key, or the YouTube key in external mode. Like the
+ * row's other inner buttons it clears its semantics: the row's merged node and its custom
+ * actions name the action, while [contentDescription] stays on the cap in the unmerged tree, as
+ * on an icon. A disabled key is dimmed and ignores taps.
+ */
+@Composable
+private fun SlipKey(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Box(
+        modifier
+            .clearAndSetSemantics {}
+            .size(TOUCH_TARGET)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .alpha(if (enabled) 1f else DIMMED_ALPHA),
+        contentAlignment = Alignment.Center,
+    ) {
+        SlipKeyCap(icon, contentDescription, Modifier.size(SLIP_KEY_CAP))
     }
 }
 
@@ -887,17 +941,22 @@ public fun DownloadStateButton(
 }
 
 private val ROW_MIN_HEIGHT = 72.dp
+private val SLIP_KEY_CAP = 36.dp
+private const val MARK_ALPHA = 0.6f
 private val SlipShape = RoundedCornerShape(4.dp)
 private val SLIP_INSET = 10.dp
 private val SLIP_GAP = 3.dp
-private val SLIP_ELEVATION = 1.5.dp
-private val SLIP_EDGE = 0.5.dp
-private const val SLIP_EDGE_ALPHA = 0.7f
+private val SLIP_ELEVATION = 3.dp
+private val SLIP_EDGE = 1.dp
+private const val SLIP_EDGE_ALPHA = 0.6f
 private val ROW_PADDING_H = 12.dp
 private val ROW_PADDING_V = 8.dp
 private val COVER_SIZE = 56.dp
 private val VIDEO_THUMB_WIDTH = 100.dp
 private val DATE_BLOCK_SIZE = 48.dp
+private val DATE_RULE_GAP = 6.dp
+private const val DATE_RULE_HEIGHT = 0.8f
+private const val DATE_RULE_ALPHA = 0.4f
 private val ROW_TEXT_GAP = 12.dp
 private val NEW_DOT_SIZE = 8.dp
 private val NEW_DOT_GAP = 6.dp
