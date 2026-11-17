@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -311,14 +312,16 @@ private fun KeyCap(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        // Engraved in capitals, read as written: screen readers spell some all-caps words.
+        // Engraved in capitals, read as written: screen readers spell some all-caps words. A label
+        // that would not fit two lines of a narrow key (three keys on a phone, longer
+        // translations) is engraved smaller before it is cut short.
         Text(
             text.uppercase(),
             Modifier.clearAndSetSemantics { this.text = AnnotatedString(spokenText) },
             color = Ink,
+            autoSize = TextAutoSize.StepBased(minFontSize = KEY_LABEL_MIN_SIZE, maxFontSize = KEY_LABEL_SIZE),
             fontFamily = barlow(),
             fontWeight = FontWeight.SemiBold,
-            fontSize = 12.sp,
             lineHeight = 14.sp,
             letterSpacing = 1.sp,
             textAlign = TextAlign.Center,
@@ -328,6 +331,8 @@ private fun KeyCap(
     }
 }
 
+private val KEY_LABEL_SIZE = 12.sp
+private val KEY_LABEL_MIN_SIZE = 9.sp
 private val SlotShape = RoundedCornerShape(6.dp)
 private val KeyShape = RoundedCornerShape(3.dp)
 private val KEY_GAP = 6.dp
