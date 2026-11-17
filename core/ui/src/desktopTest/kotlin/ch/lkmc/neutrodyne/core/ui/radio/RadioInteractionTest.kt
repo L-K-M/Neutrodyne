@@ -355,6 +355,30 @@ class RadioInteractionTest {
             onNodeWithTag("radio_play").assertIsDisplayed()
         }
 
+    @Test fun largeTextOnASmallPhoneKeepsALongTitledPlayerReachable() =
+        runDesktopComposeUiTest(width = 320, height = 568) {
+            val state =
+                radioFixture().let { fixture ->
+                    fixture.copy(
+                        episodes =
+                            fixture.episodes.map { episode ->
+                                if (episode.id == fixture.selectedId) {
+                                    episode.copy(title = "A longer programme title that needs room. ".repeat(6))
+                                } else {
+                                    episode
+                                }
+                            },
+                    )
+                }
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 1.3f)) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(state, RadioActions()) }
+                }
+            }
+            onNodeWithTag("radio_valve_deck").assertIsDisplayed()
+            onNodeWithTag("radio_play").performScrollTo().assertIsDisplayed()
+        }
+
     @Test fun aWideWindowKeepsTheDeck() =
         runDesktopComposeUiTest(width = 1200, height = 800) {
             setContent { NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(radioFixture(), RadioActions()) } }

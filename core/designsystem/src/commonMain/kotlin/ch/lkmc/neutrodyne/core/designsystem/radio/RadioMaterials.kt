@@ -311,7 +311,9 @@ private fun DrawScope.drawMirroredTiles(
     height: Float,
     tile: Float,
 ) {
-    val count = ceil(width / tile).toInt()
+    // An odd count ends on an unmirrored copy, whose outer edge is the column the fixed artwork
+    // beyond it continues from; ending on a mirrored copy would leave a seam there.
+    val count = ceil(width / tile).toInt().coerceAtLeast(1).let { if (it % 2 == 0) it + 1 else it }
     val each = width / count
     for (index in 0 until count) {
         drawPart(art, from, to, left + index * each, top, each, height, mirrored = index % 2 == 1)
