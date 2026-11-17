@@ -845,6 +845,18 @@ is "Group deleted"; the name is retained for an Undo name-conflict message. One
 D8b adds the existing-group footer’s Group settings link through
 `GroupSettingsKey`; the editor draft remains intact while settings is open.
 
+**Radio group editor (PO-55, 2026-11-17).** The editor is built from radio parts. Save is a
+labelled ivory key on the faceplate (`FaceplateKey`); Close stays the ivory key at the start.
+Each field has its name engraved above it. The name is typed on a paper strip in a brass rim
+(`PaperTextField`) with the character count at its end and the error in red below. The palette
+colours are round enamel buttons in brass rims, the chosen one pressed in with a check. The
+icon is an enamel selector that opens the icon sheet, and the play order is a two-key piano bank
+with "Play oldest first?" as a momentary key. "Show as a tab in Feeds" ends in the bat-handle
+switch (`RadioSwitch`). The member search is another paper strip, and the cover tiles are 88 dp
+wide. Group settings and Delete group are momentary keys. Manage groups and Group settings use
+`RadioSwitch` for their switches, and Manage groups loses its settings gear (Settings is in the
+radio's Menu).
+
 ### Manage groups
 
 `GroupsManageKey`, `:feature:groups`, M2.

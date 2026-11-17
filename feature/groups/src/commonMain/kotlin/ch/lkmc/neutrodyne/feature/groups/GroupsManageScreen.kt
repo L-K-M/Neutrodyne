@@ -24,7 +24,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -64,6 +63,7 @@ import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.GroupMosaicLayout
 import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
+import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
@@ -335,7 +335,7 @@ private fun ManageRow(
             if (!group.showAsTab) Text(stringResource(Res.string.group_hidden))
         }
         val tabLabel = stringResource(Res.string.group_edit_tab)
-        Switch(
+        RadioSwitch(
             checked = group.showAsTab,
             onCheckedChange = { onShowAsTab(group.id, it) },
             enabled = enabled,

@@ -13,7 +13,6 @@ import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsFeedback
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.NonCancellable
@@ -66,7 +65,6 @@ internal fun GroupsManageRoute(viewModel: GroupsManageViewModel = metroViewModel
                 viewModel.suggestedGroups::dismiss,
             )
         },
-        topBarActions = { SettingsGearButton() },
         onSettings = { navigator.pushDetail(GroupSettingsKey(it)) },
     )
     suggestions.result?.let { result ->

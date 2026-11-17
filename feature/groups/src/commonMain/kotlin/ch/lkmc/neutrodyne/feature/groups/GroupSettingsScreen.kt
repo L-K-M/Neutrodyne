@@ -13,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,6 +45,7 @@ import ch.lkmc.neutrodyne.core.ui.downloadExternalReasonText
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionNotice
+import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.back
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh_interval
@@ -119,7 +119,7 @@ internal fun GroupSettingsScreen(
                     )
                 },
                 trailingContent = {
-                    Switch(
+                    RadioSwitch(
                         checked = notifications,
                         onCheckedChange = onNotifications,
                         modifier = Modifier.semantics { contentDescription = notificationLabel },
