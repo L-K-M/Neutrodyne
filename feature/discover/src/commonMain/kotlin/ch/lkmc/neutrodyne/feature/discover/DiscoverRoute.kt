@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -162,8 +163,7 @@ internal fun DiscoverScreen(
                     item { SearchStatus(results, retry, settings) }
                     val inline = results.hits.take(INLINE_LIMIT)
                     val keys = hitKeys(inline)
-                    items(inline.size, key = { keys[it] }) { index ->
-                        val hit = inline[index]
+                    itemsIndexed(inline, key = { index, _ -> keys[index] }) { _, hit ->
                         DirectoryRow(hit) { navigator.openHit(hit) }
                     }
                     if (results.hits.size > INLINE_LIMIT) {
@@ -261,8 +261,7 @@ private fun LazyListScope.charts(
         else -> {
             val inline = chart.hits.take(INLINE_LIMIT)
             val keys = hitKeys(inline)
-            items(inline.size, key = { "chart:${keys[it]}" }) { index ->
-                val hit = inline[index]
+            itemsIndexed(inline, key = { index, _ -> "chart:${keys[index]}" }) { _, hit ->
                 DirectoryRow(hit) { navigator.openHit(hit) }
             }
         }

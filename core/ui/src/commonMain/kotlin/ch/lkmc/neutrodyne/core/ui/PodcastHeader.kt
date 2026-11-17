@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -302,7 +303,7 @@ private fun GroupPlate(
     }
 }
 
-/** A 48 dp tall key on a group plate whose press shows on the plate band only. */
+/** A key at least 48 dp each way on a group plate; its press shows on the plate band only. */
 @Composable
 private fun PlateKey(
     onClick: () -> Unit,
@@ -312,7 +313,7 @@ private fun PlateKey(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier
-            .heightIn(min = KEY_TARGET)
+            .sizeIn(minWidth = KEY_TARGET, minHeight = KEY_TARGET)
             .clickable(interaction, indication = null, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

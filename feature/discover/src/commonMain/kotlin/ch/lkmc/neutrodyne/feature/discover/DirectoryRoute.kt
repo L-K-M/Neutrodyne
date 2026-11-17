@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -114,8 +115,7 @@ internal fun DirectoryScreen(
                 }
             }
             val keys = hitKeys(state.hits)
-            items(state.hits.size, key = { keys[it] }) { index ->
-                val hit = state.hits[index]
+            itemsIndexed(state.hits, key = { index, _ -> keys[index] }) { _, hit ->
                 DirectoryRow(hit) { navigator.openHit(hit) }
             }
             // While the directory is still answering, the skeleton slips stand where this key

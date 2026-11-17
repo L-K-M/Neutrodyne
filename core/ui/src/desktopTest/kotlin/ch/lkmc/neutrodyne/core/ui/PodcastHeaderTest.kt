@@ -94,6 +94,13 @@ class PodcastHeaderTest {
             onNodeWithContentDescription("Remove from News").assertTargetIsAtLeast48Dp()
         }
 
+    @Test
+    fun aOneLetterGroupPlateStillOpensFromA48DpTarget() =
+        runDesktopComposeUiTest(width = 400, height = 640) {
+            setHeader(testPodcastDetail(), listOf(NEWS.copy(name = "N")))
+            onNodeWithText("N").assertTargetIsAtLeast48Dp()
+        }
+
     private fun SemanticsNodeInteraction.assertTargetIsAtLeast48Dp() {
         val node = fetchSemanticsNode()
         val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
