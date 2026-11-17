@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
@@ -26,13 +27,16 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -620,7 +624,7 @@ class LibraryScreenTest {
             onNodeWithText("You're offline — downloaded episodes still play").assertIsDisplayed()
         }
 
-    @Test fun chipsFilterGroupAndUngrouped() =
+    @Test fun filterSelectorFiltersGroupAndUngrouped() =
         runComposeUiTest {
             val id = createGroup("tech")
             val a = testLibraryTile(1, "A")
@@ -628,24 +632,57 @@ class LibraryScreenTest {
             groups.members.value = mapOf(id to setOf(1L))
             podcasts.tilesByGroup.value = mapOf(id to listOf(a))
             setLibraryRoute(listOf(a, b))
-            onNodeWithText("All").assertIsSelected()
-            onNodeWithText("tech").performClick()
-            onNodeWithText("tech").assertIsSelected()
+            assertFilter("All podcasts")
+            onNodeWithTag("library_filter").performClick()
+            onNode(hasText("All podcasts") and hasAnyAncestor(isPopup())).assertIsSelected()
+            onNode(hasText("tech") and hasAnyAncestor(isPopup())).assertIsNotSelected().performClick()
+            assertFilter("tech")
             onNodeWithContentDescription("A").assertIsDisplayed()
             onNodeWithContentDescription("B").assertDoesNotExist()
-            onNodeWithText("Ungrouped").performClick()
+            chooseFilter("Ungrouped")
             onNodeWithContentDescription("A").assertDoesNotExist()
             onNodeWithContentDescription("B").assertIsDisplayed()
-            onNodeWithText("All").performClick()
+            chooseFilter("All podcasts")
             onNodeWithContentDescription("A").assertIsDisplayed()
             onNodeWithContentDescription("B").assertIsDisplayed()
         }
+
+    @Test fun filterStripCountsTheFilteredPodcasts() =
+        runComposeUiTest {
+            setLibrary(
+                LibraryUiState(
+                    loaded = true,
+                    tiles =
+                        listOf(
+                            testLibraryTile(1, "A").copy(unplayedCount = 3),
+                            testLibraryTile(2, "B"),
+                        ).toImmutableList(),
+                ),
+            )
+            onNodeWithText("2 podcasts · 3 unplayed").assertIsDisplayed()
+        }
+
+    @Test fun filterMenuOpensNewGroup() =
+        runComposeUiTest {
+            setLibraryRoute()
+            chooseFilter("New group")
+            assertEquals(RecordingAppNavigator.Call.Push(GroupEditKey(null)), navigator.calls.last())
+        }
+
+    private fun ComposeUiTest.chooseFilter(label: String) {
+        onNodeWithTag("library_filter").performClick()
+        onNode(hasText(label) and hasAnyAncestor(isPopup())).performClick()
+    }
+
+    private fun ComposeUiTest.assertFilter(label: String) {
+        onNodeWithTag("library_filter").assert(hasText(label))
+    }
 
     @Test fun emptyGroupOffersAddPodcasts() =
         runComposeUiTest {
             createGroup("tech")
             setLibraryRoute()
-            onNodeWithText("tech").performClick()
+            chooseFilter("tech")
             onNodeWithText("No podcasts in 'tech'").assertIsDisplayed()
             onNodeWithText("Add podcasts").performClick()
             assertEquals(RecordingAppNavigator.Call.Push(AddPodcastKey(null)), navigator.calls.last())
@@ -658,7 +695,7 @@ class LibraryScreenTest {
             feeds.groupCounts.value = mapOf(id to FeedCounts(unplayed = 14, newSinceVisit = 3))
             setLibraryRoute()
             onNodeWithText("Groups").performClick()
-            onNodeWithText("14 unplayed · 3 new").assertIsDisplayed()
+            onNodeWithText("2 podcasts · 14 unplayed · 3 new").assertIsDisplayed()
             onNodeWithContentDescription("tech, 2 podcasts, 14 unplayed, 3 new").assertIsDisplayed().performClick()
             waitForIdle()
             assertEquals(
@@ -881,33 +918,43 @@ class LibraryScreenTest {
             val tiles = (1L..90).map { testLibraryTile(it, "Show %02d".format(it)) }
             podcasts.tilesByGroup.value = mapOf(id to tiles)
             setLibraryRoute(tiles)
-            onNodeWithText("tech").performClick()
+            chooseFilter("tech")
             onNode(hasScrollToIndexAction()).performScrollToIndex(36)
             onNodeWithContentDescription("Show 37").performTouchInput { longClick() }
             onNodeWithText("1 selected").assertIsDisplayed()
             for (density in listOf(LibraryDensity.LARGE, LibraryDensity.SMALL, LibraryDensity.MEDIUM)) {
                 runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, density) }
                 waitForIdle()
-                onNodeWithText("tech").assertIsSelected()
+                assertFilter("tech")
                 onNodeWithText("1 selected").assertIsDisplayed()
                 onNodeWithContentDescription("Show 37").assertIsDisplayed().assertIsSelected()
             }
         }
 
-    @Test fun groupsUseTheSameLiveDensity() =
-        runDesktopComposeUiTest(width = 360, height = 700) {
-            (1..6).forEach { createGroup("Group $it") }
+    /** Group drawers are full-width on phones and pair up on wide windows; cover size is not theirs. */
+    @Test fun groupDrawersPairUpWhenWideWhateverTheCoverSize() =
+        runDesktopComposeUiTest(width = 720, height = 900) {
+            (1..3).forEach { createGroup("Group $it") }
             setLibraryRoute()
             onNodeWithText("Groups").performClick()
 
             fun top(name: String) = onNodeWithContentDescription(name).fetchSemanticsNode().boundsInRoot.top
-            assertEquals(top("Group 1"), top("Group 3"))
-            runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.LARGE) }
-            waitForIdle()
-            waitUntil { top("Group 3") > top("Group 1") }
-            runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.SMALL) }
-            waitForIdle()
-            waitUntil { top("Group 1") == top("Group 4") }
+            for (density in listOf(LibraryDensity.SMALL, LibraryDensity.LARGE)) {
+                runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, density) }
+                waitForIdle()
+                assertEquals(top("Group 1"), top("Group 2"))
+                assertTrue(top("Group 3") > top("Group 1"))
+            }
+        }
+
+    @Test fun groupDrawersStackOnPhones() =
+        runDesktopComposeUiTest(width = 360, height = 900) {
+            (1..2).forEach { createGroup("Group $it") }
+            setLibraryRoute()
+            onNodeWithText("Groups").performClick()
+
+            fun top(name: String) = onNodeWithContentDescription(name).fetchSemanticsNode().boundsInRoot.top
+            assertTrue(top("Group 2") > top("Group 1"))
         }
 
     @Test fun smallDensityLongTitlesAtDoubleFontRemainOperable() = densityStress(LibraryDensity.SMALL)

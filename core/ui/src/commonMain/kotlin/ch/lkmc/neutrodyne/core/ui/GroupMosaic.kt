@@ -202,7 +202,7 @@ private fun EmptyCell(
 
 /** "{name}, {n} podcasts, {u} unplayed, {k} new" — the merged node reads it whole (08). */
 @Composable
-private fun mosaicDescription(
+internal fun mosaicDescription(
     group: Group,
     unplayedCount: Int?,
     newCount: Int?,

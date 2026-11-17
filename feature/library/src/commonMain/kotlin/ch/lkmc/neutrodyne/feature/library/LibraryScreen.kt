@@ -93,7 +93,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_settings
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_title
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.feature.library.resources.add_podcasts
 import ch.lkmc.neutrodyne.feature.library.resources.empty_group
 import ch.lkmc.neutrodyne.feature.library.resources.grid_large
@@ -206,6 +205,12 @@ internal fun LibraryScreen(
             NdTopAppBar(
                 title = stringResource(Res.string.nav_library),
                 actions = {
+                    // Settings and the other destinations live in the radio's Menu (PO-55).
+                    NdTooltipIconButton(
+                        onClick = onAddPodcast,
+                        icon = NdIcons.Add,
+                        tooltip = stringResource(LibraryRes.string.add_podcasts),
+                    )
                     SortMenu(state.sort, onSort)
                     OverflowMenu(
                         state.density,
@@ -216,13 +221,12 @@ internal fun LibraryScreen(
                         onExportSubscriptions,
                         onImportSubscriptions,
                     )
-                    SettingsGearButton()
                 },
             )
         }
         OfflineBanner(state.offline)
         LibrarySegments(segment, onSegment)
-        if (segment == LibrarySegment.PODCASTS) LibraryGroupChips(state, onGroupFilter, onNewGroup)
+        if (segment == LibrarySegment.PODCASTS) LibraryFilterStrip(state, onGroupFilter, onNewGroup)
         when {
             segment == LibrarySegment.GROUPS && state.loaded && state.groups.isEmpty() -> {
                 EmptyState(

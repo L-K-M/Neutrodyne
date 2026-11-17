@@ -13,6 +13,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -411,9 +412,15 @@ class ExternalYouTubeModeTest {
                 onNodeWithTag("nav_library").performClick()
                 waitUntil(timeoutMillis = 10_000) { onAllNodesWithText(outage).fetchSemanticsNodes().isNotEmpty() }
                 onAllNodesWithText(outage).assertCountEquals(1)
-                onAllNodesWithContentDescription("Settings").onFirst().performClick()
+                // Settings opens from the radio's Menu; the Library has no gear (PO-55). The
+                // resting pointer can leave a key's tooltip open, a second root, so keys go to
+                // the window's own root.
+                val window = onAllNodes(isRoot()).onFirst()
+                window.performKeyInput { pressKey(Key.Escape) }
+                onNodeWithTag("radio_menu").performClick()
+                onNodeWithTag("nav_settings").performClick()
                 onNodeWithText("YouTube").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
-                onRoot().performKeyInput { pressKey(Key.Enter) }
+                onAllNodes(isRoot()).onFirst().performKeyInput { pressKey(Key.Enter) }
                 if (build.youTubeEngineBundled) {
                     onNodeWithText("In-app YouTube is off").assertExists()
                     onNodeWithText("Play YouTube in the app").assertExists()

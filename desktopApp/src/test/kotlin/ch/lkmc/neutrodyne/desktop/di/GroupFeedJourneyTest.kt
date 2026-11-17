@@ -19,6 +19,9 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isPopup
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -119,11 +122,12 @@ class GroupFeedJourneyTest {
                 awaitNode(hasTestTag("radio_menu"))
                 onNodeWithTag("radio_menu").performClick()
                 onNodeWithTag("nav_library").performClick()
-                awaitNode(hasText("+ New group"))
-                onNodeWithText("+ New group").performClick()
+                awaitNode(hasTestTag("library_filter"))
+                onNodeWithTag("library_filter").performClick()
+                onNode(hasText("New group") and hasAnyAncestor(isPopup())).performClick()
                 createGroup("Science", listOf(1, 2))
                 val science = fixture.group("Science")
-                onRoot().performKeyInput { pressKey(Key.Escape) }
+                pressEscape()
                 awaitNode(hasTestTag("radio_playlist"))
                 onNodeWithTag("radio_playlist").performClick()
                 onNode(hasText("Science") and hasAnyAncestor(hasTestTag("radio_insert"))).performClick()
@@ -152,8 +156,8 @@ class GroupFeedJourneyTest {
                         onNodeWithTag("groupRow${science.id}").fetchSemanticsNode().boundsInRoot.top
                 }
                 assertEquals(listOf(news.id, science.id), fixture.groups().map { it.id })
-                onRoot().performKeyInput { pressKey(Key.Escape) }
-                onRoot().performKeyInput { pressKey(Key.Escape) }
+                pressEscape()
+                pressEscape()
                 onNodeWithTag("radio_playlist").assertTextContains("Science")
                 onNodeWithTag("radio_playlist").performClick()
                 val picker = hasAnyAncestor(hasTestTag("radio_insert"))
@@ -169,8 +173,8 @@ class GroupFeedJourneyTest {
                 awaitNode(hasText("Group deleted"))
                 onNodeWithText("Undo").performClick()
                 awaitNode(hasTestTag("groupRow${science.id}"))
-                onRoot().performKeyInput { pressKey(Key.Escape) }
-                onRoot().performKeyInput { pressKey(Key.Escape) }
+                pressEscape()
+                pressEscape()
                 onNodeWithTag("radio_playlist").assertTextContains("News")
                 assertEquals(1, runBlocking { fixture.graph.feeds.countUnplayed(FeedSource.Group(science.id), null) })
                 val restored = fixture.group("Science")
@@ -216,6 +220,14 @@ class GroupFeedJourneyTest {
         onNodeWithContentDescription("More actions").performClick()
         onNodeWithText("Manage groups").performClick()
         awaitNode(hasTestTag("groupsManageList"))
+    }
+
+    /**
+     * Escape on the window's own root: a tooltip left open under the resting pointer (the
+     * Library's Add key sits where the editor's Save was) is a second root.
+     */
+    private fun ComposeUiTest.pressEscape() {
+        onAllNodes(isRoot()).onFirst().performKeyInput { pressKey(Key.Escape) }
     }
 
     private fun ComposeUiTest.awaitNode(matcher: SemanticsMatcher) {

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -29,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -43,13 +46,20 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
-import ch.lkmc.neutrodyne.core.designsystem.components.NdBadge
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.BrassCountBadge
+import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
+import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -78,9 +88,9 @@ public data class TileMenuAction(
 )
 
 /**
- * The Library grid's cover tile (08 CoverTile): square `CoverArt` with 12 dp corners, the unplayed
- * `NdBadge` top-end, the health badge bottom-end (pending ring / `lock` / `link_off` /
- * `error_outline`), the `smart_display` YouTube glyph bottom-start, and a title line when
+ * The Library grid's cover tile (08 CoverTile): square `CoverArt` in a brass edge, the unplayed
+ * count on a brass disc top-end, the health badge bottom-end (pending ring / `lock` / `link_off` /
+ * `error_outline`), the `smart_display` YouTube glyph bottom-start, and a typed paper label when
  * [showTitle] is on (`appearance.library_titles`). Selection (M2) draws the scrim/check/scale;
  * a secondary click or the hover/focus overflow opens [menuActions].
  */
@@ -172,10 +182,12 @@ public fun CoverTile(
                 monogram = rememberMonogram(tile.displayTitle),
                 title = tile.displayTitle,
                 avgArgb = tile.artworkAvgArgb,
-                shape = NeutrodyneShapes.Tile,
+                shape = CoverShape,
                 modifier =
                     Modifier
                         .fillMaxSize()
+                        .shadow(2.dp, CoverShape)
+                        .border(1.5.dp, Brass, CoverShape)
                         .let {
                             if (selected ==
                                 null
@@ -192,7 +204,7 @@ public fun CoverTile(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .clip(NeutrodyneShapes.Tile)
+                        .clip(CoverShape)
                         .background(MaterialTheme.colorScheme.scrim.copy(alpha = SCRIM_ALPHA)),
                 )
                 if (selected) {
@@ -209,7 +221,7 @@ public fun CoverTile(
                 }
             } else {
                 if (tile.unplayedCount > 0) {
-                    NdBadge(
+                    BrassCountBadge(
                         count = tile.unplayedCount,
                         modifier = Modifier.align(Alignment.TopEnd).padding(TILE_BADGE_PAD),
                     )
@@ -261,13 +273,29 @@ public fun CoverTile(
         }
 
         if (showTitle) {
-            Text(
-                tile.displayTitle,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = TILE_TITLE_GAP),
-            )
+            // The title is typed on a paper label pinned under the cover (PO-55).
+            MaterialPlate(
+                RadioMaterial.PAPER,
+                Modifier
+                    .padding(top = TILE_TITLE_GAP)
+                    .fillMaxWidth()
+                    .shadow(1.dp, LabelShape)
+                    .clip(LabelShape)
+                    .border(0.5.dp, Brass, LabelShape),
+            ) {
+                Text(
+                    tile.displayTitle,
+                    color = Ink,
+                    fontFamily = courier(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    lineHeight = 14.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
+                )
+            }
         }
     }
 }
@@ -328,9 +356,11 @@ private fun StatusBadge(
     }
 }
 
+private val CoverShape = RoundedCornerShape(4.dp)
+private val LabelShape = RoundedCornerShape(2.dp)
 private val TILE_BADGE_PAD = 6.dp
 private val TILE_ICON_SIZE = 20.dp
 private val TILE_ICON_TOUCH = 40.dp
-private val TILE_TITLE_GAP = 4.dp
+private val TILE_TITLE_GAP = 6.dp
 private const val SCRIM_ALPHA = 0.35f
 private const val SELECTED_SCALE = 0.92f
