@@ -652,7 +652,8 @@ chip row becomes one enamel selector (`EnamelSelector`) naming the filter (All
 podcasts, Ungrouped or a group); its menu lists those choices, each read as a
 selected or unselected radio button, and New group. Beside it the strip shows
 the filtered podcast count and their unplayed total ("5 podcasts · 59
-unplayed"). Cover tiles sit in a brass edge with the unplayed count on a brass
+unplayed"); when space runs short the counts end in an ellipsis and the
+selector keeps its width. Cover tiles sit in a brass edge with the unplayed count on a brass
 disc (`BrassCountBadge`); titles, when shown, are typed on a paper label of up
 to two lines. The Groups segment is a cabinet of drawers (`GroupDrawer`): a
 wooden front with the name typed on a card in a brass holder, the group's
@@ -799,11 +800,12 @@ The group settings screen follows in D8b.
 - States: missing episode (deleted by retention or unsubscribe) → "This episode is no longer available"; notes loading → 3 skeleton paragraphs; notes empty → "No show notes"; offline and not downloaded → primary button shows `cloud_off` "Offline" and taps give the offline snackbar; images in notes stay unloaded offline (no error).
 
 **Radio episode page (PO-55, 2026-11-17).** The art sits in a brass edge (4 dp corners) beside
-the typed title, and the actions are a bank of tall ivory keys in a metal slot (`ActionKey` in a
-`PianoKeySlot`), each a symbol over its label: the primary play key (Play, Pause, Resume, Play
+the typed title, and the actions are a bank of tall ivory keys in a metal slot (`ActionKey` in an
+`ActionKeySlot`), each a symbol over its label: the primary play key (Play, Pause, Resume, Play
 again, Offline or Watch on YouTube, as above), Download with its live glyph and status as the
-label, Up next (Play next or Play last) and Mark played or Mark unplayed. Labels wrap to two
-lines, so the keys stay whole at 200 % text.
+label, Up next (Play next or Play last) and Mark played or Mark unplayed. The keys share one row
+while every label's longest word fits its key; otherwise the bank wraps into rows of two (down
+to one per row), so the labels stay whole at 200 % text.
 
 ### Group editor
 

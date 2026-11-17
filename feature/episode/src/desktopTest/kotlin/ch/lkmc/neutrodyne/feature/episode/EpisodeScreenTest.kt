@@ -14,6 +14,7 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
@@ -26,6 +27,7 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpRect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -73,6 +75,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The episode detail screen through `runComposeUiTest` (08 Episode detail): the loading skeleton,
@@ -447,6 +450,25 @@ class EpisodeScreenTest {
         }
 
     @Test
+    fun actionKeysWrapIntoRowsOfTwoAtLargeFontOnCompactWidth() =
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            setEpisode(loadedState(), fontScale = 2f)
+            // At 200 % text "Download" does not fit a quarter of a compact width, so the bank
+            // wraps into rows of two rather than cutting the label short (08).
+            val play = actionKeyBounds("Play")
+            assertEquals(play.top, actionKeyBounds("Download").top)
+            assertTrue(actionKeyBounds("Mark played").top >= play.bottom)
+        }
+
+    @Test
+    fun actionKeysShareOneRowAtDefaultFontOnCompactWidth() =
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            setEpisode(loadedState())
+            val tops = listOf("Play", "Download", "Up next", "Mark played").map { actionKeyBounds(it).top }
+            assertEquals(1, tops.distinct().size, "tops: $tops")
+        }
+
+    @Test
     fun failedYouTubeOpenOffersCopyLink() =
         runComposeUiTest {
             openResult = OpenResult.NO_HANDLER
@@ -621,6 +643,9 @@ class EpisodeScreenTest {
         }
         waitForIdle()
     }
+
+    private fun ComposeUiTest.actionKeyBounds(label: String): DpRect =
+        onNode(hasText(label) and hasClickAction()).getUnclippedBoundsInRoot()
 
     /** Scrolls the screen's lazy column until [matcher]'s node exists, then answers it. */
     private fun ComposeUiTest.scrollTo(matcher: SemanticsMatcher): SemanticsNodeInteraction {

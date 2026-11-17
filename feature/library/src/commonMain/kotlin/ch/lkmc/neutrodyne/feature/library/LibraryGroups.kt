@@ -148,7 +148,9 @@ internal fun LibraryFilterStrip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.weight(1f, fill = false)) {
+        // The selector is measured first and the counts take what is left, so at large text sizes
+        // the counts end in an ellipsis instead of squeezing the filter out.
+        Box {
             EnamelSelector(current, { open = true }, Modifier.testTag("library_filter"))
             DropdownMenu(open, { open = false }) {
                 FilterItem(allLabel, state.groupFilter.isEmpty(), "library_filter_all") {
@@ -189,6 +191,7 @@ internal fun LibraryFilterStrip(
                 } else {
                     podcasts
                 },
+                Modifier.weight(1f, fill = false),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,

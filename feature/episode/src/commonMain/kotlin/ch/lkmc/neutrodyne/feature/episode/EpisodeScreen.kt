@@ -57,8 +57,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.ActionKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.ActionKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
-import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -471,8 +471,9 @@ private fun metaLine(episode: EpisodeDetail): UiText {
  * over its label. The first is the primary play key: "Watch on YouTube" for YouTube sources in
  * external mode, `cloud_off` "Offline" while offline and not downloaded (it still dispatches the
  * playback intent), else Play, Pause, Resume or Play again. Then Download (with its live state),
- * Up next (Play next or Play last) and the played toggle. Labels wrap to two lines, so every key
- * stays whole at 200 % text on a compact width.
+ * Up next (Play next or Play last) and the played toggle. When a label's longest word does not
+ * fit its key, the bank wraps into rows of two, so every key stays whole at 200 % text on a
+ * compact width.
  */
 @Composable
 private fun ActionRow(
@@ -486,15 +487,13 @@ private fun ActionRow(
     val playableOffline = state.isNowPlaying || !state.offline || downloaded
     var upNextMenu by remember { mutableStateOf(false) }
 
-    PianoKeySlot(Modifier.fillMaxWidth().padding(top = BUTTONS_TOP)) {
-        val keyModifier = Modifier.weight(1f)
+    ActionKeySlot(Modifier.fillMaxWidth().padding(top = BUTTONS_TOP)) {
         val mediaId = episode.externalMediaId
         when {
             isYouTube && !state.rowCaps.inAppPlayback -> {
                 ActionKey(
                     stringResource(Res.string.action_watch_on_youtube),
                     onClick = { mediaId?.let { onAction(EpisodeAction.WatchOnYouTube(episode.id, it)) } },
-                    modifier = keyModifier,
                     enabled = mediaId != null,
                 ) { Icon(NdIcons.OpenInNew, contentDescription = null) }
             }
@@ -503,7 +502,6 @@ private fun ActionRow(
                 ActionKey(
                     stringResource(Res.string.episode_offline_row),
                     onClick = { onAction(EpisodeAction.PlayToggle(episode.id)) },
-                    modifier = keyModifier,
                 ) { Icon(NdIcons.CloudOff, contentDescription = null) }
             }
 
@@ -519,7 +517,6 @@ private fun ActionRow(
                         },
                     ),
                     onClick = { onAction(EpisodeAction.PlayToggle(episode.id)) },
-                    modifier = keyModifier,
                 ) { Icon(if (playing) NdIcons.Pause else NdIcons.PlayArrow, contentDescription = null) }
             }
         }
@@ -539,7 +536,6 @@ private fun ActionRow(
                 status?.asString()
                     ?: stringResource(if (downloaded) Res.string.summary_downloaded else Res.string.action_download),
                 onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
-                modifier = keyModifier,
             ) {
                 // The download state's own glyph and ring; the key carries the click and label.
                 DownloadStateButton(
@@ -553,11 +549,11 @@ private fun ActionRow(
         }
 
         if (!isYouTube || state.rowCaps.inAppPlayback) {
-            Box(keyModifier) {
+            // The key fills the bank's cell; the box only anchors the menu.
+            Box(propagateMinConstraints = true) {
                 ActionKey(
                     stringResource(Res.string.action_up_next),
                     onClick = { upNextMenu = true },
-                    modifier = Modifier.fillMaxWidth(),
                 ) { Icon(NdIcons.QueueMusic, contentDescription = null) }
                 DropdownMenu(expanded = upNextMenu, onDismissRequest = { upNextMenu = false }) {
                     DropdownMenuItem(
@@ -583,7 +579,6 @@ private fun ActionRow(
                 if (episode.playedAt != null) Res.string.action_mark_unplayed else Res.string.action_mark_played,
             ),
             onClick = { onAction(EpisodeAction.SetPlayed(episode.id, episode.playedAt == null)) },
-            modifier = keyModifier,
         ) { Icon(NdIcons.Check, contentDescription = null) }
     }
 }

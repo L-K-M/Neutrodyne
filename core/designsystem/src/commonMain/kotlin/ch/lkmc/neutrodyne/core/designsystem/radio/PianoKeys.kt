@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -47,6 +49,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -87,15 +90,9 @@ public fun PianoKeySlot(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    MaterialPlate(
-        RadioMaterial.METAL,
-        modifier
-            .shadow(3.dp, SlotShape)
-            .clip(SlotShape)
-            .border(1.dp, Brass.copy(alpha = 0.8f), SlotShape),
-    ) {
+    MaterialPlate(RadioMaterial.METAL, modifier.slotFrame()) {
         Row(
-            Modifier.padding(horizontal = 6.dp, vertical = 4.dp).selectableGroup(),
+            Modifier.padding(SlotPadding).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(KEY_GAP),
             content = content,
         )
@@ -144,9 +141,59 @@ public fun PianoKey(
 }
 
 /**
+ * The metal slot for a bank of [ActionKey]s, which share its width equally. When a key's longest
+ * word would not fit its share (large text, a narrow window), the bank wraps into rows of half as
+ * many keys, down to one per row, so no label is cut short (08: every action stays whole at 200 %
+ * text). The keys in a row take its tallest key's height.
+ */
+@Composable
+public fun ActionKeySlot(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    MaterialPlate(RadioMaterial.METAL, modifier.slotFrame()) {
+        Layout(content, Modifier.padding(SlotPadding)) { measurables, constraints ->
+            if (measurables.isEmpty()) return@Layout layout(0, 0) {}
+            val gap = KEY_GAP.roundToPx()
+            val minWidths = measurables.map { it.minIntrinsicWidth(Constraints.Infinity) }
+            val width =
+                if (constraints.hasBoundedWidth) {
+                    constraints.maxWidth
+                } else {
+                    minWidths.sum() + gap * (measurables.size - 1)
+                }
+
+            fun share(keys: Int) = (width - gap * (keys - 1)) / keys
+
+            var perRow = measurables.size
+            while (perRow > 1 && minWidths.any { it > share(perRow) }) perRow = (perRow + 1) / 2
+
+            val rows =
+                measurables.chunked(perRow).map { row ->
+                    val keyWidth = share(row.size).coerceAtLeast(0)
+                    val height = row.maxOf { it.maxIntrinsicHeight(keyWidth) }
+                    row.map { it.measure(Constraints(keyWidth, keyWidth, height, Constraints.Infinity)) }
+                }
+            val heights = rows.map { row -> row.maxOf { it.height } }
+            layout(width, heights.sum() + gap * (rows.size - 1)) {
+                var y = 0
+                rows.forEachIndexed { index, row ->
+                    var x = 0
+                    row.forEach { key ->
+                        key.placeRelative(x, y)
+                        x += key.width + gap
+                    }
+                    y += heights[index] + gap
+                }
+            }
+        }
+    }
+}
+
+/**
  * A tall momentary key for a bank of actions, like a tape deck's transport keys: a symbol over
  * its printed label on raised ivory. Read as a button named [label]; [enabled] dims it. Put
- * several in a [PianoKeySlot] with `Modifier.weight(1f)`. The [icon] slot draws in ink.
+ * several in an [ActionKeySlot]. The [icon] slot draws in ink.
  */
 @Composable
 public fun ActionKey(
@@ -258,6 +305,7 @@ private val UnlitLamp = Color(0xFF4F4130)
 private val RaisedIvory = listOf(Color(0xFFF8EED6), Color(0xFFE3CFA5))
 private val PressedIvory = listOf(Color(0xFFCDB27E), Color(0xFFDCC69A))
 private val KEY_GAP = 6.dp
+private val SlotPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
 private val KEY_HEIGHT = 36.dp
 private val LAMP_SIZE = 9.dp
 private val LAMP_PADDING = 5.dp
@@ -265,6 +313,12 @@ private val KEY_MIN_WIDTH = 64.dp
 private val ACTION_KEY_HEIGHT = 64.dp
 private val ACTION_ICON_SIZE = 28.dp
 private const val DISABLED_ALPHA = 0.5f
+
+/** The slot's metal edge: a brass rim with a shadow below. */
+private fun Modifier.slotFrame(): Modifier =
+    shadow(3.dp, SlotShape)
+        .clip(SlotShape)
+        .border(1.dp, Brass.copy(alpha = 0.8f), SlotShape)
 
 /** The slot's shadow falls on the top of a pressed key. */
 private fun DrawScope.drawPressShade() {

@@ -25,6 +25,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
@@ -52,6 +53,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -660,6 +662,15 @@ class LibraryScreenTest {
                 ),
             )
             onNodeWithText("2 podcasts · 3 unplayed").assertIsDisplayed()
+        }
+
+    @Test fun filterSelectorKeepsItsWidthBesideLongCountsAtLargeFont() =
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            val tiles = (1L..12).map { testLibraryTile(it, "Show $it").copy(unplayedCount = 30) }
+            setLibraryRoute(tiles, fontScale = 2f)
+            // At 200 % text on a compact width the counts give way to the filter: the selector
+            // keeps its plaque and its 48 dp target, and the counts end in an ellipsis.
+            onNodeWithTag("library_filter").assertWidthIsAtLeast(120.dp)
         }
 
     @Test fun filterMenuOpensNewGroup() =
