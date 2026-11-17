@@ -53,7 +53,7 @@ class M10ScreenScreenshotTest {
         rule.setContent { ScreenSnapshot(dark, PlatformKind.ANDROID) { key(variant) { M10ScreenContent(variant) } } }
         for (night in listOf(false, true)) {
             val theme = if (night) "dark" else "light"
-            for (subject in 0 until 1) {
+            for (subject in 0 until 2) {
                 rule.runOnIdle {
                     dark = night
                     variant = subject

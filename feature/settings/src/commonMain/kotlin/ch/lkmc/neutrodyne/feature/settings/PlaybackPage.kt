@@ -2,14 +2,20 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -19,7 +25,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.PlatformKind
@@ -31,12 +42,22 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggleFace
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.EngravedHeading
+import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleWindow
+import ch.lkmc.neutrodyne.core.designsystem.radio.PanelLabel
+import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.StepCounter
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_not_on_desktop
+import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_off
+import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_on
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
@@ -53,12 +74,15 @@ import ch.lkmc.neutrodyne.feature.settings.resources.playback_pause_for_navigati
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_presets_invalid
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_presets_label
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_seconds
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_seconds_short
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_skip_back
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_skip_forward
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_skip_silence
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_smart_resume
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_speed_presets
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_speed_value
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_step_down
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_step_up
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_storage
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_stream_cache
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_stream_on_metered
@@ -90,62 +114,24 @@ internal fun PlaybackPage(
                 .verticalScroll(scroll)
                 .ndScrollbar(scroll, bars, barColor),
         ) {
-            SettingsRow(
-                NdIcons.PlayArrow,
-                stringResource(
-                    Res.string.playback_default_speed,
+            PlaybackPanel(
+                state,
+                platform,
+                PlaybackPanelActions(
+                    setSpeed = viewModel::setSpeed,
+                    setSkipBackMs = viewModel::setSkipBackMs,
+                    setSkipForwardMs = viewModel::setSkipForwardMs,
+                    setSkipSilence = viewModel::setSkipSilence,
+                    setSmartResume = viewModel::setSmartResume,
+                    setPauseForNavigation = viewModel::setPauseForNavigation,
+                    openSpeedDialog = { dialog = PlaybackDialog.SPEED.name },
                 ),
-                stringResource(Res.string.playback_speed_value, state.speed.toString()),
-                {
-                    dialog =
-                        PlaybackDialog.SPEED.name
-                },
-            )
-            SettingsSwitchRow(
-                stringResource(Res.string.playback_skip_silence),
-                null,
-                state.skipSilence,
-                viewModel::setSkipSilence,
             )
             SettingsRow(NdIcons.Edit, stringResource(Res.string.playback_speed_presets), state.speedPresets, {
                 dialog =
                     PlaybackDialog.PRESETS.name
             })
-            SettingsRow(
-                NdIcons.Schedule,
-                stringResource(
-                    Res.string.playback_skip_back,
-                ),
-                secondsText(state.skipBackMs),
-                {
-                    dialog =
-                        PlaybackDialog.BACK.name
-                },
-            )
-            SettingsRow(
-                NdIcons.Schedule,
-                stringResource(
-                    Res.string.playback_skip_forward,
-                ),
-                secondsText(state.skipForwardMs),
-                {
-                    dialog =
-                        PlaybackDialog.FORWARD.name
-                },
-            )
-            SettingsSwitchRow(
-                stringResource(Res.string.playback_smart_resume),
-                null,
-                state.smartResume,
-                viewModel::setSmartResume,
-            )
             if (platform == PlatformKind.ANDROID) {
-                SettingsSwitchRow(
-                    stringResource(Res.string.playback_pause_for_navigation),
-                    null,
-                    state.pauseForNavigation,
-                    viewModel::setPauseForNavigation,
-                )
                 SettingsRow(
                     NdIcons.Wifi,
                     stringResource(
@@ -158,14 +144,17 @@ internal fun PlaybackPage(
                     },
                 )
             } else {
-                ListItem(headlineContent = {
-                    Text(stringResource(Res.string.playback_stream_on_metered))
-                }, supportingContent = { Text(stringResource(UiRes.string.feeds_not_on_desktop)) })
+                SettingsRow(
+                    NdIcons.Wifi,
+                    stringResource(Res.string.playback_stream_on_metered),
+                    stringResource(UiRes.string.feeds_not_on_desktop),
+                    {},
+                    enabled = false,
+                )
             }
-            Text(
+            EngravedHeading(
                 stringResource(Res.string.playback_storage),
-                Modifier.padding(16.dp),
-                style = MaterialTheme.typography.titleSmall,
+                Modifier.padding(start = 20.dp, end = 16.dp, top = 8.dp),
             )
             SettingsRow(
                 NdIcons.Memory,
@@ -181,7 +170,8 @@ internal fun PlaybackPage(
             state.cacheBytes?.let {
                 Text(
                     stringResource(Res.string.playback_cache_used, (it / BYTES_PER_MB).toString()),
-                    Modifier.padding(horizontal = 16.dp),
+                    Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
             SettingsRow(NdIcons.Refresh, stringResource(Res.string.playback_clear_cache), null, {
@@ -192,30 +182,6 @@ internal fun PlaybackPage(
     }
     val selected = dialog?.let { name -> PlaybackDialog.entries.firstOrNull { it.name == name } }
     when (selected) {
-        PlaybackDialog.BACK, PlaybackDialog.FORWARD -> {
-            val backward = selected == PlaybackDialog.BACK
-            val title = if (backward) Res.string.playback_skip_back else Res.string.playback_skip_forward
-            val choices =
-                if (backward) {
-                    PlaybackSettingKeys.SKIP_BACK_MS_VALUES
-                } else {
-                    PlaybackSettingKeys.SKIP_FORWARD_MS_VALUES
-                }
-            SettingsChoiceDialog(
-                icon = NdIcons.Schedule,
-                title = stringResource(title),
-                options = choices.toList(),
-                selected = if (backward) state.skipBackMs else state.skipForwardMs,
-                label = { secondsText(it) },
-                onSelect = {
-                    if (backward) viewModel.setSkipBackMs(it) else viewModel.setSkipForwardMs(it)
-                    dialog =
-                        null
-                },
-                onDismissRequest = { dialog = null },
-            )
-        }
-
         PlaybackDialog.CACHE -> {
             SettingsChoiceDialog(
                 icon = NdIcons.Memory,
@@ -325,6 +291,161 @@ internal fun PlaybackPage(
     }
 }
 
+/**
+ * The playback controls mounted on a metal panel (PO-55): the default speed as a counter beside
+ * a needle dial (its window opens the exact-speed dialog), skip back and forward as counters
+ * that step through the allowed intervals, and bat-handle switches for the on/off defaults.
+ */
+@Composable
+private fun PlaybackPanel(
+    state: PlaybackSettingsUiState,
+    platform: PlatformKind,
+    actions: PlaybackPanelActions,
+) {
+    MaterialPlate(
+        RadioMaterial.METAL,
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .shadow(3.dp, PanelShape)
+            .clip(PanelShape)
+            .border(1.dp, Brass, PanelShape),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            val speedLabel = stringResource(Res.string.playback_default_speed)
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StepCounter(
+                    label = speedLabel,
+                    value = stringResource(Res.string.playback_speed_value, state.speed.toString()),
+                    onDecrease =
+                        stepSpeed(state.speed, -SPEED_KEY_STEP)?.let { slower -> { actions.setSpeed(slower) } },
+                    onIncrease =
+                        stepSpeed(state.speed, SPEED_KEY_STEP)?.let { faster -> { actions.setSpeed(faster) } },
+                    decreaseLabel = stringResource(Res.string.playback_step_down, speedLabel),
+                    increaseLabel = stringResource(Res.string.playback_step_up, speedLabel),
+                    onWindowClick = actions.openSpeedDialog,
+                )
+                NeedleWindow(
+                    (state.speed - PlaybackSettingKeys.SPEED_MIN) /
+                        (PlaybackSettingKeys.SPEED_MAX - PlaybackSettingKeys.SPEED_MIN),
+                    Modifier.weight(1f).height(SPEED_DIAL_HEIGHT).padding(bottom = 12.dp),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SkipCounter(
+                    stringResource(Res.string.playback_skip_back),
+                    state.skipBackMs,
+                    PlaybackSettingKeys.SKIP_BACK_MS_VALUES,
+                    actions.setSkipBackMs,
+                    Modifier.weight(1f),
+                )
+                SkipCounter(
+                    stringResource(Res.string.playback_skip_forward),
+                    state.skipForwardMs,
+                    PlaybackSettingKeys.SKIP_FORWARD_MS_VALUES,
+                    actions.setSkipForwardMs,
+                    Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PanelSwitch(
+                    stringResource(Res.string.playback_skip_silence),
+                    state.skipSilence,
+                    actions.setSkipSilence,
+                    Modifier.weight(1f),
+                )
+                PanelSwitch(
+                    stringResource(Res.string.playback_smart_resume),
+                    state.smartResume,
+                    actions.setSmartResume,
+                    Modifier.weight(1f),
+                )
+                if (platform == PlatformKind.ANDROID) {
+                    PanelSwitch(
+                        stringResource(Res.string.playback_pause_for_navigation),
+                        state.pauseForNavigation,
+                        actions.setPauseForNavigation,
+                        Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** What the panel's controls write; the page wires them to its view model. */
+private class PlaybackPanelActions(
+    val setSpeed: (Float) -> Unit,
+    val setSkipBackMs: (Long) -> Unit,
+    val setSkipForwardMs: (Long) -> Unit,
+    val setSkipSilence: (Boolean) -> Unit,
+    val setSmartResume: (Boolean) -> Unit,
+    val setPauseForNavigation: (Boolean) -> Unit,
+    val openSpeedDialog: () -> Unit,
+)
+
+/** A skip interval counter that steps to the neighbouring allowed value. */
+@Composable
+private fun SkipCounter(
+    label: String,
+    ms: Long,
+    values: Set<Long>,
+    onChange: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sorted = values.sorted()
+    val shorter = sorted.lastOrNull { it < ms }
+    val longer = sorted.firstOrNull { it > ms }
+    StepCounter(
+        label = label,
+        value = stringResource(Res.string.playback_seconds_short, ms / MILLIS_PER_SECOND),
+        onDecrease = shorter?.let { { onChange(it) } },
+        onIncrease = longer?.let { { onChange(it) } },
+        decreaseLabel = stringResource(Res.string.playback_step_down, label),
+        increaseLabel = stringResource(Res.string.playback_step_up, label),
+        modifier = modifier,
+        spokenValue = secondsText(ms),
+    )
+}
+
+/**
+ * An on/off default as a bat-handle switch on the panel with its engraved name below. The whole
+ * cell is the switch, named by [label].
+ */
+@Composable
+private fun PanelSwitch(
+    label: String,
+    on: Boolean,
+    onChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .toggleable(on, role = Role.Switch, onValueChange = onChange)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        BatToggleFace(
+            on,
+            stringResource(UiRes.string.radio_switch_on),
+            stringResource(UiRes.string.radio_switch_off),
+            Modifier.size(PANEL_SWITCH_WIDTH, PANEL_SWITCH_HEIGHT),
+        )
+        PanelLabel(label, Modifier.fillMaxWidth().wrapContentWidth(), textAlign = TextAlign.Center)
+    }
+}
+
+/** The speed one key press away, or null past the end of the range. */
+private fun stepSpeed(
+    speed: Float,
+    step: Float,
+): Float? {
+    val next = PlaybackSettingKeys.normalizeSpeed(speed + step)
+    return next.takeIf { it != speed }
+}
+
 @Composable
 private fun secondsText(ms: Long): String =
     pluralStringResource(
@@ -340,8 +461,13 @@ private fun meteredLabel(policy: StreamOnMetered): StringResource =
         StreamOnMetered.NEVER -> Res.string.playback_metered_never
     }
 
-private enum class PlaybackDialog { SPEED, PRESETS, BACK, FORWARD, METERED, CACHE, CLEAR }
+private enum class PlaybackDialog { SPEED, PRESETS, METERED, CACHE, CLEAR }
 
 private const val MILLIS_PER_SECOND = 1_000L
 private const val BYTES_PER_MB = 1_000_000L
 private const val SPEED_SLIDER_STEPS = 49
+private const val SPEED_KEY_STEP = 0.1f
+private val PanelShape = RoundedCornerShape(8.dp)
+private val SPEED_DIAL_HEIGHT = 56.dp
+private val PANEL_SWITCH_WIDTH = 40.dp
+private val PANEL_SWITCH_HEIGHT = 50.dp

@@ -120,7 +120,7 @@ class SettingsScreensTest {
             openSettings()
             // "Appearance" is also the detail placeholder's title, so the row is told by its summary.
             onAllNodesWithText("Appearance").onFirst().assertExists()
-            onNodeWithText("Cover size, titles and gestures").assertExists()
+            onNodeWithText("App").assertExists()
             onNodeWithText("About").assertExists()
             onNodeWithText("Licences").assertExists()
         }

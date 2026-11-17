@@ -3,13 +3,17 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
@@ -17,6 +21,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.EngravedHeading
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.model.DesktopOs
@@ -42,19 +47,16 @@ import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_keep
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_keep_mac
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_quit
-import ch.lkmc.neutrodyne.feature.settings.resources.discover_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.discover_title
-import ch.lkmc.neutrodyne.feature.settings.resources.privacy_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.privacy_title
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
-import ch.lkmc.neutrodyne.feature.settings.resources.settings_about_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
-import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup
-import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_desktop
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_group_app
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_group_library
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_group_listening
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
-import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_off
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_on
@@ -74,12 +76,13 @@ import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
 /**
- * The Settings home list (08 Settings screens; M0a shows Appearance and About, M1a adds Feeds).
- * It is the gear's target, pushed on the selected tab's stack, so it keeps a back arrow. The Feeds
- * row's summary is the live refresh interval ("Every 4 hours" in 08's wireframe); the Desktop row
- * — desktop only — summarizes the "When the window is closed" choice. The Sync row (MS2) is the
- * only sync UI while unconfigured (R7.1); [sync] is nullable like `LicencesSource` — the shells
- * always bind it, and previews or test fixtures that omit it simply show no row.
+ * The Settings home (08 Settings screens; radio slips since PO-55): the pages as paper slips under
+ * three engraved headings, Listening, Library and App, each showing its current value where one
+ * is cheap to read instead of a description. It is pushed on the selected tab's stack, so it
+ * keeps a back key. The Feeds row's value is the live refresh interval ("Every 4 hours"); the
+ * Desktop row, desktop only, shows the "When the window is closed" choice. The Sync row (MS2) is
+ * the only sync UI while unconfigured (R7.1); [sync] is nullable like `LicencesSource`: the
+ * shells always bind it, and previews or test fixtures that omit it simply show no row.
  */
 @Composable
 internal fun SettingsHomeRoute(
@@ -121,22 +124,14 @@ internal fun SettingsHomeRoute(
                 .verticalScroll(scroll)
                 .ndScrollbar(scroll, bars, barColor),
         ) {
-            SettingsRow(
-                icon = NdIcons.Palette,
-                title = stringResource(SettingsRes.string.settings_appearance),
-                summary = stringResource(SettingsRes.string.settings_appearance_summary),
-                onClick = { navigator.push(SettingsKey(SettingsPage.APPEARANCE)) },
-            )
-            SettingsRow(
-                icon = NdIcons.RssFeed,
-                title = stringResource(Res.string.settings_feeds),
-                summary = feedsIntervalText(interval).asString(),
-                onClick = { navigator.push(SettingsKey(SettingsPage.FEEDS)) },
-            )
+            val headingModifier = Modifier.padding(start = 20.dp, end = 16.dp, top = 8.dp)
+            EngravedHeading(stringResource(SettingsRes.string.settings_group_listening), headingModifier)
             SettingsRow(
                 icon = NdIcons.PlayArrow,
                 title = stringResource(SettingsRes.string.settings_playback),
-                summary =
+                summary = null,
+                onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
+                value =
                     stringResource(
                         if (silence) {
                             SettingsRes.string.settings_playback_summary_on
@@ -145,43 +140,60 @@ internal fun SettingsHomeRoute(
                         },
                         speed.toString(),
                     ),
-                onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
+            )
+            SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
+                navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
+            })
+            SettingsRow(
+                icon = NdIcons.RssFeed,
+                title = stringResource(Res.string.settings_feeds),
+                summary = null,
+                onClick = { navigator.push(SettingsKey(SettingsPage.FEEDS)) },
+                value = feedsIntervalText(interval).asString(),
             )
             SettingsRow(NdIcons.OpenInNew, stringResource(SettingsRes.string.youtube_title), null, {
                 navigator.push(SettingsKey(SettingsPage.YOUTUBE))
             })
-            SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
-                navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
-            })
+
+            EngravedHeading(stringResource(SettingsRes.string.settings_group_library), headingModifier)
             if (sync != null) {
                 val status by sync.status.collectAsStateWithLifecycle()
                 SettingsRow(
                     icon = NdIcons.Sync,
                     title = stringResource(SettingsRes.string.settings_sync),
-                    summary = syncSummary(status),
+                    summary = null,
                     onClick = { navigator.push(SyncSettingsKey) },
+                    value = syncSummary(status),
                 )
             }
             SettingsRow(
                 icon = NdIcons.History,
                 title = stringResource(SettingsRes.string.settings_backup),
-                summary = stringResource(SettingsRes.string.settings_backup_summary),
+                summary = null,
                 onClick = { navigator.push(BackupKey) },
             )
-            val available = updateState as? UpdateCheckState.Available
             SettingsRow(
-                icon = NdIcons.Info,
-                title = stringResource(SettingsRes.string.updates_title),
-                summary = available?.let { stringResource(SettingsRes.string.updates_available, it.info.versionName) },
-                onClick = { navigator.push(SettingsKey(SettingsPage.UPDATES)) },
-                badge = available != null,
+                NdIcons.Explore,
+                stringResource(SettingsRes.string.discover_title),
+                null,
+                { navigator.push(SettingsKey(SettingsPage.DISCOVER)) },
             )
-            // 08's home wireframe places the Desktop row between Updates and Privacy, desktop only.
+
+            EngravedHeading(stringResource(SettingsRes.string.settings_group_app), headingModifier)
+            SettingsRow(
+                icon = NdIcons.Palette,
+                title = stringResource(SettingsRes.string.settings_appearance),
+                summary = null,
+                onClick = { navigator.push(SettingsKey(SettingsPage.APPEARANCE)) },
+            )
+            // The Desktop row, desktop only, sits with the other app-wide pages.
             if (platform == PlatformKind.DESKTOP) {
                 SettingsRow(
                     icon = NdIcons.Computer,
                     title = stringResource(SettingsRes.string.settings_desktop),
-                    summary =
+                    summary = null,
+                    onClick = { navigator.push(SettingsKey(SettingsPage.DESKTOP)) },
+                    value =
                         stringResource(
                             when {
                                 closeBehaviour == CloseBehaviour.KEEP_RUNNING &&
@@ -198,33 +210,36 @@ internal fun SettingsHomeRoute(
                                 }
                             },
                         ),
-                    onClick = { navigator.push(SettingsKey(SettingsPage.DESKTOP)) },
                 )
             }
+            val available = updateState as? UpdateCheckState.Available
             SettingsRow(
-                NdIcons.Explore,
-                stringResource(SettingsRes.string.discover_title),
-                stringResource(SettingsRes.string.discover_summary),
-                { navigator.push(SettingsKey(SettingsPage.DISCOVER)) },
+                icon = NdIcons.Info,
+                title = stringResource(SettingsRes.string.updates_title),
+                summary = null,
+                onClick = { navigator.push(SettingsKey(SettingsPage.UPDATES)) },
+                badge = available != null,
+                value = available?.let { stringResource(SettingsRes.string.updates_available, it.info.versionName) },
             )
             SettingsRow(
                 NdIcons.Info,
                 stringResource(SettingsRes.string.privacy_title),
-                stringResource(SettingsRes.string.privacy_summary),
+                null,
                 { navigator.push(SettingsKey(SettingsPage.PRIVACY)) },
             )
             SettingsRow(
                 icon = NdIcons.Info,
                 title = stringResource(SettingsRes.string.settings_about),
-                summary = stringResource(SettingsRes.string.settings_about_summary),
+                summary = null,
                 onClick = { navigator.push(SettingsKey(SettingsPage.ABOUT)) },
             )
             SettingsRow(
                 icon = NdIcons.Article,
                 title = stringResource(SettingsRes.string.settings_licences),
-                summary = stringResource(SettingsRes.string.settings_licences_summary),
+                summary = null,
                 onClick = { navigator.push(LicencesKey) },
             )
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

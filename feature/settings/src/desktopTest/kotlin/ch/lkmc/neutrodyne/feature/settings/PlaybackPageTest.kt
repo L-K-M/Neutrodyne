@@ -7,6 +7,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -73,7 +74,7 @@ class PlaybackPageTest {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.DESKTOP, vm) }
                 }
             }
-            onNodeWithText("Default speed").assertIsDisplayed()
+            onNodeWithContentDescription("Default speed, 1.0×").assertIsDisplayed()
             onNodeWithText("Pause for navigation prompts").assertDoesNotExist()
             onNodeWithText("Not used on computers").assertExists()
         }
@@ -87,10 +88,11 @@ class PlaybackPageTest {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
                 }
             }
-            onNodeWithText("Skip back").performScrollTo().performClick()
-            onNodeWithText("20 seconds").performClick()
+            onNodeWithContentDescription("Skip back, 30 seconds").assertExists()
+            onNodeWithContentDescription("Decrease Skip back").performScrollTo().performClick()
             waitForIdle()
             assertEquals(20_000L, runBlocking { settings.get(PlaybackSettingKeys.SKIP_BACK_MS) })
+            onNodeWithContentDescription("Skip back, 20 seconds").assertExists()
             onNodeWithText("Speed presets").performScrollTo().performClick()
             onNode(hasSetTextAction()).performTextReplacement("0.1")
             onNodeWithText("Save").assertIsNotEnabled()
@@ -98,6 +100,25 @@ class PlaybackPageTest {
             onNodeWithText("Save").performClick()
             waitForIdle()
             assertEquals("1.0,1.5", runBlocking { settings.get(PlaybackSettingKeys.SPEED_PRESETS) })
+        }
+
+    @Test fun speedKeysStepByATenthAndStopAtTheEnd() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            runBlocking { settings.set(PlaybackSettingKeys.SPEED, 2.95f) }
+            val vm = PlaybackSettingsViewModel(settings, FakePlaybackMaintenance())
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
+                }
+            }
+            onNodeWithContentDescription("Increase Default speed").performClick()
+            waitForIdle()
+            assertEquals(3.0f, runBlocking { settings.get(PlaybackSettingKeys.SPEED) })
+            onNodeWithContentDescription("Increase Default speed").assertIsNotEnabled()
+            onNodeWithContentDescription("Decrease Default speed").performClick()
+            waitForIdle()
+            assertEquals(2.9f, runBlocking { settings.get(PlaybackSettingKeys.SPEED) })
         }
 
     @Test fun smartResumeSwitchWritesItsTypedKey() =

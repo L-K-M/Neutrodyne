@@ -1308,6 +1308,20 @@ interface DesktopIntegration {
 
 Shared pages hide what the desktop does not use, with 11's one-line explanation where users may look for it: metered-network and Wi-Fi-only rows ("Not used on computers"), "only while charging", "Pause for navigation prompts", the notification-permission row, the Android backup section and Appearance's "Use wallpaper colours" and per-app language row (the language row is in Settings › Desktop) ([11 Behaviour differences from Android](11-desktop.md#behaviour-differences-from-android)).
 
+**Radio Settings (PO-55, 2026-11-17).** Every Settings row is a paper slip: a printed symbol,
+the name in Courier, an optional summary line and, on the home, the current value at the end;
+rows have no chevrons. The home groups its rows under three engraved headings: Listening
+(Playback, Downloads, Feeds, YouTube), Library (Sync, Backup, Discover) and App (Appearance,
+Desktop, Updates, Privacy, About, Licences). Rows show a value where the home already reads one
+(playback speed and skip silence, refresh interval, sync status, update available, close
+behaviour) and otherwise only their name; the descriptive summaries are gone. Switch rows end
+in the radio's bat-handle switch (`BatToggleFace`), with the whole line as the switch. Playback
+mounts its controls on a metal panel: the default speed as a `StepCounter` (keys step 0.1 within
+0.5 to 3.0; its window opens the exact-speed dialog) beside a `NeedleWindow` dial, skip back
+and skip forward as counters that step through the allowed intervals instead of opening choice
+dialogs, and Skip silence, Smart resume and (Android) Pause for navigation prompts as panel
+switches. Other pages keep their dialogs for now.
+
 ### Updates settings
 
 `SettingsKey(SettingsPage.UPDATES)`, `:feature:settings`, M11a, on both apps. Serves R6.2–R6.4, R6.6 and N12 (what the card shows). Honours [D78](../PLAN.md#3-key-decisions), [D80](../PLAN.md#3-key-decisions), [PO-31](../PLAN.md#48-further-product-owner-decisions) (resolved: notify only, with links to GitHub), [PO-33](../PLAN.md#48-further-product-owner-decisions) (resolved: no beta channel), [PO-36](../PLAN.md#48-further-product-owner-decisions) (notice). What the update check does — the manifest and its link validation, the daily and "Check now" runs (Android work, the desktop's `app-update-check` lane), the APK choice for `Build.SUPPORTED_ABIS[0]` and the desktop asset choice of `DesktopAssetSelector`, skip and notify-once bookkeeping, and when a notice becomes pending — is 09's ([09 Update check](09-quality-and-release.md#update-check), [11 Desktop update check](11-desktop.md#desktop-update-check)); this section fixes the screens, states and wording. Neutrodyne never downloads, verifies or installs an APK or a desktop installer: every action here opens GitHub in the browser, and the user installs the downloaded file with the system's installer, so no text on this page, the first-run card or the notification may promise that Neutrodyne installs anything. Data: `AppUpdateChecker.state` (`StateFlow<UpdateCheckState>`, `:core:domain`; state types in `:core:model`), `updates.check_enabled` and `updates.last_check_at` through `SettingsRepository`.

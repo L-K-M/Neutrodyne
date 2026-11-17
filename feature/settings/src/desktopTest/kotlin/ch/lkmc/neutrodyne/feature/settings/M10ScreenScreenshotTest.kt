@@ -21,7 +21,7 @@ class M10ScreenScreenshotTest {
             installFakeImageLoader()
             for (dark in listOf(false, true)) {
                 val theme = if (dark) "dark" else "light"
-                for (variant in 0 until 1) {
+                for (variant in 0 until 2) {
                     runDesktopComposeUiTest(width = 900, height = 800) {
                         setContent { ScreenSnapshot(dark, PlatformKind.DESKTOP) { M10ScreenContent(variant) } }
                         waitForIdle()
