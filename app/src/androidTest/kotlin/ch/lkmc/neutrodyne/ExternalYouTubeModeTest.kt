@@ -412,7 +412,10 @@ class ExternalYouTubeModeTest {
                 onNodeWithTag("nav_library").performClick()
                 waitUntil(timeoutMillis = 10_000) { onAllNodesWithText(outage).fetchSemanticsNodes().isNotEmpty() }
                 onAllNodesWithText(outage).assertCountEquals(1)
-                onAllNodesWithContentDescription("Settings").onFirst().performClick()
+                // Settings opens from the radio's Menu; the Library has no gear (PO-55).
+                Espresso.pressBack()
+                onNodeWithTag("radio_menu").performClick()
+                onNodeWithTag("nav_settings").performClick()
                 onNodeWithText("YouTube").performClick()
                 onNodeWithText("YouTube engine turned off").assertExists()
                 onNodeWithText("Play YouTube in the app").assertExists()

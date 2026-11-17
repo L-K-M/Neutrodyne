@@ -4,9 +4,8 @@
     <string name="read_failed">Die Daten konnten nicht geladen werden</string>
     <string name="podcasts">Podcasts</string>
     <string name="groups">Gruppen</string>
-    <string name="all">Alle</string>
+    <string name="all_podcasts">Alle Podcasts</string>
     <string name="ungrouped">Ohne Gruppe</string>
-    <string name="new_group_chip">+ Neue Gruppe</string>
     <string name="new_group">Neue Gruppe</string>
     <string name="edit_group">Gruppe bearbeiten</string>
     <string name="manage_groups">Gruppen verwalten</string>

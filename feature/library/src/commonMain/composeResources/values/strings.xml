@@ -5,9 +5,8 @@
     <string name="read_failed">Couldn&apos;t load the data</string>
     <string name="podcasts">Podcasts</string>
     <string name="groups">Groups</string>
-    <string name="all">All</string>
+    <string name="all_podcasts">All podcasts</string>
     <string name="ungrouped">Ungrouped</string>
-    <string name="new_group_chip">+ New group</string>
     <string name="new_group">New group</string>
     <string name="edit_group">Edit group</string>
     <string name="manage_groups">Manage groups</string>

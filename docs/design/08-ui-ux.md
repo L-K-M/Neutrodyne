@@ -643,6 +643,25 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 - Overflow: Grid size, Show titles, Manage groups, Import subscriptions… (`FilePicker`, 05; on the desktop also Ctrl/Cmd+O and dropping a file on the window), Export subscriptions… (`ExportKey(null)`), Backup and restore (`BackupKey`).
 - States: loading → 12 skeleton tiles in `surfaceContainer`; empty library → onboarding empty state; filter chip with no members → "No podcasts in 'tech'" + "Add podcasts"; a selected group chip whose group was deleted → chip filter falls back to All silently; banners per [Banners and the startup gate](#banners-and-the-startup-gate) (restore running, held sync changes, foreign Android-backup snapshot, "Reconnect to {server}", import in progress, offline). Library needs no network: offline only adds the banner.
 
+**Radio Library (PO-55, 2026-11-17).** The Library stands in the radio's
+cabinet like every page. Its faceplate carries an ivory Add key ("Add podcasts",
+`AddPodcastKey(null)`), Sort and More; the settings gear is gone because
+Settings opens from the radio's Menu. Podcasts and Groups are a bank of piano
+keys (`PianoKeys`): the chosen key sits pressed in under a lit amber lamp. The
+chip row becomes one enamel selector (`EnamelSelector`) naming the filter (All
+podcasts, Ungrouped or a group); its menu lists those choices, each read as a
+selected or unselected radio button, and New group. Beside it the strip shows
+the filtered podcast count and their unplayed total ("5 podcasts · 59
+unplayed"). Cover tiles sit in a brass edge with the unplayed count on a brass
+disc (`BrassCountBadge`); titles, when shown, are typed on a paper label of up
+to two lines. The Groups segment is a cabinet of drawers (`GroupDrawer`): a
+wooden front with the name typed on a card in a brass holder, the group's
+colour on an enamel tab, "{n} podcasts · {u} unplayed · {k} new", up to four
+member covers and a brass cup pull. Drawers fill the width on phones and sit
+side by side on panes wide enough for two of at least 300 dp; the cover size
+setting applies only to covers. The empty drawer at the end opens New group. Taps, menus, custom
+actions, selection and keyboard behaviour are unchanged.
+
 Implementation note (2026-10-16, M2): D7 delivers the Library chips,
 persisted Podcasts/Groups segment, mosaic grid and selection actions. Group
 tile counts are wired to `FeedRepository.observeGroupCounts(sinceMs)`, using

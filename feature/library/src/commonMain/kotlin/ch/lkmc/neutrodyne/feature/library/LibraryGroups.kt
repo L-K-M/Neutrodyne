@@ -24,13 +24,12 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,29 +53,39 @@ import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
-import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
-import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.EnamelSelector
+import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeys
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
-import ch.lkmc.neutrodyne.core.ui.GroupMosaic
+import ch.lkmc.neutrodyne.core.ui.GroupDrawer
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.NewGroupDrawer
+import ch.lkmc.neutrodyne.core.ui.resources.group_counts_join
 import ch.lkmc.neutrodyne.core.ui.resources.group_export_opml
 import ch.lkmc.neutrodyne.core.ui.resources.group_share_opml
+import ch.lkmc.neutrodyne.core.ui.resources.group_unplayed_fmt
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
 import ch.lkmc.neutrodyne.feature.library.resources.Res
 import ch.lkmc.neutrodyne.feature.library.resources.add_to_group
-import ch.lkmc.neutrodyne.feature.library.resources.all
+import ch.lkmc.neutrodyne.feature.library.resources.all_podcasts
 import ch.lkmc.neutrodyne.feature.library.resources.edit_group
 import ch.lkmc.neutrodyne.feature.library.resources.exit_selection
 import ch.lkmc.neutrodyne.feature.library.resources.group_actions
@@ -84,7 +93,6 @@ import ch.lkmc.neutrodyne.feature.library.resources.groups
 import ch.lkmc.neutrodyne.feature.library.resources.manage_groups
 import ch.lkmc.neutrodyne.feature.library.resources.mark_played
 import ch.lkmc.neutrodyne.feature.library.resources.new_group
-import ch.lkmc.neutrodyne.feature.library.resources.new_group_chip
 import ch.lkmc.neutrodyne.feature.library.resources.podcasts
 import ch.lkmc.neutrodyne.feature.library.resources.refresh
 import ch.lkmc.neutrodyne.feature.library.resources.select_all
@@ -92,6 +100,7 @@ import ch.lkmc.neutrodyne.feature.library.resources.selected_count
 import ch.lkmc.neutrodyne.feature.library.resources.selection_actions
 import ch.lkmc.neutrodyne.feature.library.resources.ungrouped
 import ch.lkmc.neutrodyne.feature.library.resources.unsubscribe
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
@@ -104,38 +113,109 @@ internal fun LibrarySegments(
     segment: LibrarySegment,
     onSegment: (LibrarySegment) -> Unit,
 ) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = GRID_PADDING)) {
-        LibrarySegment.entries.forEachIndexed { index, item ->
-            SegmentedButton(
-                selected = segment == item,
-                onClick = { onSegment(item) },
-                shape = SegmentedButtonDefaults.itemShape(index, LibrarySegment.entries.size),
-            ) {
-                Text(stringResource(if (item == LibrarySegment.PODCASTS) Res.string.podcasts else Res.string.groups))
-            }
-        }
-    }
+    PianoKeys(
+        options = LibrarySegment.entries,
+        selected = segment,
+        onSelect = onSegment,
+        label = { stringResource(if (it == LibrarySegment.PODCASTS) Res.string.podcasts else Res.string.groups) },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = GRID_PADDING, vertical = 4.dp),
+        tag = { "library_segment_${it.name.lowercase()}" },
+    )
 }
 
+/**
+ * The podcasts filter as one enamel selector (PO-55), replacing the chip row: All podcasts,
+ * Ungrouped, each group and New group in its menu, with the filter's podcast and unplayed counts
+ * beside it.
+ */
 @Composable
-internal fun LibraryGroupChips(
+internal fun LibraryFilterStrip(
     state: LibraryUiState,
     onFilter: (String) -> Unit,
     onNewGroup: () -> Unit,
 ) {
-    Row(
-        Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = GRID_PADDING),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        NdFilterChip(state.groupFilter.isEmpty(), { onFilter("") }, stringResource(Res.string.all))
-        NdFilterChip(state.groupFilter == UNGROUPED_FILTER, {
-            onFilter(UNGROUPED_FILTER)
-        }, stringResource(Res.string.ungrouped))
-        state.groups.forEach { group ->
-            NdFilterChip(state.groupFilter == group.uuid, { onFilter(group.uuid) }, group.name)
+    var open by remember { mutableStateOf(false) }
+    val allLabel = stringResource(Res.string.all_podcasts)
+    val ungroupedLabel = stringResource(Res.string.ungrouped)
+    val current =
+        when (state.groupFilter) {
+            "" -> allLabel
+            UNGROUPED_FILTER -> ungroupedLabel
+            else -> state.groups.firstOrNull { it.uuid == state.groupFilter }?.name ?: allLabel
         }
-        NdAssistChip(onNewGroup, stringResource(Res.string.new_group_chip))
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = GRID_PADDING),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.weight(1f, fill = false)) {
+            EnamelSelector(current, { open = true }, Modifier.testTag("library_filter"))
+            DropdownMenu(open, { open = false }) {
+                FilterItem(allLabel, state.groupFilter.isEmpty(), "library_filter_all") {
+                    open = false
+                    onFilter("")
+                }
+                FilterItem(ungroupedLabel, state.groupFilter == UNGROUPED_FILTER, "library_filter_ungrouped") {
+                    open = false
+                    onFilter(UNGROUPED_FILTER)
+                }
+                state.groups.forEach { group ->
+                    FilterItem(group.name, state.groupFilter == group.uuid, "library_filter_${group.uuid}") {
+                        open = false
+                        onFilter(group.uuid)
+                    }
+                }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(stringResource(Res.string.new_group)) },
+                    leadingIcon = { Icon(NdIcons.Add, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        onNewGroup()
+                    },
+                )
+            }
+        }
+        if (state.loaded && state.tiles.isNotEmpty()) {
+            val podcasts = pluralStringResource(UiRes.plurals.podcast_count, state.tiles.size, state.tiles.size)
+            val unplayed = state.tiles.sumOf { it.unplayedCount }
+            Text(
+                if (unplayed > 0) {
+                    stringResource(
+                        UiRes.string.group_counts_join,
+                        podcasts,
+                        stringResource(UiRes.string.group_unplayed_fmt, unplayed),
+                    )
+                } else {
+                    podcasts
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
+}
+
+/** One filter choice; the radio role and `selected` tell screen readers which one is active. */
+@Composable
+private fun FilterItem(
+    label: String,
+    selected: Boolean,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { if (selected) Icon(NdIcons.Check, contentDescription = null) },
+        onClick = onClick,
+        modifier =
+            Modifier.testTag(tag).semantics {
+                this.selected = selected
+                role = Role.RadioButton
+            },
+    )
 }
 
 @Composable
@@ -162,7 +242,7 @@ internal fun LibraryGroupsGrid(
             },
         )
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(state.density.minCellWidthDp.dp),
+        columns = GridCells.Adaptive(DRAWER_MIN_WIDTH),
         state = grid,
         contentPadding = PaddingValues(GRID_PADDING),
         horizontalArrangement = Arrangement.spacedBy(GRID_SPACING),
@@ -175,7 +255,7 @@ internal fun LibraryGroupsGrid(
             val hovered by interaction.collectIsHoveredAsState()
             var focused by remember { mutableStateOf(false) }
             Box {
-                GroupMosaic(
+                GroupDrawer(
                     group = group,
                     members = state.mosaics[group.id].orEmpty(),
                     unplayedCount = state.groupCounts[group.id]?.unplayed,
@@ -221,12 +301,15 @@ internal fun LibraryGroupsGrid(
                             }.combinedClickable(onClick = { onOpenGroup(group.id) }, onLongClick = { menuOpen = true }),
                 )
                 if (hovered || focused || menuOpen) {
-                    NdIconButton(
-                        { menuOpen = true },
-                        NdIcons.MoreVert,
-                        stringResource(Res.string.group_actions),
-                        Modifier.align(Alignment.TopEnd),
-                    )
+                    // An ivory key on the drawer front, like the faceplate keys.
+                    CompositionLocalProvider(LocalRadioFaceplate provides true) {
+                        NdIconButton(
+                            { menuOpen = true },
+                            NdIcons.MoreVert,
+                            stringResource(Res.string.group_actions),
+                            Modifier.align(Alignment.TopEnd).padding(4.dp),
+                        )
+                    }
                 }
                 DropdownMenu(menuOpen, { menuOpen = false }) {
                     DropdownMenuItem(text = { Text(editLabel) }, onClick = {
@@ -245,20 +328,10 @@ internal fun LibraryGroupsGrid(
             }
         }
         item(key = "new") {
-            Column(
-                Modifier.combinedClickable(onClick = onNewGroup),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(NeutrodyneShapes.Tile)
-                        .background(MaterialTheme.colorScheme.surfaceContainer),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(NdIcons.Add, contentDescription = null) }
-                Text(stringResource(Res.string.new_group), style = MaterialTheme.typography.titleSmall)
-            }
+            NewGroupDrawer(
+                stringResource(Res.string.new_group),
+                Modifier.combinedClickable(role = Role.Button, onClick = onNewGroup),
+            )
         }
     }
 }
@@ -348,3 +421,5 @@ internal fun extendSelection(
 
     return (selected + visible.subList(minOf(start, end), maxOf(start, end) + 1)).distinct()
 }
+
+private val DRAWER_MIN_WIDTH = 300.dp

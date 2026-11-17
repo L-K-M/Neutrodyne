@@ -19,6 +19,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -121,8 +122,9 @@ class GroupFeedJourneyTest {
                 awaitNode(hasTestTag("radio_menu"))
                 onNodeWithTag("radio_menu").performClick()
                 onNodeWithTag("nav_library").performClick()
-                awaitNode(hasText("+ New group"))
-                onNodeWithText("+ New group").performClick()
+                awaitNode(hasTestTag("library_filter"))
+                onNodeWithTag("library_filter").performClick()
+                onNode(hasText("New group") and hasAnyAncestor(isPopup())).performClick()
                 createGroup("Science", listOf(1, 2))
                 val science = fixture.group("Science")
                 pressEscape()
@@ -221,8 +223,8 @@ class GroupFeedJourneyTest {
     }
 
     /**
-     * Escape on the window's own root: a key's tooltip left open under the resting pointer (a
-     * faceplate key sits where the editor's Save was) is a second root.
+     * Escape on the window's own root: a tooltip left open under the resting pointer (the
+     * Library's Add key sits where the editor's Save was) is a second root.
      */
     private fun ComposeUiTest.pressEscape() {
         onAllNodes(isRoot()).onFirst().performKeyInput { pressKey(Key.Escape) }
