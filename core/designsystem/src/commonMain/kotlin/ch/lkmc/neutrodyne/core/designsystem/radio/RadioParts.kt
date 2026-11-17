@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -94,7 +95,8 @@ private fun SignRivet() {
 
 /**
  * The cap of a round ivory push key, like the home's Menu key: concave ivory in a brass ring with
- * an ink symbol. The caller supplies the click target (at least 48 dp) and the accessible label.
+ * an ink symbol scaled with [size]. The caller supplies the click target (at least 48 dp) and the
+ * accessible label.
  */
 @Composable
 public fun IvoryKeyCap(
@@ -102,19 +104,21 @@ public fun IvoryKeyCap(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    size: Dp = IVORY_KEY_SIZE,
 ) {
     Box(
         modifier
-            .size(IVORY_KEY_SIZE)
+            .size(size)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
             .shadow(2.dp, CircleShape)
             .background(Brush.radialGradient(listOf(Color(0xFFF6EBD0), Color(0xFFD4BC90))), CircleShape)
             .border(1.5.dp, Brass, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription, Modifier.size(20.dp), tint = Ink)
+        Icon(icon, contentDescription, Modifier.size(size * ICON_FRACTION), tint = Ink)
     }
 }
 
 private val IVORY_KEY_SIZE = 36.dp
 private const val DISABLED_ALPHA = 0.45f
+private const val ICON_FRACTION = 20f / 36f

@@ -670,6 +670,11 @@
     <string name="radio_menu">Menü</string>
     <string name="radio_menu_speed">Wiedergabegeschwindigkeit</string>
     <string name="radio_menu_sleep">Einschlaf-Timer</string>
+    <string name="radio_menu_speed_key">Tempo</string>
+    <string name="radio_menu_sleep_key">Schlaf</string>
+    <string name="radio_menu_playback">Wiedergabe</string>
+    <string name="radio_menu_go_to">Gehe zu</string>
+    <string name="radio_menu_close">Schliessen</string>
     <string name="radio_episodes">Folgen</string>
     <string name="radio_removed">Aus dieser Playlist entfernt.</string>
     <string name="radio_ready">BEREIT ZUM ABSPIELEN</string>

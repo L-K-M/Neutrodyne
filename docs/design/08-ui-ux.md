@@ -220,7 +220,19 @@ Focused episodes support Delete on desktop and hardware keyboards. The
 chooser insert restores focus, dismisses on Escape/Back, blocks underlying
 interaction and keeps its header fixed while the list scrolls.
 All supplied English labels follow brief section 5 exactly; German resources
-are supplied. Menu (Menü) is the single owner-added label.
+are supplied. Menu (Menü) is the single owner-added label; the PO-55 Menu plate below adds
+five more.
+
+**Menu plate (PO-55, 2026-11-17).** The Menu dialog is a metal plate with a
+brass edge over the dimmed radio: an enamel Menu sign, an engraved Playback
+row with ivory Speed and Sleep keys (read as Playback speed and Sleep timer),
+a brass rule, an engraved Go to bank with ivory keys for Library, Up next,
+Downloads, Discover and Settings, and a small brass Close plate. Each key is
+one button named by its printed label. Failed downloads light a red count lamp
+on the Downloads key, read as "{n} failed downloads". Destinations, sheets,
+order and test tags are unchanged, and Back, Escape or a tap outside still
+closes it. Added labels: Playback (Wiedergabe), Go to (Gehe zu), Close
+(Schliessen), Speed (Tempo) and Sleep (Schlaf).
 
 **Selection fallback (2026-11-04).** Deleting the selected group falls back
 to the first remaining playlist, or the empty radio if none remain. This
