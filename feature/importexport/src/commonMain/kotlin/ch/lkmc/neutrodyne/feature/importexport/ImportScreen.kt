@@ -5,7 +5,6 @@ package ch.lkmc.neutrodyne.feature.importexport
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -824,9 +823,9 @@ private fun ChipsRow(
                 ImportItemFilter.NEEDS_ATTENTION,
             )
         }
-    // Content-sized keys in a slot that scrolls sideways: four equal keys on a phone cut the
+    // Content-sized keys that slide sideways in their slot: four equal keys on a phone cut the
     // longer labels ("Needs attention") short.
-    PianoKeySlot(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).horizontalScroll(rememberScrollState())) {
+    PianoKeySlot(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), rememberScrollState()) {
         options.forEach { option ->
             PianoKey(
                 stringResource(
