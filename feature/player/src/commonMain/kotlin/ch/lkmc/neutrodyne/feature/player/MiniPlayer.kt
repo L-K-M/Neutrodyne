@@ -45,7 +45,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -76,9 +75,11 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggle
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
+import ch.lkmc.neutrodyne.core.designsystem.radio.IvoryKeyCap
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleWindow
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.SwitchPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.barlow
 import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
@@ -386,16 +387,7 @@ private fun SkipKey(
     onClick: () -> Unit,
 ) {
     Box(Modifier.size(SKIP_KEY_TARGET).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .size(SKIP_KEY_CAP)
-                .shadow(2.dp, CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFFF6EBD0), Color(0xFFD4BC90))), CircleShape)
-                .border(1.dp, Brass, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text, color = Ink, fontFamily = barlow(), fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
-        }
+        IvoryKeyCap(text, size = SKIP_KEY_CAP)
     }
 }
 
@@ -417,6 +409,7 @@ private fun PlayToggle(
             onLabel = stringResource(Res.string.player_switch_on),
             offLabel = stringResource(Res.string.player_switch_off),
             modifier = Modifier.size(TOGGLE_WIDTH, TOGGLE_HEIGHT).semantics { contentDescription = label },
+            plate = SwitchPlate.NICKEL,
         )
         if (now.phase == PlayerPhase.BUFFERING) {
             Box(

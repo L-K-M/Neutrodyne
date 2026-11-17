@@ -2,8 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.designsystem.radio
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -18,15 +17,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
@@ -36,12 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -54,6 +47,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_jewel_dark
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_jewel_lit
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_key_piano_down
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_key_piano_up
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_key_slot
+import org.jetbrains.compose.resources.imageResource
+import org.jetbrains.compose.resources.painterResource
 
 /**
  * A bank of piano keys for two to four exclusive choices, like a radio's band selector: ivory
@@ -94,7 +95,9 @@ public fun PianoKeySlot(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    MaterialPlate(RadioMaterial.METAL, modifier.slotFrame()) {
+    // The rendered riveted slot (owner-approved renders, 2026-11-17), stretched without
+    // distorting its screwed corners.
+    Box(modifier.ninePatch(imageResource(Res.drawable.radio_key_slot), SLOT_SRC_INSET, SLOT_INSET)) {
         Row(
             Modifier.padding(SlotPadding).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(KEY_GAP),
@@ -231,12 +234,10 @@ public fun ActionKey(
         modifier
             .heightIn(min = ACTION_KEY_HEIGHT)
             .alpha(if (enabled) 1f else DISABLED_ALPHA)
-            .shadow(3.dp, KeyShape)
+            .threePatch(imageResource(Res.drawable.radio_key_piano_up), KEY_SRC_CAP)
             .clip(KeyShape)
-            .background(Brush.verticalGradient(RaisedIvory))
-            .border(1.dp, Color(0xFF9A7E4E), KeyShape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 7.dp),
+            .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = RAISED_LIP + 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
     ) {
@@ -261,19 +262,16 @@ public fun ActionKey(
 
 @Composable
 private fun Lamp(lit: Boolean) {
-    Canvas(Modifier.padding(top = 1.dp, bottom = LAMP_PADDING - 1.dp).size(LAMP_SIZE)) {
-        val r = size.minDimension / 2
-        if (lit) {
-            // The glow spills past the lamp's bezel onto the metal.
-            drawCircle(
-                Brush.radialGradient(listOf(Amber.copy(alpha = 0.55f), Color.Transparent), center, r * 2.6f),
-                r * 2.6f,
-            )
-            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFF4C8), Amber, Color(0xFFB8661A)), center, r), r)
-        } else {
-            drawCircle(Brush.radialGradient(listOf(Color(0xFF6A5638), UnlitLamp), center, r), r)
-        }
-        drawCircle(Color(0xFF2A2116), r, style = Stroke(1.dp.toPx()))
+    Box(
+        Modifier.padding(top = 1.dp, bottom = LAMP_PADDING - 1.dp).size(LAMP_SIZE),
+        contentAlignment = Alignment.Center,
+    ) {
+        // The picture leaves room around the bezel for the lit jewel's glow, which spills onto the slot.
+        Image(
+            painterResource(if (lit) Res.drawable.radio_jewel_lit else Res.drawable.radio_jewel_dark),
+            null,
+            Modifier.requiredSize(LAMP_SIZE * JEWEL_PICTURE_SCALE),
+        )
     }
 }
 
@@ -288,21 +286,17 @@ private fun KeyCap(
             .fillMaxWidth()
             .heightIn(min = KEY_HEIGHT)
             .widthIn(min = KEY_MIN_WIDTH)
-            // A pressed key sits lower in the slot and loses most of its shadow.
-            .offset(y = if (pressed) 1.5.dp else 0.dp)
-            .shadow(if (pressed) 0.5.dp else 3.dp, KeyShape)
-            .background(Brush.verticalGradient(if (pressed) PressedIvory else RaisedIvory), KeyShape)
-            .let {
-                if (pressed) {
-                    it.drawWithContent {
-                        drawContent()
-                        drawPressShade()
-                    }
-                } else {
-                    it
-                }
-            }.border(1.dp, if (pressed) Color(0xFF5E4526) else Color(0xFF9A7E4E), KeyShape)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .threePatch(
+                imageResource(if (pressed) Res.drawable.radio_key_piano_down else Res.drawable.radio_key_piano_up),
+                KEY_SRC_CAP,
+            )
+            // The label sits on the key's top face, above its front edge.
+            .padding(
+                start = 6.dp,
+                end = 6.dp,
+                top = if (pressed) KEY_DROP + 5.dp else 5.dp,
+                bottom = (if (pressed) PRESSED_LIP else RAISED_LIP) + 4.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         // Engraved in capitals, read as written: screen readers spell some all-caps words.
@@ -312,9 +306,9 @@ private fun KeyCap(
             color = Ink,
             fontFamily = barlow(),
             fontWeight = FontWeight.SemiBold,
-            fontSize = 14.sp,
-            lineHeight = 16.sp,
-            letterSpacing = 1.5.sp,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            letterSpacing = 1.sp,
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -324,14 +318,22 @@ private fun KeyCap(
 
 private val SlotShape = RoundedCornerShape(6.dp)
 private val KeyShape = RoundedCornerShape(3.dp)
-private val Amber = Color(0xFFF3B35E)
-private val UnlitLamp = Color(0xFF4F4130)
-private val RaisedIvory = listOf(Color(0xFFF8EED6), Color(0xFFE3CFA5))
-private val PressedIvory = listOf(Color(0xFFCDB27E), Color(0xFFDCC69A))
 private val KEY_GAP = 6.dp
-private val SlotPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+
+// The rendered parts' fixed borders, in source pixels: the slot's screwed frame and a key's ends.
+private const val SLOT_SRC_INSET = 56
+private val SLOT_INSET = 14.dp
+private const val KEY_SRC_CAP = 30
+private val RAISED_LIP = 4.5.dp
+private val PRESSED_LIP = 1.5.dp
+private val KEY_DROP = 2.dp
+private val SlotPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
 private val KEY_HEIGHT = 36.dp
 private val LAMP_SIZE = 9.dp
+
+// The bezel fills about 87% of the jewel picture (the margin holds the glow), so the picture
+// is drawn larger than the lamp for the bezel to span about 11 dp.
+private const val JEWEL_PICTURE_SCALE = 1.4f
 private val LAMP_PADDING = 5.dp
 private val KEY_MIN_WIDTH = 64.dp
 private val ACTION_KEY_HEIGHT = 64.dp
@@ -343,8 +345,3 @@ private fun Modifier.slotFrame(): Modifier =
     shadow(3.dp, SlotShape)
         .clip(SlotShape)
         .border(1.dp, Brass.copy(alpha = 0.8f), SlotShape)
-
-/** The slot's shadow falls on the top of a pressed key. */
-private fun DrawScope.drawPressShade() {
-    drawRect(Brush.verticalGradient(listOf(Color(0x66000000), Color.Transparent), endY = 6.dp.toPx()))
-}

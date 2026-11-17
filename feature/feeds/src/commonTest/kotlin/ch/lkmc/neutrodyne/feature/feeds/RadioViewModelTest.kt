@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
@@ -104,6 +105,34 @@ class RadioViewModelTest : MainDispatcherTest() {
                 assertTrue(start.filters.unplayedOnly)
                 assertEquals(
                     FakePlaybackController.Call.Transport(FakePlaybackController.Action.SEEK, 25_000),
+                    controller.calls.last(),
+                )
+            }
+        }
+
+    @Test fun skipKeysMoveByTheListenersIntervalsAndStopAtTheEnds() =
+        runTest {
+            settings.set(PlaybackSettingKeys.SKIP_BACK_MS, 15_000L)
+            settings.set(PlaybackSettingKeys.SKIP_FORWARD_MS, 45_000L)
+            withRadio { model, _ ->
+                assertEquals(15_000L, model.state.value.skipBackMs)
+                assertEquals(45_000L, model.state.value.skipForwardMs)
+
+                // Not loaded yet: the position waits for play, like a needle seek.
+                model.skipForward()
+                assertEquals(45_000L, model.state.value.elapsedMs)
+                model.skipForward()
+                assertEquals(60_000L, model.state.value.elapsedMs)
+                model.skipBack()
+                assertEquals(45_000L, model.state.value.elapsedMs)
+
+                // Loaded at 10 s: one skip back stops at the start and seeks the player there.
+                controller.state.nowPlaying.value = testNowPlaying(1)
+                runCurrent()
+                model.skipBack()
+                assertEquals(0L, model.state.value.elapsedMs)
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.SEEK, 0),
                     controller.calls.last(),
                 )
             }

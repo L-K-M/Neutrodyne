@@ -710,6 +710,10 @@
     <string name="radio_play">Play</string>
     <string name="radio_switch_on">ON</string>
     <string name="radio_switch_off">OFF</string>
+    <string name="radio_skip_back">Back %1$d seconds</string>
+    <string name="radio_skip_forward">Forward %1$d seconds</string>
+    <string name="radio_skip_back_value">−%1$d</string>
+    <string name="radio_skip_forward_value">+%1$d</string>
     <string name="radio_no_playlists">No playlists yet. Create a group in the Library to fill one.</string>
     <string name="radio_elapsed">Elapsed</string>
     <string name="radio_playlists">Your playlists</string>

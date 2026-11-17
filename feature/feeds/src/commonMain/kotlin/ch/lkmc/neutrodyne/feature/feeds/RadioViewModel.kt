@@ -113,6 +113,15 @@ public class RadioViewModel(
     init {
         viewModelScope.launch {
             combine(
+                settings.observe(PlaybackSettingKeys.SKIP_BACK_MS),
+                settings.observe(PlaybackSettingKeys.SKIP_FORWARD_MS),
+            ) { back, forward -> back to forward }
+                .collect { (back, forward) ->
+                    mutableState.value = state.value.copy(skipBackMs = back, skipForwardMs = forward)
+                }
+        }
+        viewModelScope.launch {
+            combine(
                 groups.observeGroups(),
                 settings.observe(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE),
             ) { all, encoded ->
@@ -377,6 +386,16 @@ public class RadioViewModel(
             seeks[selected.id] = position
         }
         mutableState.value = current.copy(elapsedMs = position)
+    }
+
+    /** Moves back by the listener's skip interval; [seek] stops it at the start. */
+    public fun skipBack() {
+        seek(state.value.elapsedMs - state.value.skipBackMs)
+    }
+
+    /** Moves forward by the listener's skip interval; [seek] stops it at the end. */
+    public fun skipForward() {
+        seek(state.value.elapsedMs + state.value.skipForwardMs)
     }
 
     public fun selectPlaylist(id: Long) {

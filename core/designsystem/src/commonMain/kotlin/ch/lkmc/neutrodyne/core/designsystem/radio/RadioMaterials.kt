@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.arvo_bold
 import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_bold
 import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_medium
 import ch.lkmc.neutrodyne.core.designsystem.resources.barlow_regular
@@ -73,6 +74,10 @@ public fun courier(): FontFamily =
         Font(Res.font.courierprime_regular, FontWeight.Normal),
         Font(Res.font.courierprime_bold, FontWeight.Bold),
     )
+
+/** Heavy slab lettering printed on switch plates. */
+@Composable
+public fun slab(): FontFamily = FontFamily(Font(Res.font.arvo_bold, FontWeight.Bold))
 
 @Composable
 public fun dosis(): FontFamily = FontFamily(Font(Res.font.dosis_light, FontWeight.Light))

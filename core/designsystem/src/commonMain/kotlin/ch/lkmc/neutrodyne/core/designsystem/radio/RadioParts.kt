@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.designsystem.radio
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -24,20 +26,27 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_key_round_up
+import org.jetbrains.compose.resources.painterResource
 
 /**
  * True inside a metal faceplate. Icon buttons placed there become ivory keys (08 Nd wrappers), so
@@ -96,13 +105,23 @@ private fun EnamelPlaque(
     small: Boolean = false,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(4.dp)
+    val shape = RoundedCornerShape(5.dp)
     Row(
         modifier
-            .shadow(3.dp, shape)
-            .background(Brush.verticalGradient(listOf(Color(0xFF2B3A4A), Color(0xFF16212D))), shape)
-            .border(2.dp, Brush.verticalGradient(listOf(Color(0xFFE2C98F), Brass, Color(0xFF6E5530))), shape)
-            .padding(horizontal = 8.dp, vertical = if (small) 4.dp else 6.dp),
+            .dropShadow(shape, Shadow(radius = 5.dp, color = Color(0xB3000000), offset = DpOffset(0.dp, 2.dp)))
+            .background(Brush.verticalGradient(listOf(Color(0xFF33495F), Color(0xFF1C2A39), Color(0xFF111A24))), shape)
+            // Vitreous enamel is domed: a soft gloss over its upper half.
+            .drawBehind {
+                drawRect(
+                    Brush.verticalGradient(
+                        0f to Color(0x33FFFFFF),
+                        0.48f to Color(0x0AFFFFFF),
+                        0.5f to Color.Transparent,
+                    ),
+                )
+            }.bevel(shape, depth = 1.dp, light = Color(0x40FFFFFF), shade = Color(0x99000000))
+            .brassRim(shape, width = 2.5.dp)
+            .padding(horizontal = 8.dp, vertical = if (small) 5.dp else 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (small) 5.dp else 7.dp),
     ) {
@@ -165,15 +184,7 @@ public fun BrassCountBadge(
 
 @Composable
 private fun SignRivet() {
-    Canvas(Modifier.size(7.dp)) {
-        drawCircle(Brush.radialGradient(listOf(Color(0xFFF6E7C1), Color(0xFF8A6D3E)), radius = size.minDimension))
-        drawLine(
-            Color(0xFF5A4424),
-            Offset(size.width * 0.2f, size.height * 0.8f),
-            Offset(size.width * 0.8f, size.height * 0.2f),
-            1.dp.toPx(),
-        )
-    }
+    Canvas(Modifier.size(7.dp)) { drawRivet(center, size.minDimension / 2) }
 }
 
 /**
@@ -189,16 +200,44 @@ public fun IvoryKeyCap(
     enabled: Boolean = true,
     size: Dp = IVORY_KEY_SIZE,
 ) {
+    Box(modifier.size(size).alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.Center) {
+        // The rendered key (owner-approved renders, 2026-11-17): an ivory cap in a turned brass ring.
+        Image(painterResource(Res.drawable.radio_key_round_up), null, Modifier.matchParentSize())
+        // Engraved: the cut's lower wall catches the light just below the ink.
+        Icon(icon, null, Modifier.size(size * ICON_FRACTION).offset(y = 0.75.dp), tint = Color(0xB3FFFBEF))
+        Icon(icon, contentDescription, Modifier.size(size * ICON_FRACTION), tint = Ink)
+    }
+}
+
+/**
+ * A round ivory key engraved with a short [legend] (such as "+30") instead of a symbol. The
+ * legend keeps its proportion to the cap whatever the text size, so the caller scales [size];
+ * like the symbol cap, it is decorative and the caller supplies the target and label.
+ */
+@Composable
+public fun IvoryKeyCap(
+    legend: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    size: Dp = IVORY_KEY_SIZE,
+) {
+    val fontSize = with(LocalDensity.current) { (size * LEGEND_FRACTION).toSp() }
     Box(
-        modifier
-            .size(size)
-            .alpha(if (enabled) 1f else DISABLED_ALPHA)
-            .shadow(2.dp, CircleShape)
-            .background(Brush.radialGradient(listOf(Color(0xFFF6EBD0), Color(0xFFD4BC90))), CircleShape)
-            .border(1.5.dp, Brass, CircleShape),
+        modifier.size(size).alpha(if (enabled) 1f else DISABLED_ALPHA).clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription, Modifier.size(size * ICON_FRACTION), tint = Ink)
+        Image(painterResource(Res.drawable.radio_key_round_up), null, Modifier.matchParentSize())
+        for ((color, drop) in listOf(Color(0xB3FFFBEF) to 0.75.dp, Ink to 0.dp)) {
+            Text(
+                legend,
+                Modifier.offset(y = drop),
+                color = color,
+                fontFamily = slab(),
+                fontSize = fontSize,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
     }
 }
 
@@ -207,3 +246,4 @@ private const val DISABLED_ALPHA = 0.45f
 private const val MAX_BADGE_COUNT = 99
 private val BADGE_SIZE = 24.dp
 private const val ICON_FRACTION = 20f / 36f
+private const val LEGEND_FRACTION = 0.28f

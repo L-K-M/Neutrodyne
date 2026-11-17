@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -52,6 +53,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
+import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
+import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
 import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -225,6 +228,46 @@ class RadioInteractionTest {
             onNodeWithTag("radio_play").assertIsNotEnabled().performClick()
             onNodeWithTag("radio_play").performTouchInput { swipeUp() }
             assertEquals(0, toggles)
+        }
+
+    @Test fun skipKeysFlankTheCounterWithTheListenersIntervals() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var back = 0
+            var forward = 0
+            var selected by mutableStateOf<Long?>(radioFixture().selectedId)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(selectedId = selected, skipBackMs = 15_000, skipForwardMs = 45_000),
+                        RadioActions(skipBack = { back++ }, skipForward = { forward++ }),
+                    )
+                }
+            }
+            onNodeWithTag(
+                "radio_skip_back",
+            ).assertContentDescriptionEquals(getString(Res.string.radio_skip_back, 15L)).performClick()
+            onNodeWithTag(
+                "radio_skip_forward",
+            ).assertContentDescriptionEquals(getString(Res.string.radio_skip_forward, 45L)).performClick()
+            assertEquals(1, back)
+            assertEquals(1, forward)
+
+            selected = null
+            onNodeWithTag("radio_skip_back").assertIsNotEnabled().performClick()
+            onNodeWithTag("radio_skip_forward").assertIsNotEnabled().performClick()
+            assertEquals(1, back)
+            assertEquals(1, forward)
+        }
+
+    @Test fun doubleTextScaleOnANarrowScreenLeavesSkippingToTheNeedle() =
+        runDesktopComposeUiTest(width = 320, height = 568) {
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(radioFixture(), RadioActions()) }
+                }
+            }
+            onNodeWithTag("radio_skip_back").assertDoesNotExist()
+            onNodeWithTag("radio_skip_forward").assertDoesNotExist()
         }
 
     @Test fun emptyChooserExplainsWhereToCreatePlaylists() =

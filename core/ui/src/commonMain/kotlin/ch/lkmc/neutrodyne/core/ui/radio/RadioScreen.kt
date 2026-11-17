@@ -62,6 +62,8 @@ public data class RadioActions(
     val undo: () -> Unit = {},
     val togglePlay: () -> Unit = {},
     val seek: (Long) -> Unit = {},
+    val skipBack: () -> Unit = {},
+    val skipForward: () -> Unit = {},
     val selectPlaylist: (Long) -> Unit = {},
     val menu: () -> Unit = {},
     val loadEpisode: (Int) -> Unit = {},

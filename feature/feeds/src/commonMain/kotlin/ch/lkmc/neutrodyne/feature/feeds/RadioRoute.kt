@@ -81,6 +81,8 @@ internal fun RadioRoute(model: RadioViewModel = metroViewModel()) {
             undo = model::undoDiscard,
             togglePlay = model::togglePlay,
             seek = model::seek,
+            skipBack = model::skipBack,
+            skipForward = model::skipForward,
             selectPlaylist = model::selectPlaylist,
             menu = { menu = true },
             loadEpisode = { index ->

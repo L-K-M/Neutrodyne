@@ -2,18 +2,23 @@
 
 package ch.lkmc.neutrodyne.core.designsystem.radio
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,26 +26,27 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_switch_brass_off
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_switch_brass_on
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_switch_nickel_off
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_switch_nickel_on
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
 
 /**
  * The radio's panel toggle switch: a chrome bat lever through a hex nut on a plate printed
@@ -56,6 +62,7 @@ public fun BatToggle(
     offLabel: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    plate: SwitchPlate = SwitchPlate.BRASS,
 ) {
     val currentOn by rememberUpdatedState(on)
     val toggle by rememberUpdatedState(onToggle)
@@ -83,13 +90,16 @@ public fun BatToggle(
                 )
             },
         enabled,
+        plate,
     )
 }
 
 /**
  * [BatToggle]'s plate and lever as a picture of [on], for a row whose whole line is the toggle
- * and carries the switch semantics. The lever swings like the real switch's. The printed labels
- * stay silent: the switch's state, not its plate, is what a screen reader announces.
+ * and carries the switch semantics. The plate is a photographic render (owner-approved look,
+ * 2026-11-17) in two states, lever up and lever down; the app prints [onLabel] and [offLabel] on
+ * its blank enamel so they follow the user's language. The printed labels stay silent: the
+ * switch's state, not its plate, is what a screen reader announces.
  */
 @Composable
 public fun BatToggleFace(
@@ -98,129 +108,125 @@ public fun BatToggleFace(
     offLabel: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    plate: SwitchPlate = SwitchPlate.BRASS,
 ) {
     val reducedMotion = LocalReducedMotion.current
-    // -1 is lever up (ON), +1 is lever down (OFF).
-    val lever by animateFloatAsState(
-        if (on) -1f else 1f,
-        if (reducedMotion) snap() else spring(dampingRatio = 0.55f, stiffness = 900f),
-    )
-    BoxWithConstraints(modifier.alpha(if (enabled) 1f else DISABLED_ALPHA)) {
-        val tab = maxHeight * SWITCH_TAB_FRACTION
-        Canvas(Modifier.matchParentSize()) { drawSwitchPlate(tab.toPx()) }
-        Column(Modifier.matchParentSize().clearAndSetSemantics {}) {
-            SwitchLabel(onLabel, tab)
-            Spacer(Modifier.weight(1f))
-            SwitchLabel(offLabel, tab)
+    BoxWithConstraints(modifier.alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.Center) {
+        // The plate keeps the render's proportion inside whatever box the caller gives it.
+        val plateHeight = minOf(maxHeight, maxWidth * plate.aspect)
+        val plateWidth = plateHeight / plate.aspect
+        Box(
+            Modifier
+                .size(plateWidth, plateHeight)
+                .dropShadow(
+                    PlateShape,
+                    Shadow(
+                        radius = plateWidth * 0.08f,
+                        color = Color(0x99000000),
+                        offset =
+                            DpOffset(
+                                plateWidth * 0.02f,
+                                plateWidth * 0.05f,
+                            ),
+                    ),
+                ),
+        ) {
+            Crossfade(on, animationSpec = if (reducedMotion) snap() else tween(LEVER_FLIP_MS), label = "lever") { up ->
+                Image(
+                    painterResource(if (up) plate.on else plate.off),
+                    null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds,
+                )
+            }
+            Column(
+                Modifier.matchParentSize().clearAndSetSemantics {},
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.height(plateHeight * plate.onBandTop))
+                SwitchLabel(onLabel, plateWidth * plate.labelWidth, plateHeight * plate.band, OnLettering)
+                Spacer(Modifier.weight(1f))
+                SwitchLabel(offLabel, plateWidth * plate.labelWidth, plateHeight * plate.band, OffLettering)
+                Spacer(Modifier.height(plateHeight * plate.offBandBottom))
+            }
         }
-        Canvas(Modifier.matchParentSize()) { drawSwitchLever(lever) }
     }
 }
 
 @Composable
 private fun SwitchLabel(
     text: String,
+    width: Dp,
     height: Dp,
+    color: Color,
 ) {
-    Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
-        // Printed on the plate, so it scales with the plate rather than with the text size.
+    Box(Modifier.size(width, height), contentAlignment = Alignment.Center) {
+        // Printed on the plate, so it scales with the plate rather than with the text size; a long
+        // translation is printed smaller instead of running under the lever.
+        val fontScale = LocalDensity.current.fontScale
         Text(
             text,
-            color = Color(0xFFF7F1E3),
-            fontFamily = barlow(),
-            fontWeight = FontWeight.Bold,
-            fontSize = (height.value * 0.52f / LocalDensity.current.fontScale).sp,
-            lineHeight = (height.value * 0.6f / LocalDensity.current.fontScale).sp,
+            color = color,
+            fontFamily = slab(),
+            fontSize = (height.value * 0.8f / fontScale).sp,
+            lineHeight = (height.value / fontScale).sp,
+            autoSize =
+                TextAutoSize.StepBased(
+                    minFontSize = (height.value * 0.4f / fontScale).sp,
+                    maxFontSize =
+                        (
+                            height.value *
+                                0.8f /
+                                fontScale
+                        ).sp,
+                ),
             maxLines = 1,
             softWrap = false,
         )
     }
 }
 
-private fun DrawScope.drawSwitchPlate(tab: Float) {
-    val corner = CornerRadius(5.dp.toPx())
-    drawRoundRect(
-        Brush.verticalGradient(listOf(Color(0xFFF1F0EA), Color(0xFFB4B2A8), Color(0xFFDCDAD2), Color(0xFF9C9A90))),
-        cornerRadius = corner,
-    )
-    drawRoundRect(Color(0xFF6E6C64), cornerRadius = corner, style = Stroke(1.dp.toPx()))
-    val inset = 3.dp.toPx()
-    drawRoundRect(
-        Color(0xFFCB2A22),
-        Offset(inset, inset),
-        Size(size.width - inset * 2, tab - inset),
-        CornerRadius(3.dp.toPx()),
-    )
-    drawRoundRect(
-        Color(0xFF1C1B19),
-        Offset(inset, size.height - tab),
-        Size(size.width - inset * 2, tab - inset),
-        CornerRadius(3.dp.toPx()),
-    )
-    val center = Offset(size.width / 2, size.height / 2)
-    val nut = minOf(size.width, size.height - tab * 2) * 0.46f
-    val hexagon =
-        Path().apply {
-            for (corner in 0..5) {
-                val angle = (corner * 60.0) * PI / 180.0
-                val point = Offset(center.x + nut * cos(angle).toFloat(), center.y + nut * sin(angle).toFloat())
-                if (corner == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
-            }
-            close()
-        }
-    drawPath(hexagon, Color(0x55000000), style = Stroke(2.dp.toPx()))
-    drawPath(
-        hexagon,
-        Brush.linearGradient(
-            listOf(Color(0xFFFAFAF6), Color(0xFFA7A59C), Color(0xFFE6E4DC), Color(0xFF7F7D74)),
-            center - Offset(nut, nut),
-            center + Offset(nut, nut),
-        ),
-    )
-    drawPath(hexagon, Color(0xFF6A685F), style = Stroke(0.75.dp.toPx()))
-    // Threaded bushing: concentric rings around the lever's pivot hole.
-    val bushing = nut * 0.68f
-    drawCircle(
-        Brush.radialGradient(listOf(Color(0xFFE9E7E0), Color(0xFF8D8B82)), center, bushing),
-        bushing,
-        center,
-    )
-    for (ring in 1..3) {
-        drawCircle(Color(0x66504E46), bushing * (1f - ring * 0.18f), center, style = Stroke(0.75.dp.toPx()))
-    }
-    drawCircle(Color(0xFF2A2925), bushing * 0.34f, center)
+private val PlateShape = RoundedCornerShape(8)
+
+/**
+ * The two switch plates recreated from the owner's favourite renders: their pictures (lever up,
+ * lever down), height over width, and where the enamel stays clear of the lever for the printed
+ * labels: their bands as fractions of the plate's height and, because the lever swings out to the
+ * right, the widest a centred label may print, as a fraction of the plate's width.
+ */
+public enum class SwitchPlate(
+    internal val on: DrawableResource,
+    internal val off: DrawableResource,
+    internal val aspect: Float,
+    internal val onBandTop: Float,
+    internal val offBandBottom: Float,
+    internal val band: Float,
+    internal val labelWidth: Float,
+) {
+    /** Polished nickel rim (renders/podcast.png). */
+    NICKEL(
+        Res.drawable.radio_switch_nickel_on,
+        Res.drawable.radio_switch_nickel_off,
+        1170f / 824f,
+        0.06f,
+        0.06f,
+        0.19f,
+        0.4f,
+    ),
+
+    /** Brass rim with four Phillips screws (superseded/v2). */
+    BRASS(
+        Res.drawable.radio_switch_brass_on,
+        Res.drawable.radio_switch_brass_off,
+        1306f / 776f,
+        0.1f,
+        0.11f,
+        0.16f,
+        0.62f,
+    ),
 }
 
-private fun DrawScope.drawSwitchLever(position: Float) {
-    val center = Offset(size.width / 2, size.height / 2)
-    // The tip stops just short of the printed tabs so ON and OFF stay legible.
-    val reach = size.height * 0.17f
-    val base = size.width * 0.07f
-    val tip = size.width * 0.11f
-    val end = Offset(center.x, center.y + position * reach)
-    val shadow = Offset(1.5.dp.toPx(), 2.dp.toPx())
-
-    fun bat(offset: Offset): Path =
-        Path().apply {
-            moveTo(center.x - base + offset.x, center.y + offset.y)
-            lineTo(end.x - tip + offset.x, end.y + offset.y)
-            lineTo(end.x + tip + offset.x, end.y + offset.y)
-            lineTo(center.x + base + offset.x, center.y + offset.y)
-            close()
-        }
-    drawPath(bat(shadow), Color(0x40000000))
-    drawCircle(Color(0x40000000), tip, end + shadow)
-    val chrome =
-        Brush.horizontalGradient(
-            listOf(Color(0xFF6F6D66), Color(0xFFFBFBF8), Color(0xFFBDBBB3), Color(0xFF5E5C55)),
-            end.x - tip,
-            end.x + tip,
-        )
-    drawCircle(chrome, base * 1.3f, center)
-    drawPath(bat(Offset.Zero), chrome)
-    drawCircle(chrome, tip, end)
-    drawCircle(Color(0xCCFFFFFF), tip * 0.35f, end - Offset(tip * 0.3f, tip * 0.3f))
-}
-
-private const val SWITCH_TAB_FRACTION = 0.22f
+private const val LEVER_FLIP_MS = 90
 private const val DISABLED_ALPHA = 0.56f
+private val OnLettering = Color(0xFFF6EAD0)
+private val OffLettering = Color(0xFF2A2117)

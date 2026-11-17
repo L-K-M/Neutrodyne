@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui.radio
 
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 
 /** Immutable presentation data; production adapters retain repository IDs, never fixture indices. */
 public data class RadioEpisode(
@@ -36,6 +37,9 @@ public data class RadioState(
     val playing: Boolean = false,
     val hasPlayed: Boolean = false,
     val removed: RadioEpisode? = null,
+    /** The listener's skip intervals (Playback settings), printed on the keys beside the counter. */
+    val skipBackMs: Long = PlaybackSettingKeys.SKIP_BACK_MS.default,
+    val skipForwardMs: Long = PlaybackSettingKeys.SKIP_FORWARD_MS.default,
 ) {
     public val playlist: RadioPlaylist? get() = playlists.find { it.id == playlistId }
     public val selected: RadioEpisode? get() =
