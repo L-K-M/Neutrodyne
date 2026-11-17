@@ -5,7 +5,6 @@ package ch.lkmc.neutrodyne.feature.importexport
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +17,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.ui.CredentialFields
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -77,16 +77,15 @@ internal fun ImportFixUpDialog(
     ) {
         Column {
             if (kind == ImportFixUp.URL) {
-                OutlinedTextField(
+                PaperTextField(
                     value = url,
                     onValueChange = {
                         url = it
                         error = null
                     },
-                    label = { Text(title) },
+                    placeholder = title,
                     enabled = !submitting,
-                    isError = error != null,
-                    singleLine = true,
+                    errorText = error?.asString(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     modifier = Modifier.testTag("import-url-input").ndTextFieldFocus(),
                 )

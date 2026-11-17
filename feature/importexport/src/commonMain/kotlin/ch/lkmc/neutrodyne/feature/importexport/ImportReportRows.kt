@@ -2,9 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.importexport
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -14,7 +12,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
+import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
@@ -76,7 +75,14 @@ internal fun ImportSectionHeader(
             style = MaterialTheme.typography.titleSmall,
         )
         if (section == ImportReportSection.NO_MEDIA && session.noMediaOrdinals.isNotEmpty()) {
-            NdTextButton(stringResource(Res.string.import_remove_all), onClick = onRemoveAll, enabled = enabled)
+            KeyBank {
+                MomentaryKey(
+                    label = stringResource(Res.string.import_remove_all),
+                    onClick = onRemoveAll,
+                    enabled = enabled,
+                    destructive = true,
+                )
+            }
         }
     }
 }
@@ -145,34 +151,35 @@ internal fun ImportRowActions(
     ) {
         return
     }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    KeyBank {
         if (section == ImportReportSection.ATTENTION) {
-            NdTextButton(
-                stringResource(Res.string.action_retry),
+            MomentaryKey(
+                label = stringResource(Res.string.action_retry),
                 onClick = onRetry,
                 enabled = enabled,
                 modifier = Modifier.testTag("import-retry-${item.ordinal}"),
             )
-            NdTextButton(
-                stringResource(Res.string.import_edit_url),
+            MomentaryKey(
+                label = stringResource(Res.string.import_edit_url),
                 onClick = onEditUrl,
                 enabled = enabled,
                 modifier = Modifier.testTag("import-edit-${item.ordinal}"),
             )
         }
         if (item.status == ImportItemStatus.AUTH_REQUIRED) {
-            NdTextButton(
-                stringResource(Res.string.import_enter_password),
+            MomentaryKey(
+                label = stringResource(Res.string.import_enter_password),
                 onClick = onPassword,
                 enabled = enabled,
                 modifier = Modifier.testTag("import-password-${item.ordinal}"),
             )
         }
         val removeLabel = stringResource(Res.string.import_remove_item, displayMetadata(item.title))
-        NdTextButton(
-            stringResource(Res.string.import_remove),
+        MomentaryKey(
+            label = stringResource(Res.string.import_remove),
             onClick = onRemove,
             enabled = enabled,
+            destructive = true,
             modifier =
                 Modifier.testTag("import-remove-${item.ordinal}").semantics {
                     contentDescription = removeLabel

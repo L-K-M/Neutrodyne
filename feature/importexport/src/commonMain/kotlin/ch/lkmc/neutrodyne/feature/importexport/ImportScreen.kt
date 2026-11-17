@@ -3,7 +3,8 @@
 package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,13 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -55,28 +54,30 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
-import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
-import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
-import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
-import ch.lkmc.neutrodyne.core.designsystem.components.NdOutlinedButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.components.rememberMonogramPainter
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.EngravedHeading
+import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
+import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
+import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeys
+import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
-import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -89,6 +90,7 @@ import ch.lkmc.neutrodyne.core.model.reportSection
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.FeedErrorText
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -184,6 +186,8 @@ import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 private val MONOGRAM = 40.dp
+private val ImportSlipShape = RoundedCornerShape(4.dp)
+private val TagShape = RoundedCornerShape(3.dp)
 
 /**
  * The `ImportKey` screen (05 Preview contract, 08 Import): one route body for the session's
@@ -240,11 +244,13 @@ internal fun ImportScreen(
                 navigation = { NavBackButton() },
                 actions = {
                     if (editable) {
-                        NdTextButton(
-                            label = stringResource(Res.string.action_cancel),
-                            enabled = !state.busy,
-                            onClick = onCancelPreview,
-                        )
+                        KeyBank {
+                            MomentaryKey(
+                                label = stringResource(Res.string.action_cancel),
+                                enabled = !state.busy,
+                                onClick = onCancelPreview,
+                            )
+                        }
                     }
                 },
             )
@@ -406,7 +412,7 @@ private fun SessionBody(
                 }
                 if (state.proposals.isNotEmpty() || session.options.importGroups) {
                     item(key = "groupsHead", contentType = "section") {
-                        SectionLabel(stringResource(Res.string.import_groups_section))
+                        EngravedHeading(stringResource(Res.string.import_groups_section))
                         GroupsBlock(
                             proposals = state.proposals,
                             importGroups = session.options.importGroups,
@@ -418,7 +424,7 @@ private fun SessionBody(
                     }
                 }
                 item(key = "options", contentType = "section") {
-                    SectionLabel(stringResource(Res.string.import_options_section))
+                    EngravedHeading(stringResource(Res.string.import_options_section))
                     OptionsBlock(
                         session = session,
                         state = state,
@@ -435,16 +441,13 @@ private fun SessionBody(
                     SearchField(state.query, onQuery)
                 }
                 item(key = "bulk", contentType = "controls") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        NdTextButton(
+                    KeyBank(Modifier.padding(horizontal = 16.dp)) {
+                        MomentaryKey(
                             label = stringResource(Res.string.selection_select_all),
                             enabled = !state.busy,
                             onClick = onSelectAll,
                         )
-                        NdTextButton(
+                        MomentaryKey(
                             label = stringResource(Res.string.import_select_none),
                             enabled = !state.busy,
                             onClick = onSelectNone,
@@ -582,18 +585,16 @@ private fun SessionHeader(session: ImportSessionView) {
         } else {
             pluralStringResource(Res.plurals.import_podcast_count, total, total)
         }
-    ListItem(
-        headlineContent = {
-            Text(
-                stringResource(
-                    Res.string.import_header_in,
-                    counts,
-                    session.sourceName?.let(::displayMetadata) ?: stringResource(Res.string.import_source_unknown),
-                ),
-                style = MaterialTheme.typography.titleMedium,
-            )
-        },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+    SettingsRow(
+        icon = null,
+        title =
+            stringResource(
+                Res.string.import_header_in,
+                counts,
+                session.sourceName?.let(::displayMetadata) ?: stringResource(Res.string.import_source_unknown),
+            ),
+        summary = null,
+        onClick = null,
     )
 }
 
@@ -663,9 +664,12 @@ private fun GroupsBlock(
 ) {
     val masterLabel = stringResource(Res.string.import_groups_master)
     Column {
-        ListItem(
-            headlineContent = { Text(masterLabel) },
-            trailingContent = {
+        SettingsRow(
+            icon = null,
+            title = masterLabel,
+            summary = null,
+            onClick = null,
+            trailing = {
                 RadioSwitch(
                     checked = importGroups,
                     enabled = enabled,
@@ -692,43 +696,40 @@ private fun GroupProposalRow(
     val reason = proposal.excludedReason
     val name = displayMetadata(proposal.name)
     val includeLabel = stringResource(Res.string.import_group_include, name)
-    ListItem(
-        headlineContent = {
+    val summary =
+        if (reason != null) {
+            excludedReasonText(reason, name)
+        } else {
+            pluralStringResource(
+                Res.plurals.import_group_members,
+                proposal.memberCount,
+                proposal.memberCount,
+            ) +
+                if (proposal.existingGroupId != null) {
+                    " · " + stringResource(Res.string.import_group_existing)
+                } else {
+                    ""
+                }
+        }
+    SettingsRow(
+        icon = null,
+        title = name,
+        summary = summary,
+        onClick = null,
+        trailing = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.width(8.dp))
-                NdTextButton(
+                MomentaryKey(
                     label = stringResource(Res.string.import_group_rename),
                     enabled = enabled,
                     onClick = { onRename(proposal) },
                 )
-            }
-        },
-        supportingContent = {
-            if (reason != null) {
-                Text(excludedReasonText(reason, name))
-            } else {
-                Text(
-                    pluralStringResource(
-                        Res.plurals.import_group_members,
-                        proposal.memberCount,
-                        proposal.memberCount,
-                    ) +
-                        if (proposal.existingGroupId != null) {
-                            " · " + stringResource(Res.string.import_group_existing)
-                        } else {
-                            ""
-                        },
+                RadioSwitch(
+                    checked = proposal.included,
+                    enabled = enabled,
+                    onCheckedChange = { onIncludeGroup(proposal.nameKey, it) },
+                    modifier = Modifier.semantics { contentDescription = includeLabel },
                 )
             }
-        },
-        trailingContent = {
-            RadioSwitch(
-                checked = proposal.included,
-                enabled = enabled,
-                onCheckedChange = { onIncludeGroup(proposal.nameKey, it) },
-                modifier = Modifier.semantics { contentDescription = includeLabel },
-            )
         },
     )
 }
@@ -760,16 +761,19 @@ private fun OptionsBlock(
     val treatPlayedLabel = stringResource(Res.string.import_opt_treat_played)
     val notifyLabel = stringResource(Res.string.import_opt_notify)
     Column {
-        ListItem(
-            headlineContent = { Text(stringResource(Res.string.import_target_label)) },
-            supportingContent = {
-                Text(targetLabel?.let(::displayMetadata) ?: stringResource(Res.string.import_target_none))
-            },
-            modifier = Modifier.clickable(enabled = enabled, onClick = onPickTarget),
+        SettingsRow(
+            icon = null,
+            title = stringResource(Res.string.import_target_label),
+            summary = targetLabel?.let(::displayMetadata) ?: stringResource(Res.string.import_target_none),
+            onClick = onPickTarget,
+            enabled = enabled,
         )
-        ListItem(
-            headlineContent = { Text(treatPlayedLabel) },
-            trailingContent = {
+        SettingsRow(
+            icon = null,
+            title = treatPlayedLabel,
+            summary = null,
+            onClick = null,
+            trailing = {
                 RadioSwitch(
                     checked = session.options.treatExistingAsPlayed,
                     enabled = enabled,
@@ -778,9 +782,12 @@ private fun OptionsBlock(
                 )
             },
         )
-        ListItem(
-            headlineContent = { Text(notifyLabel) },
-            trailingContent = {
+        SettingsRow(
+            icon = null,
+            title = notifyLabel,
+            summary = null,
+            onClick = null,
+            trailing = {
                 RadioSwitch(
                     checked = session.options.notifyNewEpisodes,
                     enabled = enabled,
@@ -802,33 +809,34 @@ private fun ChipsRow(
     onFilter: (ImportItemFilter) -> Unit,
     report: Boolean = false,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        NdFilterChip(
-            selected = filter == ImportItemFilter.ALL,
-            onClick = { onFilter(ImportItemFilter.ALL) },
-            label = stringResource(Res.string.selection_select_all),
-        )
-        if (!report) {
-            NdFilterChip(
-                selected = filter == ImportItemFilter.NEW_ONLY,
-                onClick = { onFilter(ImportItemFilter.NEW_ONLY) },
-                label = stringResource(Res.string.import_filter_new),
+    val options =
+        if (report) {
+            listOf(ImportItemFilter.ALL, ImportItemFilter.NOT_IMPORTED, ImportItemFilter.NEEDS_ATTENTION)
+        } else {
+            listOf(
+                ImportItemFilter.ALL,
+                ImportItemFilter.NEW_ONLY,
+                ImportItemFilter.NOT_IMPORTED,
+                ImportItemFilter.NEEDS_ATTENTION,
             )
         }
-        NdFilterChip(
-            selected = filter == ImportItemFilter.NOT_IMPORTED,
-            onClick = { onFilter(ImportItemFilter.NOT_IMPORTED) },
-            label = stringResource(Res.string.import_filter_not_imported),
-        )
-        NdFilterChip(
-            selected = filter == ImportItemFilter.NEEDS_ATTENTION,
-            onClick = { onFilter(ImportItemFilter.NEEDS_ATTENTION) },
-            label = stringResource(Res.string.import_filter_attention),
-        )
-    }
+    PianoKeys(
+        options = options,
+        selected = filter,
+        onSelect = onFilter,
+        label = { option ->
+            stringResource(
+                when (option) {
+                    ImportItemFilter.ALL -> Res.string.selection_select_all
+                    ImportItemFilter.NEW_ONLY -> Res.string.import_filter_new
+                    ImportItemFilter.NOT_IMPORTED -> Res.string.import_filter_not_imported
+                    ImportItemFilter.NEEDS_ATTENTION -> Res.string.import_filter_attention
+                },
+            )
+        },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        tag = { option -> "import-filter-${option.name}" },
+    )
 }
 
 @Composable
@@ -836,17 +844,16 @@ private fun SearchField(
     query: String,
     onQuery: (String) -> Unit,
 ) {
-    OutlinedTextField(
+    PaperTextField(
         value = query,
         onValueChange = onQuery,
+        placeholder = stringResource(Res.string.import_search),
         modifier =
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp)
                 .ndTextFieldFocus(),
-        singleLine = true,
-        placeholder = { Text(stringResource(Res.string.import_search)) },
-        leadingIcon = { Icon(NdIcons.Search, contentDescription = null) },
+        leadingIcon = NdIcons.Search,
     )
 }
 
@@ -865,68 +872,77 @@ private fun ImportRow(
 ) {
     val title = displayMetadata(item.title)
     val selectionLabel = stringResource(Res.string.import_select_item, title)
-    ListItem(
-        leadingContent = {
-            val podcastId = item.podcastId
-            if (!preview && podcastId != null) {
-                val art by remember(podcastId, artworkFor) { artworkFor(podcastId) }
-                    .collectAsStateWithLifecycle(initialValue = null)
-                CoverArt(
-                    ref = art?.artwork,
-                    avgArgb = art?.artworkAvgArgb,
-                    monogram = rememberMonogram(title),
-                    modifier = Modifier.size(MONOGRAM).testTag("import-cover-${item.ordinal}"),
-                )
-            } else {
-                Image(
-                    painter = rememberMonogramPainter(rememberMonogram(title)),
-                    contentDescription = null,
-                    modifier =
-                        Modifier
-                            .size(MONOGRAM)
-                            .clip(RoundedCornerShape(8.dp))
-                            .testTag("import-monogram-${item.ordinal}"),
-                )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 3.dp)
+            .shadow(1.5.dp, ImportSlipShape)
+            .clip(ImportSlipShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .border(0.5.dp, Brass.copy(alpha = 0.7f), ImportSlipShape)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val podcastId = item.podcastId
+        if (!preview && podcastId != null) {
+            val art by remember(podcastId, artworkFor) { artworkFor(podcastId) }
+                .collectAsStateWithLifecycle(initialValue = null)
+            CoverArt(
+                ref = art?.artwork,
+                avgArgb = art?.artworkAvgArgb,
+                monogram = rememberMonogram(title),
+                modifier = Modifier.size(MONOGRAM).testTag("import-cover-${item.ordinal}"),
+            )
+        } else {
+            Image(
+                painter = rememberMonogramPainter(rememberMonogram(title)),
+                contentDescription = null,
+                modifier =
+                    Modifier
+                        .size(MONOGRAM)
+                        .clip(RoundedCornerShape(8.dp))
+                        .testTag("import-monogram-${item.ordinal}"),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = courier(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(displayMetadata(item.host), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            StatusChips(item, preview)
+            if (!preview && item.reportSection() == ImportReportSection.ATTENTION) {
+                val fallback =
+                    when (item.status) {
+                        ImportItemStatus.NOT_A_FEED -> FeedErrorKind.NOT_A_FEED
+                        ImportItemStatus.AUTH_REQUIRED -> FeedErrorKind.HTTP_AUTH
+                        ImportItemStatus.GONE -> FeedErrorKind.HTTP_GONE
+                        else -> FeedErrorKind.UNKNOWN
+                    }
+                val errorKind = FeedErrorKind.entries.firstOrNull { it.name == item.errorDetail } ?: fallback
+                Text(FeedErrorText.describe(errorKind).asString(), style = MaterialTheme.typography.bodySmall)
             }
-        },
-        headlineContent = {
-            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        },
-        supportingContent = {
-            Column {
-                Text(displayMetadata(item.host), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                StatusChips(item, preview)
-                if (!preview && item.reportSection() == ImportReportSection.ATTENTION) {
-                    val fallback =
-                        when (item.status) {
-                            ImportItemStatus.NOT_A_FEED -> FeedErrorKind.NOT_A_FEED
-                            ImportItemStatus.AUTH_REQUIRED -> FeedErrorKind.HTTP_AUTH
-                            ImportItemStatus.GONE -> FeedErrorKind.HTTP_GONE
-                            else -> FeedErrorKind.UNKNOWN
-                        }
-                    val errorKind = FeedErrorKind.entries.firstOrNull { it.name == item.errorDetail } ?: fallback
-                    Text(FeedErrorText.describe(errorKind).asString(), style = MaterialTheme.typography.bodySmall)
-                }
-                statusDescription(item)?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall)
-                }
-                if (!preview) ImportRowActions(item, enabled, onRetry, onEditUrl, onPassword, onRemove)
+            statusDescription(item)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
             }
-        },
-        trailingContent = {
-            if (preview && item.selectable) {
-                Checkbox(
-                    checked = item.selected,
-                    enabled = enabled,
-                    onCheckedChange = { onToggle(item.ordinal, it) },
-                    modifier =
-                        Modifier.testTag("import-toggle-${item.ordinal}").semantics {
-                            contentDescription = selectionLabel
-                        },
-                )
-            }
-        },
-    )
+            if (!preview) ImportRowActions(item, enabled, onRetry, onEditUrl, onPassword, onRemove)
+        }
+        if (preview && item.selectable) {
+            RadioSwitch(
+                checked = item.selected,
+                onCheckedChange = { onToggle(item.ordinal, it) },
+                modifier =
+                    Modifier.testTag("import-toggle-${item.ordinal}").semantics {
+                        contentDescription = selectionLabel
+                    },
+                enabled = enabled,
+            )
+        }
+    }
 }
 
 @Composable
@@ -949,16 +965,34 @@ private fun StatusChips(
         }
         val label = statusLabel(item, preview)
         if (label != null) {
-            NdAssistChip(onClick = {}, label = label, enabled = false)
+            StatusTag(label)
         }
         if (item.kind == ImportItemKind.YOUTUBE) {
-            NdAssistChip(
-                onClick = {},
-                label = stringResource(Res.string.import_chip_youtube),
-                leadingIcon = NdIcons.SmartDisplay,
-                enabled = false,
-            )
+            StatusTag(stringResource(Res.string.import_chip_youtube), leadingIcon = NdIcons.SmartDisplay)
         }
+    }
+}
+
+/** A status printed on a small paper tag with a brass edge, like the header's membership plates. */
+@Composable
+private fun StatusTag(
+    label: String,
+    modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
+) {
+    Row(
+        modifier
+            .shadow(1.dp, TagShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest, TagShape)
+            .border(1.dp, Brass, TagShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (leadingIcon != null) {
+            Icon(leadingIcon, contentDescription = null, modifier = Modifier.size(14.dp), tint = Ink)
+        }
+        Text(label, style = MaterialTheme.typography.labelMedium, color = Ink, maxLines = 1)
     }
 }
 
@@ -1167,22 +1201,24 @@ private fun BottomBar(
                         CircularProgressIndicator(Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
                     }
-                    NdButton(
-                        label =
-                            if (session.selectedCount > 0) {
-                                pluralStringResource(
-                                    Res.plurals.import_subscribe_count,
-                                    session.selectedCount,
-                                    session.selectedCount,
-                                )
-                            } else {
-                                // Zero selected rows can still move already-subscribed
-                                // memberships — confirm stays enabled (05's member-only commit).
-                                stringResource(Res.string.import_subscribe)
-                            },
-                        enabled = !busy,
-                        onClick = onConfirm,
-                    )
+                    KeyBank {
+                        MomentaryKey(
+                            label =
+                                if (session.selectedCount > 0) {
+                                    pluralStringResource(
+                                        Res.plurals.import_subscribe_count,
+                                        session.selectedCount,
+                                        session.selectedCount,
+                                    )
+                                } else {
+                                    // Zero selected rows can still move already-subscribed
+                                    // memberships — confirm stays enabled (05's member-only commit).
+                                    stringResource(Res.string.import_subscribe)
+                                },
+                            enabled = !busy,
+                            onClick = onConfirm,
+                        )
+                    }
                 }
             }
         }
@@ -1192,27 +1228,19 @@ private fun BottomBar(
         -> {
             Surface(shadowElevation = 8.dp) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.End) {
-                    NdOutlinedButton(
-                        label = stringResource(Res.string.import_stop),
-                        enabled = !busy,
-                        onClick = onStop,
-                    )
+                    KeyBank {
+                        MomentaryKey(
+                            label = stringResource(Res.string.import_stop),
+                            enabled = !busy,
+                            onClick = onStop,
+                        )
+                    }
                 }
             }
         }
 
         else -> {}
     }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    )
 }
 
 /**
@@ -1250,19 +1278,18 @@ private fun NameDialog(
         dismiss = NdDialogAction(label = stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
         Column {
-            OutlinedTextField(
+            PaperTextField(
                 value = name,
                 onValueChange = {
                     name = it
                     error = null
                 },
-                singleLine = true,
+                placeholder = stringResource(Res.string.import_target_name),
                 enabled = !submitting,
-                isError = error != null,
-                supportingText = { error?.let { Text(groupErrorText(it)) } },
-                label = { Text(stringResource(Res.string.import_target_name)) },
-                modifier = Modifier.ndTextFieldFocus(),
+                errorText = error?.let { groupErrorText(it) },
+                modifier = Modifier.testTag("import-name-input").ndTextFieldFocus(),
             )
+            error?.let { Text(groupErrorText(it), color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -1316,38 +1343,41 @@ private fun TargetGroupList(
     ) {
         LazyColumn {
             item(key = "none") {
-                ListItem(
-                    headlineContent = { Text(stringResource(Res.string.import_target_none)) },
-                    trailingContent = {
+                SettingsRow(
+                    icon = null,
+                    title = stringResource(Res.string.import_target_none),
+                    summary = null,
+                    onClick = { onPick(null) },
+                    trailing = {
                         if (selectedId == null && selectedName == null) {
                             Icon(NdIcons.Check, contentDescription = null)
                         }
                     },
-                    modifier = Modifier.clickable { onPick(null) },
                 )
             }
             items(count = groups.size, key = { groups[it].id }) { index ->
                 val group = groups[index]
-                ListItem(
-                    headlineContent = { Text(displayMetadata(group.name)) },
-                    trailingContent = {
+                SettingsRow(
+                    icon = null,
+                    title = displayMetadata(group.name),
+                    summary = null,
+                    onClick = { onPick(group.id) },
+                    trailing = {
                         if (selectedId == group.id) Icon(NdIcons.Check, contentDescription = null)
                     },
-                    modifier = Modifier.clickable { onPick(group.id) },
                 )
             }
             item(key = "new") {
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            selectedName?.let(::displayMetadata)
-                                ?: stringResource(Res.string.import_target_new),
-                        )
-                    },
-                    trailingContent = {
+                SettingsRow(
+                    icon = null,
+                    title =
+                        selectedName?.let(::displayMetadata)
+                            ?: stringResource(Res.string.import_target_new),
+                    summary = null,
+                    onClick = onNewName,
+                    trailing = {
                         if (selectedName != null) Icon(NdIcons.Check, contentDescription = null)
                     },
-                    modifier = Modifier.clickable { onNewName() },
                 )
             }
         }
