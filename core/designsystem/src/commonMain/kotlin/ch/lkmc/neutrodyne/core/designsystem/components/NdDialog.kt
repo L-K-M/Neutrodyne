@@ -2,17 +2,38 @@
 
 package ch.lkmc.neutrodyne.core.designsystem.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
+import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
+import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
 
 /**
  * One dialog action button: resolved [label] plus the callback. [role] marks destructive
@@ -25,10 +46,11 @@ public data class NdDialogAction(
 )
 
 /**
- * `AlertDialog` wrapper (08 Nd wrappers). On desktop Compose `AlertDialog` is window-backed, so it
- * renders above the expanded player, which is why navigation-level dialogs use it too. The text
- * body is bounded by the dialog's layout and scrolls, so long content (the Licences detail's full
- * terms) stays reachable at any font size.
+ * The app's dialog (08 Nd wrappers, PO-55): a paper card in a brass rim with the title in
+ * Courier and its actions as momentary piano keys. It is a `BasicAlertDialog`, so on the desktop it
+ * is window-backed and renders above the expanded player, which is why navigation-level dialogs
+ * use it too. The text body is bounded by the dialog's layout and scrolls, so long content (the
+ * Licences detail's full terms) stays reachable at any font size.
  */
 @Composable
 public fun NdDialog(
@@ -63,6 +85,7 @@ public fun NdDialog(
  * layout; a scrollable [content] (for example `Column` with `verticalScroll`) keeps long content
  * reachable.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun NdDialog(
     onDismissRequest: () -> Unit,
@@ -74,24 +97,57 @@ public fun NdDialog(
     properties: DialogProperties = DialogProperties(),
     content: @Composable () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismissRequest,
-        modifier = modifier,
-        confirmButton = {
-            if (confirm != null) {
-                NdTextButton(label = confirm.label, role = confirm.role, onClick = confirm.onClick)
+    BasicAlertDialog(onDismissRequest = onDismissRequest, modifier = modifier, properties = properties) {
+        Column(
+            Modifier
+                .widthIn(min = DIALOG_MIN_WIDTH, max = DIALOG_MAX_WIDTH)
+                .shadow(6.dp, DialogShape)
+                .clip(DialogShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .border(1.5.dp, Brass, DialogShape)
+                .padding(DIALOG_PADDING),
+        ) {
+            if (icon != null) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = Ink,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp).size(24.dp),
+                )
             }
-        },
-        dismissButton = {
-            if (dismiss != null) {
-                NdTextButton(label = dismiss.label, role = dismiss.role, onClick = dismiss.onClick)
+            if (title != null) {
+                Text(
+                    title,
+                    Modifier
+                        .align(if (icon != null) Alignment.CenterHorizontally else Alignment.Start)
+                        .padding(bottom = 12.dp)
+                        .semantics { heading() },
+                    color = Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                )
             }
-        },
-        icon = { if (icon != null) Icon(icon, contentDescription = null) },
-        title = {
-            if (title != null) Text(title, style = MaterialTheme.typography.headlineSmall)
-        },
-        text = content,
-        properties = properties,
-    )
+            // The body takes what the title and keys leave; long bodies scroll inside it.
+            Box(Modifier.weight(1f, fill = false)) {
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                    ProvideTextStyle(MaterialTheme.typography.bodyMedium, content)
+                }
+            }
+            if (confirm != null || dismiss != null) {
+                KeyBank(Modifier.align(Alignment.End).padding(top = 18.dp)) {
+                    for (action in listOfNotNull(dismiss, confirm)) {
+                        MomentaryKey(
+                            action.label,
+                            action.onClick,
+                            destructive = action.role == NdActionRole.DESTRUCTIVE,
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
+
+private val DialogShape = RoundedCornerShape(6.dp)
+private val DIALOG_MIN_WIDTH = 280.dp
+private val DIALOG_MAX_WIDTH = 560.dp
+private val DIALOG_PADDING = 22.dp

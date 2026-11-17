@@ -29,6 +29,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -124,7 +125,8 @@ public fun PianoKeySlot(
  * exclusive banks and [Role.Checkbox] for latching keys, which expose `selected`; [Role.Button]
  * makes a momentary key that never latches. A short printed [label] can be read as a fuller
  * [spokenLabel] that contains it (WCAG 2.5.3).
- * A disabled key is dimmed and ignores clicks. At least 48 dp tall.
+ * A disabled key is dimmed and ignores clicks. At least 48 dp tall. A [destructive] key prints
+ * its label in signal red (08 Dialogs: destructive confirms stand out).
  */
 @Composable
 public fun PianoKey(
@@ -135,6 +137,7 @@ public fun PianoKey(
     role: Role = Role.Tab,
     enabled: Boolean = true,
     spokenLabel: String = label,
+    destructive: Boolean = false,
 ) {
     Column(
         modifier
@@ -156,7 +159,7 @@ public fun PianoKey(
         // Momentary keys never latch, so they carry no lamp; the empty socket keeps every cap in
         // a bank at the same height.
         if (role != Role.Button) Lamp(pressed) else Spacer(Modifier.height(LAMP_SIZE + LAMP_PADDING))
-        KeyCap(label, spokenLabel, pressed)
+        KeyCap(label, spokenLabel, pressed, if (destructive) MaterialTheme.colorScheme.error else Ink)
     }
 }
 
@@ -169,15 +172,24 @@ public fun KeyBank(
     PianoKeySlot(modifier, rememberScrollState(), content)
 }
 
-/** A momentary piano key: a button that springs back, without a lamp. */
+/** A momentary piano key: a button that springs back, without a lamp; see [PianoKey]. */
 @Composable
 public fun MomentaryKey(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    destructive: Boolean = false,
 ) {
-    PianoKey(label, pressed = false, onClick = onClick, modifier = modifier, role = Role.Button, enabled = enabled)
+    PianoKey(
+        label,
+        pressed = false,
+        onClick = onClick,
+        modifier = modifier,
+        role = Role.Button,
+        enabled = enabled,
+        destructive = destructive,
+    )
 }
 
 /**
@@ -293,6 +305,7 @@ private fun KeyCap(
     text: String,
     spokenText: String,
     pressed: Boolean,
+    color: Color,
 ) {
     Box(
         Modifier
@@ -318,7 +331,7 @@ private fun KeyCap(
         Text(
             text.uppercase(),
             Modifier.clearAndSetSemantics { this.text = AnnotatedString(spokenText) },
-            color = Ink,
+            color = color,
             // The key's content width is measured at fontSize, so it stays the full size: without
             // it a content-sized key would be as wide as a label in the theme's larger body text.
             fontSize = KEY_LABEL_SIZE,
