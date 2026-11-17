@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertAll
+import androidx.compose.ui.test.assertAny
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
@@ -833,8 +834,9 @@ class FeedsScreenTest {
             fixture.feeds.prefs.value = mapOf(FeedSource.All to FeedPrefs(hideOlderThanDays = 7))
             setContent { fixture.Content() }
             fixture.awaitSelected(this, 0)
-            // The age window is no filter: the Clear key stays released and dimmed.
-            onAllNodesWithText("Clear filters").assertAll(isNotEnabled())
+            // The age window is no filter: the Clear key is there, released and dimmed. The pager
+            // composes neighbouring pages too, so every copy must be dimmed and at least one exist.
+            onAllNodesWithText("Clear filters").assertAny(isNotEnabled()).assertAll(isNotEnabled())
             pageList(FeedSourceRef.All).performScrollToIndex(35)
             val before =
                 pageList(

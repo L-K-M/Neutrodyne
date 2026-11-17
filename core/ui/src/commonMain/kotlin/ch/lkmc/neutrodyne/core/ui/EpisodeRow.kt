@@ -235,7 +235,7 @@ public fun EpisodeRow(
                     .border(SLIP_EDGE, Brass.copy(alpha = SLIP_EDGE_ALPHA), SlipShape)
                     .padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
             trailing = {
-                // The slip's play key is an ivory key cap like the radio's (PO-55).
+                // The slip's icon keys (play or open, and the hover menu) are ivory key caps (PO-55).
                 CompositionLocalProvider(LocalRadioFaceplate provides true) {
                     TrailingSlot(
                         row = row,
