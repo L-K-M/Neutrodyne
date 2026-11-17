@@ -2,7 +2,13 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -66,6 +72,26 @@ class FeedFilterChipsTest {
                 onNodeWithText("Downloaded").assertIsSelected()
                 onNodeWithText("In progress").assertIsSelected()
                 onNodeWithText("Clear filters").assertExists()
+            } finally {
+                Locale.setDefault(previous)
+            }
+        }
+
+    /** The Clear key is a release key: always in the bank, dimmed until a filter is pressed. */
+    @Test
+    fun clearKeyIsDisabledUntilAFilterIsPressed() =
+        runComposeUiTest {
+            val previous = Locale.getDefault()
+            Locale.setDefault(Locale.ENGLISH)
+            try {
+                var filters by mutableStateOf(FeedFilters())
+                setContent { FeedFilterChips(filters, { filters = it }, AVAILABLE_FEED_FILTER_CAPABILITIES) }
+                onNodeWithText("Clear filters").assertIsNotEnabled()
+                onNodeWithText("Unplayed").assertIsNotSelected().performClick()
+                onNodeWithText("Unplayed").assertIsSelected()
+                onNodeWithText("Clear filters").assertIsEnabled().performClick()
+                onNodeWithText("Unplayed").assertIsNotSelected()
+                assertEquals(FeedFilters(), filters)
             } finally {
                 Locale.setDefault(previous)
             }

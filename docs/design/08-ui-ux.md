@@ -709,6 +709,20 @@ value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
 - Data: 03's `PodcastDetail` (display title, author, description as `ShowNotes`, `artwork`, `bannerUrl`, `sourceType`, `link`, `episodeCount`, `latestEpisodeAt`, `status`, `health: FeedHealth` with the derived `possiblyDead`, `isPrivate`, `episodeOrder`, `showType`, `hasOlderPages`) and `ArtworkRepository.observeColors(detail.artwork.key)` for the header scheme.
 - States: loading → header skeleton (cover box in the monogram tone) + 6 skeleton rows; `observePodcast` emits null (unsubscribed elsewhere, merged into another podcast) → pop with snackbar "This podcast was removed"; offline → offline banner, list from the database, refresh disabled with a tooltip; feed with no episodes → "No episodes yet" (`emptyFeed`, new show); YouTube channel with no visible episodes → "No long-form videos yet. This channel may post only Shorts or live streams." + "Podcast settings" (variants, 04 [UI per capability](04-youtube.md#ui-per-capability-hand-off-to-08-capability-differences-in-ui)); preview resolution failure → the [Add podcast sheet](#add-podcast-sheet) failure texts with Retry.
 
+**Radio podcast page (PO-55, 2026-11-17).** The header is the radio's programme card
+(`PodcastHeader`): the 120 dp cover in a brass edge beside a paper card typed with the title
+and author and a lit "Subscribed" lamp; memberships are small enamel plates with the group's
+colour, opening the membership sheet, each with its own remove key, and "+ Group" is a paper
+tag. The filter chips are a bank of latching piano keys (`FeedFilterChips`): a filter key stays
+pressed in with its lamp lit while on, and the Clear key, printed "Clear" and read "Clear
+filters", releases them; it stays in the bank, dimmed, while nothing is pressed. The bank
+scrolls sideways when the labels do not fit. The order control is a momentary key printed
+"Newest" or "Oldest" (read "Newest first" or "Oldest first") that opens the same menu. Every
+`EpisodeRow` is a cream paper slip inset in the tray, with ivory play and overflow keys; the
+whole list line stays the click and gesture target, and the slip draws the press, hover and
+focus indication. Slips appear wherever `EpisodeRow` does (Podcast, Up next, Feeds). The
+download key and swipes are unchanged, so a left swipe still discards by default.
+
 ### Podcast settings
 
 `PodcastSettingsKey(podcastId)`, `:feature:podcast`. Sections (rows appear in the milestone that delivers their semantics):

@@ -2,10 +2,13 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -28,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -63,6 +69,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.CoverAspect
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
@@ -113,7 +121,12 @@ import androidx.compose.ui.semantics.selected as semanticsSelected
  *
  * Android swipes honour the screen's capability gate; desktop rows only scroll. Selection
  * gestures dispatch IDs; the screen supplies the loaded order for range selection.
+ *
+ * Each row is a paper slip inset in the tray (PO-55). The click target deliberately precedes the
+ * slip's shape: the whole list line takes clicks and gestures, while the slip draws the press,
+ * hover and focus indication.
  */
+@Suppress("ktlint:compose:modifier-clickable-order")
 @Composable
 public fun EpisodeRow(
     row: EpisodeRow,
@@ -145,7 +158,7 @@ public fun EpisodeRow(
         if (selected == true || live?.isNowPlaying == true) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
-            MaterialTheme.colorScheme.surface
+            MaterialTheme.colorScheme.surfaceContainerLowest
         }
     val menuActions =
         rowMenuActions(row, live, caps, style).map { (label, action) ->
@@ -158,12 +171,13 @@ public fun EpisodeRow(
         onAction,
         modifier,
     ) {
+        // Each row is a paper slip in the tray, like the radio's episode slips (PO-55). The whole
+        // list line stays the click target; the slip is inset within it.
         EpisodeRowLayout(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = ROW_MIN_HEIGHT)
-                    .background(container)
+                    .heightIn(min = ROW_MIN_HEIGHT + SLIP_GAP * 2)
                     .hoverable(interactionSource)
                     .onFocusChanged { focused = it.isFocused }
                     .focusRequester(focusRequester)
@@ -200,6 +214,9 @@ public fun EpisodeRow(
                                 }
                             }
                     }.combinedClickable(
+                        interactionSource = interactionSource,
+                        // The press, hover and focus layers draw on the slip, not its margins.
+                        indication = null,
                         role = Role.Button,
                         onClick = {
                             val action =
@@ -210,16 +227,25 @@ public fun EpisodeRow(
                             focusRequester.requestFocus()
                             onAction(EpisodeAction.Select(row.id))
                         },
-                    ).padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
+                    ).padding(horizontal = SLIP_INSET, vertical = SLIP_GAP)
+                    .shadow(SLIP_ELEVATION, SlipShape)
+                    .clip(SlipShape)
+                    .background(container)
+                    .indication(interactionSource, LocalIndication.current)
+                    .border(SLIP_EDGE, Brass.copy(alpha = SLIP_EDGE_ALPHA), SlipShape)
+                    .padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
             trailing = {
-                TrailingSlot(
-                    row = row,
-                    live = live,
-                    caps = caps,
-                    onAction = onAction,
-                    showOverflow = hovered || focused || menuOpen,
-                    onOpenMenu = { menuOpen = true },
-                )
+                // The slip's play key is an ivory key cap like the radio's (PO-55).
+                CompositionLocalProvider(LocalRadioFaceplate provides true) {
+                    TrailingSlot(
+                        row = row,
+                        live = live,
+                        caps = caps,
+                        onAction = onAction,
+                        showOverflow = hovered || focused || menuOpen,
+                        onOpenMenu = { menuOpen = true },
+                    )
+                }
             },
         ) {
             LeadingSlot(row, style)
@@ -861,7 +887,13 @@ public fun DownloadStateButton(
 }
 
 private val ROW_MIN_HEIGHT = 72.dp
-private val ROW_PADDING_H = 16.dp
+private val SlipShape = RoundedCornerShape(4.dp)
+private val SLIP_INSET = 10.dp
+private val SLIP_GAP = 3.dp
+private val SLIP_ELEVATION = 1.5.dp
+private val SLIP_EDGE = 0.5.dp
+private const val SLIP_EDGE_ALPHA = 0.7f
+private val ROW_PADDING_H = 12.dp
 private val ROW_PADDING_V = 8.dp
 private val COVER_SIZE = 56.dp
 private val VIDEO_THUMB_WIDTH = 100.dp

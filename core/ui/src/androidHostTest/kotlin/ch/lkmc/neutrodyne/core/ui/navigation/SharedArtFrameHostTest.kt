@@ -196,9 +196,16 @@ internal class SharedArtFrameHostTest : NdNavHostHarness() {
         prepare("reduced")
         install(reduced = true)
         assertTrue(!scopePresent)
+        val before = artFrame().width
         rule.runOnUiThread { navigation.push(PodcastKey(1)) }
         val widths = watchFrames(24)
-        assertTrue(widths.none { it in 75..150 }, "shared art animated despite reduced motion: $widths")
+        val after = widths.last()
+        assertTrue(after > before + SIZE_SLACK * 2, "fixture must change the art size: $before -> $widths")
+        // The art jumps from the tile to the hero size; no frame lies in between.
+        assertTrue(
+            widths.none { it in (before + SIZE_SLACK) until (after - SIZE_SLACK) },
+            "shared art animated despite reduced motion: $widths",
+        )
     }
 
     @Test
@@ -393,3 +400,5 @@ internal class SharedArtFrameHostTest : NdNavHostHarness() {
 
     private fun Color.isArt(): Boolean = blue > .8f && red + green in .8f..1.2f
 }
+
+private const val SIZE_SLACK = 4
