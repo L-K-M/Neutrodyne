@@ -7,11 +7,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -70,12 +74,27 @@ class GroupEditScreenTest {
         runComposeUiTest {
             var uiState by mutableStateOf(GroupEditUiState(loaded = true, draft = GroupEditDraft(name = "Dup")))
             setEditor({ uiState })
+            onNodeWithTag("groupName").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Error))
             runOnIdle { uiState = uiState.copy(nameError = GroupError.NameEmpty) }
             onNodeWithText("Enter a name").assertIsDisplayed()
+            // Screen readers hear the error on the field itself, as with Material's text fields.
+            onNodeWithTag("groupName").assert(SemanticsMatcher.expectValue(SemanticsProperties.Error, "Enter a name"))
             runOnIdle { uiState = uiState.copy(nameError = GroupError.NameTooLong(40)) }
             onNodeWithText("Use at most 40 characters").assertIsDisplayed()
             runOnIdle { uiState = uiState.copy(nameError = GroupError.NameTaken(2)) }
             onNodeWithText("A group named 'Dup' already exists").assertIsDisplayed()
+        }
+
+    @Test
+    fun busyEditorShowsItsControlsDisabled() =
+        runComposeUiTest {
+            val draft = GroupEditDraft(name = "Audiobooks")
+            setEditor({ GroupEditUiState(loaded = true, busy = true, draft = draft) })
+            onNodeWithTag("groupName").assertIsNotEnabled()
+            onNodeWithTag("groupIconPicker").assertIsNotEnabled()
+            onNodeWithText("Oldest first").assertIsNotEnabled()
+            onNodeWithText("Newest first").assertIsNotEnabled()
+            onNodeWithText("Play oldest first?").assertIsNotEnabled()
         }
 
     @Test

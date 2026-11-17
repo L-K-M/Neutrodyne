@@ -188,7 +188,7 @@ internal fun GroupEditScreen(
                         placeholder = stringResource(Res.string.group_edit_name),
                         modifier = Modifier.testTag("groupName").ndTextFieldFocus(),
                         enabled = enabled,
-                        isError = error != null,
+                        errorText = error,
                         trailingText =
                             stringResource(
                                 Res.string.group_edit_name_count,
@@ -219,8 +219,9 @@ internal fun GroupEditScreen(
                     FieldLabel(stringResource(Res.string.group_edit_icon))
                     EnamelSelector(
                         draft.iconKey ?: stringResource(Res.string.group_edit_none),
-                        onClick = { if (enabled) iconsOpen = true },
+                        onClick = { iconsOpen = true },
                         modifier = Modifier.testTag("groupIconPicker"),
+                        enabled = enabled,
                     )
                 }
             }
@@ -230,7 +231,8 @@ internal fun GroupEditScreen(
                     PianoKeys(
                         options = FeedOrder.entries,
                         selected = draft.playOrder,
-                        onSelect = { if (enabled) onEdit(draft.copy(playOrder = it)) },
+                        onSelect = { onEdit(draft.copy(playOrder = it)) },
+                        enabled = enabled,
                         label = {
                             stringResource(
                                 if (it ==
@@ -246,9 +248,11 @@ internal fun GroupEditScreen(
                     )
                     if (draft.playOrder != FeedOrder.OLDEST_FIRST && GroupNames.suggestsOldestFirst(draft.name)) {
                         KeyBank {
-                            MomentaryKey(stringResource(Res.string.group_edit_oldest_hint), {
-                                if (enabled) onEdit(draft.copy(playOrder = FeedOrder.OLDEST_FIRST))
-                            })
+                            MomentaryKey(
+                                stringResource(Res.string.group_edit_oldest_hint),
+                                { onEdit(draft.copy(playOrder = FeedOrder.OLDEST_FIRST)) },
+                                enabled = enabled,
+                            )
                         }
                     }
                 }

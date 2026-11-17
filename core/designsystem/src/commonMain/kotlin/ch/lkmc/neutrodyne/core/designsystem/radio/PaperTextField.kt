@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -44,9 +45,9 @@ import androidx.compose.ui.unit.sp
  * A text field as a strip of paper in a brass-rimmed slot, typed in Courier like a label maker's
  * tape: an optional printed [leadingIcon], the [placeholder] until something is typed, and an
  * optional [trailingText] at the end (such as a character count). The rim turns amber while the
- * field has focus and red when [isError]. Like a hint, [placeholder] names the empty field for
- * screen readers; typed text then speaks for itself. Callers add focus requesters and key handling
- * through [modifier].
+ * field has focus and red while there is an [errorText], which screen readers hear as the field's
+ * error. Like a hint, [placeholder] names the empty field for screen readers; typed text then
+ * speaks for itself. Callers add focus requesters and key handling through [modifier].
  */
 @Composable
 public fun PaperTextField(
@@ -55,7 +56,7 @@ public fun PaperTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    isError: Boolean = false,
+    errorText: String? = null,
     leadingIcon: ImageVector? = null,
     trailingText: String? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -65,7 +66,7 @@ public fun PaperTextField(
     val focused by interaction.collectIsFocusedAsState()
     val rim =
         when {
-            isError -> ErrorRed
+            errorText != null -> ErrorRed
             focused -> FocusAmber
             else -> null
         }
@@ -76,7 +77,10 @@ public fun PaperTextField(
             modifier
                 .fillMaxWidth()
                 .alpha(if (enabled) 1f else DISABLED_ALPHA)
-                .semantics { if (value.isEmpty()) contentDescription = placeholder },
+                .semantics {
+                    if (value.isEmpty()) contentDescription = placeholder
+                    if (errorText != null) error(errorText)
+                },
         enabled = enabled,
         textStyle = TextStyle(color = Ink, fontFamily = courier(), fontSize = FIELD_TEXT),
         keyboardOptions = keyboardOptions,

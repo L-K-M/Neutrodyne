@@ -74,11 +74,13 @@ public fun EnamelSelector(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier
             .heightIn(min = 48.dp)
-            .clickable(role = Role.DropdownList, onClick = onClick),
+            .alpha(if (enabled) 1f else DISABLED_ALPHA)
+            .clickable(enabled = enabled, role = Role.DropdownList, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         EnamelPlaque(Modifier, small = true) {

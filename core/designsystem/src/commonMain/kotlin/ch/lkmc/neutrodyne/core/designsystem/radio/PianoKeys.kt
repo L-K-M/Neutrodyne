@@ -67,6 +67,7 @@ public fun <T> PianoKeys(
     onSelect: (T) -> Unit,
     label: @Composable (T) -> String,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     tag: (T) -> String? = { null },
 ) {
     PianoKeySlot(modifier) {
@@ -77,6 +78,7 @@ public fun <T> PianoKeys(
                 onClick = { onSelect(option) },
                 modifier = Modifier.weight(1f).let { m -> tag(option)?.let { m.testTag(it) } ?: m },
                 role = Role.Tab,
+                enabled = enabled,
             )
         }
     }
