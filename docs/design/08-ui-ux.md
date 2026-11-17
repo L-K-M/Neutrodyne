@@ -1012,6 +1012,15 @@ accessibility and permission behavior still require device/packaged-app runs.
 - `DownloadsOverview.notices` render as `NdBanner`s above the lists (at most two, in 07's table order) with 07's texts adopted as the final wording ([07 Notices](07-downloads.md#notices)): `DATA_SAVER` (Android; open the data-restriction settings), `BACKGROUND_RESTRICTED` (Android), `NOTIFICATIONS_OFF` (Android; Allow → the contextual prompt, [Permission prompts](#permission-prompts)), `CAP_REACHED`, `STORAGE_LOW` (Manage storage), `ROOT_UNAVAILABLE`, `YOUTUBE_PAUSED` (04's breaker text with "Try now" → `YouTubeHealth.retryNow()`; shown above the YouTube rows), `MOVE_IN_PROGRESS`, `ORPHAN_FILES` (Delete → confirmation → `deleteOrphanFiles()`). In external mode completed YouTube downloads stay listed with Delete and Share file (desktop: "Show in …") but no play button (they are not played in the app, 04 [Engine absent or disabled](04-youtube.md#engine-absent-or-disabled)); queued YouTube rows wait with `YOUTUBE_ENGINE_OFF`, or, on an APK without the engine (`NOT_IN_THIS_APK`), end `FAILED(UNSUPPORTED_STREAM)` with the YouTube text of [Download status text](#download-status-text).
 - Empty: "Downloaded episodes play offline" + storage summary + "Auto-download settings" (`SettingsKey(DOWNLOADS)`).
 
+**Radio Downloads (PO-55, 2026-11-17).** The faceplate has no settings gear; Settings opens
+from the radio's Menu. Storage is an analog meter behind glass (`NeedleGauge`, printed
+"Storage", 0 to "Full") under the used and free line, which states the values; the meter is
+decorative. Section and selection actions (Download settings, Pause all, Resume all, Retry all,
+Play all, Select all completed, Select played, Delete and Cancel for a selection) are momentary
+piano keys in banks that scroll sideways; momentary keys have no lamp. Each download is a paper
+slip whose whole list line stays the click target, with its cover in a recess, ivory Play, state
+and overflow keys, and a needle window (`NeedleWindow`) for a known download progress.
+
 ### Discover
 
 `DiscoverKey`, `:feature:discover`, M1 (add by URL and import entry points), M7 (search, charts), M9a (YouTube channel search with the engine).

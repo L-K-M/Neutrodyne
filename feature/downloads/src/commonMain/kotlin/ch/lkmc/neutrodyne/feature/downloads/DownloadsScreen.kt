@@ -3,20 +3,30 @@
 package ch.lkmc.neutrodyne.feature.downloads
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -24,6 +34,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,7 +43,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -43,9 +57,11 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -59,6 +75,13 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
+import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleGauge
+import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleWindow
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
+import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.WaitReason
@@ -93,6 +116,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_dismiss
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_body
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_manual
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_failed
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_gauge_full
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_gauge_storage
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_in_progress
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_loading
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_partial
@@ -161,7 +186,8 @@ internal fun DownloadsScreen(
         margin = 0,
     )
     Column(Modifier.fillMaxSize()) {
-        NdTopAppBar(title = stringResource(Res.string.nav_downloads), actions = { SettingsGearButton() })
+        // Settings and the other destinations live in the radio's Menu (PO-55).
+        NdTopAppBar(title = stringResource(Res.string.nav_downloads))
         // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
         val scrollbars = LocalScrollbars.current
         val scrollbarColor = ndScrollbarColor(scrollbars)
@@ -189,11 +215,12 @@ internal fun DownloadsScreen(
                     state.storage?.let { usage ->
                         val free = usage.freeBytes
                         if (free != null && usage.usedBytes + free > 0) {
-                            LinearProgressIndicator(
-                                progress =
-                                    { usage.usedBytes.toFloat() / (usage.usedBytes + free) },
-                                modifier =
-                                    Modifier.fillMaxWidth(),
+                            // A storage meter behind glass (PO-55); the line above states the values.
+                            NeedleGauge(
+                                fraction = usage.usedBytes.toFloat() / (usage.usedBytes + free),
+                                caption = stringResource(Res.string.downloads_gauge_storage),
+                                endLabel = stringResource(Res.string.downloads_gauge_full),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             )
                         }
                         Text(
@@ -204,7 +231,9 @@ internal fun DownloadsScreen(
                             ),
                         )
                     }
-                    NdTextButton(stringResource(Res.string.downloads_settings), onClick = onSettings)
+                    KeyBank(Modifier.padding(top = 8.dp)) {
+                        MomentaryKey(stringResource(Res.string.downloads_settings), onSettings)
+                    }
                 }
             }
             if (rows == null) {
@@ -236,8 +265,8 @@ internal fun DownloadsScreen(
             if (rows.inProgress.isNotEmpty()) {
                 item("progress-header") {
                     SectionHeader(stringResource(Res.string.downloads_in_progress, rows.inProgress.size)) {
-                        NdTextButton(stringResource(Res.string.downloads_pause_all), onClick = onPauseAll)
-                        NdTextButton(stringResource(Res.string.downloads_resume_all), onClick = onResumeAll)
+                        MomentaryKey(stringResource(Res.string.downloads_pause_all), onPauseAll)
+                        MomentaryKey(stringResource(Res.string.downloads_resume_all), onResumeAll)
                     }
                 }
                 items(rows.inProgress, key = { it.status.episodeId }) { entry ->
@@ -273,10 +302,7 @@ internal fun DownloadsScreen(
                             rows.failed.size,
                         ),
                     ) {
-                        NdTextButton(
-                            stringResource(Res.string.downloads_retry_all),
-                            onClick = onRetryAll,
-                        )
+                        MomentaryKey(stringResource(Res.string.downloads_retry_all), onRetryAll)
                     }
                 }
                 items(rows.failed, key = { it.status.episodeId }) { entry ->
@@ -304,24 +330,21 @@ internal fun DownloadsScreen(
                             downloadSize(rows.completed.sumOf { it.status.totalBytes ?: it.status.downloadedBytes }),
                         ),
                     ) {
-                        NdTextButton(stringResource(Res.string.downloads_play_all), onClick = { onPlay(null) })
+                        MomentaryKey(stringResource(Res.string.downloads_play_all)) { onPlay(null) }
+                        // Selection is limited to completed files; queued transfers cannot be deleted
+                        // accidentally.
+                        MomentaryKey(stringResource(Res.string.downloads_select_all), onSelectAll)
+                        MomentaryKey(stringResource(Res.string.downloads_select_played), onSelectPlayedEpisodes)
                     }
-                    // Selection is limited to completed files; queued transfers cannot be deleted accidentally.
-                    FlowRow {
-                        NdTextButton(stringResource(Res.string.downloads_select_all), onClick = onSelectAll)
-                        NdTextButton(
-                            stringResource(Res.string.downloads_select_played),
-                            onClick =
-                            onSelectPlayedEpisodes,
+                    if (state.selected.isNotEmpty()) {
+                        Text(
+                            stringResource(Res.string.downloads_selected, state.selected.size),
+                            Modifier.padding(start = 16.dp, top = 8.dp),
+                            style = MaterialTheme.typography.labelLarge,
                         )
-                        if (state.selected.isNotEmpty()) {
-                            Text(stringResource(Res.string.downloads_selected, state.selected.size))
-                            NdTextButton(stringResource(Res.string.action_delete_download), onClick = onDeleteSelection)
-                            NdTextButton(
-                                stringResource(Res.string.downloads_cancel_selection),
-                                onClick =
-                                onClearSelection,
-                            )
+                        KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            MomentaryKey(stringResource(Res.string.action_delete_download), onDeleteSelection)
+                            MomentaryKey(stringResource(Res.string.downloads_cancel_selection), onClearSelection)
                         }
                     }
                 }
@@ -352,17 +375,41 @@ internal fun DownloadsScreen(
     }
 }
 
+/** A section title typed on the paper with its momentary keys below it (PO-55). */
 @Composable
 private fun SectionHeader(
     title: String,
-    actions: @Composable () -> Unit,
+    actions: @Composable RowScope.() -> Unit,
 ) {
-    Column(Modifier.padding(16.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        FlowRow { actions() }
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        KeyBank(Modifier.padding(top = 6.dp), content = actions)
     }
 }
 
+/** A bank of momentary keys that scrolls sideways when the labels do not fit. */
+@Composable
+private fun KeyBank(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    PianoKeySlot(modifier.horizontalScroll(rememberScrollState()), content = content)
+}
+
+@Composable
+private fun MomentaryKey(
+    label: String,
+    onClick: () -> Unit,
+) {
+    PianoKey(label, pressed = false, onClick = onClick, role = Role.Button)
+}
+
+/**
+ * One download as a paper slip in the tray (PO-55). The click target deliberately precedes the
+ * slip's shape: the whole list line takes clicks and gestures, while the slip draws the press,
+ * hover and focus indication.
+ */
+@Suppress("ktlint:compose:modifier-clickable-order")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DownloadEntryRow(
@@ -450,6 +497,9 @@ private fun DownloadEntryRow(
     val focus = remember { FocusRequester() }
     var menu by remember { mutableStateOf(false) }
     val summary = "${entry.episodeTitle}. ${entry.podcastTitle}. $text"
+    val interaction = remember { MutableInteractionSource() }
+    val slipColor =
+        if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest
     Row(
         Modifier
             .fillMaxWidth()
@@ -503,6 +553,9 @@ private fun DownloadEntryRow(
                 onSelect = { if (completed) onSelect(id) },
                 onExtend = { if (completed) onSelect(id) },
             ).combinedClickable(
+                interactionSource = interaction,
+                // The press, hover and focus layers draw on the slip, not its margins.
+                indication = null,
                 onClick = { if (selectionMode == DownloadSelectionMode.SELECT) onSelect(id) else onOpen(id) },
                 onLongClick = { if (completed) onSelect(id) else menu = true },
             ).semantics(mergeDescendants = true) {
@@ -516,7 +569,13 @@ private fun DownloadEntryRow(
                             true
                         }
                     }
-            }.padding(16.dp),
+            }.padding(horizontal = 10.dp, vertical = 3.dp)
+            .shadow(1.5.dp, SlipShape)
+            .clip(SlipShape)
+            .background(slipColor)
+            .indication(interaction, LocalIndication.current)
+            .border(0.5.dp, Brass.copy(alpha = 0.7f), SlipShape)
+            .padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (selectionMode == DownloadSelectionMode.SELECT) {
@@ -527,7 +586,11 @@ private fun DownloadEntryRow(
                     Modifier.clearAndSetSemantics {},
             )
         }
-        CoverArt(entry.artwork, rememberMonogram(entry.podcastTitle), Modifier.size(56.dp).clearAndSetSemantics {})
+        CoverArt(
+            entry.artwork,
+            rememberMonogram(entry.podcastTitle),
+            Modifier.size(56.dp).recess(RoundedCornerShape(3.dp)).clearAndSetSemantics {},
+        )
         Column(Modifier.weight(1f)) {
             Text(entry.episodeTitle, style = MaterialTheme.typography.titleMedium)
             Text(entry.podcastTitle, style = MaterialTheme.typography.bodySmall)
@@ -535,17 +598,39 @@ private fun DownloadEntryRow(
             if (status.state == DownloadState.DOWNLOADING) {
                 val total = progress?.totalBytes ?: status.totalBytes ?: status.estimatedBytes
                 if (total != null && total > 0) {
-                    LinearProgressIndicator(progress = {
-                        ((progress?.downloadedBytes ?: status.downloadedBytes).toFloat() / total).coerceIn(
-                            0f,
-                            1f,
-                        )
-                    }, modifier = Modifier.fillMaxWidth())
+                    NeedleWindow(
+                        ((progress?.downloadedBytes ?: status.downloadedBytes).toFloat() / total).coerceIn(0f, 1f),
+                        Modifier.fillMaxWidth().height(14.dp).padding(top = 2.dp),
+                    )
                 } else {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
             }
         }
+        CompositionLocalProvider(LocalRadioFaceplate provides true) {
+            DownloadRowKeys(completed, status, progress, id, onPlay, onToggle, { menu = true }, actions, menu) {
+                menu =
+                    it
+            }
+        }
+    }
+}
+
+/** The slip's trailing keys: Play or the download state, and the overflow menu, as ivory keys. */
+@Composable
+private fun DownloadRowKeys(
+    completed: Boolean,
+    status: DownloadStatus,
+    progress: LiveProgress?,
+    id: Long,
+    onPlay: (Long?) -> Unit,
+    onToggle: (Long) -> Unit,
+    onOpenMenu: () -> Unit,
+    actions: List<Pair<String, () -> Unit>>,
+    menu: Boolean,
+    onMenu: (Boolean) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         if (completed) {
             NdTooltipIconButton(
                 onClick = { onPlay(id) },
@@ -563,7 +648,7 @@ private fun DownloadEntryRow(
                 },
                 {
                     if (status.state == DownloadState.QUEUED && status.waitReason != WaitReason.NEEDS_FOREGROUND) {
-                        menu = true
+                        onOpenMenu()
                     } else {
                         onToggle(id)
                     }
@@ -573,19 +658,19 @@ private fun DownloadEntryRow(
         }
         Box {
             NdTooltipIconButton(
-                onClick = { menu = true },
+                onClick = onOpenMenu,
                 icon = NdIcons.MoreVert,
                 tooltip =
                     stringResource(Res.string.action_more),
                 modifier = Modifier.clearAndSetSemantics {},
             )
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenu(expanded = menu, onDismissRequest = { onMenu(false) }) {
                 actions.forEach { (label, action) ->
                     DropdownMenuItem(
                         text = { Text(label) },
                         onClick =
                             {
-                                menu = false
+                                onMenu(false)
                                 action()
                             },
                     )
@@ -654,3 +739,5 @@ private fun downloadEntryText(
 }
 
 private enum class DownloadSelectionMode { BROWSE, SELECT }
+
+private val SlipShape = RoundedCornerShape(4.dp)

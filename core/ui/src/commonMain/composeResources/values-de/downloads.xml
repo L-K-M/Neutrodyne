@@ -84,4 +84,7 @@
     </plurals>
     <string name="downloads_too_large">Diese Datei ist zu groß für den gewählten Speicher</string>
     <string name="downloads_options">Download-Aktionen</string>
+    <!-- Printed on the Downloads storage meter (PO-55). -->
+    <string name="downloads_gauge_storage">Speicher</string>
+    <string name="downloads_gauge_full">Voll</string>
 </resources>

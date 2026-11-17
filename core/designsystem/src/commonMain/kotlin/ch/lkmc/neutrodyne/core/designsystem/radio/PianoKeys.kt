@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -134,7 +136,9 @@ public fun PianoKey(
             },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Lamp(pressed)
+        // Momentary keys never latch, so they carry no lamp; the empty socket keeps every cap in
+        // a bank at the same height.
+        if (role != Role.Button) Lamp(pressed) else Spacer(Modifier.height(LAMP_SIZE + LAMP_PADDING))
         KeyCap(label, spokenLabel, pressed)
     }
 }
@@ -186,7 +190,7 @@ public fun ActionKey(
 
 @Composable
 private fun Lamp(lit: Boolean) {
-    Canvas(Modifier.padding(top = 1.dp, bottom = 4.dp).size(LAMP_SIZE)) {
+    Canvas(Modifier.padding(top = 1.dp, bottom = LAMP_PADDING - 1.dp).size(LAMP_SIZE)) {
         val r = size.minDimension / 2
         if (lit) {
             // The glow spills past the lamp's bezel onto the metal.
@@ -256,6 +260,7 @@ private val PressedIvory = listOf(Color(0xFFCDB27E), Color(0xFFDCC69A))
 private val KEY_GAP = 6.dp
 private val KEY_HEIGHT = 36.dp
 private val LAMP_SIZE = 9.dp
+private val LAMP_PADDING = 5.dp
 private val KEY_MIN_WIDTH = 64.dp
 private val ACTION_KEY_HEIGHT = 64.dp
 private val ACTION_ICON_SIZE = 28.dp
