@@ -171,15 +171,22 @@ internal fun DiscoverScreen(
                 }
             } else if (state.input.isBlank() && state.chartsAvailable()) {
                 charts(state, navigator, onChartVisible, onTune, onChartRetry)
+            } else if (state.input.isBlank()) {
+                item(key = "charts-off") { ChartsOff(settings) }
             }
         }
     }
 }
 
-/** Charts come from Apple alone: none while Apple is switched off or unusable. */
-private fun DiscoverState.chartsAvailable(): Boolean =
-    chart.failure != ProviderStatus.Disabled &&
-        providers?.none { it.id == ProviderId.APPLE && it.effective } != true
+/**
+ * Charts come from Apple alone: none while Apple is switched off. Until the providers are known,
+ * the tray shows; the chart request itself reports [ProviderStatus.Disabled].
+ */
+private fun DiscoverState.chartsAvailable(): Boolean {
+    if (chart.failure == ProviderStatus.Disabled) return false
+    val known = providers ?: return true
+    return known.any { it.id == ProviderId.APPLE && it.effective }
+}
 
 private fun LazyListScope.charts(
     state: DiscoverState,

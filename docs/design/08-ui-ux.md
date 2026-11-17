@@ -1066,8 +1066,9 @@ input is a link), "Add by URL" and "Import". With nothing typed, the charts are 
   key (`DirectoryKey("", genreId)`), then the first 10 hits as paper slips. Only the tuned
   chart is requested, once the tray is composed (`DiscoverViewModel.loadChart`), and a
   directory configuration change fetches it again. Loading shows 5 blank slips; a failure
-  shows "Charts unavailable" with Retry instead of hiding the section; the dial, presets and
-  tray are absent while Apple, the only chart source, is off.
+  shows "Charts unavailable" with Retry instead of hiding the section. While Apple, the only
+  chart source, is off, a note in place of the dial, presets and tray says so, with a Settings
+  key to Discover settings (Discover has no gear; Settings is in the radio's Menu).
 
 Directory hits, here and in [Directory results](#directory-results), are paper slips: cover in
 a recess, Courier title, author, then episode count, latest episode and the answering

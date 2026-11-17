@@ -58,8 +58,8 @@ import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 /**
  * Discover's search field as a strip of paper in a brass-rimmed slot, typed in Courier like a
  * label: a printed magnifier, the [placeholder] until something is typed, and an amber rim while
- * the field has focus. Enter and the keyboard's search action call [onSubmit]. The field keeps
- * [placeholder] as its name for screen readers once text replaces it.
+ * the field has focus. Enter (either key) and the keyboard's search action call [onSubmit]. Like a
+ * hint, [placeholder] names the empty field for screen readers; typed text then speaks for itself.
  */
 @Composable
 internal fun SearchStrip(
@@ -80,14 +80,14 @@ internal fun SearchStrip(
                 .fillMaxWidth()
                 .focusRequester(focus)
                 .onPreviewKeyEvent {
-                    if (it.type == KeyEventType.KeyDown && it.key == Key.Enter) {
+                    if (it.type == KeyEventType.KeyDown && (it.key == Key.Enter || it.key == Key.NumPadEnter)) {
                         onSubmit()
                         true
                     } else {
                         false
                     }
                 }.ndTextFieldFocus()
-                .semantics { contentDescription = placeholder },
+                .semantics { if (value.isEmpty()) contentDescription = placeholder },
         textStyle = TextStyle(color = Ink, fontFamily = courier(), fontSize = STRIP_TEXT),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { onSubmit() }),

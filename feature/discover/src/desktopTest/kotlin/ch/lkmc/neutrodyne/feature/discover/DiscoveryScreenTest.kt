@@ -37,6 +37,8 @@ import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -349,9 +351,19 @@ class DiscoveryScreenTest {
             waitForIdle()
             onNodeWithTag("station:").assertDoesNotExist()
             onNodeWithText("Top podcasts").assertDoesNotExist()
+            onNodeWithText(CHARTS_OFF).assertIsDisplayed()
+            onNodeWithText("Settings").performClick()
+            assertEquals<List<RecordingAppNavigator.Call>>(
+                listOf(RecordingAppNavigator.Call.PushDetail(SettingsKey(SettingsPage.DISCOVER))),
+                navigator.calls,
+            )
             state = DiscoverState(chart = TunedChart(failure = ProviderStatus.Disabled))
             waitForIdle()
             onNodeWithTag("station:").assertDoesNotExist()
+            onNodeWithText(CHARTS_OFF).assertIsDisplayed()
+            state = DiscoverState(providers = listOf(ProviderInfo(ProviderId.APPLE, true)), input = "news")
+            waitForIdle()
+            onNodeWithText(CHARTS_OFF).assertDoesNotExist()
         }
 
     private fun hit(
@@ -363,4 +375,8 @@ class DiscoveryScreenTest {
         providers = persistentSetOf(ProviderId.APPLE),
         subscribedPodcastId = subscribed,
     )
+
+    private companion object {
+        const val CHARTS_OFF = "Charts come from Apple, which is switched off in Discover settings"
+    }
 }

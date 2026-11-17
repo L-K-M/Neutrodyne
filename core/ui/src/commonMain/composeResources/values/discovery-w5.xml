@@ -14,6 +14,7 @@
     <string name="discovery_empty">No podcasts found for ‘%1$s’</string>
     <string name="discovery_unavailable">Search isn’t available right now</string>
     <string name="discovery_charts_unavailable">Charts unavailable</string>
+    <string name="discovery_charts_off">Charts come from Apple, which is switched off in Discover settings</string>
     <string name="discovery_partial">%1$s did not answer; showing available results</string>
     <string name="discovery_busy">%1$s is busy; showing available results</string>
     <string name="discovery_invalid">This directory is unavailable</string>

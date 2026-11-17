@@ -14,6 +14,7 @@
     <string name="discovery_empty">Keine Podcasts für „%1$s“ gefunden</string>
     <string name="discovery_unavailable">Die Suche ist momentan nicht verfügbar</string>
     <string name="discovery_charts_unavailable">Charts nicht verfügbar</string>
+    <string name="discovery_charts_off">Charts kommen von Apple, das in den Entdecken-Einstellungen ausgeschaltet ist</string>
     <string name="discovery_partial">%1$s hat nicht geantwortet; verfügbare Ergebnisse werden angezeigt</string>
     <string name="discovery_busy">%1$s ist ausgelastet; verfügbare Ergebnisse werden angezeigt</string>
     <string name="discovery_invalid">Dieses Verzeichnis ist nicht verfügbar</string>

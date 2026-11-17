@@ -151,7 +151,8 @@ private val WheelPaper = listOf(Color(0xFFD9C7A0), Color(0xFFF8EFD8), Color(0xFF
 private val WINDOW_MIN_WIDTH = 88.dp
 private val WINDOW_HEIGHT = 56.dp
 
-// Two keys stack beside the window; each keeps a 48 dp target below the cap's 30 dp.
+// Two keys stack beside the window; each keeps a 40 dp target around the cap's 30 dp. Two 48 dp
+// targets would stand 96 dp tall beside the 56 dp window and stop reading as one counter.
 private val STEP_TARGET = 40.dp
 private val STEP_KEY = 30.dp
 private const val UP_DEGREES = -90f

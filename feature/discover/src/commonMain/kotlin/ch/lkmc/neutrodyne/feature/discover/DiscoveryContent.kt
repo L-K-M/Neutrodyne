@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.add_episodes_count
 import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_busy
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_charts_off
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disclosure
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_empty
@@ -166,7 +167,14 @@ internal fun DirectoryRow(
             hit.author?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall)
+            if (details.isNotEmpty()) {
+                Text(
+                    details,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             if (hit.subscribedPodcastId != null) SubscribedLamp(Modifier.padding(top = 4.dp))
         }
     }
@@ -270,3 +278,15 @@ internal fun ChartGenre.label(): String =
             ChartGenre.LEISURE -> Res.string.discovery_genre_leisure
         },
     )
+
+/** In place of the charts while Apple, their only source, is switched off: why, and the way back. */
+@Composable
+internal fun ChartsOff(settings: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(stringResource(Res.string.discovery_charts_off))
+        KeyBank { MomentaryKey(stringResource(Res.string.settings), settings) }
+    }
+}

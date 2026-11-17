@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -87,7 +88,8 @@ public fun BatToggle(
 
 /**
  * [BatToggle]'s plate and lever as a picture of [on], for a row whose whole line is the toggle
- * and carries the switch semantics. The lever swings like the real switch's.
+ * and carries the switch semantics. The lever swings like the real switch's. The printed labels
+ * stay silent: the switch's state, not its plate, is what a screen reader announces.
  */
 @Composable
 public fun BatToggleFace(
@@ -106,7 +108,7 @@ public fun BatToggleFace(
     BoxWithConstraints(modifier.alpha(if (enabled) 1f else DISABLED_ALPHA)) {
         val tab = maxHeight * SWITCH_TAB_FRACTION
         Canvas(Modifier.matchParentSize()) { drawSwitchPlate(tab.toPx()) }
-        Column(Modifier.matchParentSize()) {
+        Column(Modifier.matchParentSize().clearAndSetSemantics {}) {
             SwitchLabel(onLabel, tab)
             Spacer(Modifier.weight(1f))
             SwitchLabel(offLabel, tab)
