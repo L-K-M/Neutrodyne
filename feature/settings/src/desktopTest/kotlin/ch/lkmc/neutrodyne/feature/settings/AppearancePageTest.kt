@@ -30,7 +30,6 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 @OptIn(ExperimentalTestApi::class)
 class AppearancePageTest {
@@ -70,16 +69,14 @@ class AppearancePageTest {
             val settings = FakeSettingsRepository().apply { failNextSet = SettingsError.WriteFailed }
             val snackbar = SnackbarHostState()
             setAppearance(settings, snackbar)
+            val storedBefore = runBlocking { settings.get(AppearanceSettingKeys.LIBRARY_DENSITY) }
 
             onNodeWithText("Cover size").performClick()
             onNodeWithText("Large").performClick()
             waitUntil { snackbar.currentSnackbarData != null }
 
             assertEquals("Couldn’t save the setting", snackbar.currentSnackbarData?.visuals?.message)
-            assertNotEquals(
-                LibraryDensity.LARGE,
-                runBlocking { settings.get(AppearanceSettingKeys.LIBRARY_DENSITY) },
-            )
+            assertEquals(storedBefore, runBlocking { settings.get(AppearanceSettingKeys.LIBRARY_DENSITY) })
         }
 
     private fun ComposeUiTest.setAppearance(
