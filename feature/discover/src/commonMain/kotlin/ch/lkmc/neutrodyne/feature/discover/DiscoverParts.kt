@@ -48,6 +48,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
@@ -56,10 +57,8 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 
 /**
- * Discover's search field as a strip of paper in a brass-rimmed slot, typed in Courier like a
- * label: a printed magnifier, the [placeholder] until something is typed, and an amber rim while
- * the field has focus. Enter (either key) and the keyboard's search action call [onSubmit]. Like a
- * hint, [placeholder] names the empty field for screen readers; typed text then speaks for itself.
+ * Discover's search field: a [PaperTextField] with a printed magnifier. Enter (either key) and the
+ * keyboard's search action call [onSubmit].
  */
 @Composable
 internal fun SearchStrip(
@@ -70,14 +69,12 @@ internal fun SearchStrip(
     focus: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    BasicTextField(
+    PaperTextField(
         value = value,
         onValueChange = onValueChange,
+        placeholder = placeholder,
         modifier =
             modifier
-                .fillMaxWidth()
                 .focusRequester(focus)
                 .onPreviewKeyEvent {
                     if (it.type == KeyEventType.KeyDown && (it.key == Key.Enter || it.key == Key.NumPadEnter)) {
@@ -86,64 +83,11 @@ internal fun SearchStrip(
                     } else {
                         false
                     }
-                }.ndTextFieldFocus()
-                .semantics { if (value.isEmpty()) contentDescription = placeholder },
-        textStyle = TextStyle(color = Ink, fontFamily = courier(), fontSize = STRIP_TEXT),
+                }.ndTextFieldFocus(),
+        leadingIcon = NdIcons.Search,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
-        singleLine = true,
-        interactionSource = interaction,
-        cursorBrush = SolidColor(Ink),
-        decorationBox = { field ->
-            MaterialPlate(
-                RadioMaterial.PAPER,
-                Modifier
-                    .fillMaxWidth()
-                    .recess(StripShape)
-                    .then(if (focused) Modifier.border(2.dp, FocusAmber, StripShape) else Modifier),
-            ) {
-                Row(
-                    Modifier.heightIn(min = STRIP_HEIGHT).padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(NdIcons.Search, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Box(Modifier.weight(1f)) {
-                        if (value.isEmpty()) {
-                            Text(
-                                placeholder,
-                                Modifier.clearAndSetSemantics {},
-                                color = Ink.copy(alpha = PLACEHOLDER_ALPHA),
-                                fontFamily = courier(),
-                                fontSize = STRIP_TEXT,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        field()
-                    }
-                }
-            }
-        },
     )
-}
-
-/** A row of momentary piano keys that scrolls sideways when the labels outgrow the slot. */
-@Composable
-internal fun KeyBank(
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit,
-) {
-    PianoKeySlot(modifier.horizontalScroll(rememberScrollState()), content = content)
-}
-
-@Composable
-internal fun MomentaryKey(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    PianoKey(label, pressed = false, onClick = onClick, modifier = modifier, role = Role.Button)
 }
 
 /** A blank slip that holds a chart's place while it loads. */
@@ -161,9 +105,4 @@ internal fun SkeletonSlip(modifier: Modifier = Modifier) {
 }
 
 internal val SlipShape = RoundedCornerShape(4.dp)
-private val StripShape = RoundedCornerShape(6.dp)
-private val FocusAmber = Color(0xFFF3B35E)
-private val STRIP_HEIGHT = 52.dp
 private val SKELETON_HEIGHT = 80.dp
-private val STRIP_TEXT = 16.sp
-private const val PLACEHOLDER_ALPHA = 0.6f

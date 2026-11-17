@@ -75,7 +75,9 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
 import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
+import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleGauge
 import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleWindow
 import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
@@ -329,7 +331,7 @@ internal fun DownloadsScreen(
                             downloadSize(rows.completed.sumOf { it.status.totalBytes ?: it.status.downloadedBytes }),
                         ),
                     ) {
-                        MomentaryKey(stringResource(Res.string.downloads_play_all)) { onPlay(null) }
+                        MomentaryKey(stringResource(Res.string.downloads_play_all), { onPlay(null) })
                         // Selection is limited to completed files; queued transfers cannot be deleted
                         // accidentally.
                         MomentaryKey(stringResource(Res.string.downloads_select_all), onSelectAll)
@@ -384,23 +386,6 @@ private fun SectionHeader(
         Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
         KeyBank(Modifier.padding(top = 6.dp), content = actions)
     }
-}
-
-/** A bank of momentary keys that scrolls sideways when the labels do not fit. */
-@Composable
-private fun KeyBank(
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit,
-) {
-    PianoKeySlot(modifier.horizontalScroll(rememberScrollState()), content = content)
-}
-
-@Composable
-private fun MomentaryKey(
-    label: String,
-    onClick: () -> Unit,
-) {
-    PianoKey(label, pressed = false, onClick = onClick, role = Role.Button)
 }
 
 /**

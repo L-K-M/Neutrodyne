@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -138,6 +140,26 @@ public fun PianoKey(
         if (role != Role.Button) Lamp(pressed) else Spacer(Modifier.height(LAMP_SIZE + LAMP_PADDING))
         KeyCap(label, spokenLabel, pressed)
     }
+}
+
+/** A bank of momentary piano keys in a slot that scrolls sideways when the labels outgrow it. */
+@Composable
+public fun KeyBank(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    PianoKeySlot(modifier.horizontalScroll(rememberScrollState()), content = content)
+}
+
+/** A momentary piano key: a button that springs back, without a lamp. */
+@Composable
+public fun MomentaryKey(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    PianoKey(label, pressed = false, onClick = onClick, modifier = modifier, role = Role.Button, enabled = enabled)
 }
 
 /**
