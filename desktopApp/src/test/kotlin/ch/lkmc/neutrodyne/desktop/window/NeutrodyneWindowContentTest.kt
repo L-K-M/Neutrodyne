@@ -190,7 +190,8 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
             onNodeWithTag("radio_menu").performClick()
             onNodeWithTag("nav_settings").performClick()
-            onNodeWithText("Updates").performClick()
+            // Updates sits under the App heading near the end of the list, below the window's fold.
+            onNodeWithText("Updates").performScrollTo().performClick()
             onNodeWithTag("updates-page").assertExists()
             onNodeWithText("Install & updates").performScrollTo().performClick()
             onNodeWithTag("install-help-page").assertExists()

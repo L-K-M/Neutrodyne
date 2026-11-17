@@ -364,6 +364,13 @@ class DiscoveryScreenTest {
             state = DiscoverState(providers = listOf(ProviderInfo(ProviderId.APPLE, true)), input = "news")
             waitForIdle()
             onNodeWithText(CHARTS_OFF).assertDoesNotExist()
+            // With Apple on, and while the providers are still unknown, a blank search keeps the tray.
+            for (providers in listOf(listOf(ProviderInfo(ProviderId.APPLE, true)), null)) {
+                state = DiscoverState(providers = providers)
+                waitForIdle()
+                onNodeWithText(CHARTS_OFF).assertDoesNotExist()
+                onNodeWithText("Top podcasts").assertExists()
+            }
         }
 
     private fun hit(
