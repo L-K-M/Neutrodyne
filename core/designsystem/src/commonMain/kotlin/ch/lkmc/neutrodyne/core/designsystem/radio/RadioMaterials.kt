@@ -181,7 +181,17 @@ public fun MaterialPlate(
 public fun Modifier.cabinetEdges(): Modifier =
     drawWithContent {
         drawContent()
-        drawRect(Brush.horizontalGradient(listOf(Color(0x88311507), Color.Transparent, Color(0x88230E06))))
+        // The walls turn away from the light at the sides; the shade stays on the wood and off the
+        // panels, keys and dials inside.
+        val wall = (CABINET_SHADE_WIDTH.toPx() / size.width).coerceAtMost(0.5f)
+        drawRect(
+            Brush.horizontalGradient(
+                0f to Color(0x88311507),
+                wall to Color.Transparent,
+                1f - wall to Color.Transparent,
+                1f to Color(0x88230E06),
+            ),
+        )
         drawLine(Color(0xBFE8B56E), Offset.Zero, Offset(size.width, 0f), 2.dp.toPx())
         drawLine(Color(0x992D1609), Offset(0f, size.height), Offset(size.width, size.height), 5.dp.toPx())
         drawLine(Color(0x88D39C58), Offset(5.dp.toPx(), 20.dp.toPx()), Offset(5.dp.toPx(), size.height), 3.dp.toPx())
@@ -192,6 +202,8 @@ public fun Modifier.cabinetEdges(): Modifier =
             5.dp.toPx(),
         )
     }
+
+private val CABINET_SHADE_WIDTH = 16.dp
 
 /** Shadow falls inside a routed opening, over the contents beneath its wooden lip. */
 public fun Modifier.recess(shape: Shape = RoundedCornerShape(3.dp)): Modifier =
