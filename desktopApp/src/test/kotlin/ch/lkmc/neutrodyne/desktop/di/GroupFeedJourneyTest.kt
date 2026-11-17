@@ -101,6 +101,7 @@ import org.junit.Test
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * M2 AC14: production Feeds/editor/manager routes and ViewModels, with the real group, podcast,
@@ -111,7 +112,7 @@ import kotlin.test.assertTrue
 class GroupFeedJourneyTest {
     @Test
     fun createFilterPlayReorderDeleteAndUndo() =
-        runComposeUiTest {
+        runComposeUiTest(testTimeout = JOURNEY_TIMEOUT) {
             val previousLocale = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
             installFakeImageLoader()
@@ -248,6 +249,10 @@ class GroupFeedJourneyTest {
 
     private companion object {
         const val TIMEOUT_MS = 10_000L
+
+        // The whole journey takes about 11 s on a Mac, but CI runners draw the radio's
+        // shadows and gradients in software and have taken more than the default minute.
+        val JOURNEY_TIMEOUT = 3.minutes
     }
 }
 
