@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -18,11 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +37,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -45,15 +50,19 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
@@ -61,6 +70,11 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
+import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -299,19 +313,35 @@ public fun UpNextList(
                         modifier = Modifier.semantics { heading() },
                         style = MaterialTheme.typography.titleSmall,
                     )
-                    TextButton(onClick = onStopAfter) { Text(stringResource(Res.string.queue_stop_after)) }
+                    // A momentary key (PO-55): it ends playback after Up next by dropping the
+                    // continuation, so it has no latched state to show.
+                    PianoKeySlot(Modifier.padding(top = 8.dp)) {
+                        PianoKey(
+                            stringResource(Res.string.queue_stop_after),
+                            pressed = false,
+                            onClick = onStopAfter,
+                            role = Role.Button,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** A section label engraved in spaced capitals (PO-55), read as written. */
 @Composable
 private fun QueueHeading(text: String) {
     Text(
-        text,
-        modifier = Modifier.padding(16.dp).semantics { heading() },
-        style = MaterialTheme.typography.titleSmall,
+        text.uppercase(),
+        modifier =
+            Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp).clearAndSetSemantics {
+                this.text = AnnotatedString(text)
+                heading()
+            },
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        letterSpacing = HEADING_LETTER_SPACING,
     )
 }
 
@@ -339,12 +369,19 @@ private fun CurrentQueueRow(
                             true
                         },
                     )
-            }.clickable { onAction(EpisodeAction.Open(current.episodeId)) }
-            .padding(16.dp),
+            }
+            // The episode on air is a slip like the queue's rows (PO-55), its ivory key in reach.
+            .padding(horizontal = 10.dp, vertical = 3.dp)
+            .shadow(1.5.dp, CurrentShape)
+            .clip(CurrentShape)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .border(0.5.dp, Brass, CurrentShape)
+            .clickable { onAction(EpisodeAction.Open(current.episodeId)) }
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CoverArt(current.artwork, rememberMonogram(current.podcastTitle), Modifier.size(56.dp))
+        CoverArt(current.artwork, rememberMonogram(current.podcastTitle), Modifier.size(56.dp).recess(CoverShape))
         Column(Modifier.weight(1f)) {
             Text(
                 current.title,
@@ -354,12 +391,14 @@ private fun CurrentQueueRow(
             )
             Text(current.podcastTitle, style = MaterialTheme.typography.bodySmall)
         }
-        NdIconButton(
-            { onAction(EpisodeAction.PlayToggle(current.episodeId)) },
-            if (current.isPlaying) NdIcons.Pause else NdIcons.PlayArrow,
-            play,
-            Modifier.clearAndSetSemantics {},
-        )
+        CompositionLocalProvider(LocalRadioFaceplate provides true) {
+            NdIconButton(
+                { onAction(EpisodeAction.PlayToggle(current.episodeId)) },
+                if (current.isPlaying) NdIcons.Pause else NdIcons.PlayArrow,
+                play,
+                Modifier.clearAndSetSemantics {},
+            )
+        }
     }
 }
 
@@ -418,3 +457,7 @@ private fun QueueSwipe(
         Box(Modifier.absoluteOffset { IntOffset(displacement.roundToInt(), 0) }) { content() }
     }
 }
+
+private val CurrentShape = RoundedCornerShape(4.dp)
+private val CoverShape = RoundedCornerShape(3.dp)
+private val HEADING_LETTER_SPACING = 3.sp

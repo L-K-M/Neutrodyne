@@ -798,6 +798,13 @@ The group settings screen follows in D8b.
 - Unavailable YouTube episode: a reason line under the meta (`AvailabilityText`, [Capability differences in UI](#capability-differences-in-ui)). External YouTube episode: the line "Opens in YouTube" and, below the buttons, the short [external-reason text](#external-reason-texts) (for example "In-app YouTube is off") linking to Settings › YouTube.
 - States: missing episode (deleted by retention or unsubscribe) → "This episode is no longer available"; notes loading → 3 skeleton paragraphs; notes empty → "No show notes"; offline and not downloaded → primary button shows `cloud_off` "Offline" and taps give the offline snackbar; images in notes stay unloaded offline (no error).
 
+**Radio episode page (PO-55, 2026-11-17).** The art sits in a brass edge (4 dp corners) beside
+the typed title, and the actions are a bank of tall ivory keys in a metal slot (`ActionKey` in a
+`PianoKeySlot`), each a symbol over its label: the primary play key (Play, Pause, Resume, Play
+again, Offline or Watch on YouTube, as above), Download with its live glyph and status as the
+label, Up next (Play next or Play last) and Mark played or Mark unplayed. Labels wrap to two
+lines, so the keys stay whole at 200 % text.
+
 ### Group editor
 
 `GroupEditKey(groupId?)` (null = new), `:feature:groups`, M2.
@@ -934,6 +941,11 @@ In progress is enabled; Downloaded remains gated until M6.
 - Row tap → `pushDetail(EpisodeKey)`; the row's play button → `playEpisode(id)`, which keeps the current context for Up next items (06).
 - Empty: "Nothing up next. Add episodes with Play next or Play last." (one wording for touch and mouse) + chips "Play tech", "Play news", "Play fiction" (the first three groups in user order, each `playFeed(Group)`); nothing playing and no groups: Discover link.
 - `AddResult.Rejected` texts: `ALREADY_PLAYING` "This episode is already playing", `YOUTUBE_EXTERNAL` "YouTube episodes open in YouTube", `UNAVAILABLE` "This episode isn't available".
+
+**Radio Up next (PO-55, 2026-11-17).** Section labels (Now playing, Up next) are engraved in
+spaced capitals and read as written. The episode on air is a tan slip with its cover in a
+recess and an ivory play key; queue rows are the shared paper slips. "Stop after Up next" is a
+momentary piano key: it drops the continuation, so it has no latched state to show.
 
 ### Downloads
 

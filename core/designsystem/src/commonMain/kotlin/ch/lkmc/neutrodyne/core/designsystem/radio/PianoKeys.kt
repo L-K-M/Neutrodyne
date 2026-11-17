@@ -23,8 +23,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -137,6 +139,51 @@ public fun PianoKey(
     }
 }
 
+/**
+ * A tall momentary key for a bank of actions, like a tape deck's transport keys: a symbol over
+ * its printed label on raised ivory. Read as a button named [label]; [enabled] dims it. Put
+ * several in a [PianoKeySlot] with `Modifier.weight(1f)`. The [icon] slot draws in ink.
+ */
+@Composable
+public fun ActionKey(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    icon: @Composable () -> Unit,
+) {
+    Column(
+        modifier
+            .heightIn(min = ACTION_KEY_HEIGHT)
+            .alpha(if (enabled) 1f else DISABLED_ALPHA)
+            .shadow(3.dp, KeyShape)
+            .clip(KeyShape)
+            .background(Brush.verticalGradient(RaisedIvory))
+            .border(1.dp, Color(0xFF9A7E4E), KeyShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+    ) {
+        CompositionLocalProvider(LocalContentColor provides Ink) {
+            Box(Modifier.size(ACTION_ICON_SIZE), contentAlignment = Alignment.Center) { icon() }
+        }
+        Text(
+            label.uppercase(),
+            Modifier.clearAndSetSemantics { this.text = AnnotatedString(label) },
+            color = Ink,
+            fontFamily = barlow(),
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            letterSpacing = 1.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun Lamp(lit: Boolean) {
     Canvas(Modifier.padding(top = 1.dp, bottom = 4.dp).size(LAMP_SIZE)) {
@@ -210,6 +257,8 @@ private val KEY_GAP = 6.dp
 private val KEY_HEIGHT = 36.dp
 private val LAMP_SIZE = 9.dp
 private val KEY_MIN_WIDTH = 64.dp
+private val ACTION_KEY_HEIGHT = 64.dp
+private val ACTION_ICON_SIZE = 28.dp
 private const val DISABLED_ALPHA = 0.5f
 
 /** The slot's shadow falls on the top of a pressed key. */
