@@ -3,9 +3,18 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys as Keys
+
+/**
+ * One key from each settings file. Only their first reads matter: a key reads once its file has
+ * loaded (or failed to load and fallen back to defaults). `SettingsGateTest` fails if the list
+ * stops covering every [ch.lkmc.neutrodyne.core.model.settings.SettingsFile].
+ */
+internal val SETTINGS_FILE_SENTINELS: List<SettingKey<*>> =
+    listOf(Keys.LIBRARY_DENSITY, Keys.PLAYER_PANEL_HIDDEN)
 
 /**
  * Returns once both settings files (`settings` and `device_settings`) have loaded. Either shell
@@ -13,5 +22,5 @@ import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys as Keys
  * rather than their defaults.
  */
 public suspend fun SettingsRepository.awaitSettingsFiles() {
-    combine(observe(Keys.LIBRARY_DENSITY), observe(Keys.PLAYER_PANEL_HIDDEN)) { _, _ -> }.first()
+    combine(SETTINGS_FILE_SENTINELS.map { observe(it) }) { }.first()
 }
