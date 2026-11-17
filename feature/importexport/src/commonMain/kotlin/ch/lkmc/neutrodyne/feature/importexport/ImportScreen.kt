@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.importexport
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -39,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,7 +73,8 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
 import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
-import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeys
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -820,23 +824,26 @@ private fun ChipsRow(
                 ImportItemFilter.NEEDS_ATTENTION,
             )
         }
-    PianoKeys(
-        options = options,
-        selected = filter,
-        onSelect = onFilter,
-        label = { option ->
-            stringResource(
-                when (option) {
-                    ImportItemFilter.ALL -> Res.string.selection_select_all
-                    ImportItemFilter.NEW_ONLY -> Res.string.import_filter_new
-                    ImportItemFilter.NOT_IMPORTED -> Res.string.import_filter_not_imported
-                    ImportItemFilter.NEEDS_ATTENTION -> Res.string.import_filter_attention
-                },
+    // Content-sized keys in a slot that scrolls sideways: four equal keys on a phone cut the
+    // longer labels ("Needs attention") short.
+    PianoKeySlot(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).horizontalScroll(rememberScrollState())) {
+        options.forEach { option ->
+            PianoKey(
+                stringResource(
+                    when (option) {
+                        ImportItemFilter.ALL -> Res.string.selection_select_all
+                        ImportItemFilter.NEW_ONLY -> Res.string.import_filter_new
+                        ImportItemFilter.NOT_IMPORTED -> Res.string.import_filter_not_imported
+                        ImportItemFilter.NEEDS_ATTENTION -> Res.string.import_filter_attention
+                    },
+                ),
+                pressed = option == filter,
+                onClick = { onFilter(option) },
+                modifier = Modifier.testTag("import-filter-${option.name}"),
+                role = Role.Tab,
             )
-        },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        tag = { option -> "import-filter-${option.name}" },
-    )
+        }
+    }
 }
 
 @Composable
