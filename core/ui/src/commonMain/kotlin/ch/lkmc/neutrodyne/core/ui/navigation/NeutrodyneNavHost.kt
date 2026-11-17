@@ -32,6 +32,7 @@ import androidx.navigation3.ui.defaultPopTransitionSpec
 import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
 import androidx.navigation3.ui.defaultTransitionSpec
 import ch.lkmc.neutrodyne.core.designsystem.radio.CabinetDeck
+import ch.lkmc.neutrodyne.core.designsystem.radio.CabinetSpan
 import ch.lkmc.neutrodyne.core.designsystem.radio.LocalCabinetBackKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioCabinetPage
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
@@ -356,8 +357,9 @@ private fun rememberHeaderBarDecorator(
 
 /**
  * Builds every page except the radio home into the radio's cabinet (owner decision 2026-11-17).
- * Sheets and dialogs keep their own containers. In a pane row only the list pane, which leads
- * the row, carries the valve deck, so a two-pane window shows one deck as one radio would.
+ * Sheets and dialogs keep their own containers. Panes shown side by side share one cabinet: each
+ * takes its [CabinetSpan] from its place in the scene's pane row, and only the list pane, which
+ * leads the row, carries the valve deck, so a two-pane window shows one deck as one radio would.
  */
 @Composable
 private fun rememberCabinetDecorator(
@@ -374,7 +376,7 @@ private fun rememberCabinetDecorator(
                     } else {
                         CabinetDeck.HIDDEN
                     }
-                RadioCabinetPage(deck) {
+                RadioCabinetPage(deck, span = cabinetSpan(role, LocalPaneRow.current)) {
                     CompositionLocalProvider(LocalCabinetBackKey provides CabinetBackKey) { entry.Content() }
                 }
             } else {
@@ -384,6 +386,20 @@ private fun rememberCabinetDecorator(
     }
 
 private val CabinetBackKey: @Composable () -> Unit = { NavBackButton() }
+
+/** A page's place in its scene's pane row; a page outside a row of two or more stands alone. */
+internal fun cabinetSpan(
+    role: Any?,
+    row: List<String>,
+): CabinetSpan {
+    val index = row.indexOf(role)
+    return when {
+        row.size < 2 || index < 0 -> CabinetSpan.ALONE
+        index == 0 -> CabinetSpan.LEADING
+        index == row.lastIndex -> CabinetSpan.TRAILING
+        else -> CabinetSpan.MIDDLE
+    }
+}
 
 /**
  * Cabinet pages sit below the valve deck on the charcoal stage, so the status bar always has

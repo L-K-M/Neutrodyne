@@ -44,6 +44,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
@@ -55,6 +56,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventDispatcher
@@ -184,6 +186,33 @@ class NeutrodyneRootTest {
             }
         }
     }
+
+    /**
+     * PO-55 follow-up: a wide window's list and detail panes share one cabinet. Their trays sit
+     * under one roof line and only the cabinet's walls part them (no stage gap), and the row
+     * carries a single valve deck.
+     */
+    @Test
+    fun aPaneRowSharesOneCabinet() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
+            setContent { TestRoot(routes = pending.receiveAsFlow(), initialTab = LibraryKey) }
+            onNodeWithText("import-7").assertIsDisplayed()
+            onNodeWithText("count:0", useUnmergedTree = true).assertIsDisplayed()
+
+            val trays =
+                onAllNodesWithTag(CABINET_TRAY_TAG)
+                    .fetchSemanticsNodes()
+                    .map { it.boundsInRoot }
+                    .sortedBy { it.left }
+            kotlin.test.assertEquals(2, trays.size)
+            kotlin.test.assertEquals(trays[0].top, trays[1].top, "one roof line")
+            val partition = with(density) { (trays[1].left - trays[0].right).toDp() }
+            // Two 9 dp walls meet; a stage gap or side gaps would make the partition wider.
+            kotlin.test.assertTrue(partition <= 20.dp, "partition $partition")
+            onAllNodesWithTag(CABINET_DECK_TAG).assertCountEquals(1)
+        }
 
     @Test
     fun playerDeepLinkOpensTheRadioHomeWithoutASidePanel() =

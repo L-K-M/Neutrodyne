@@ -22,8 +22,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+
+/**
+ * Where a page sits in the cabinet. Panes shown side by side share one cabinet (PO-55): the first
+ * has its start wall, the last its end wall, and the walls between them meet as one partition.
+ */
+public enum class CabinetSpan {
+    /** The page fills the cabinet. */
+    ALONE,
+
+    /** The first pane of a row. */
+    LEADING,
+
+    /** A pane between two others. */
+    MIDDLE,
+
+    /** The last pane of a row. */
+    TRAILING,
+}
 
 /** Whether a page's cabinet carries the valve deck on its roof. */
 public enum class CabinetDeck {
@@ -43,35 +64,57 @@ public enum class CabinetDeck {
  * The frame consumes the status bar, display cutout and navigation bar insets, so a page's own
  * inset handling sees them as already applied. The deck spans the cabinet like the home radio's,
  * and stows on short windows (below [DECK_MIN_HEIGHT] of usable height) to keep the content
- * readable.
+ * readable. [span] places the page in a row of panes that share one cabinet: they keep one roof
+ * line at the deck's height, and only the row's outer walls have gaps, rounded corners and lit or
+ * shaded edges.
  */
 @Composable
 public fun RadioCabinetPage(
     deck: CabinetDeck,
     modifier: Modifier = Modifier,
+    span: CabinetSpan = CabinetSpan.ALONE,
     content: @Composable () -> Unit,
 ) {
     BoxWithConstraints(
         modifier
             .fillMaxSize()
-            .radioStage()
+            // A pane row stands on the root's stage, whose light falls across the whole window; a
+            // stage per pane would show a seam where each pane's own light pool ends.
+            .let { if (span == CabinetSpan.ALONE) it.radioStage() else it }
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
     ) {
         // The deck is the cabinet's lid, as on the home: as wide as the cabinet with a little
         // overhang, its height following the width up to a share of the window's height (beyond
-        // that its chassis grows longer instead).
+        // that its chassis grows longer instead). The panes of a row share one roof line, which
+        // cannot depend on any one pane's width: there the deck takes the share of the height, and
+        // a pane too narrow for it fits the deck to its width, resting on that roof.
         val deckWidth = maxWidth - CABINET_SIDE_GAP * 2 + DECK_OVERHANG
-        val deckHeight = minOf(deckWidth / VALVE_DECK_ASPECT, maxHeight * DECK_HEIGHT_SHARE)
-        val showDeck = deck == CabinetDeck.SHOWN && maxHeight >= DECK_MIN_HEIGHT
-        val roof = if (showDeck) deckHeight * (1f - DECK_OVERLAP_SHARE) else CABINET_TOP_GAP
+        val tallest = maxHeight * DECK_HEIGHT_SHARE
+        val deckHeight = if (span == CabinetSpan.ALONE) minOf(deckWidth / VALVE_DECK_ASPECT, tallest) else tallest
+        val roomForDeck = maxHeight >= DECK_MIN_HEIGHT
+        val showDeck = deck == CabinetDeck.SHOWN && roomForDeck
+        // Every pane of a row keeps the deck's roof line, so the row reads as one cabinet.
+        val roof =
+            if (roomForDeck && (showDeck || span != CabinetSpan.ALONE)) {
+                deckHeight * (1f - DECK_OVERLAP_SHARE)
+            } else {
+                CABINET_TOP_GAP
+            }
+        val startWall = span == CabinetSpan.ALONE || span == CabinetSpan.LEADING
+        val endWall = span == CabinetSpan.ALONE || span == CabinetSpan.TRAILING
+        val ltr = LocalLayoutDirection.current == LayoutDirection.Ltr
+        val shape = cabinetShape(startWall, endWall)
         MaterialPlate(
             RadioMaterial.WOOD,
             Modifier
                 .fillMaxSize()
-                .padding(top = roof, start = CABINET_SIDE_GAP, end = CABINET_SIDE_GAP)
-                .shadow(8.dp, CabinetShape)
-                .clip(CabinetShape)
-                .cabinetEdges(),
+                .padding(
+                    top = roof,
+                    start = if (startWall) CABINET_SIDE_GAP else 0.dp,
+                    end = if (endWall) CABINET_SIDE_GAP else 0.dp,
+                ).shadow(8.dp, shape)
+                .clip(shape)
+                .cabinetEdges(leftWall = if (ltr) startWall else endWall, rightWall = if (ltr) endWall else startWall),
         ) {
             MaterialPlate(
                 RadioMaterial.PAPER,
@@ -118,5 +161,18 @@ private val DECK_MIN_HEIGHT = 560.dp
 private val CABINET_TOP_GAP = 6.dp
 private val CABINET_SIDE_GAP = 6.dp
 private val CABINET_WALL = 9.dp
-private val CabinetShape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 6.dp, bottomEnd = 6.dp)
+
+private fun cabinetShape(
+    startWall: Boolean,
+    endWall: Boolean,
+): Shape =
+    RoundedCornerShape(
+        topStart = if (startWall) TOP_CORNER else 0.dp,
+        topEnd = if (endWall) TOP_CORNER else 0.dp,
+        bottomEnd = if (endWall) BOTTOM_CORNER else 0.dp,
+        bottomStart = if (startWall) BOTTOM_CORNER else 0.dp,
+    )
+
+private val TOP_CORNER = 14.dp
+private val BOTTOM_CORNER = 6.dp
 private val TrayShape = RoundedCornerShape(4.dp)

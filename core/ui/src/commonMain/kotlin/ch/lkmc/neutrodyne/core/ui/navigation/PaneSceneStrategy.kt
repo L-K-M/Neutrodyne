@@ -10,6 +10,7 @@ import androidx.compose.animation.core.snap
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldDestinationItem
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldRole
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
@@ -25,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -199,6 +201,16 @@ internal class PaneSceneStrategy(
     }
 }
 
+/**
+ * The pane roles (`NdSceneMetadata.PANE_*`) a scene shows side by side, from start to end, so a
+ * page can tell where it sits in the row; empty outside a pane scene.
+ */
+internal val LocalPaneRow = staticCompositionLocalOf<List<String>> { emptyList() }
+
+/** The list, detail and extra panes lie start to end in the list-detail scaffold. */
+private fun PaneSnapshot.paneRow(): List<String> =
+    PaneRole.entries.filter { value[it.scaffoldRole] == PaneAdaptedValue.Expanded }.map { it.marker }
+
 private enum class PaneRole(
     val marker: String,
     val scaffoldRole: ThreePaneScaffoldRole,
@@ -308,7 +320,10 @@ private class PaneScene(
         // These dispatchers seek native preview only; real completion is owned outside NavDisplay.
         Box(Modifier.fillMaxSize().then(if (exiting) Modifier.clearAndSetSemantics {} else Modifier)) {
             // A committed exit is no longer an accessible screen; a cancellable source remains active.
-            CompositionLocalProvider(LocalPaneSceneMotion provides PaneSceneMotion(key, enteringRoles)) {
+            CompositionLocalProvider(
+                LocalPaneSceneMotion provides PaneSceneMotion(key, enteringRoles),
+                LocalPaneRow provides snapshot.paneRow(),
+            ) {
                 if (owner == null) {
                     delegate.content()
                 } else {

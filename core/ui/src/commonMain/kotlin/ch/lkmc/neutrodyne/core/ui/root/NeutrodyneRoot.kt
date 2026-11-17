@@ -284,11 +284,12 @@ private fun ReadyRoot(
     // Moving the same composition preserves its collectors, tabs and sheet state on resize.
     val currentPlayer by rememberUpdatedState(slots.player)
     val player = remember { movableContentOf<PlayerSlotState> { currentPlayer(it) } }
-    // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
+    // The pane directive keeps the library's hinge values; the partition count is ours, and panes
+    // meet without a spacer so a pane row reads as one radio cabinet (PO-55).
     val directive =
         remember(windowInfo, layout.partitions) {
             calculatePaneScaffoldDirective(windowInfo, verticalHingePolicy = HingePolicy.AvoidSeparating)
-                .copy(maxHorizontalPartitions = layout.partitions)
+                .copy(maxHorizontalPartitions = layout.partitions, horizontalPartitionSpacerSize = 0.dp)
         }
     SideEffect { navigation.panePartitions = layout.partitions }
 

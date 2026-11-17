@@ -207,8 +207,15 @@ public fun Modifier.paper(
 private val PAPER_TILE_WIDTH = 256.dp
 private val PaperLight = listOf(Color(0x1F695123), Color.Transparent, Color(0x2EFFF2D0))
 
-/** Light catches the cabinet's top edge and left wall; the right wall and base fall into shade. */
-public fun Modifier.cabinetEdges(): Modifier =
+/**
+ * Light catches the cabinet's top edge and left wall; the right wall and base fall into shade. A
+ * pane inside a wider cabinet passes false for a wall it does not have, so only the cabinet's
+ * outer walls are lit or shaded.
+ */
+public fun Modifier.cabinetEdges(
+    leftWall: Boolean = true,
+    rightWall: Boolean = true,
+): Modifier =
     drawWithContent {
         drawContent()
         // The walls turn away from the light at the sides; the shade stays on the wood and off the
@@ -216,21 +223,30 @@ public fun Modifier.cabinetEdges(): Modifier =
         val wall = (CABINET_SHADE_WIDTH.toPx() / size.width).coerceAtMost(0.5f)
         drawRect(
             Brush.horizontalGradient(
-                0f to Color(0x88311507),
+                0f to if (leftWall) Color(0x88311507) else Color.Transparent,
                 wall to Color.Transparent,
                 1f - wall to Color.Transparent,
-                1f to Color(0x88230E06),
+                1f to if (rightWall) Color(0x88230E06) else Color.Transparent,
             ),
         )
         drawLine(Color(0xBFE8B56E), Offset.Zero, Offset(size.width, 0f), 2.dp.toPx())
         drawLine(Color(0x992D1609), Offset(0f, size.height), Offset(size.width, size.height), 5.dp.toPx())
-        drawLine(Color(0x88D39C58), Offset(5.dp.toPx(), 20.dp.toPx()), Offset(5.dp.toPx(), size.height), 3.dp.toPx())
-        drawLine(
-            Color(0xBB32170B),
-            Offset(size.width - 5.dp.toPx(), 20.dp.toPx()),
-            Offset(size.width - 5.dp.toPx(), size.height),
-            5.dp.toPx(),
-        )
+        if (leftWall) {
+            drawLine(
+                Color(0x88D39C58),
+                Offset(5.dp.toPx(), 20.dp.toPx()),
+                Offset(5.dp.toPx(), size.height),
+                3.dp.toPx(),
+            )
+        }
+        if (rightWall) {
+            drawLine(
+                Color(0xBB32170B),
+                Offset(size.width - 5.dp.toPx(), 20.dp.toPx()),
+                Offset(size.width - 5.dp.toPx(), size.height),
+                5.dp.toPx(),
+            )
+        }
     }
 
 private val CABINET_SHADE_WIDTH = 16.dp
@@ -295,13 +311,13 @@ public fun Modifier.radioStage(): Modifier =
 public const val VALVE_DECK_ASPECT: Float = 1100f / 423f
 
 /**
- * The radio's valve deck: two glowing tubes on a metal chassis. The home shows it across the
- * cabinet; every other page carries a smaller one on its cabinet roof (owner decision 2026-11-17).
+ * The radio's valve deck: two glowing tubes on a metal chassis, the lid across every cabinet
+ * (owner decisions 2026-11-17).
  *
  * The deck fills the node's height. A node wider than the artwork gets a longer chassis rather
  * than larger tubes: the plain stretches of plate beside the outer terminals repeat, mirrored so
  * their lighting meets without seams, until the plate spans the node. A narrower node fits the
- * whole deck inside it.
+ * whole deck to its width, resting on its lower edge.
  */
 @Composable
 public fun ValveDeck(modifier: Modifier = Modifier) {
@@ -316,7 +332,8 @@ private fun DrawScope.drawValveDeck(art: ImageBitmap) {
     val long = art.width * size.height / art.height < size.width - 0.5f
     val scale = if (long) size.height / art.height else size.width / art.width
     val extra = if (long) size.width - art.width * scale else 0f
-    val top = (size.height - art.height * scale) / 2f
+    // A deck fitted to a narrow node rests on its lower edge, where the cabinet's roof is.
+    val top = size.height - art.height * scale
     val height = art.height * scale
     // Source columns: the left end, a plain stretch, the tubes and circuit, a plain stretch, the
     // right end. Only the plain stretches grow, each by half of the extra width.
