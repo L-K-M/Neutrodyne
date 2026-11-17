@@ -42,6 +42,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
 public data class NdDialogAction(
     val label: String,
     val role: NdActionRole = NdActionRole.NORMAL,
+    val enabled: Boolean = true,
     val onClick: () -> Unit,
 )
 
@@ -61,6 +62,7 @@ public fun NdDialog(
     text: String? = null,
     confirm: NdDialogAction? = null,
     dismiss: NdDialogAction? = null,
+    alternative: NdDialogAction? = null,
     properties: DialogProperties = DialogProperties(),
 ) {
     NdDialog(
@@ -70,6 +72,7 @@ public fun NdDialog(
         title = title,
         confirm = confirm,
         dismiss = dismiss,
+        alternative = alternative,
         properties = properties,
     ) {
         if (text != null) {
@@ -83,7 +86,8 @@ public fun NdDialog(
 /**
  * [NdDialog] with a custom body (choice lists, forms). The body slot is bounded by the dialog's
  * layout; a scrollable [content] (for example `Column` with `verticalScroll`) keeps long content
- * reachable.
+ * reachable. An [alternative] action, for the rare dialog with a third answer, stands between
+ * [dismiss] and [confirm].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,6 +98,7 @@ public fun NdDialog(
     title: String? = null,
     confirm: NdDialogAction? = null,
     dismiss: NdDialogAction? = null,
+    alternative: NdDialogAction? = null,
     properties: DialogProperties = DialogProperties(),
     content: @Composable () -> Unit,
 ) {
@@ -132,12 +137,14 @@ public fun NdDialog(
                     ProvideTextStyle(MaterialTheme.typography.bodyMedium, content)
                 }
             }
-            if (confirm != null || dismiss != null) {
+            val actions = listOfNotNull(dismiss, alternative, confirm)
+            if (actions.isNotEmpty()) {
                 KeyBank(Modifier.align(Alignment.End).padding(top = 18.dp)) {
-                    for (action in listOfNotNull(dismiss, confirm)) {
+                    for (action in actions) {
                         MomentaryKey(
                             action.label,
                             action.onClick,
+                            enabled = action.enabled,
                             destructive = action.role == NdActionRole.DESTRUCTIVE,
                         )
                     }

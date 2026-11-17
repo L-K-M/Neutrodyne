@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +28,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
@@ -178,8 +177,8 @@ internal fun ColumnScope.DisconnectActions(
  * is the full destruction disclosure — records, account backups, the unlink of every device
  * and the 7-day nightly-backup retention — and the field takes the untranslated confirmation.
  * The Delete button enables only on exactly `DELETE`: never case-folded, never trimmed, never
- * a look-alike script. `AlertDialog` rather than `NdDialog` like the other input dialogs —
- * its confirm needs an `enabled` the shared action does not carry.
+ * a look-alike script. It is an `NdDialog`, like the other input dialogs; its confirm carries
+ * the `enabled` gate directly.
  */
 @Composable
 private fun DeleteServerDataDialog(
@@ -189,37 +188,32 @@ private fun DeleteServerDataDialog(
     onDismiss: () -> Unit,
 ) {
     var typed by remember { mutableStateOf("") }
-    AlertDialog(
+    NdDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.sync_delete_title, host)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(
-                    stringResource(Res.string.sync_delete_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    label = { Text(stringResource(Res.string.sync_delete_field)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            NdTextButton(
+        title = stringResource(Res.string.sync_delete_title, host),
+        confirm =
+            NdDialogAction(
                 label = stringResource(Res.string.sync_delete_confirm),
-                onClick = onConfirm,
-                enabled = typed == DELETE_CONFIRMATION && !busy,
                 role = NdActionRole.DESTRUCTIVE,
+                enabled = typed == DELETE_CONFIRMATION && !busy,
+                onClick = onConfirm,
+            ),
+        dismiss = NdDialogAction(stringResource(UiRes.string.action_cancel), onClick = onDismiss),
+    ) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text(
+                stringResource(Res.string.sync_delete_body),
+                style = MaterialTheme.typography.bodyMedium,
             )
-        },
-        dismissButton = {
-            NdTextButton(label = stringResource(UiRes.string.action_cancel), onClick = onDismiss)
-        },
-    )
+            Spacer(Modifier.height(8.dp))
+            PaperTextField(
+                value = typed,
+                onValueChange = { typed = it },
+                placeholder = stringResource(Res.string.sync_delete_field),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }
 
 /** The exact, untranslated confirmation `deleteServerData` requires (08, 10). */

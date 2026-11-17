@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,7 +48,9 @@ import androidx.compose.ui.unit.sp
  * optional [trailingText] at the end (such as a character count). The rim turns amber while the
  * field has focus and red while there is an [errorText], which screen readers hear as the field's
  * error. Like a hint, [placeholder] names the empty field for screen readers; typed text then
- * speaks for itself. Callers add focus requesters and key handling through [modifier].
+ * speaks for itself. Callers add focus requesters and key handling through [modifier]. A
+ * [visualTransformation] masks secrets (`PasswordVisualTransformation` also marks the field as a
+ * password for screen readers), and [trailing] holds a small control such as a show-password key.
  */
 @Composable
 public fun PaperTextField(
@@ -61,6 +64,8 @@ public fun PaperTextField(
     trailingText: String? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -85,6 +90,7 @@ public fun PaperTextField(
         textStyle = TextStyle(color = Ink, fontFamily = courier(), fontSize = FIELD_TEXT),
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
+        visualTransformation = visualTransformation,
         singleLine = true,
         interactionSource = interaction,
         cursorBrush = SolidColor(Ink),
@@ -121,6 +127,10 @@ public fun PaperTextField(
                     if (trailingText != null) {
                         Spacer(Modifier.width(8.dp))
                         Text(trailingText, color = Ink, fontFamily = courier(), fontSize = 12.sp, maxLines = 1)
+                    }
+                    if (trailing != null) {
+                        Spacer(Modifier.width(4.dp))
+                        trailing()
                     }
                 }
             }

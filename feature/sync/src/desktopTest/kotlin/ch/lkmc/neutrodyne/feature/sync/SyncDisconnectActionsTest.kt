@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -189,7 +190,7 @@ class SyncDisconnectActionsTest {
             onNodeWithText("unlinks all your devices", substring = true).assertIsDisplayed()
             onNodeWithText("Every device keeps its own library", substring = true).assertIsDisplayed()
             onNodeWithText("nightly backups keep a copy for up to 7 days", substring = true).assertIsDisplayed()
-            onNodeWithText("Type DELETE to confirm").assertIsDisplayed()
+            onNodeWithContentDescription("Type DELETE to confirm").assertIsDisplayed()
         }
 
     @Test

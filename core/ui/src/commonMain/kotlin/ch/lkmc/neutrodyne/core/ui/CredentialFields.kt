@@ -5,8 +5,6 @@ package ch.lkmc.neutrodyne.core.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +19,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_hide
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
@@ -31,8 +30,9 @@ import org.jetbrains.compose.resources.stringResource
 
 /**
  * The credential dialogs' username/password pair (08's dialogs table: "password (masked, show
- * toggle)"). The password renders through `PasswordVisualTransformation` and the password
- * keyboard; the trailing toggle reveals it and flips to the hide icon while shown. The reveal
+ * toggle)"), on the radio's paper strips. The password renders through
+ * `PasswordVisualTransformation` and the password keyboard; the trailing toggle reveals it and
+ * flips to the hide icon while shown. The reveal
  * flag lives in plain `remember` so a recreated dialog never comes back exposing the secret.
  * `ContentType` marks both fields for the platform's autofill/credential manager (CMP 1.12).
  */
@@ -46,18 +46,16 @@ public fun CredentialFields(
 ) {
     var showPassword by remember { mutableStateOf(false) }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
-        OutlinedTextField(
+        PaperTextField(
             value = username,
             onValueChange = onUsernameChange,
-            label = { Text(stringResource(Res.string.add_auth_username)) },
-            singleLine = true,
+            placeholder = stringResource(Res.string.add_auth_username),
             modifier = Modifier.contentType(ContentType.Username).ndTextFieldFocus(),
         )
-        OutlinedTextField(
+        PaperTextField(
             value = password,
             onValueChange = onPasswordChange,
-            label = { Text(stringResource(Res.string.add_auth_password)) },
-            singleLine = true,
+            placeholder = stringResource(Res.string.add_auth_password),
             modifier = Modifier.contentType(ContentType.Password).ndTextFieldFocus(),
             visualTransformation =
                 if (showPassword) {
@@ -66,7 +64,7 @@ public fun CredentialFields(
                     PasswordVisualTransformation()
                 },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
+            trailing = {
                 NdIconButton(
                     onClick = { showPassword = !showPassword },
                     icon =

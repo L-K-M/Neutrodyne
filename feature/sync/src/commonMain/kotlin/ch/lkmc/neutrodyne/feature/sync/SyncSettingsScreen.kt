@@ -14,14 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +45,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
@@ -737,29 +736,27 @@ private fun OwnNameDialog(
     val trimmed = name.trim()
     val valid = trimmed.isNotEmpty() && trimmed.length <= MAX_DEVICE_NAME
     val renamedMessage = stringResource(Res.string.sync_device_renamed, trimmed)
-    AlertDialog(
+    NdDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.sync_rename_this_device)) },
-        text = {
-            OutlinedTextField(
+        title = stringResource(Res.string.sync_rename_this_device),
+        confirm =
+            NdDialogAction(label = stringResource(UiRes.string.action_save), enabled = valid) {
+                onRename(trimmed, renamedMessage)
+            },
+        dismiss = NdDialogAction(stringResource(UiRes.string.action_cancel), onClick = onDismiss),
+    ) {
+        Column {
+            PaperTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text(stringResource(Res.string.sync_device_name_label)) },
-                supportingText = { Text(stringResource(Res.string.sync_device_name_hint)) },
-                isError = !valid,
-                singleLine = true,
+                placeholder = stringResource(Res.string.sync_device_name_label),
+                errorText = if (!valid) stringResource(Res.string.sync_device_name_hint) else null,
                 modifier = Modifier.fillMaxWidth(),
             )
-        },
-        confirmButton = {
-            TextButton(onClick = { onRename(trimmed, renamedMessage) }, enabled = valid) {
-                Text(stringResource(UiRes.string.action_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(UiRes.string.action_cancel)) }
-        },
-    )
+            // PaperTextField prints no supporting line; the old hint stays visible below.
+            Text(stringResource(Res.string.sync_device_name_hint))
+        }
+    }
 }
 
 private const val MAX_DEVICE_NAME = 40

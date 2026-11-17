@@ -1180,6 +1180,14 @@ PREVIEW                                         FETCHING / DONE
 - Backup sessions (`format = NEUTRODYNE_BACKUP`) show the **restore preview** instead: 05's preview sentence from `BackupRepository.inspect(sessionId)` (`BackupPreview`), checkboxes Listening history / Up next / Settings (Merge preselects history and Up next; switching to Replace checks all three), mode Merge (default) / Replace, and for Replace a confirmation dialog naming its effect ("Removes 9 podcasts and 2 groups that are not in the backup, and replaces your listening history"); confirming Replace first calls `PlaybackController.pause()`, then `restore(sessionId, RestoreRequest(mode, categories))`. While the device is linked to a sync server (`SyncController.status` is `Linked`, MS2) Replace asks the [restore-while-linked question](#restore-while-linked-prompts) instead of the plain confirmation; Merge asks nothing extra (05 [Restore while linked](05-groups-opml-backup.md#restore-while-linked)). `inspect` errors show 05's `BackupError` texts with "Choose another file". Restore progress comes from `BackupRepository.observeRestore()` ("Restoring… {phase} {done} of {total}"); `RestoreRunning` → "A restore is already running". After restore the same screen shows the report, including the M6 re-download offer, whose tap calls `DownloadController.request(ids, MANUAL, null)` from this visible screen (05 [After restore](05-groups-opml-backup.md#after-restore)).
 - Errors before a session exists (picker): [`ImportError` texts](#error-handling-and-failure-modes) in a dialog. Cancel in PREVIEW → `cancel(sessionId)` and pop. `observeSession` emitting null (session cleaned up after 7 days, or cancelled elsewhere) → "This import is no longer available" + Back.
 
+**Radio import (PO-55, 2026-11-17).** The import screen is built from radio parts. The
+row filters are piano keys and the search is a paper strip. Each feed is a paper slip with its monogram or cover, the title in Courier, the
+host and its statuses on small paper tags with a brass edge; the preview's selection is the
+bat-handle switch at the slip's end. Section names are engraved, Select all / Select none,
+Subscribe, Stop and each row's Retry, Edit address, Enter password and Remove are momentary
+keys (Remove and Remove all print in the error red), and group proposals and options are
+settings slips.
+
 ### Backup and restore
 
 `BackupKey`, `:feature:importexport`, M3; also reachable as Settings › Backup.
@@ -1916,6 +1924,14 @@ no undo. The ViewModel retains state across composition recreation; process
 recreation closes the dialog and requires a fresh count.
 
 The sync dialogs (unlink, delete my data, share feed passwords, held changes, restore while linked, first-link confirmations, local-network rationale, insecure connection) are specified in [Sync screens](#sync-screens). All dialogs are `NdDialog` (window-based), keep their input in `rememberSaveable`, and close on back or Esc; on the desktop the default button answers Enter, and destructive actions are never the default. Destructive confirm buttons use the `error` colour role.
+
+**Radio dialogs (PO-55, 2026-11-17).** `NdDialog` is a paper card in a brass rim: an optional
+symbol, the title in Courier and the actions as a bank of momentary keys, ordered Cancel, an
+optional alternative answer (the metered prompt's Always), then the confirm. A destructive
+confirm prints its label in the error red, and an unavailable action is a dimmed key. No
+screen calls Material's `AlertDialog` directly. Fields in dialogs are paper strips
+(`PaperTextField`), including the credential pair, whose password stays masked behind a
+show-password key at the strip's end.
 
 ### String mappers
 

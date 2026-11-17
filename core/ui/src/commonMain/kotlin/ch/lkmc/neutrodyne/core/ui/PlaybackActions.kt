@@ -2,10 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,7 +13,6 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.AddResult
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -487,9 +482,8 @@ public class PlaybackActions(
 }
 
 /**
- * The metered-streaming decision (08 Dialogs: a "small confirmation" the screen owns). `NdDialog`
- * only carries two action slots, so the three buttons use `AlertDialog`'s dismiss slot as a row —
- * Once stays the rightmost confirm, Always and Cancel sit beside it.
+ * The metered-streaming decision (08 Dialogs: a "small confirmation" the screen owns): three
+ * momentary keys in one `NdDialog` — Cancel, the alternative Always, and Once as the confirm.
  */
 @Composable
 public fun MeteredConsentDialog(
@@ -498,24 +492,13 @@ public fun MeteredConsentDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AlertDialog(
+    NdDialog(
         onDismissRequest = onDismiss,
         modifier = modifier,
-        confirmButton = {
-            NdTextButton(stringResource(Res.string.playback_metered_once), onClick = onOnce)
-        },
-        dismissButton = {
-            Row {
-                NdTextButton(stringResource(Res.string.playback_metered_always), onClick = onAlways)
-                NdTextButton(stringResource(Res.string.action_cancel), onClick = onDismiss)
-            }
-        },
-        title = {
-            Text(
-                stringResource(Res.string.playback_metered_title),
-                style = MaterialTheme.typography.headlineSmall,
-            )
-        },
+        title = stringResource(Res.string.playback_metered_title),
+        confirm = NdDialogAction(stringResource(Res.string.playback_metered_once), onClick = onOnce),
+        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
+        alternative = NdDialogAction(stringResource(Res.string.playback_metered_always), onClick = onAlways),
     )
 }
 

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +35,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
@@ -138,17 +139,16 @@ internal fun PodcastPreviewScreen(
         }
     }
     if (confirm) {
-        AlertDialog(
+        NdDialog(
             onDismissRequest = { confirm = false },
-            title = { Text(stringResource(Res.string.preview_confirm)) },
-            text = { Text(stringResource(Res.string.add_might_be_subscribed)) },
-            confirmButton = {
-                NdTextButton(stringResource(Res.string.add_subscribe), {
+            title = stringResource(Res.string.preview_confirm),
+            text = stringResource(Res.string.add_might_be_subscribed),
+            confirm =
+                NdDialogAction(stringResource(Res.string.add_subscribe)) {
                     confirm = false
                     subscribe(selected.toSet())
-                })
-            },
-            dismissButton = { NdTextButton(stringResource(Res.string.action_cancel), { confirm = false }) },
+                },
+            dismiss = NdDialogAction(stringResource(Res.string.action_cancel)) { confirm = false },
         )
     }
     Column(Modifier.fillMaxSize()) {

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -27,10 +26,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
 import ch.lkmc.neutrodyne.core.model.ProviderFailure
 import ch.lkmc.neutrodyne.core.model.ProviderId
@@ -200,44 +202,43 @@ private fun KeyEditor(
         onCancel()
         onClose()
     }
-    AlertDialog(
+    NdDialog(
         onDismissRequest = dismiss,
-        title = { Text(stringResource(Res.string.discover_key_entry)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(Res.string.discover_key_help))
-                OutlinedTextField(
-                    key,
-                    { key = it },
-                    label = { Text(stringResource(Res.string.discover_key)) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                    singleLine = true,
-                    modifier = Modifier.testTag("pi-key").ndTextFieldFocus(),
-                )
-                OutlinedTextField(
-                    secret,
-                    { secret = it },
-                    label = { Text(stringResource(Res.string.discover_secret)) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                    singleLine = true,
-                    modifier = Modifier.testTag("pi-secret").ndTextFieldFocus(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
+        title = stringResource(Res.string.discover_key_entry),
+        confirm =
+            NdDialogAction(
+                label = stringResource(Res.string.discover_verify),
+                enabled = key.isNotBlank() && secret.isNotEmpty(),
+            ) {
                 val enteredKey = key
                 val enteredSecret = secret.toCharArray()
                 key = ""
                 secret = ""
                 onSubmit(enteredKey, enteredSecret)
                 onClose()
-            }, enabled = key.isNotBlank() && secret.isNotEmpty()) { Text(stringResource(Res.string.discover_verify)) }
-        },
-        dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(Res.string.discover_cancel)) } },
-    )
+            },
+        dismiss = NdDialogAction(stringResource(Res.string.discover_cancel), onClick = dismiss),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(Res.string.discover_key_help))
+            PaperTextField(
+                value = key,
+                onValueChange = { key = it },
+                placeholder = stringResource(Res.string.discover_key),
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                modifier = Modifier.testTag("pi-key").ndTextFieldFocus(),
+            )
+            PaperTextField(
+                value = secret,
+                onValueChange = { secret = it },
+                placeholder = stringResource(Res.string.discover_secret),
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                modifier = Modifier.testTag("pi-secret").ndTextFieldFocus(),
+            )
+        }
+    }
 }
 
 internal fun providerSummary(provider: ProviderInfo): StringResource? =

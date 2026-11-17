@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
@@ -20,7 +19,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -490,16 +488,12 @@ private fun LocalNetworkDialog(
     onAllow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    NdDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.sync_setup_local_network_title)) },
-        text = { Text(stringResource(Res.string.sync_setup_local_network_body, host)) },
-        confirmButton = {
-            TextButton(onClick = onAllow) { Text(stringResource(Res.string.sync_continue)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.sync_setup_cancel)) }
-        },
+        title = stringResource(Res.string.sync_setup_local_network_title),
+        text = stringResource(Res.string.sync_setup_local_network_body, host),
+        confirm = NdDialogAction(stringResource(Res.string.sync_continue), onClick = onAllow),
+        dismiss = NdDialogAction(stringResource(Res.string.sync_setup_cancel), onClick = onDismiss),
     )
 }
 
@@ -509,16 +503,12 @@ private fun InsecureDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    NdDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.sync_setup_insecure_title)) },
-        text = { Text(stringResource(Res.string.sync_setup_insecure_body, host)) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text(stringResource(Res.string.sync_setup_connect_anyway)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.sync_setup_cancel)) }
-        },
+        title = stringResource(Res.string.sync_setup_insecure_title),
+        text = stringResource(Res.string.sync_setup_insecure_body, host),
+        confirm = NdDialogAction(stringResource(Res.string.sync_setup_connect_anyway), onClick = onConfirm),
+        dismiss = NdDialogAction(stringResource(Res.string.sync_setup_cancel), onClick = onDismiss),
     )
 }
 
