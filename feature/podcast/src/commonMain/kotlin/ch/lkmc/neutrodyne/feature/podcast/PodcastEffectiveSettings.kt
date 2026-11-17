@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +31,7 @@ import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionNotice
+import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh_interval
 import ch.lkmc.neutrodyne.core.ui.resources.new_episode_notifications
@@ -70,7 +70,7 @@ internal fun PodcastEffectiveSettings(
             trailingContent = {
                 // The headline is a sibling node; name the switch itself for screen readers.
                 val label = stringResource(Res.string.new_episode_notifications)
-                Switch(
+                RadioSwitch(
                     checked = notifications,
                     onCheckedChange = onNotifications,
                     modifier = Modifier.semantics { contentDescription = label },

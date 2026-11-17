@@ -31,9 +31,6 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
 
-/** Retained for callers that extend artwork behind the bar; the faceplate is opaque in both. */
-public enum class NdTopAppBarAppearance { SURFACE, ARTWORK_OVERLAY }
-
 /**
  * The page header (08 Nd wrappers, radio look since 2026-11-17): a metal faceplate across the top
  * of the cabinet's paper tray, with the navigation key at the start, [title] on a centred enamel
@@ -50,7 +47,6 @@ public fun NdTopAppBar(
     navigation: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     elevated: Boolean = false,
-    @Suppress("UNUSED_PARAMETER") appearance: NdTopAppBarAppearance = NdTopAppBarAppearance.SURFACE,
 ) {
     // Pinned chrome must win overlap with off-screen semantics from scrolling siblings.
     MaterialPlate(

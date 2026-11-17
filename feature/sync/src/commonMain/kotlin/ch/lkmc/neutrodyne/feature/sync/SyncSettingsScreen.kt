@@ -20,7 +20,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,6 +55,7 @@ import ch.lkmc.neutrodyne.core.navigation.SyncDiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
 import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
@@ -712,7 +712,7 @@ private fun SyncSwitchRow(
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(summary) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        trailingContent = { RadioSwitch(checked = checked, onCheckedChange = null) },
         modifier =
             modifier.toggleable(
                 value = checked,

@@ -64,7 +64,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdScaffold
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -281,12 +280,6 @@ internal fun PodcastScreen(
                         )
                     },
                     elevated = headerGone,
-                    appearance =
-                        if (artworkBar) {
-                            NdTopAppBarAppearance.ARTWORK_OVERLAY
-                        } else {
-                            NdTopAppBarAppearance.SURFACE
-                        },
                 )
             }
         },

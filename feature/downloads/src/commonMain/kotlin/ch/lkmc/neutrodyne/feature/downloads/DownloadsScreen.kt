@@ -139,7 +139,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_unknown
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_working
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.download.api.DownloadEntry
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.DownloadStatus

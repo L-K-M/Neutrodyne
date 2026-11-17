@@ -857,6 +857,12 @@ wide. Group settings and Delete group are momentary keys. Manage groups and Grou
 `RadioSwitch` for their switches, and Manage groups loses its settings gear (Settings is in the
 radio's Menu).
 
+**Radio switches everywhere (PO-55, 2026-11-17).** Every on/off control in the app is the
+radio's bat-handle switch (`RadioSwitch` in `:core:ui`, Material's `Switch` contract):
+import and export options, backup, podcast and group settings, Sync and the speed sheet's skip
+silence. No top bar carries a settings gear any more; Settings opens from the radio's Menu, whose Settings key carries D78's amber update dot and reads "Settings, update available" while an update waits. The
+retired `NdTopAppBarAppearance` header mode is gone, as the faceplate is opaque everywhere.
+
 ### Manage groups
 
 `GroupsManageKey`, `:feature:groups`, M2.

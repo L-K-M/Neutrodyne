@@ -35,10 +35,13 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -491,6 +494,18 @@ class NeutrodyneRootTest {
             }
             pressEscape()
             onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun radioMenuSettingsKeyCarriesTheUpdateNotice() =
+        runComposeUiTest {
+            var badge by mutableStateOf(true)
+            setContent { TestRoot(state = RootUiState.READY.copy(settingsBadge = badge)) }
+            onNodeWithTag("radio_menu").performClick()
+            onNodeWithTag("nav_settings").assert(hasContentDescription("Settings, update available"))
+            badge = false
+            waitForIdle()
+            onNodeWithTag("nav_settings").assert(hasText("Settings")).assert(hasContentDescription("Settings").not())
         }
 
     @Test

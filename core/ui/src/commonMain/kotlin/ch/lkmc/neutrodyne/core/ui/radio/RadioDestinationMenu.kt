@@ -76,6 +76,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_menu_sleep_key
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu_speed
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu_speed_key
 import ch.lkmc.neutrodyne.core.ui.resources.settings
+import ch.lkmc.neutrodyne.core.ui.resources.settings_update_available
+import ch.lkmc.neutrodyne.core.ui.root.LocalSettingsBadge
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -166,14 +168,22 @@ private fun Destinations(open: (NavKey) -> Unit) {
             lampDescription = failedDescription,
         ) { open(DownloadsKey) }
         MenuKey(NdIcons.Explore, discover, "nav_discover") { open(DiscoverKey) }
-        MenuKey(NdIcons.Settings, settings, "nav_settings") { open(SettingsHomeKey) }
+        // With the top bars' gears gone, the Settings key carries D78's update notice.
+        val updateNotice = LocalSettingsBadge.current
+        MenuKey(
+            NdIcons.Settings,
+            settings,
+            "nav_settings",
+            spokenAs = if (updateNotice) stringResource(Res.string.settings_update_available) else null,
+            notice = updateNotice,
+        ) { open(SettingsHomeKey) }
     }
 }
 
 /**
  * One ivory key with its printed label, read as a button named by the label. A short printed
  * [label] gives way to the full [spokenAs] name; [lamp] lights a red count lamp on the cap that
- * reads as [lampDescription].
+ * reads as [lampDescription], and [notice] an amber dot like the radio's Menu key.
  */
 @Composable
 private fun MenuKey(
@@ -183,6 +193,7 @@ private fun MenuKey(
     spokenAs: String? = null,
     lamp: Int? = null,
     lampDescription: String? = null,
+    notice: Boolean = false,
     onClick: () -> Unit,
 ) {
     Column(
@@ -200,6 +211,9 @@ private fun MenuKey(
         Box {
             IvoryKeyCap(icon, contentDescription = null, size = KEY_CAP)
             if (lamp != null) CountLamp(lamp, lampDescription, Modifier.align(Alignment.TopEnd))
+            if (notice) {
+                Box(Modifier.align(Alignment.TopEnd).size(NOTICE_DOT).background(NoticeAmber, CircleShape))
+            }
         }
         Text(
             label,
@@ -303,3 +317,6 @@ private val KEY_GAP = 8.dp
 private const val KEYS_PER_ROW = 3
 private const val MAX_LAMP_COUNT = 99
 private const val ENGRAVING_ALPHA = 0.85f
+
+private val NOTICE_DOT = 8.dp
+private val NoticeAmber = Color(0xFFF3881C)

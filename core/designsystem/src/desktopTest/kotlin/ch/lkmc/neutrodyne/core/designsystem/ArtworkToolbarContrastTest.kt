@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -43,7 +42,6 @@ class ArtworkToolbarContrastTest {
                                         title = "MMMMMM",
                                         navigation = { NdTooltipIconButton({}, NdIcons.ArrowBack, "Back") },
                                         actions = { NdIconButton({}, NdIcons.MoreVert, "More") },
-                                        appearance = NdTopAppBarAppearance.ARTWORK_OVERLAY,
                                     )
                                 }
                             }

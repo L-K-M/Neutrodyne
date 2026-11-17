@@ -28,7 +28,6 @@ import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
@@ -79,7 +78,6 @@ internal fun UpNextRoute(
         onDiscover = { navigator.selectTab(DiscoverKey) },
         onRetry = viewModel::retry,
         onVisibleIds = viewModel::onVisibleIds,
-        topBarActions = { SettingsGearButton() },
     )
     ShowUserMessages(state.messages, viewModel::onMessageShown) { id ->
         viewModel.externalOpen.onAction(id)

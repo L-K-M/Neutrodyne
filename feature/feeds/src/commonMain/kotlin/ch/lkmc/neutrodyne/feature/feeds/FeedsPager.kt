@@ -87,7 +87,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_hidden
 import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.play
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
@@ -264,7 +263,6 @@ internal fun FeedsScreen(
                             tooltip = stringResource(Res.string.feeds_refresh),
                         )
                     }
-                    SettingsGearButton()
                 },
             )
         }

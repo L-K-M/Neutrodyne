@@ -16,7 +16,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +47,7 @@ import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.ui.AttributionText
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
@@ -243,7 +243,7 @@ internal fun SpeedSheet(
                     )
                 }
             }
-            Switch(
+            RadioSwitch(
                 checked = shownSilence,
                 onCheckedChange = { requestSilence(it) },
                 modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = silenceLabel },

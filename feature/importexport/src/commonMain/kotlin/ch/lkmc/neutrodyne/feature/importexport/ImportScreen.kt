@@ -27,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -94,6 +93,7 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionNotice
+import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
@@ -666,7 +666,7 @@ private fun GroupsBlock(
         ListItem(
             headlineContent = { Text(masterLabel) },
             trailingContent = {
-                Switch(
+                RadioSwitch(
                     checked = importGroups,
                     enabled = enabled,
                     onCheckedChange = onImportGroups,
@@ -723,7 +723,7 @@ private fun GroupProposalRow(
             }
         },
         trailingContent = {
-            Switch(
+            RadioSwitch(
                 checked = proposal.included,
                 enabled = enabled,
                 onCheckedChange = { onIncludeGroup(proposal.nameKey, it) },
@@ -770,7 +770,7 @@ private fun OptionsBlock(
         ListItem(
             headlineContent = { Text(treatPlayedLabel) },
             trailingContent = {
-                Switch(
+                RadioSwitch(
                     checked = session.options.treatExistingAsPlayed,
                     enabled = enabled,
                     onCheckedChange = onTreatExisting,
@@ -781,7 +781,7 @@ private fun OptionsBlock(
         ListItem(
             headlineContent = { Text(notifyLabel) },
             trailingContent = {
-                Switch(
+                RadioSwitch(
                     checked = session.options.notifyNewEpisodes,
                     enabled = enabled,
                     onCheckedChange = onNotify,
