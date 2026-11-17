@@ -1,29 +1,16 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feature.discover
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -45,19 +31,18 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
-import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
-import ch.lkmc.neutrodyne.core.designsystem.components.ndHorizontalScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.TuningDial
 import ch.lkmc.neutrodyne.core.model.ChartGenre
+import ch.lkmc.neutrodyne.core.model.ProviderId
 import ch.lkmc.neutrodyne.core.model.ProviderInfo
+import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
@@ -66,18 +51,18 @@ import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.discover_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_add_link
-import ch.lkmc.neutrodyne.core.ui.resources.discovery_categories
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_charts_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_import
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_more
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_popular
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_search
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_station_top
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_top
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.root.LocalDiscoverSearchFocus
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
-import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import org.jetbrains.compose.resources.stringResource
 
@@ -87,12 +72,27 @@ internal fun DiscoverRoute(viewModel: DiscoverViewModel = metroViewModel()) {
     var input by rememberSaveable { mutableStateOf(state.input) }
     LaunchedEffect(Unit) { viewModel.inputChanged(input) }
     val navigator = LocalAppNavigator.current
-    DiscoverScreen(state.copy(input = input), {
-        input = it
-        viewModel.inputChanged(it)
-    }, viewModel::retry, navigator, viewModel::loadChart, viewModel::onProvidersVisible)
+    DiscoverScreen(
+        state.copy(input = input),
+        {
+            input = it
+            viewModel.inputChanged(it)
+        },
+        viewModel::retry,
+        navigator,
+        viewModel::loadChart,
+        viewModel::onProvidersVisible,
+        viewModel::tune,
+        viewModel::retryChart,
+    )
 }
 
+/**
+ * Discover in the radio's parts (PO-55): a paper search strip with the provider disclosure under
+ * it, a bank of keys to add by URL or import, and, while nothing is typed, the charts as radio
+ * stations: preset keys for the top chart and the genres the user's groups map to, a tuning dial
+ * of every genre, and a tray of slips for the tuned station's top podcasts.
+ */
 @Composable
 internal fun DiscoverScreen(
     state: DiscoverState,
@@ -101,6 +101,8 @@ internal fun DiscoverScreen(
     navigator: AppNavigator,
     onChartVisible: (ChartGenre?) -> Unit = {},
     onProvidersVisible: (List<ProviderInfo>) -> Unit = {},
+    onTune: (ChartGenre?) -> Unit = {},
+    onChartRetry: () -> Unit = {},
 ) {
     val focus = remember { FocusRequester() }
     val searchFocus = LocalDiscoverSearchFocus.current
@@ -109,11 +111,11 @@ internal fun DiscoverScreen(
         searchFocus?.register(action)
         onDispose { searchFocus?.unregister(action) }
     }
-    val currentOnChartVisible by rememberUpdatedState(onChartVisible)
     val list = rememberLazyListState()
     val bars = LocalScrollbars.current
     val barColor = ndScrollbarColor(bars)
     val settings = { navigator.pushDetail(SettingsKey(SettingsPage.DISCOVER)) }
+    val linkInput = isLinkInput(state.input)
 
     fun submit() {
         val query = state.input.trim()
@@ -134,47 +136,25 @@ internal fun DiscoverScreen(
             }
         },
     ) {
-        NdTopAppBar(stringResource(Res.string.nav_discover), actions = { SettingsGearButton() })
-        OutlinedTextField(
-            value = state.input,
-            onValueChange = onInput,
-            label = { Text(stringResource(Res.string.discovery_search)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { submit() }),
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .focusRequester(focus)
-                    .onPreviewKeyEvent {
-                        if (it.type == KeyEventType.KeyDown && it.key == Key.Enter) {
-                            submit()
-                            true
-                        } else {
-                            false
-                        }
-                    }.ndTextFieldFocus(),
-        )
-        ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp), onProvidersVisible)
-        FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            NdAssistChip(
-                onClick = { navigator.push(AddPodcastKey(null)) },
-                label = stringResource(Res.string.discover_add_url),
-            )
-            NdAssistChip(
-                onClick = { navigator.push(ImportFileKey) },
-                label = stringResource(Res.string.discovery_import),
-            )
-            if (isLinkInput(
-                    state.input,
-                )
-            ) {
-                NdAssistChip(onClick = ::submit, label = stringResource(Res.string.discovery_add_link))
+        NdTopAppBar(stringResource(Res.string.nav_discover))
+        Column(
+            Modifier.padding(horizontal = 16.dp).padding(top = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SearchStrip(state.input, onInput, ::submit, stringResource(Res.string.discovery_search), focus)
+            ProviderDisclosure(state.providers, Modifier.padding(horizontal = 4.dp), onProvidersVisible)
+            KeyBank {
+                if (linkInput) MomentaryKey(stringResource(Res.string.discovery_add_link), ::submit)
+                MomentaryKey(stringResource(Res.string.discover_add_url), { navigator.push(AddPodcastKey(null)) })
+                MomentaryKey(stringResource(Res.string.discovery_import), { navigator.push(ImportFileKey) })
             }
         }
-        LazyColumn(state = list, modifier = Modifier.weight(1f).ndScrollbar(list, bars, barColor)) {
-            if (state.input.isNotBlank() && !isLinkInput(state.input)) {
+        LazyColumn(
+            state = list,
+            modifier = Modifier.weight(1f).ndScrollbar(list, bars, barColor),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
+        ) {
+            if (state.input.isNotBlank() && !linkInput) {
                 state.results?.let { results ->
                     item { SearchStatus(results, retry, settings) }
                     items(results.hits.take(INLINE_LIMIT), key = { it.feedUrl }) { hit ->
@@ -182,74 +162,102 @@ internal fun DiscoverScreen(
                     }
                     if (results.hits.size > INLINE_LIMIT) {
                         item {
-                            NdTextButton(stringResource(Res.string.discovery_more), ::submit)
-                        }
-                    }
-                }
-            } else if (state.input.isBlank()) {
-                state.charts.forEach { row ->
-                    item(key = row.title ?: "top") {
-                        LaunchedEffect(row.generation, row.genre) { currentOnChartVisible(row.genre) }
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                            Text(
-                                row.title?.let { stringResource(Res.string.discovery_popular, it) }
-                                    ?: stringResource(Res.string.discovery_top),
-                                Modifier.weight(1f),
-                            )
-                            NdTextButton(stringResource(Res.string.discovery_more), {
-                                navigator.pushDetail(DirectoryKey("", row.genre?.id))
-                            })
-                        }
-                        if (row.hits == null) {
-                            Row(
-                                Modifier.horizontalScroll(rememberScrollState()).padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                repeat(CHART_PLACEHOLDERS) {
-                                    Box(Modifier.size(120.dp).background(MaterialTheme.colorScheme.surfaceContainer))
-                                }
-                            }
-                        } else {
-                            val scroll = rememberLazyListState()
-                            LazyRow(
-                                state = scroll,
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .testTag("chart-row:${row.genre?.id.orEmpty()}")
-                                        .ndHorizontalScrollbar(scroll, bars, barColor),
-                                contentPadding =
-                                    androidx.compose.foundation.layout
-                                        .PaddingValues(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                items(row.hits, key = { it.feedUrl }) { hit ->
-                                    Column(
-                                        Modifier.width(120.dp).clickable(role = Role.Button) { navigator.openHit(hit) },
-                                    ) {
-                                        DirectoryCover(hit, Modifier.size(120.dp))
-                                        Text(hit.title, maxLines = 2)
-                                    }
-                                }
+                            KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                MomentaryKey(stringResource(Res.string.discovery_more), ::submit)
                             }
                         }
                     }
                 }
-                item {
-                    Text(stringResource(Res.string.discovery_categories), Modifier.padding(16.dp))
-                    FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ChartGenre.entries.forEach { genre ->
-                            NdAssistChip(
-                                onClick = { navigator.pushDetail(DirectoryKey("", genre.id)) },
-                                label = genre.label(),
-                            )
-                        }
-                    }
-                }
+            } else if (state.input.isBlank() && state.chartsAvailable()) {
+                charts(state, navigator, onChartVisible, onTune, onChartRetry)
             }
         }
     }
 }
+
+/** Charts come from Apple alone: none while Apple is switched off or unusable. */
+private fun DiscoverState.chartsAvailable(): Boolean =
+    chart.failure != ProviderStatus.Disabled &&
+        providers?.none { it.id == ProviderId.APPLE && it.effective } != true
+
+private fun LazyListScope.charts(
+    state: DiscoverState,
+    navigator: AppNavigator,
+    onChartVisible: (ChartGenre?) -> Unit,
+    onTune: (ChartGenre?) -> Unit,
+    onChartRetry: () -> Unit,
+) {
+    val chart = state.chart
+    if (state.presets.size > 1) {
+        item(key = "presets") {
+            KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                state.presets.forEach { genre ->
+                    PianoKey(
+                        genre.stationLabel(),
+                        pressed = genre == chart.genre,
+                        onClick = { onTune(genre) },
+                        modifier = Modifier.testTag("preset:${genre?.id.orEmpty()}"),
+                    )
+                }
+            }
+        }
+    }
+    item(key = "dial") {
+        val stations = STATIONS.map { it.stationLabel() }
+        TuningDial(
+            stations = stations,
+            tuned = STATIONS.indexOf(chart.genre),
+            onTune = { onTune(STATIONS[it]) },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            tag = { "station:${STATIONS[it]?.id.orEmpty()}" },
+        )
+    }
+    item(key = "chart-heading") {
+        val currentOnChartVisible by rememberUpdatedState(onChartVisible)
+        LaunchedEffect(chart.genre, chart.generation) { currentOnChartVisible(chart.genre) }
+        EngravedHeading(
+            chart.genre?.let { stringResource(Res.string.discovery_popular, it.label()) }
+                ?: stringResource(Res.string.discovery_top),
+            Modifier.padding(start = 20.dp, end = 16.dp, top = 8.dp),
+        ) {
+            KeyBank {
+                MomentaryKey(
+                    stringResource(Res.string.discovery_more),
+                    { navigator.pushDetail(DirectoryKey("", chart.genre?.id)) },
+                )
+            }
+        }
+    }
+    when {
+        chart.failure != null -> {
+            item(key = "chart-failure") {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(stringResource(Res.string.discovery_charts_unavailable))
+                    KeyBank { MomentaryKey(stringResource(Res.string.action_retry), onChartRetry) }
+                }
+            }
+        }
+
+        chart.hits == null -> {
+            items(CHART_PLACEHOLDERS, key = { "chart-skeleton-$it" }) { SkeletonSlip() }
+        }
+
+        else -> {
+            items(chart.hits.take(INLINE_LIMIT), key = { "chart:${it.feedUrl}" }) { hit ->
+                DirectoryRow(hit) { navigator.openHit(hit) }
+            }
+        }
+    }
+}
+
+/** The dial's stations: the top chart, then every genre in the directory's order. */
+private val STATIONS: List<ChartGenre?> = listOf<ChartGenre?>(null) + ChartGenre.entries
+
+@Composable
+private fun ChartGenre?.stationLabel(): String = this?.label() ?: stringResource(Res.string.discovery_station_top)
 
 private const val INLINE_LIMIT = 10
 

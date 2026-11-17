@@ -34,6 +34,8 @@ class DiscoveryScreenshotTest {
 
     @Test fun content() = capture(DiscoveryShot.CONTENT)
 
+    @Test fun charts() = capture(DiscoveryShot.CHARTS)
+
     private fun capture(shot: DiscoveryShot) {
         val previous = Locale.getDefault()
         Locale.setDefault(Locale.ENGLISH)

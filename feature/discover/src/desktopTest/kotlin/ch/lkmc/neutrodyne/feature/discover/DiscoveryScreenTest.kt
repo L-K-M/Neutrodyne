@@ -1,33 +1,30 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feature.discover
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.viewModelScope
-import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
-import ch.lkmc.neutrodyne.core.designsystem.components.NdScrollbarStyle
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderId
@@ -59,7 +56,6 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 @OptIn(ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class DiscoveryScreenTest {
@@ -292,43 +288,70 @@ class DiscoveryScreenTest {
         }
 
     @Test
-    fun chartRowsScrollToOffscreenTiles() =
+    fun stationsAndPresetsTuneTheDialAndTheTrayShowsTheTunedChart() =
         runComposeUiTest {
-            var thumb = Color.Transparent
+            val tuned = mutableListOf<ChartGenre?>()
+            val visible = mutableListOf<ChartGenre?>()
             setContent {
-                CompositionLocalProvider(
-                    LocalAppNavigator provides navigator,
-                    LocalScrollbars provides NdScrollbarStyle(enabled = true, alpha = 1f),
-                ) {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                        thumb = MaterialTheme.colorScheme.onSurface
                         DiscoverScreen(
                             DiscoverState(
-                                charts =
-                                    listOf(
-                                        ChartRow(null, null, (1..15).map { hit("Chart show $it") }),
-                                    ),
+                                presets = listOf(null, ChartGenre.TECHNOLOGY),
+                                chart = TunedChart(null, (1..12).map { hit("Chart show $it") }),
                             ),
                             {},
                             {},
                             navigator,
+                            onChartVisible = { visible += it },
+                            onTune = { tuned += it },
                         )
                     }
                 }
             }
-            val before = onNodeWithTag("chart-row:").captureToImage().toPixelMap()
-            assertEquals(thumb.toArgb(), before[before.width / 4, before.height - 4].toArgb())
-            assertNotEquals(thumb.toArgb(), before[before.width * 3 / 4, before.height - 4].toArgb())
-            onNodeWithTag("chart-row:").performScrollToNode(hasText("Chart show 15"))
-            onNodeWithText("Chart show 15").assertIsDisplayed()
-            val after = onNodeWithTag("chart-row:").captureToImage().toPixelMap()
-            assertNotEquals(thumb.toArgb(), after[after.width / 4, after.height - 4].toArgb())
-            assertEquals(thumb.toArgb(), after[after.width * 3 / 4, after.height - 4].toArgb())
-            onNodeWithText("Chart show 15").performClick()
+            assertEquals(listOf<ChartGenre?>(null), visible)
+            onNodeWithTag("station:").assertIsSelected()
+            onNodeWithTag("station:${ChartGenre.HISTORY.id}").assertIsNotSelected().performScrollTo().performClick()
+            onNodeWithTag("preset:${ChartGenre.TECHNOLOGY.id}").performClick()
+            assertEquals(listOf<ChartGenre?>(ChartGenre.HISTORY, ChartGenre.TECHNOLOGY), tuned)
+            onNodeWithText("Top podcasts").assertIsDisplayed()
+            onNodeWithText("Chart show 11").assertDoesNotExist()
+            onNodeWithText("More").performClick()
+            onNodeWithText("Chart show 3").performScrollTo().performClick()
             assertEquals<List<RecordingAppNavigator.Call>>(
-                listOf(RecordingAppNavigator.Call.PushDetail(PodcastPreviewKey("https://example.test/Chart show 15"))),
+                listOf(
+                    RecordingAppNavigator.Call.PushDetail(DirectoryKey("", null)),
+                    RecordingAppNavigator.Call.PushDetail(PodcastPreviewKey("https://example.test/Chart show 3")),
+                ),
                 navigator.calls,
             )
+        }
+
+    @Test
+    fun aFailedChartOffersRetryAndChartsLeaveWithApple() =
+        runComposeUiTest {
+            var state by mutableStateOf(
+                DiscoverState(chart = TunedChart(ChartGenre.NEWS, failure = ProviderStatus.RateLimited)),
+            )
+            var retried = 0
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DiscoverScreen(state, {}, {}, navigator, onChartRetry = { retried++ })
+                    }
+                }
+            }
+            onNodeWithText("Popular in News").assertIsDisplayed()
+            onNodeWithText("Charts unavailable").assertIsDisplayed()
+            onNodeWithText("Retry").performClick()
+            assertEquals(1, retried)
+            state = DiscoverState(providers = listOf(ProviderInfo(ProviderId.APPLE, false)))
+            waitForIdle()
+            onNodeWithTag("station:").assertDoesNotExist()
+            onNodeWithText("Top podcasts").assertDoesNotExist()
+            state = DiscoverState(chart = TunedChart(failure = ProviderStatus.Disabled))
+            waitForIdle()
+            onNodeWithTag("station:").assertDoesNotExist()
         }
 
     private fun hit(

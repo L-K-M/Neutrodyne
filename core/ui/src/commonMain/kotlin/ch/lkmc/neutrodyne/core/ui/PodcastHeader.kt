@@ -167,7 +167,7 @@ public fun PodcastHeader(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    SubscribedLamp()
+                    SubscribedLamp(Modifier.padding(top = 4.dp))
                 }
             }
         }
@@ -179,11 +179,14 @@ public fun PodcastHeader(
     }
 }
 
-/** A lit amber pilot lamp beside "Subscribed": this screen only shows subscribed podcasts. */
+/**
+ * A lit amber pilot lamp beside "Subscribed": on the podcast page (which only shows subscribed
+ * podcasts) and on directory slips for podcasts already in the library.
+ */
 @Composable
-private fun SubscribedLamp() {
+public fun SubscribedLamp(modifier: Modifier = Modifier) {
     Row(
-        Modifier.padding(top = 4.dp),
+        modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
