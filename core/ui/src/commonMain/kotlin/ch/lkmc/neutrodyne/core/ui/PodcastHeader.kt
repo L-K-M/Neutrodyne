@@ -2,9 +2,12 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -225,7 +228,7 @@ private fun MembershipPlates(
         groups.forEach { group -> GroupPlate(group, onAddToGroups, onRemoveGroup) }
         Box(
             Modifier
-                .heightIn(min = 48.dp)
+                .heightIn(min = KEY_TARGET)
                 .clickable(role = Role.Button, onClick = onAddToGroups),
             contentAlignment = Alignment.Center,
         ) {
@@ -243,49 +246,51 @@ private fun MembershipPlates(
     }
 }
 
+/**
+ * One membership as an enamel plate [PLATE_HEIGHT] tall. Its two keys, the body that opens the
+ * membership sheet and the remove key, each keep a 48 dp target around the plate; the plate band
+ * draws their press, hover and focus.
+ */
 @Composable
 private fun GroupPlate(
     group: Group,
     onOpen: () -> Unit,
     onRemove: (Group) -> Unit,
 ) {
-    Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-        Row(
+    Box(contentAlignment = Alignment.Center) {
+        Box(
             Modifier
+                .matchParentSize()
+                .padding(vertical = PLATE_INSET)
                 .shadow(2.dp, TagShape)
                 .background(Brush.verticalGradient(listOf(Color(0xFF2B3A4A), Color(0xFF16212D))), TagShape)
                 .border(1.5.dp, Brass, TagShape),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                Modifier
-                    .clickable(role = Role.Button, onClick = onOpen)
-                    .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Box(
-                    Modifier
-                        .size(DOT_SIZE)
-                        .background(groupTones(group.colorArgb).dot, CircleShape)
-                        .border(1.dp, Cream, CircleShape),
-                )
-                Text(
-                    group.name,
-                    color = Cream,
-                    fontFamily = courier(),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PlateKey(onOpen) {
+                Row(
+                    Modifier.padding(start = 10.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(DOT_SIZE)
+                            .background(groupTones(group.colorArgb).dot, CircleShape)
+                            .border(1.dp, Cream, CircleShape),
+                    )
+                    Text(
+                        group.name,
+                        color = Cream,
+                        fontFamily = courier(),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Box(
-                Modifier
-                    .size(REMOVE_KEY_SIZE)
-                    .clickable(role = Role.Button) { onRemove(group) },
-                contentAlignment = Alignment.Center,
-            ) {
+            PlateKey({ onRemove(group) }, Modifier.width(KEY_TARGET)) {
                 Icon(
                     imageVector = NdIcons.Close,
                     contentDescription = stringResource(Res.string.podcast_group_remove, group.name),
@@ -294,6 +299,31 @@ private fun GroupPlate(
                 )
             }
         }
+    }
+}
+
+/** A 48 dp tall key on a group plate whose press shows on the plate band only. */
+@Composable
+private fun PlateKey(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier
+            .heightIn(min = KEY_TARGET)
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .padding(vertical = PLATE_INSET)
+                .clip(TagShape)
+                .indication(interaction, LocalIndication.current),
+        )
+        content()
     }
 }
 
@@ -417,7 +447,9 @@ private val HEADER_TOP_GAP = 12.dp
 private val HERO_SIZE = 120.dp
 private val CARD_GAP = 12.dp
 private val LAMP_SIZE = 9.dp
-private val REMOVE_KEY_SIZE = 32.dp
+private val KEY_TARGET = 48.dp
+private val PLATE_HEIGHT = 32.dp
+private val PLATE_INSET = (KEY_TARGET - PLATE_HEIGHT) / 2
 private const val BANNER_ASPECT = 6f
 private val CoverShape = RoundedCornerShape(4.dp)
 private val CardShape = RoundedCornerShape(4.dp)

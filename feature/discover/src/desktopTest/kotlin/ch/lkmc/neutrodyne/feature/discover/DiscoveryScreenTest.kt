@@ -202,6 +202,67 @@ class DiscoveryScreenTest {
         }
 
     @Test
+    fun repeatedFeedUrlsListEveryHit() =
+        runComposeUiTest {
+            // Apple's charts can list one feed under two shows; a repeated lazy-list key crashes.
+            val hits =
+                persistentListOf(
+                    hit("Listing A").copy(feedUrl = SHARED_FEED),
+                    hit("Listing B").copy(feedUrl = SHARED_FEED),
+                )
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DirectoryScreen(
+                            DirectoryKey("", null),
+                            DirectoryState(loading = false, hits = hits),
+                            {},
+                            navigator,
+                        )
+                    }
+                }
+            }
+            onNodeWithText("Listing A").assertIsDisplayed()
+            onNodeWithText("Listing B").assertIsDisplayed()
+        }
+
+    @Test
+    fun repeatedFeedUrlsInTheTunedChartListEveryHit() =
+        runComposeUiTest {
+            val hits =
+                listOf(hit("Listing A").copy(feedUrl = SHARED_FEED), hit("Listing B").copy(feedUrl = SHARED_FEED))
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DiscoverScreen(DiscoverState(chart = TunedChart(null, hits)), {}, {}, navigator)
+                    }
+                }
+            }
+            onNodeWithText("Listing A").performScrollTo().assertIsDisplayed()
+            onNodeWithText("Listing B").performScrollTo().assertIsDisplayed()
+        }
+
+    @Test
+    fun addByUrlWaitsUntilTheDirectoryHasAnswered() =
+        runComposeUiTest {
+            var state by mutableStateOf(DirectoryState(loading = true))
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DirectoryScreen(DirectoryKey("", null), state, {}, navigator)
+                    }
+                }
+            }
+            onNodeWithText(ADD_BY_URL).assertDoesNotExist()
+
+            state = DirectoryState(loading = false)
+            onNodeWithText(ADD_BY_URL).assertIsDisplayed()
+
+            state = DirectoryState(loading = false, chartError = ProviderStatus.RateLimited)
+            onNodeWithText(ADD_BY_URL).assertIsDisplayed()
+        }
+
+    @Test
     fun explicitChartFailureOffersRetry() =
         runComposeUiTest {
             var retries = 0
@@ -384,6 +445,8 @@ class DiscoveryScreenTest {
     )
 
     private companion object {
+        const val SHARED_FEED = "https://example.test/shared"
+        const val ADD_BY_URL = "Add by URL"
         const val CHARTS_OFF = "Charts come from Apple, which is switched off in Discover settings"
     }
 }

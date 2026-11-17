@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
+import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 
 /**
@@ -73,6 +74,21 @@ internal fun SkeletonSlip(modifier: Modifier = Modifier) {
             .heightIn(min = SKELETON_HEIGHT)
             .border(0.5.dp, Brass.copy(alpha = 0.7f), SlipShape),
     ) {}
+}
+
+/**
+ * Lazy-list keys for [hits], one per row and unique by construction: the occurrence number, a
+ * space, then the feed URL. Apple's charts can list one feed under two shows, and fused search
+ * keeps hits whose URLs fail to normalise apart, so a feed URL alone may repeat, and a repeated
+ * key crashes the list.
+ */
+internal fun hitKeys(hits: List<DirectoryHit>): List<String> {
+    val seen = mutableMapOf<String, Int>()
+    return hits.map { hit ->
+        val occurrence = seen[hit.feedUrl] ?: 0
+        seen[hit.feedUrl] = occurrence + 1
+        "$occurrence ${hit.feedUrl}"
+    }
 }
 
 internal val SlipShape = RoundedCornerShape(4.dp)

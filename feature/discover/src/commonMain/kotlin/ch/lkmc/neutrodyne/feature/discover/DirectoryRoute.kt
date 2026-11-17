@@ -113,8 +113,14 @@ internal fun DirectoryScreen(
                     }
                 }
             }
-            items(state.hits, key = { it.feedUrl }) { hit -> DirectoryRow(hit) { navigator.openHit(hit) } }
-            if (state.hits.isEmpty()) {
+            val keys = hitKeys(state.hits)
+            items(state.hits.size, key = { keys[it] }) { index ->
+                val hit = state.hits[index]
+                DirectoryRow(hit) { navigator.openHit(hit) }
+            }
+            // While the directory is still answering, the skeleton slips stand where this key
+            // would; once it has answered with nothing (or failed), adding by URL is the way on.
+            if (!state.loading && state.hits.isEmpty()) {
                 item {
                     KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         MomentaryKey(

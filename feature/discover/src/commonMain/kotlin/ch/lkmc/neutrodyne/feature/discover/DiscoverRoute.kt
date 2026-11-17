@@ -160,7 +160,10 @@ internal fun DiscoverScreen(
             if (state.input.isNotBlank() && !linkInput) {
                 state.results?.let { results ->
                     item { SearchStatus(results, retry, settings) }
-                    items(results.hits.take(INLINE_LIMIT), key = { it.feedUrl }) { hit ->
+                    val inline = results.hits.take(INLINE_LIMIT)
+                    val keys = hitKeys(inline)
+                    items(inline.size, key = { keys[it] }) { index ->
+                        val hit = inline[index]
                         DirectoryRow(hit) { navigator.openHit(hit) }
                     }
                     if (results.hits.size > INLINE_LIMIT) {
@@ -256,7 +259,10 @@ private fun LazyListScope.charts(
         }
 
         else -> {
-            items(chart.hits.take(INLINE_LIMIT), key = { "chart:${it.feedUrl}" }) { hit ->
+            val inline = chart.hits.take(INLINE_LIMIT)
+            val keys = hitKeys(inline)
+            items(inline.size, key = { "chart:${keys[it]}" }) { index ->
+                val hit = inline[index]
                 DirectoryRow(hit) { navigator.openHit(hit) }
             }
         }
