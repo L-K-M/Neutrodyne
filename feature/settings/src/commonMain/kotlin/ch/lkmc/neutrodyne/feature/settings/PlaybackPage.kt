@@ -53,7 +53,8 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
 import ch.lkmc.neutrodyne.core.designsystem.radio.StepCounter
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_not_on_desktop
@@ -133,40 +134,35 @@ internal fun PlaybackPage(
                     PlaybackDialog.PRESETS.name
             })
             if (platform == PlatformKind.ANDROID) {
-                SettingsRow(
+                SettingsChoiceRow(
                     NdIcons.Wifi,
-                    stringResource(
-                        Res.string.playback_stream_on_metered,
-                    ),
-                    stringResource(meteredLabel(state.streamOnMetered)),
-                    {
-                        dialog =
-                            PlaybackDialog.METERED.name
-                    },
+                    stringResource(Res.string.playback_stream_on_metered),
+                    null,
+                    StreamOnMetered.entries,
+                    state.streamOnMetered,
+                    { stringResource(meteredLabel(it)) },
+                    viewModel::setStreamOnMetered,
                 )
             } else {
                 SettingsRow(
                     NdIcons.Wifi,
                     stringResource(Res.string.playback_stream_on_metered),
                     stringResource(UiRes.string.feeds_not_on_desktop),
-                    {},
-                    enabled = false,
+                    null,
                 )
             }
             EngravedHeading(
                 stringResource(Res.string.playback_storage),
                 Modifier.padding(start = 20.dp, end = 16.dp, top = 8.dp),
             )
-            SettingsRow(
+            SettingsChoiceRow(
                 NdIcons.Memory,
-                stringResource(
-                    Res.string.playback_stream_cache,
-                ),
-                stringResource(Res.string.playback_cache_mb, state.streamCacheMb),
-                {
-                    dialog =
-                        PlaybackDialog.CACHE.name
-                },
+                stringResource(Res.string.playback_stream_cache),
+                null,
+                PlaybackSettingKeys.STREAM_CACHE_MB_VALUES.toList(),
+                state.streamCacheMb,
+                { stringResource(Res.string.playback_cache_mb, it) },
+                viewModel::setStreamCacheMb,
             )
             state.cacheBytes?.let {
                 Text(
@@ -183,36 +179,6 @@ internal fun PlaybackPage(
     }
     val selected = dialog?.let { name -> PlaybackDialog.entries.firstOrNull { it.name == name } }
     when (selected) {
-        PlaybackDialog.CACHE -> {
-            SettingsChoiceDialog(
-                icon = NdIcons.Memory,
-                title = stringResource(Res.string.playback_stream_cache),
-                options = PlaybackSettingKeys.STREAM_CACHE_MB_VALUES.toList(),
-                selected = state.streamCacheMb,
-                label = { stringResource(Res.string.playback_cache_mb, it) },
-                onSelect = {
-                    viewModel.setStreamCacheMb(it)
-                    dialog = null
-                },
-                onDismissRequest = { dialog = null },
-            )
-        }
-
-        PlaybackDialog.METERED -> {
-            SettingsChoiceDialog(
-                icon = NdIcons.Wifi,
-                title = stringResource(Res.string.playback_stream_on_metered),
-                options = StreamOnMetered.entries,
-                selected = state.streamOnMetered,
-                label = { stringResource(meteredLabel(it)) },
-                onSelect = {
-                    viewModel.setStreamOnMetered(it)
-                    dialog = null
-                },
-                onDismissRequest = { dialog = null },
-            )
-        }
-
         PlaybackDialog.SPEED -> {
             var draft by rememberSaveable { mutableStateOf(state.speed) }
             NdDialog(
@@ -459,7 +425,7 @@ private fun meteredLabel(policy: StreamOnMetered): StringResource =
         StreamOnMetered.NEVER -> Res.string.playback_metered_never
     }
 
-private enum class PlaybackDialog { SPEED, PRESETS, METERED, CACHE, CLEAR }
+private enum class PlaybackDialog { SPEED, PRESETS, CLEAR }
 
 private const val MILLIS_PER_SECOND = 1_000L
 private const val BYTES_PER_MB = 1_000_000L

@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_debug_build
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android

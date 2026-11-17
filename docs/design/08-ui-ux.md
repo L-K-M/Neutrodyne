@@ -1340,7 +1340,14 @@ mounts its controls on a metal panel: the default speed as a `StepCounter` (keys
 0.5 to 3.0; its window opens the exact-speed dialog) beside a `NeedleWindow` dial, skip back
 and skip forward as counters that step through the allowed intervals instead of opening choice
 dialogs, and Skip silence, Smart resume and (Android) Pause for navigation prompts as panel
-switches. Other pages keep their dialogs for now.
+switches. Every other choice is made on its slip, with no choice dialog: up to four options are
+`PianoKeys` under the slip's name, and longer, ordered lists (refresh interval, keep latest,
+stream cache, storage limit) are a `StepCounter` whose keys step to the neighbouring option.
+The rows live in `:core:ui` (`SettingsRow`, `SettingsSwitchRow`, `SettingsChoiceRow`), so the
+group and podcast settings pages and the shared download rows use the same slips; their
+choices offer Inherit first, the slip's summary names the effective value and a line under it
+says where that value comes from. Dialogs remain only for typing (exact speed, feed address,
+credentials), confirmations and long texts.
 
 ### Updates settings
 

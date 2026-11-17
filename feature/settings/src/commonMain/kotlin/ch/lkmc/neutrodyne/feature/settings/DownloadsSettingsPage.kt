@@ -37,7 +37,8 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.DownloadSettingsRows
 import ch.lkmc.neutrodyne.core.ui.DownloadSettingsScope
 import ch.lkmc.neutrodyne.core.ui.OrphanFilesDialog
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadSizeText
@@ -83,7 +84,6 @@ internal fun DownloadsSettingsPage(
     val orphans by viewModel.orphanConfirmation.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val working by viewModel.working.collectAsStateWithLifecycle()
-    var capDialog by rememberSaveable { mutableStateOf(false) }
     val navigator = LocalAppNavigator.current
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
@@ -115,20 +115,14 @@ internal fun DownloadsSettingsPage(
                 platform,
                 viewModel::edit,
             )
-            SettingsRow(
+            SettingsChoiceRow(
                 NdIcons.Download,
                 stringResource(Res.string.download_cap),
-                if (state.capMb ==
-                    0
-                ) {
-                    stringResource(Res.string.download_unlimited)
-                } else {
-                    downloadSizeText(state.capMb.toLong() * MIB).asString()
-                },
-                {
-                    capDialog =
-                        true
-                },
+                null,
+                DownloadSettingKeys.STORAGE_CAP_MB_VALUES.toList(),
+                state.capMb,
+                { capText(it) },
+                viewModel::setCap,
             )
             storage?.let { usage ->
                 Text(
@@ -168,28 +162,6 @@ internal fun DownloadsSettingsPage(
                 )
             }
         }
-    }
-    if (capDialog) {
-        SettingsChoiceDialog(
-            NdIcons.Download,
-            stringResource(Res.string.download_cap),
-            DownloadSettingKeys.STORAGE_CAP_MB_VALUES.toList(),
-            state.capMb,
-            label = {
-                if (it ==
-                    0
-                ) {
-                    stringResource(Res.string.download_unlimited)
-                } else {
-                    downloadSizeText(it.toLong() * MIB).asString()
-                }
-            },
-            onSelect = {
-                capDialog = false
-                viewModel.setCap(it)
-            },
-            onDismissRequest = { capDialog = false },
-        )
     }
     FolderMoveDialog(folder, error, working, viewModel::changeFolder, viewModel::dismissFolder)
     orphans?.let {
@@ -337,3 +309,8 @@ private fun FolderMoveDialog(
 private const val MIB = 1_048_576L
 
 private val SECTION_HEADING_PADDING = 16.dp
+
+/** The storage cap as the counter shows it: "Unlimited" for 0, else a size. */
+@Composable
+private fun capText(mb: Int): String =
+    if (mb == 0) stringResource(Res.string.download_unlimited) else downloadSizeText(mb.toLong() * MIB).asString()

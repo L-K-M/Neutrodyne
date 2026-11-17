@@ -26,7 +26,7 @@ import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.ui.SettingAttribution
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -52,104 +52,66 @@ internal fun PodcastEffectiveSettings(
     modifier: Modifier = Modifier,
 ) {
     val settings = state.scoped ?: return
-    var intervalDialog by rememberSaveable { mutableStateOf(false) }
-    var notificationsDialog by rememberSaveable { mutableStateOf(false) }
     val notifications = settings.effective.notifyNewEpisodes == true
+    val inherit = stringResource(Res.string.setting_inherit)
 
     Column(modifier) {
         SectionHeader(stringResource(Res.string.section_notifications))
-        ListItem(
-            headlineContent = { Text(stringResource(Res.string.new_episode_notifications)) },
-            supportingContent = {
-                EffectiveSummary(
-                    stringResource(if (notifications) Res.string.setting_on else Res.string.setting_off),
-                    settings.sources.getValue(SettingField.NOTIFY_NEW_EPISODES),
-                    SettingField.NOTIFY_NEW_EPISODES in state.invalidFields,
-                )
-            },
-            trailingContent = {
-                // The headline is a sibling node; name the switch itself for screen readers.
-                val label = stringResource(Res.string.new_episode_notifications)
-                RadioSwitch(
-                    checked = notifications,
-                    onCheckedChange = onNotifications,
-                    modifier = Modifier.semantics { contentDescription = label },
-                )
-            },
-            modifier = Modifier.clickable { notificationsDialog = true },
-        )
+        SettingsChoiceRow(
+            icon = NdIcons.Info,
+            title = stringResource(Res.string.new_episode_notifications),
+            summary = onOffText(notifications),
+            options = listOf(null, true, false),
+            selected = settings.own.notifyNewEpisodes,
+            label = { if (it == null) inherit else onOffText(it) },
+            onSelect = onNotifications,
+            tag = { "notifications:${it ?: "inherit"}" },
+        ) {
+            Attribution(
+                settings.sources.getValue(SettingField.NOTIFY_NEW_EPISODES),
+                SettingField.NOTIFY_NEW_EPISODES in state.invalidFields,
+            )
+        }
         NotificationPermissionNotice(notifications, LocalPlatformActions.current.notifications)
 
         SectionHeader(stringResource(Res.string.section_refresh))
-        ListItem(
-            headlineContent = { Text(stringResource(Res.string.feeds_refresh_interval)) },
-            supportingContent = {
-                EffectiveSummary(
-                    feedsIntervalText(
-                        settings.effective.refreshIntervalMinutes ?: FeedsSettingKeys.MANUAL_ONLY_MINUTES,
-                    ).asString(),
-                    settings.sources.getValue(SettingField.REFRESH_INTERVAL_MINUTES),
-                    SettingField.REFRESH_INTERVAL_MINUTES in state.invalidFields,
-                )
-            },
-            modifier = Modifier.clickable { intervalDialog = true },
-        )
-
-        if (intervalDialog) {
-            SettingsChoiceDialog(
-                icon = NdIcons.Schedule,
-                title = stringResource(Res.string.feeds_refresh_interval),
-                options = listOf(null) + FeedsSettingKeys.REFRESH_INTERVAL_CHOICES,
-                selected = settings.own.refreshIntervalMinutes,
-                label = { minutes ->
-                    when (minutes) {
-                        null -> stringResource(Res.string.setting_inherit)
-                        else -> feedsIntervalText(minutes).asString()
-                    }
-                },
-                onSelect = {
-                    intervalDialog = false
-                    onRefreshInterval(it)
-                },
-                onDismissRequest = { intervalDialog = false },
-            )
-        }
-        if (notificationsDialog) {
-            SettingsChoiceDialog(
-                icon = NdIcons.Info,
-                title = stringResource(Res.string.new_episode_notifications),
-                options = listOf(null, true, false),
-                selected = settings.own.notifyNewEpisodes,
-                label = {
-                    stringResource(
-                        when (it) {
-                            null -> Res.string.setting_inherit
-                            true -> Res.string.setting_on
-                            false -> Res.string.setting_off
-                        },
-                    )
-                },
-                onSelect = {
-                    notificationsDialog = false
-                    onNotifications(it)
-                },
-                onDismissRequest = { notificationsDialog = false },
+        SettingsChoiceRow(
+            icon = NdIcons.Schedule,
+            title = stringResource(Res.string.feeds_refresh_interval),
+            summary =
+                feedsIntervalText(
+                    settings.effective.refreshIntervalMinutes ?: FeedsSettingKeys.MANUAL_ONLY_MINUTES,
+                ).asString(),
+            options = listOf(null) + FeedsSettingKeys.REFRESH_INTERVAL_CHOICES,
+            selected = settings.own.refreshIntervalMinutes,
+            label = { minutes -> if (minutes == null) inherit else feedsIntervalText(minutes).asString() },
+            onSelect = onRefreshInterval,
+        ) {
+            Attribution(
+                settings.sources.getValue(SettingField.REFRESH_INTERVAL_MINUTES),
+                SettingField.REFRESH_INTERVAL_MINUTES in state.invalidFields,
             )
         }
     }
 }
 
 @Composable
-private fun EffectiveSummary(
-    value: String,
+private fun onOffText(on: Boolean): String = stringResource(if (on) Res.string.setting_on else Res.string.setting_off)
+
+/** Where the effective value comes from, and a warning when the stored override is invalid. */
+@Composable
+private fun Attribution(
     source: SettingSource,
     invalid: Boolean,
 ) {
     Column {
-        Text(value)
         SettingAttribution(source)
         if (invalid) {
-            Text(stringResource(Res.string.setting_invalid_value), color = MaterialTheme.colorScheme.error)
+            Text(
+                stringResource(Res.string.setting_invalid_value),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

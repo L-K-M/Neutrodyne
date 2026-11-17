@@ -5,15 +5,12 @@ package ch.lkmc.neutrodyne.feature.groups
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsOff
-import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isSelectable
-import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -90,8 +87,9 @@ class GroupSettingsScreenTest {
             val state = state(SettingOverrides(0, true))
             setPage { GroupSettingsScreen(state, {}, {}, {}) }
             onNodeWithText("Group settings · News").assertIsDisplayed()
-            onNodeWithText("Manual only").assertIsDisplayed()
-            onNode(isToggleable()).assertIsOn()
+            // The effective value shows in the summary and on the selected counter window.
+            onAllNodesWithText("Manual only").assertCountEquals(2)
+            onNodeWithTag("notifications:true").assertIsSelected()
             onAllNodesWithText("From group 'News'").assertCountEquals(2)
             listOf("General", "Feed", "YouTube", "Episode order", "Hide older than").forEach {
                 onNodeWithText(it).assertDoesNotExist()
@@ -101,28 +99,41 @@ class GroupSettingsScreenTest {
     @Test fun refreshChooserWritesManualOnlyAndInheritPreviewsAppDefault() =
         runComposeUiTest {
             val picked = mutableListOf<Int?>()
-            val state = state(SettingOverrides(120, null)).copy(inherited = SettingOverrides(0, false))
-            setPage { GroupSettingsScreen(state, picked::add, {}, {}) }
-            onNodeWithText("Refresh interval").performClick()
-            onNodeWithText("Use default (Manual only, App default)").assertIsDisplayed()
-            onNodeWithText("Manual only").performClick()
+            // The counter's selection follows the write, as the read model would.
+            val refresh = mutableStateOf<Int?>(null)
+            val base = state(SettingOverrides(null, null))
+            setPage {
+                GroupSettingsScreen(
+                    base.copy(scoped = base.scoped?.copy(own = SettingOverrides(refresh.value, null))),
+                    {
+                        picked.add(it)
+                        refresh.value = it
+                    },
+                    {},
+                    {},
+                )
+            }
+            // The slip previews the app default: the summary shows the effective value, the
+            // details line attributes it, and the counter window offers Inherit, selected.
+            onNodeWithText("Every hour").performScrollTo().assertIsDisplayed()
+            onAllNodesWithText("App default")[5].performScrollTo().assertIsDisplayed()
+            onNodeWithContentDescription("Refresh interval, Inherit").performScrollTo().assertIsDisplayed()
+            onNodeWithContentDescription("Increase Refresh interval").performClick()
             assertEquals(listOf<Int?>(0), picked)
-            onNodeWithText("Refresh interval").performClick()
-            onNodeWithText("Use default (Manual only, App default)").performClick()
+            onNodeWithContentDescription("Decrease Refresh interval").performClick()
             assertEquals(listOf(0, null), picked)
         }
 
-    @Test fun notificationSwitchAndChooserWriteOnOffAndInherit() =
+    @Test fun notificationChooserWriteOnOffAndInherit() =
         runComposeUiTest {
             val picked = mutableListOf<Boolean?>()
-            val state = state().copy(inherited = SettingOverrides(60, true))
+            val state = state()
             setPage { GroupSettingsScreen(state, {}, picked::add, {}) }
-            onNodeWithContentDescription("New episodes").assertIsOff().performClick()
+            onNodeWithTag("notifications:true").performScrollTo().performClick()
             assertEquals(listOf<Boolean?>(true), picked)
-            onNodeWithText("New episodes").performClick()
-            onNodeWithText("Use default (On, App default)").performClick()
-            onNodeWithText("New episodes").performClick()
-            onNode(isSelectable() and hasText("Off")).performClick()
+            onNodeWithTag("notifications:inherit").performScrollTo().performClick()
+            assertEquals(listOf(true, null), picked)
+            onNodeWithTag("notifications:false").performScrollTo().performClick()
             assertEquals(listOf(true, null, false), picked)
         }
 
@@ -138,19 +149,19 @@ class GroupSettingsScreenTest {
                         ),
                 )
             setPage { GroupSettingsScreen(state, {}, {}, {}) }
-            onNodeWithText("Manual only").assertIsDisplayed()
+            onNodeWithText("Manual only").performScrollTo().assertIsDisplayed()
             onAllNodesWithText("App default").assertCountEquals(6)
             onNodeWithText("Notifications are blocked").assertDoesNotExist()
             onNodeWithText("Open settings").assertDoesNotExist()
         }
 
-    @Test fun deniedPermissionKeepsSwitchOnAndOpensSettings() =
+    @Test fun deniedPermissionKeepsNotificationOnAndOpensSettings() =
         runComposeUiTest {
             val requester = PermissionRequester()
             val state = state(SettingOverrides(null, true))
             setPage(requester) { GroupSettingsScreen(state, {}, {}, {}) }
-            onNode(isToggleable()).assertIsOn()
-            onNodeWithText("Notifications are blocked").assertIsDisplayed()
+            onNodeWithTag("notifications:true").assertIsSelected()
+            onNodeWithText("Notifications are blocked").performScrollTo().assertIsDisplayed()
             onNodeWithText("Open settings").performClick()
             assertEquals(1, requester.opened)
         }
@@ -168,7 +179,7 @@ class GroupSettingsScreenTest {
         runComposeUiTest {
             val state = state().copy(invalidFields = setOf(SettingField.REFRESH_INTERVAL_MINUTES))
             setPage { GroupSettingsScreen(state, {}, {}, {}) }
-            onNodeWithText("Choose a supported value").assertIsDisplayed()
+            onNodeWithText("Choose a supported value").performScrollTo().assertIsDisplayed()
         }
 
     @Test fun deletedGroupPopsTheSettingsRoute() =

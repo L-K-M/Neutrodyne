@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -13,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.DeleteAfter
@@ -119,7 +122,6 @@ public fun DownloadSettingsRows(
     invalidFields: Set<SettingField> = emptySet(),
     externalGroupReason: String? = null,
 ) {
-    var dialog by rememberSaveable { mutableStateOf<SettingField?>(null) }
     val value = settings.effective
     val own = settings.own
     val supported = settings.sources[SettingField.AUTO_DOWNLOAD] != SettingSource.NotSupported
@@ -144,32 +146,112 @@ public fun DownloadSettingsRows(
     Column(modifier) {
         fields.forEach { field ->
             val enabled = field == SettingField.AUTO_DOWNLOAD || field == SettingField.DELETE_AFTER_PLAYED || dependents
-            ListItem(
-                headlineContent = { Text(downloadFieldLabel(field)) },
-                supportingContent = {
-                    Column {
-                        Text(
-                            downloadFieldValue(
-                                field,
-                                value,
-                            ),
-                        )
-                        if (!enabled && scope == DownloadSettingsScope.GROUP) {
-                            Text(stringResource(Res.string.download_group_enable_first))
-                        }
-                        if (scope != DownloadSettingsScope.APP) {
-                            SettingAttribution(settings.sources[field] ?: SettingSource.AppDefault)
-                        }
-                        if (field in invalidFields) {
-                            Text(
-                                stringResource(Res.string.setting_invalid_value),
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
+            // Scoped rows press the scope's own value ("Inherit" when unset) and name the effective
+            // value it resolves to; app defaults are concrete and need no summary.
+            val details: @Composable ColumnScope.() -> Unit = {
+                if (!enabled && scope == DownloadSettingsScope.GROUP) {
+                    Text(
+                        stringResource(Res.string.download_group_enable_first),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (scope != DownloadSettingsScope.APP) {
+                    SettingAttribution(settings.sources[field] ?: SettingSource.AppDefault)
+                }
+                if (field in invalidFields) {
+                    Text(
+                        stringResource(Res.string.setting_invalid_value),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            val summary = if (scope == DownloadSettingsScope.APP) null else downloadFieldValue(field, value)
+            when (field) {
+                SettingField.AUTO_DOWNLOAD -> {
+                    DownloadChoice(
+                        field,
+                        BOOLEANS,
+                        own.autoDownload,
+                        scope,
+                        summary,
+                        enabled,
+                        { boolText(it) },
+                        details,
+                    ) {
+                        onEdit(DownloadSettingEdit.Enabled(it))
                     }
-                },
-                modifier = Modifier.clickable(enabled = enabled) { dialog = field },
-            )
+                }
+
+                SettingField.AUTO_DOWNLOAD_KEEP_LATEST -> {
+                    DownloadChoice(
+                        field,
+                        DownloadSettingKeys.KEEP_LATEST_RANGE.toList(),
+                        own.autoDownloadKeepLatest,
+                        scope,
+                        summary,
+                        enabled,
+                        { stringResource(Res.string.download_keep_value, it) },
+                        details,
+                    ) { onEdit(DownloadSettingEdit.Keep(it)) }
+                }
+
+                SettingField.AUTO_DOWNLOAD_NETWORK -> {
+                    DownloadChoice(
+                        field,
+                        NetworkPolicy.entries,
+                        own.autoDownloadNetwork,
+                        scope,
+                        summary,
+                        enabled,
+                        { networkText(it) },
+                        details,
+                    ) { onEdit(DownloadSettingEdit.Network(it)) }
+                }
+
+                SettingField.AUTO_DOWNLOAD_REQUIRE_CHARGING -> {
+                    DownloadChoice(
+                        field,
+                        BOOLEANS,
+                        own.autoDownloadRequireCharging,
+                        scope,
+                        summary,
+                        enabled,
+                        { boolText(it) },
+                        details,
+                    ) { onEdit(DownloadSettingEdit.Charging(it)) }
+                }
+
+                SettingField.INCLUDE_VIDEO_IN_AUTO_DOWNLOAD -> {
+                    DownloadChoice(
+                        field,
+                        BOOLEANS,
+                        own.includeVideoInAutoDownload,
+                        scope,
+                        summary,
+                        enabled,
+                        { boolText(it) },
+                        details,
+                    ) { onEdit(DownloadSettingEdit.Video(it)) }
+                }
+
+                SettingField.DELETE_AFTER_PLAYED -> {
+                    DownloadChoice(
+                        field,
+                        DeleteAfter.entries,
+                        own.deleteAfterPlayed,
+                        scope,
+                        summary,
+                        enabled,
+                        { deleteAfterText(it) },
+                        details,
+                    ) { onEdit(DownloadSettingEdit.Delete(it)) }
+                }
+
+                else -> {
+                    Unit
+                }
+            }
         }
         externalGroupReason?.let {
             Text(
@@ -177,130 +259,48 @@ public fun DownloadSettingsRows(
                     Res.string.download_external_group,
                     it,
                 ),
+                Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
             )
         }
-        if (!supported) Text(stringResource(Res.string.download_external_cleanup))
-    }
-    dialog?.takeIf { it in fields }?.let { field ->
-        // App defaults are concrete; only scoped fields offer inheritance.
-        when (field) {
-            SettingField.AUTO_DOWNLOAD -> {
-                DownloadChoice(
-                    field,
-                    listOf(
-                        true,
-                        false,
-                    ),
-                    own.autoDownload,
-                    scope,
-                    { boolText(it) },
-                    { DownloadSettingEdit.Enabled(it) },
-                    onEdit,
-                ) { dialog = null }
-            }
-
-            SettingField.AUTO_DOWNLOAD_KEEP_LATEST -> {
-                DownloadChoice(
-                    field,
-                    DownloadSettingKeys.KEEP_LATEST_RANGE.toList(),
-                    own.autoDownloadKeepLatest,
-                    scope,
-                    {
-                        stringResource(
-                            Res.string.download_keep_value,
-                            it,
-                        )
-                    },
-                    { DownloadSettingEdit.Keep(it) },
-                    onEdit,
-                ) { dialog = null }
-            }
-
-            SettingField.AUTO_DOWNLOAD_NETWORK -> {
-                DownloadChoice(
-                    field,
-                    NetworkPolicy.entries,
-                    own.autoDownloadNetwork,
-                    scope,
-                    { networkText(it) },
-                    { DownloadSettingEdit.Network(it) },
-                    onEdit,
-                ) { dialog = null }
-            }
-
-            SettingField.AUTO_DOWNLOAD_REQUIRE_CHARGING -> {
-                DownloadChoice(
-                    field,
-                    listOf(
-                        true,
-                        false,
-                    ),
-                    own.autoDownloadRequireCharging,
-                    scope,
-                    { boolText(it) },
-                    { DownloadSettingEdit.Charging(it) },
-                    onEdit,
-                ) { dialog = null }
-            }
-
-            SettingField.INCLUDE_VIDEO_IN_AUTO_DOWNLOAD -> {
-                DownloadChoice(
-                    field,
-                    listOf(
-                        true,
-                        false,
-                    ),
-                    own.includeVideoInAutoDownload,
-                    scope,
-                    { boolText(it) },
-                    { DownloadSettingEdit.Video(it) },
-                    onEdit,
-                ) { dialog = null }
-            }
-
-            SettingField.DELETE_AFTER_PLAYED -> {
-                DownloadChoice(
-                    field,
-                    DeleteAfter.entries,
-                    own.deleteAfterPlayed,
-                    scope,
-                    { deleteAfterText(it) },
-                    { DownloadSettingEdit.Delete(it) },
-                    onEdit,
-                ) { dialog = null }
-            }
-
-            else -> {
-                Unit
-            }
+        if (!supported) {
+            Text(
+                stringResource(Res.string.download_external_cleanup),
+                Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            )
         }
     }
 }
 
+/** One download field as a slip whose keys (or counter) set it; scoped slips add "Inherit" first. */
 @Composable
-private fun <T> DownloadChoice(
+private fun <T : Any> DownloadChoice(
     field: SettingField,
     options: List<T>,
     selected: T?,
     scope: DownloadSettingsScope,
+    summary: String?,
+    enabled: Boolean,
     label: @Composable (T) -> String,
-    edit: (T?) -> DownloadSettingEdit,
-    onEdit: (DownloadSettingEdit) -> Unit,
-    close: () -> Unit,
+    details: @Composable ColumnScope.() -> Unit,
+    onSelect: (T?) -> Unit,
 ) {
-    SettingsChoiceDialog(
+    val inherit = stringResource(Res.string.setting_inherit)
+    val choices: List<T?> = if (scope == DownloadSettingsScope.APP) options else listOf(null) + options
+    SettingsChoiceRow(
         NdIcons.Download,
         downloadFieldLabel(field),
-        if (scope == DownloadSettingsScope.APP) options else listOf(null) + options,
+        summary,
+        choices,
         selected,
-        label = { if (it == null) stringResource(Res.string.setting_inherit) else label(it) },
-        onSelect = {
-            close()
-            onEdit(edit(it))
-        },
-        onDismissRequest = close,
+        label = { if (it == null) inherit else label(it) },
+        onSelect = onSelect,
+        enabled = enabled,
+        tag = { "download:${field.name}:${it ?: "inherit"}" },
+        details = details,
     )
 }
+
+private val BOOLEANS = listOf(true, false)
 
 @Composable
 private fun downloadFieldLabel(field: SettingField): String =

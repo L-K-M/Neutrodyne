@@ -9,7 +9,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -71,9 +74,12 @@ class DownloadSettingsRowsTest {
                     }
                 }
             }
-            onNodeWithText("Keep latest").assertIsNotEnabled().performClick()
-            onNodeWithText("Delete played episodes").performScrollTo().performClick()
-            onNodeWithText("Never").performClick()
+            // The group has not opted in, so the dependent keep-latest counter is disabled:
+            // its step keys are dimmed and clicking one writes nothing.
+            onNodeWithContentDescription("Keep latest, Inherit").assertIsDisplayed()
+            onNodeWithContentDescription("Increase Keep latest").assertIsNotEnabled().performClick()
+            assertEquals(emptyList<DownloadSettingEdit>(), edits)
+            onNodeWithTag("download:DELETE_AFTER_PLAYED:NEVER").performScrollTo().performClick()
             assertEquals(
                 listOf<DownloadSettingEdit>(DownloadSettingEdit.Delete(DeleteAfter.NEVER)),
                 edits,
@@ -86,37 +92,43 @@ class DownloadSettingsRowsTest {
             height = 1000,
         ) {
             val edits = mutableListOf<DownloadSettingEdit>()
+            // The counter's selection follows the write, as the read model would.
+            val keep = mutableStateOf(enabled.autoDownloadKeepLatest)
             setContent {
                 MaterialTheme {
                     DownloadSettingsRows(
                         ScopedSettingsView(
-                            enabled,
-                            enabled,
+                            enabled.copy(autoDownloadKeepLatest = keep.value),
+                            enabled.copy(autoDownloadKeepLatest = keep.value),
                             emptyMap(),
                         ),
                         DownloadSettingsScope.PODCAST,
                         PlatformKind.ANDROID,
-                        edits::add,
+                        {
+                            edits.add(it)
+                            if (it is DownloadSettingEdit.Keep) keep.value = it.value ?: 0
+                        },
                     )
                 }
             }
-            onNodeWithText("Keep latest").performClick()
-            onNodeWithText("7 unplayed episodes").performClick()
-            onNodeWithText("Network").performClick()
-            onNodeWithText("Any network").performClick()
-            onNodeWithText("Include video").performClick()
-            onNodeWithText("Inherit").performClick()
+            // The keep-latest counter steps from 3 to 7; the network and video keys are
+            // tagged by their typed values, and the video row offers Inherit.
+            repeat(4) {
+                onNodeWithContentDescription("Increase Keep latest").performClick()
+            }
+            onNodeWithContentDescription("Keep latest, 7 unplayed episodes").assertIsDisplayed()
+            onNodeWithTag("download:AUTO_DOWNLOAD_NETWORK:ANY").performClick()
+            onNodeWithTag("download:INCLUDE_VIDEO_IN_AUTO_DOWNLOAD:inherit").performClick()
             assertEquals(
-                DownloadSettingEdit.Keep(7),
-                edits[0],
-            )
-            assertEquals(
-                DownloadSettingEdit.Network(NetworkPolicy.ANY),
-                edits[1],
-            )
-            assertEquals(
-                DownloadSettingEdit.Video(null),
-                edits[2],
+                listOf<DownloadSettingEdit>(
+                    DownloadSettingEdit.Keep(4),
+                    DownloadSettingEdit.Keep(5),
+                    DownloadSettingEdit.Keep(6),
+                    DownloadSettingEdit.Keep(7),
+                    DownloadSettingEdit.Network(NetworkPolicy.ANY),
+                    DownloadSettingEdit.Video(null),
+                ),
+                edits,
             )
         }
 
@@ -204,24 +216,36 @@ class DownloadSettingsRowsTest {
         ) {
             val edits = mutableListOf<DownloadSettingEdit>()
             val defaults = enabled.copy(autoDownload = false)
+            val keep = mutableStateOf(defaults.autoDownloadKeepLatest)
             setContent {
                 MaterialTheme {
                     DownloadSettingsRows(
                         ScopedSettingsView(
-                            defaults,
-                            defaults,
+                            defaults.copy(autoDownloadKeepLatest = keep.value),
+                            defaults.copy(autoDownloadKeepLatest = keep.value),
                             emptyMap(),
                         ),
                         DownloadSettingsScope.APP,
                         PlatformKind.DESKTOP,
-                        edits::add,
+                        {
+                            edits.add(it)
+                            if (it is DownloadSettingEdit.Keep) keep.value = it.value ?: 0
+                        },
                     )
                 }
             }
             onNodeWithText("Network").assertDoesNotExist()
             onNodeWithText("Require charging").assertDoesNotExist()
-            onNodeWithText("Keep latest").performClick()
-            onNodeWithText("5 unplayed episodes").performClick()
-            assertEquals(listOf<DownloadSettingEdit>(DownloadSettingEdit.Keep(5)), edits)
+            // The app default stays editable: two steps from 3 reach 5 unplayed episodes.
+            onNodeWithContentDescription("Increase Keep latest").performClick()
+            onNodeWithContentDescription("Increase Keep latest").performClick()
+            onNodeWithContentDescription("Keep latest, 5 unplayed episodes").assertIsDisplayed()
+            assertEquals(
+                listOf<DownloadSettingEdit>(
+                    DownloadSettingEdit.Keep(4),
+                    DownloadSettingEdit.Keep(5),
+                ),
+                edits,
+            )
         }
 }

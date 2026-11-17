@@ -709,6 +709,8 @@
     <string name="radio_cleared">PLAYLIST CLEARED</string>
     <string name="radio_play">Play</string>
     <string name="radio_switch_on">ON</string>
+    <string name="settings_step_up">Increase %1$s</string>
+    <string name="settings_step_down">Decrease %1$s</string>
     <string name="radio_switch_off">OFF</string>
     <string name="radio_skip_back">Back %1$d seconds</string>
     <string name="radio_skip_forward">Forward %1$d seconds</string>

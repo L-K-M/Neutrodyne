@@ -3,28 +3,27 @@
 package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isSelectable
-import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -445,8 +444,10 @@ class PodcastSettingsScreenTest {
         for ((source, text) in expected) {
             runComposeUiTest {
                 setSettings(effectiveState(source))
-                onAllNodesWithText(text).onFirst().assertIsDisplayed()
-                onNodeWithText("Manual only").performScrollTo().assertIsDisplayed()
+                onAllNodesWithText(text).onFirst().performScrollTo().assertIsDisplayed()
+                // The effective value appears in the slip's summary and, for the podcast
+                // override, on the selected counter window too.
+                onAllNodesWithText("Manual only").onFirst().performScrollTo().assertIsDisplayed()
                 onNodeWithText("Notifications are blocked").assertDoesNotExist()
                 onNodeWithText("Open settings").assertDoesNotExist()
             }
@@ -457,22 +458,46 @@ class PodcastSettingsScreenTest {
     fun intervalChooserIncludesInheritAndWritesManualOnlyAsZero() =
         runComposeUiTest {
             var minutes: Int? = 999
-            setSettings(effectiveState(SettingSource.AppDefault), onRefreshInterval = { minutes = it })
-            onNodeWithText("Refresh interval").performScrollTo().performClick()
-            onNodeWithText("Inherit").performClick()
+            // The counter's selection follows the write, as the read model would.
+            val refresh = mutableStateOf<Int?>(null)
+            val base = effectiveState(SettingSource.AppDefault)
+            setSettings(
+                base,
+                onRefreshInterval = {
+                    minutes = it
+                    refresh.value = it
+                },
+                stateProducer = {
+                    base.copy(
+                        scoped = base.scoped?.copy(own = SettingOverrides(refreshIntervalMinutes = refresh.value)),
+                    )
+                },
+            )
+            // Inherit is offered and selected; the window names the row and the choice.
+            onNodeWithContentDescription("Refresh interval, Inherit").performScrollTo().assertIsDisplayed()
+            // Stepping away and back writes the null override; Manual only writes 0.
+            onNodeWithContentDescription("Increase Refresh interval").performClick()
+            assertEquals(0, minutes)
+            onNodeWithContentDescription("Decrease Refresh interval").performClick()
             assertEquals(null, minutes)
-            onNodeWithText("Refresh interval").performClick()
-            onNode(hasText("Manual only") and isSelectable()).performSemanticsAction(SemanticsActions.OnClick)
+            onNodeWithContentDescription("Increase Refresh interval").performClick()
             assertEquals(0, minutes)
         }
 
-    /** Screen readers name the switch itself; the row's headline is a separate node. */
+    /** The row's headline is a node of the slip; each key is named by its label. */
     @Test
-    fun notificationSwitchIsNamedForScreenReaders() =
+    fun notificationKeysAreNamedForScreenReaders() =
         runComposeUiTest {
             var notifications: Boolean? = null
-            setSettings(effectiveState(SettingSource.AppDefault), onNotifications = { notifications = it })
-            onNode(hasContentDescription("New episodes") and isToggleable()).performScrollTo().performClick()
+            setSettings(effectiveState(SettingSource.PodcastOverride), onNotifications = { notifications = it })
+            onNodeWithTag("notifications:false").performScrollTo()
+            // The slip's headline names the row; each key is a tab named by its printed label.
+            onNodeWithText("New episodes").assertIsDisplayed()
+            onNodeWithTag("notifications:true").assertIsSelected()
+            onNodeWithTag("notifications:true").assertTextEquals("On")
+            onNodeWithTag("notifications:false").assertTextEquals("Off")
+            onNodeWithTag("notifications:inherit").assertTextEquals("Inherit")
+            onNodeWithTag("notifications:false").performClick()
             assertEquals(false, notifications)
         }
 
@@ -481,8 +506,7 @@ class PodcastSettingsScreenTest {
         runComposeUiTest {
             var notifications: Boolean? = false
             setSettings(effectiveState(SettingSource.PodcastOverride), onNotifications = { notifications = it })
-            onNodeWithText("New episodes").performClick()
-            onNodeWithText("Inherit").performClick()
+            onNodeWithTag("notifications:inherit").performScrollTo().performClick()
             assertEquals(null, notifications)
         }
 
@@ -550,6 +574,7 @@ class PodcastSettingsScreenTest {
         onNotifications: (Boolean?) -> Unit = {},
         requester: NotificationPermissionRequester? = null,
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
+        stateProducer: (() -> PodcastSettingsUiState)? = null,
     ) {
         setContent {
             CompositionLocalProvider(
@@ -564,7 +589,7 @@ class PodcastSettingsScreenTest {
             ) {
                 NeutrodyneTheme(SystemUiState.DEFAULT) {
                     PodcastSettingsScreen(
-                        state = state,
+                        state = stateProducer?.invoke() ?: state,
                         onCustomTitle = onCustomTitle,
                         onVariants = onVariants,
                         onOrderChange = onOrderChange,

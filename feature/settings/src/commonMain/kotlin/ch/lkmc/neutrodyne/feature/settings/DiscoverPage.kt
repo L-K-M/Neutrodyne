@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.core.model.ProviderId
 import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.ui.PrivacyInventory
+import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus

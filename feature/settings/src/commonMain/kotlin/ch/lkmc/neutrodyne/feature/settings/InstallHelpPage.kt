@@ -40,6 +40,7 @@ import ch.lkmc.neutrodyne.core.model.InstallKind
 import ch.lkmc.neutrodyne.core.model.update.UpdateInfo
 import ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
 import ch.lkmc.neutrodyne.core.model.update.VerificationPhase
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.feature.settings.resources.Res

@@ -43,7 +43,9 @@ import org.jetbrains.compose.resources.imageResource
  * [onIncrease] or [onDecrease] dims that key (the end of the range). The label and value read
  * together; each key is a button named by [increaseLabel] or [decreaseLabel]. [onWindowClick],
  * when set, makes the window a button too (for example to type an exact value). [spokenValue]
- * replaces an abbreviated [value] for screen readers.
+ * replaces an abbreviated [value] for screen readers. With [engraved] false the label is not
+ * printed (a paper slip around the counter already names it) but still names it for screen
+ * readers.
  */
 @Composable
 public fun StepCounter(
@@ -56,10 +58,11 @@ public fun StepCounter(
     modifier: Modifier = Modifier,
     onWindowClick: (() -> Unit)? = null,
     spokenValue: String = value,
+    engraved: Boolean = true,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // The window reads the label with the value.
-        PanelEngraving(label, Modifier.clearAndSetSemantics {})
+        if (engraved) PanelEngraving(label, Modifier.clearAndSetSemantics {})
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(
                 Modifier

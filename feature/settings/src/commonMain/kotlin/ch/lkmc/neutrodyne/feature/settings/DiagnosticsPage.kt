@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.core.model.diagnostics.DESKTOP_LOG_DIR_KEY
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSection
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSeverity
+import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.SystemSettingsTarget
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel

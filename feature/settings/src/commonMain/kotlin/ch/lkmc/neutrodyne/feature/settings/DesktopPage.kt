@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.model.LoginItemState
 import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
+import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res

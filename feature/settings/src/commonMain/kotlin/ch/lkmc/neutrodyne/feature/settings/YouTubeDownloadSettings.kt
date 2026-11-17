@@ -15,7 +15,9 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
+import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
@@ -37,7 +39,6 @@ internal fun YouTubeDownloadSettings(
         .collectAsStateWithLifecycle(false)
     val keep by remember(settings) { settings.observe(YouTubeSettingKeys.AUTO_DOWNLOAD_KEEP_LATEST) }
         .collectAsStateWithLifecycle(2)
-    var showKeep by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHost.current
     val failed = stringResource(Res.string.settings_save_failed)
@@ -54,29 +55,22 @@ internal fun YouTubeDownloadSettings(
                 }
             },
         )
-        SettingsRow(
+        SettingsChoiceRow(
             NdIcons.Download,
             stringResource(Res.string.youtube_keep_latest),
-            keep.toString(),
-            { showKeep = true },
-        )
-    }
-    if (showKeep) {
-        SettingsChoiceDialog(
-            NdIcons.Download,
-            stringResource(Res.string.youtube_keep_latest),
-            (1..10).toList(),
+            null,
+            KEEP_LATEST_CHOICES,
             keep,
             { it.toString() },
             { value ->
-                showKeep = false
                 scope.launch {
                     if (settings.set(YouTubeSettingKeys.AUTO_DOWNLOAD_KEEP_LATEST, value) is Outcome.Failure) {
                         snackbar.showSnackbar(failed)
                     }
                 }
             },
-            { showKeep = false },
         )
     }
 }
+
+private val KEEP_LATEST_CHOICES = (1..10).toList()

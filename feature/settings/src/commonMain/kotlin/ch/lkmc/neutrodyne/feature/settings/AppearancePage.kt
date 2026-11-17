@@ -27,7 +27,9 @@ import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
+import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_cover_large
@@ -71,8 +73,6 @@ internal fun AppearancePage(
     val rowArt by settings
         .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
         .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
-    var showDensityDialog by rememberSaveable { mutableStateOf(false) }
-    var showRowArtDialog by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbarHost = LocalSnackbarHost.current
     val saveFailed = stringResource(Res.string.settings_save_failed)
@@ -102,11 +102,14 @@ internal fun AppearancePage(
                 .verticalScroll(scroll)
                 .ndScrollbar(scroll, bars, barColor),
         ) {
-            SettingsRow(
+            SettingsChoiceRow(
                 icon = NdIcons.GridView,
                 title = stringResource(Res.string.appearance_cover_size),
-                summary = stringResource(densityLabel(density)),
-                onClick = { showDensityDialog = true },
+                summary = null,
+                options = AppearanceSettingKeys.LIBRARY_DENSITY.values,
+                selected = density,
+                label = { stringResource(densityLabel(it)) },
+                onSelect = { save(AppearanceSettingKeys.LIBRARY_DENSITY, it) },
             )
             SettingsSwitchRow(
                 title = stringResource(Res.string.appearance_titles),
@@ -115,45 +118,18 @@ internal fun AppearancePage(
                 onCheckedChange = { save(AppearanceSettingKeys.LIBRARY_TITLES, it) },
             )
             if (channelsExist) {
-                SettingsRow(
+                SettingsChoiceRow(
                     icon = NdIcons.Palette,
                     title = stringResource(Res.string.appearance_youtube_row_art),
-                    summary = stringResource(rowArtLabel(rowArt)),
-                    onClick = { showRowArtDialog = true },
+                    summary = null,
+                    options = AppearanceSettingKeys.YOUTUBE_ROW_ART.values,
+                    selected = rowArt,
+                    label = { stringResource(rowArtLabel(it)) },
+                    onSelect = { save(AppearanceSettingKeys.YOUTUBE_ROW_ART, it) },
                 )
             }
             if (platform == PlatformKind.ANDROID) GestureSettings(settings)
         }
-    }
-
-    if (showDensityDialog) {
-        SettingsChoiceDialog(
-            icon = NdIcons.GridView,
-            title = stringResource(Res.string.appearance_cover_size),
-            options = AppearanceSettingKeys.LIBRARY_DENSITY.values,
-            selected = density,
-            label = { stringResource(densityLabel(it)) },
-            onSelect = {
-                showDensityDialog = false
-                save(AppearanceSettingKeys.LIBRARY_DENSITY, it)
-            },
-            onDismissRequest = { showDensityDialog = false },
-        )
-    }
-
-    if (showRowArtDialog && channelsExist) {
-        SettingsChoiceDialog(
-            icon = NdIcons.Palette,
-            title = stringResource(Res.string.appearance_youtube_row_art),
-            options = AppearanceSettingKeys.YOUTUBE_ROW_ART.values,
-            selected = rowArt,
-            label = { stringResource(rowArtLabel(it)) },
-            onSelect = {
-                showRowArtDialog = false
-                save(AppearanceSettingKeys.YOUTUBE_ROW_ART, it)
-            },
-            onDismissRequest = { showRowArtDialog = false },
-        )
     }
 }
 

@@ -30,7 +30,9 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
+import ch.lkmc.neutrodyne.core.ui.SettingsRow
+import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadExternalReasonText
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
@@ -88,7 +90,6 @@ internal fun YouTubePage(
         .collectAsStateWithLifecycle(YouTubeSettingKeys.VOLUME_LEVELLING.default)
     val quality by remember(settings) { settings.observe(YouTubeSettingKeys.AUDIO_QUALITY) }
         .collectAsStateWithLifecycle(YouTubeSettingKeys.AUDIO_QUALITY.default)
-    var showQuality by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbarHost.current
     val failed = stringResource(Res.string.settings_save_failed)
@@ -124,11 +125,14 @@ internal fun YouTubePage(
                         enabled,
                         { save(YouTubeSettingKeys.ENGINE_ENABLED, it) },
                     )
-                    SettingsRow(
+                    SettingsChoiceRow(
                         NdIcons.Download,
                         stringResource(Res.string.youtube_audio_quality),
-                        stringResource(qualityLabel(quality)),
-                        { showQuality = true },
+                        null,
+                        YouTubeAudioQuality.entries,
+                        quality,
+                        { stringResource(qualityLabel(it)) },
+                        { save(YouTubeSettingKeys.AUDIO_QUALITY, it) },
                     )
                     SettingsSwitchRow(
                         stringResource(Res.string.youtube_volume_levelling),
@@ -166,20 +170,6 @@ internal fun YouTubePage(
             null,
             mark,
             { save(YouTubeSettingKeys.MARK_PLAYED_ON_OPEN, it) },
-        )
-    }
-    if (showQuality) {
-        SettingsChoiceDialog(
-            NdIcons.Download,
-            stringResource(Res.string.youtube_audio_quality),
-            YouTubeAudioQuality.entries,
-            quality,
-            { stringResource(qualityLabel(it)) },
-            {
-                showQuality = false
-                save(YouTubeSettingKeys.AUDIO_QUALITY, it)
-            },
-            { showQuality = false },
         )
     }
 }

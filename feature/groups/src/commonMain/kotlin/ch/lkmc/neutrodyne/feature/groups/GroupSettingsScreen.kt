@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.EngravedHeading
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
@@ -39,7 +40,7 @@ import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
 import ch.lkmc.neutrodyne.core.ui.DownloadSettingsRows
 import ch.lkmc.neutrodyne.core.ui.DownloadSettingsScope
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
-import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadExternalReasonText
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
@@ -54,6 +55,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.new_episode_notifications
 import ch.lkmc.neutrodyne.core.ui.resources.section_notifications
 import ch.lkmc.neutrodyne.core.ui.resources.section_refresh
+import ch.lkmc.neutrodyne.core.ui.resources.setting_inherit
 import ch.lkmc.neutrodyne.core.ui.resources.setting_invalid_value
 import ch.lkmc.neutrodyne.core.ui.resources.setting_off
 import ch.lkmc.neutrodyne.core.ui.resources.setting_on
@@ -69,8 +71,6 @@ internal fun GroupSettingsScreen(
     modifier: Modifier = Modifier,
     onDownloadEdit: (DownloadSettingEdit) -> Unit = {},
 ) {
-    var intervalDialog by rememberSaveable { mutableStateOf(false) }
-    var notificationsDialog by rememberSaveable { mutableStateOf(false) }
     val settings = state.scoped
     Column(modifier.fillMaxSize()) {
         NdTopAppBar(
@@ -107,79 +107,39 @@ internal fun GroupSettingsScreen(
                     },
             )
             val notifications = settings.effective.notifyNewEpisodes == true
-            val notificationLabel = stringResource(Res.string.new_episode_notifications)
+            val inherit = stringResource(Res.string.setting_inherit)
             SectionHeader(stringResource(Res.string.section_notifications))
-            ListItem(
-                headlineContent = { Text(notificationLabel) },
-                supportingContent = {
-                    EffectiveSummary(
-                        notificationText(notifications),
-                        settings.sources.getValue(SettingField.NOTIFY_NEW_EPISODES),
-                        SettingField.NOTIFY_NEW_EPISODES in state.invalidFields,
-                    )
-                },
-                trailingContent = {
-                    RadioSwitch(
-                        checked = notifications,
-                        onCheckedChange = onNotifications,
-                        modifier = Modifier.semantics { contentDescription = notificationLabel },
-                    )
-                },
-                modifier = Modifier.clickable { notificationsDialog = true }.semantics { role = Role.Button },
-            )
-            NotificationPermissionNotice(notifications, LocalPlatformActions.current.notifications)
-            SectionHeader(stringResource(Res.string.section_refresh))
-            ListItem(
-                headlineContent = { Text(stringResource(Res.string.feeds_refresh_interval)) },
-                supportingContent = {
-                    EffectiveSummary(
-                        intervalText(settings.effective.refreshIntervalMinutes),
-                        settings.sources.getValue(SettingField.REFRESH_INTERVAL_MINUTES),
-                        SettingField.REFRESH_INTERVAL_MINUTES in state.invalidFields,
-                    )
-                },
-                modifier = Modifier.clickable { intervalDialog = true }.semantics { role = Role.Button },
-            )
-        }
-        if (intervalDialog) {
-            SettingsChoiceDialog(
-                icon = NdIcons.Schedule,
-                title = stringResource(Res.string.feeds_refresh_interval),
-                options = listOf(null) + FeedsSettingKeys.REFRESH_INTERVAL_CHOICES,
-                selected = settings.own.refreshIntervalMinutes,
-                label = { minutes ->
-                    if (minutes == null) {
-                        useDefaultText(intervalText(state.inherited.refreshIntervalMinutes))
-                    } else {
-                        intervalText(minutes)
-                    }
-                },
-                onSelect = {
-                    intervalDialog = false
-                    onRefreshInterval(it)
-                },
-                onDismissRequest = { intervalDialog = false },
-            )
-        }
-        if (notificationsDialog) {
-            SettingsChoiceDialog(
+            SettingsChoiceRow(
                 icon = NdIcons.Info,
                 title = stringResource(Res.string.new_episode_notifications),
+                summary = notificationText(notifications),
                 options = listOf(null, true, false),
                 selected = settings.own.notifyNewEpisodes,
-                label = { enabled ->
-                    if (enabled == null) {
-                        useDefaultText(notificationText(state.inherited.notifyNewEpisodes == true))
-                    } else {
-                        notificationText(enabled)
-                    }
-                },
-                onSelect = {
-                    notificationsDialog = false
-                    onNotifications(it)
-                },
-                onDismissRequest = { notificationsDialog = false },
-            )
+                label = { enabled -> if (enabled == null) inherit else notificationText(enabled) },
+                onSelect = onNotifications,
+                tag = { "notifications:${it ?: "inherit"}" },
+            ) {
+                Attribution(
+                    settings.sources.getValue(SettingField.NOTIFY_NEW_EPISODES),
+                    SettingField.NOTIFY_NEW_EPISODES in state.invalidFields,
+                )
+            }
+            NotificationPermissionNotice(notifications, LocalPlatformActions.current.notifications)
+            SectionHeader(stringResource(Res.string.section_refresh))
+            SettingsChoiceRow(
+                icon = NdIcons.Schedule,
+                title = stringResource(Res.string.feeds_refresh_interval),
+                summary = intervalText(settings.effective.refreshIntervalMinutes),
+                options = listOf(null) + FeedsSettingKeys.REFRESH_INTERVAL_CHOICES,
+                selected = settings.own.refreshIntervalMinutes,
+                label = { minutes -> if (minutes == null) inherit else intervalText(minutes) },
+                onSelect = onRefreshInterval,
+            ) {
+                Attribution(
+                    settings.sources.getValue(SettingField.REFRESH_INTERVAL_MINUTES),
+                    SettingField.REFRESH_INTERVAL_MINUTES in state.invalidFields,
+                )
+            }
         }
     }
 }
@@ -192,31 +152,27 @@ private fun intervalText(minutes: Int?): String =
 private fun notificationText(enabled: Boolean): String =
     stringResource(if (enabled) Res.string.setting_on else Res.string.setting_off)
 
+/** Where the effective value comes from, and a warning when the stored override is invalid. */
 @Composable
-private fun useDefaultText(value: String): String =
-    stringResource(Res.string.setting_use_default, value, AttributionText.describe(SettingSource.AppDefault).asString())
-
-@Composable
-private fun EffectiveSummary(
-    value: String,
+private fun Attribution(
     source: SettingSource,
     invalid: Boolean,
 ) {
     Column {
-        Text(value)
-        Text(AttributionText.describe(source).asString())
-        if (invalid) Text(stringResource(Res.string.setting_invalid_value), color = MaterialTheme.colorScheme.error)
+        Text(AttributionText.describe(source).asString(), style = MaterialTheme.typography.bodySmall)
+        if (invalid) {
+            Text(
+                stringResource(Res.string.setting_invalid_value),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 
 @Composable
 private fun SectionHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(SECTION_PADDING),
-    )
+    EngravedHeading(title, Modifier.padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 4.dp))
 }
 
 private val SECTION_PADDING = 16.dp
