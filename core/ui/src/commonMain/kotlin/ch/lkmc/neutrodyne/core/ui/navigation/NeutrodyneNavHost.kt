@@ -358,8 +358,8 @@ private fun rememberHeaderBarDecorator(
 /**
  * Builds every page except the radio home into the radio's cabinet (owner decision 2026-11-17).
  * Sheets and dialogs keep their own containers. Panes shown side by side share one cabinet: each
- * takes its [CabinetSpan] from its place in the scene's pane row, and only the list pane, which
- * leads the row, carries the valve deck, so a two-pane window shows one deck as one radio would.
+ * takes its [CabinetSpan] from its place in the scene's pane row, and one valve deck lies across
+ * the whole row, as on one radio; the list pane, which leads the row, carries it.
  */
 @Composable
 private fun rememberCabinetDecorator(

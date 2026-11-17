@@ -2,9 +2,11 @@
 
 package ch.lkmc.neutrodyne.core.designsystem.radio
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -12,21 +14,38 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 /**
  * Where a page sits in the cabinet. Panes shown side by side share one cabinet (PO-55): the first
@@ -51,7 +70,10 @@ public enum class CabinetDeck {
     /** The page stands alone or leads a pane row: its cabinet carries the deck. */
     SHOWN,
 
-    /** A later pane beside a cabinet that already carries the deck. */
+    /**
+     * A later pane beside a cabinet that already carries the deck. In a pane row it still draws
+     * its slice of the row's one deck.
+     */
     HIDDEN,
 }
 
@@ -85,14 +107,17 @@ public fun RadioCabinetPage(
     ) {
         // The deck is the cabinet's lid, as on the home: as wide as the cabinet with a little
         // overhang, its height following the width up to a share of the window's height (beyond
-        // that its chassis grows longer instead). The panes of a row share one roof line, which
-        // cannot depend on any one pane's width: there the deck takes the share of the height, and
-        // a pane too narrow for it fits the deck to its width, resting on that roof.
-        val deckWidth = maxWidth - CABINET_SIDE_GAP * 2 + DECK_OVERHANG
+        // that its chassis grows longer instead). A pane row is one cabinet across the window with
+        // one lid: each pane draws its own slice of it (a pane clips what it draws), and the row's
+        // roof line cannot depend on any one pane's width, so there the deck takes the share of
+        // the height.
+        val inRow = span != CabinetSpan.ALONE
+        val row = rememberRowPlacement()
+        val deckWidth = (if (inRow) row.width() else maxWidth) - CABINET_SIDE_GAP * 2 + DECK_OVERHANG
         val tallest = maxHeight * DECK_HEIGHT_SHARE
         val deckHeight = if (span == CabinetSpan.ALONE) minOf(deckWidth / VALVE_DECK_ASPECT, tallest) else tallest
         val roomForDeck = maxHeight >= DECK_MIN_HEIGHT
-        val showDeck = deck == CabinetDeck.SHOWN && roomForDeck
+        val showDeck = roomForDeck && (deck == CabinetDeck.SHOWN || inRow)
         // Every pane of a row keeps the deck's roof line, so the row reads as one cabinet.
         val roof =
             if (roomForDeck && (showDeck || span != CabinetSpan.ALONE)) {
@@ -100,6 +125,7 @@ public fun RadioCabinetPage(
             } else {
                 CABINET_TOP_GAP
             }
+        if (inRow) Box(Modifier.matchParentSize().onPlaced(row::place))
         val startWall = span == CabinetSpan.ALONE || span == CabinetSpan.LEADING
         val endWall = span == CabinetSpan.ALONE || span == CabinetSpan.TRAILING
         val ltr = LocalLayoutDirection.current == LayoutDirection.Ltr
@@ -132,15 +158,55 @@ public fun RadioCabinetPage(
         }
         if (showDeck) {
             // Drawn after the cabinet so the chassis plate rests on the roof rather than behind it.
-            ValveDeck(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .requiredWidth(deckWidth)
-                    .height(deckHeight)
-                    .testTag(CABINET_DECK_TAG),
-            )
+            val placed =
+                if (inRow) {
+                    // This pane's slice of the row's lid, which starts at the row's left wall.
+                    val overhang = DECK_OVERHANG / 2 - CABINET_SIDE_GAP
+                    Modifier
+                        .align(AbsoluteAlignment.TopLeft)
+                        .wrapContentWidth(AbsoluteAlignment.Left, unbounded = true)
+                        .width(deckWidth)
+                        .absoluteOffset { IntOffset(-(row.paneLeft + overhang.toPx()).roundToInt(), 0) }
+                } else {
+                    Modifier.align(Alignment.TopCenter).requiredWidth(deckWidth)
+                }
+            // The row's single deck is tagged on the pane that carries it.
+            val tagged = if (deck == CabinetDeck.SHOWN) placed.testTag(CABINET_DECK_TAG) else placed
+            ValveDeck(tagged.height(deckHeight))
         }
     }
+}
+
+/**
+ * Where a pane sits in its row, which spans the window inside its safe-drawing insets: the
+ * pane's left edge in pixels from the row's, updated as the pane is placed.
+ */
+@Stable
+private class RowPlacement(
+    private val density: Density,
+    private val windowWidth: Int,
+    private val leftInset: Int,
+    private val rightInset: Int,
+) {
+    var paneLeft by mutableFloatStateOf(0f)
+        private set
+
+    fun width(): Dp = with(density) { (windowWidth - leftInset - rightInset).toDp() }
+
+    fun place(coordinates: LayoutCoordinates) {
+        paneLeft = coordinates.positionInWindow().x - leftInset
+    }
+}
+
+@Composable
+private fun rememberRowPlacement(): RowPlacement {
+    val density = LocalDensity.current
+    val window = LocalWindowInfo.current.containerSize.width
+    val insets = WindowInsets.safeDrawing
+    // Absolute sides: the row's lid is laid out from the window's left edge in either direction.
+    val left = insets.getLeft(density, LayoutDirection.Ltr)
+    val right = insets.getRight(density, LayoutDirection.Ltr)
+    return remember(density, window, left, right) { RowPlacement(density, window, left, right) }
 }
 
 /** Test tag of the paper tray that holds a page. */
