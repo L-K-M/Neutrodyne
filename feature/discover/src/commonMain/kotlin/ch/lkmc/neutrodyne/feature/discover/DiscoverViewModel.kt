@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.ProviderInfo
+import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.model.SearchResults
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
@@ -19,16 +20,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-internal data class ChartRow(
-    val title: String?,
-    val genre: ChartGenre?,
-    val hits: List<DirectoryHit>?,
+/**
+ * The chart the station dial is tuned to: [genre] null is the top chart. [hits] stay null while
+ * the chart loads; [failure] says why it did not ([ProviderStatus.Disabled] when Apple, the only
+ * chart source, is switched off). [generation] changes whenever the chart must be fetched again.
+ */
+internal data class TunedChart(
+    val genre: ChartGenre? = null,
+    val hits: List<DirectoryHit>? = null,
+    val failure: ProviderStatus? = null,
     val generation: Int = 0,
 )
 
@@ -36,7 +42,9 @@ internal data class DiscoverState(
     val input: String = "",
     val results: SearchResults? = null,
     val providers: List<ProviderInfo>? = null,
-    val charts: List<ChartRow> = emptyList(),
+    /** Preset stations: the top chart, then each genre a group's name maps to (03), once. */
+    val presets: List<ChartGenre?> = listOf(null),
+    val chart: TunedChart = TunedChart(),
 )
 
 @ViewModelKey(DiscoverViewModel::class)
@@ -51,8 +59,7 @@ internal class DiscoverViewModel(
     private var searchJob: Job? = null
     private var disclosedProviders: List<ProviderInfo>? = null
     private var pendingSearchTiming = SearchTiming.DEBOUNCED
-    private val chartJobs = mutableMapOf<ChartGenre?, Job>()
-    private var chartGeneration = 0
+    private var chartJob: Job? = null
     private var generation = 0
 
     init {
@@ -69,51 +76,58 @@ internal class DiscoverViewModel(
             }
         }
         viewModelScope.launch {
-            combine(
-                repository
-                    .observeProviders()
-                    .map { providers ->
-                        providers.configuration()
-                    }.distinctUntilChanged(),
-                groups.observeGroups().map { rows -> rows.map { it.name } }.distinctUntilChanged(),
-            ) { _, names -> names }.collect { names ->
-                chartJobs.values.forEach { it.cancel() }
-                chartJobs.clear()
-                val chartRun = ++chartGeneration
-                val rows =
-                    listOf(ChartRow(null, null, null, chartRun)) +
-                        names.mapNotNull { name ->
-                            repository.genreForGroupName(name)?.let { ChartRow(name, it, null, chartRun) }
-                        }
-                mutableState.update { it.copy(charts = rows) }
+            // Charts come from Apple: a changed directory configuration changes their answer.
+            repository
+                .observeProviders()
+                .map { providers -> providers.configuration() }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { refetchChart() }
+        }
+        viewModelScope.launch {
+            groups.observeGroups().map { rows -> rows.map { it.name } }.distinctUntilChanged().collect { names ->
+                val presets =
+                    (listOf<ChartGenre?>(null) + names.mapNotNull(repository::genreForGroupName)).distinct()
+                mutableState.update { it.copy(presets = presets) }
             }
         }
     }
 
-    /** LazyColumn calls this as a row enters composition; matching groups share one request. */
+    /** Tunes the dial; the screen asks for the chart with [loadChart] once it shows it. */
+    fun tune(genre: ChartGenre?) {
+        if (genre == mutableState.value.chart.genre) return
+        chartJob?.cancel()
+        mutableState.update { it.copy(chart = TunedChart(genre, generation = it.chart.generation + 1)) }
+    }
+
+    /** Fetches the tuned chart again after a failure. */
+    fun retryChart() = refetchChart()
+
+    /** The screen calls this as the tuned chart enters composition; repeated calls share one request. */
     fun loadChart(genre: ChartGenre?) {
-        if (genre in chartJobs || mutableState.value.charts.none { it.genre == genre }) return
-        val run = chartGeneration
-        chartJobs[genre] =
+        val chart = mutableState.value.chart
+        if (genre != chart.genre || chart.hits != null || chart.failure != null || chartJob?.isActive == true) return
+        chartJob =
             viewModelScope.launch {
                 val result = repository.charts(genre)
                 ensureActive()
                 mutableState.update { state ->
-                    state.copy(
-                        charts =
-                            state.charts.mapNotNull { row ->
-                                if (row.genre != genre || row.generation != run) {
-                                    row
-                                } else {
-                                    when (result) {
-                                        is Outcome.Success -> row.copy(hits = result.value)
-                                        is Outcome.Failure -> null
-                                    }
-                                }
-                            },
-                    )
+                    if (state.chart.genre != genre || state.chart.generation != chart.generation) {
+                        state
+                    } else {
+                        when (result) {
+                            is Outcome.Success -> state.copy(chart = state.chart.copy(hits = result.value))
+                            is Outcome.Failure -> state.copy(chart = state.chart.copy(failure = result.error))
+                        }
+                    }
                 }
             }
+    }
+
+    /** Provider and group changes can change the chart's answer: drop it and wait to be shown. */
+    private fun refetchChart() {
+        chartJob?.cancel()
+        mutableState.update { it.copy(chart = TunedChart(it.chart.genre, generation = it.chart.generation + 1)) }
     }
 
     /** Uses Directory's disclosure acknowledgement, including its frame boundary. */

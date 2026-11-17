@@ -6,8 +6,8 @@
     <string name="discovery_disclosure">Suchanfragen werden an %1$s gesendet</string>
     <string name="discovery_disabled">Aktiviere ein Verzeichnis in den Entdecken-Einstellungen</string>
     <string name="discovery_top">Beliebte Podcasts</string>
+    <string name="discovery_station_top">Top</string>
     <string name="discovery_popular">Beliebt in %1$s</string>
-    <string name="discovery_categories">Kategorien</string>
     <string name="discovery_add_link">Diesen Link hinzufügen</string>
     <string name="discovery_import">Importieren</string>
     <string name="discovery_more">Mehr</string>
@@ -17,7 +17,6 @@
     <string name="discovery_partial">%1$s hat nicht geantwortet; verfügbare Ergebnisse werden angezeigt</string>
     <string name="discovery_busy">%1$s ist ausgelastet; verfügbare Ergebnisse werden angezeigt</string>
     <string name="discovery_invalid">Dieses Verzeichnis ist nicht verfügbar</string>
-    <string name="discovery_subscribed">Abonniert</string>
     <string name="discovery_search_for">Nach „%1$s“ suchen</string>
     <string name="add_lookup_once">Einmal bei Apple nachschlagen</string>
     <string name="preview_subscribe_play">Zum Abspielen abonnieren</string>

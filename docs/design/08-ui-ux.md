@@ -1051,6 +1051,30 @@ and overflow keys, and a needle window (`NeedleWindow`) for a known download pro
 
 **Implementation note (2026-11-01, M7).** Discover, [Directory results](#directory-results) and the podcast preview mode of [Podcast detail](#podcast-detail) are implemented as specified here, both apps; the provider disclosure, the per-provider partial-results wording and the key-consent row of [Add podcast sheet](#add-podcast-sheet) come from `:feature:discover`'s `DiscoveryContent` and `AddPodcastSheet`, and the surfaces are covered by `DiscoveryScreenTest`, `DiscoveryScreenshotTest`, `PreviewScreenshotTest` and the desktop `DiscoveryJourneyTest`.
 
+**Radio Discover (PO-55, 2026-11-17).** Discover is built from radio parts and replaces the
+layout above. The faceplate carries only the "Discover" sign; Settings opens from the radio's
+Menu. The search field is a strip of paper in a brass-rimmed slot, typed in Courier, with the
+provider disclosure under it and a bank of momentary piano keys: "Add this link" (while the
+input is a link), "Add by URL" and "Import". With nothing typed, the charts are radio stations:
+
+- A `TuningDial` prints "Top" and every genre along a scale behind glass; tapping a station
+  tunes to it, the red needle travels there and the scale scrolls to keep it in view. Each
+  station is a tab in one selectable group. The dial replaces the 19 category chips.
+- Preset keys above the dial ("Top" and each genre a group's name maps to, once per genre)
+  tune with one tap; they appear only when at least one group maps to a genre.
+- One tray shows the tuned station's chart: "Top podcasts" or "Popular in {genre}" with a More
+  key (`DirectoryKey("", genreId)`), then the first 10 hits as paper slips. Only the tuned
+  chart is requested, once the tray is composed (`DiscoverViewModel.loadChart`), and a
+  directory configuration change fetches it again. Loading shows 5 blank slips; a failure
+  shows "Charts unavailable" with Retry instead of hiding the section; the dial, presets and
+  tray are absent while Apple, the only chart source, is off.
+
+Directory hits, here and in [Directory results](#directory-results), are paper slips: cover in
+a recess, Courier title, author, then episode count, latest episode and the answering
+directories on one line, and the amber "Subscribed" lamp for podcasts in the library. Directory
+results lose their settings gear; Retry, Settings, More and "Add by URL" there and in the
+search status are momentary piano keys.
+
 ### Directory results
 
 `DirectoryKey(query, genreId)`, `:feature:discover`, M7.

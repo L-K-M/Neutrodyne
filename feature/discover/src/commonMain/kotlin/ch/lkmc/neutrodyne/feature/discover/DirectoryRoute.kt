@@ -1,20 +1,15 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feature.discover
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,7 +19,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
@@ -45,7 +39,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.discovery_charts_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_empty
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_invalid
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_top
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import org.jetbrains.compose.resources.stringResource
 
@@ -71,14 +64,20 @@ internal fun DirectoryScreen(
             key.query.takeIf { it.isNotBlank() } ?: key.genreId?.let(ChartGenre::fromId)?.label()
                 ?: stringResource(Res.string.discovery_top),
             navigation = { NdIconButton({ navigator.pop() }, NdIcons.ArrowBack, stringResource(Res.string.back)) },
-            actions = { SettingsGearButton() },
         )
-        ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp), onProvidersVisible)
+        ProviderDisclosure(
+            state.providers,
+            Modifier.padding(start = 20.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+            onProvidersVisible,
+        )
         LazyColumn(state = list, modifier = Modifier.fillMaxSize().ndScrollbar(list, bars, ndScrollbarColor(bars))) {
             item {
                 when {
                     state.invalid -> {
-                        Text(stringResource(Res.string.discovery_invalid))
+                        Text(
+                            stringResource(Res.string.discovery_invalid),
+                            Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
                     }
 
                     state.results != null -> {
@@ -88,40 +87,39 @@ internal fun DirectoryScreen(
                     }
 
                     state.loading -> {
-                        Column {
-                            LinearProgressIndicator()
-                            repeat(DIRECTORY_PLACEHOLDERS) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                ) {
-                                    Box(Modifier.size(64.dp).background(MaterialTheme.colorScheme.surfaceContainer))
-                                    Box(
-                                        Modifier
-                                            .size(
-                                                180.dp,
-                                                24.dp,
-                                            ).background(MaterialTheme.colorScheme.surfaceContainer),
-                                    )
-                                }
-                            }
+                        Column(Modifier.padding(vertical = 4.dp)) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                            repeat(DIRECTORY_PLACEHOLDERS) { SkeletonSlip() }
                         }
                     }
 
                     state.chartError != null -> {
-                        Text(stringResource(Res.string.discovery_charts_unavailable))
-                        NdTextButton(stringResource(Res.string.action_retry), retry)
+                        Column(
+                            Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(stringResource(Res.string.discovery_charts_unavailable))
+                            KeyBank { MomentaryKey(stringResource(Res.string.action_retry), retry) }
+                        }
                     }
 
                     state.hits.isEmpty() -> {
-                        Text(stringResource(Res.string.discovery_empty, key.query))
+                        Text(
+                            stringResource(Res.string.discovery_empty, key.query),
+                            Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
                     }
                 }
             }
             items(state.hits, key = { it.feedUrl }) { hit -> DirectoryRow(hit) { navigator.openHit(hit) } }
             if (state.hits.isEmpty()) {
                 item {
-                    NdTextButton(stringResource(Res.string.discover_add_url), { navigator.push(AddPodcastKey(null)) })
+                    KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        MomentaryKey(
+                            stringResource(Res.string.discover_add_url),
+                            { navigator.push(AddPodcastKey(null)) },
+                        )
+                    }
                 }
             }
         }

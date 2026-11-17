@@ -1,24 +1,39 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feature.discover
 
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverNetworkPolicy
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
@@ -31,6 +46,7 @@ import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.ui.FeedDates
+import ch.lkmc.neutrodyne.core.ui.SubscribedLamp
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
@@ -61,7 +77,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_true_crime
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_tv_film
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_partial
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_providers_loading
-import ch.lkmc.neutrodyne.core.ui.resources.discovery_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.net_offline
 import ch.lkmc.neutrodyne.core.ui.resources.settings
@@ -104,32 +119,57 @@ internal fun ProviderDisclosure(
     )
 }
 
+/**
+ * One directory hit as a paper slip in the tray (PO-55): cover in a recess, the title in Courier,
+ * the author, then episode count, latest episode and the directories that returned it, and a lit
+ * lamp for podcasts already in the library. The click target deliberately precedes the slip's
+ * shape: the whole list line takes the click, while the slip draws the press, hover and focus.
+ */
+@Suppress("ktlint:compose:modifier-clickable-order")
 @Composable
 internal fun DirectoryRow(
     hit: DirectoryHit,
     onClick: () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(hit.title) },
-        supportingContent = {
-            Column {
-                hit.author?.let { Text(it) }
-                Text(
-                    listOfNotNull(
-                        hit.episodeCount?.let { pluralStringResource(Res.plurals.add_episodes_count, it, it) },
-                        hit.lastEpisodeAt?.let {
-                            val (day, month) = FeedDates.dayMonth(it)
-                            stringResource(Res.string.add_last_episode, "$day $month")
-                        },
-                    ).joinToString(" · "),
-                )
-                Text(hit.providers.joinToString(", ") { it.displayName() })
-                if (hit.subscribedPodcastId != null) Text(stringResource(Res.string.discovery_subscribed))
+    val interaction = remember { MutableInteractionSource() }
+    val details =
+        listOfNotNull(
+            hit.episodeCount?.let { pluralStringResource(Res.plurals.add_episodes_count, it, it) },
+            hit.lastEpisodeAt?.let {
+                val (day, month) = FeedDates.dayMonth(it)
+                stringResource(Res.string.add_last_episode, "$day $month")
+            },
+            hit.providers.joinToString(", ") { it.displayName() }.takeIf { it.isNotEmpty() },
+        ).joinToString(" · ")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 3.dp)
+            .shadow(1.5.dp, SlipShape)
+            .clip(SlipShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .indication(interaction, LocalIndication.current)
+            .border(0.5.dp, Brass.copy(alpha = 0.7f), SlipShape)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DirectoryCover(hit, Modifier.size(56.dp).recess(RoundedCornerShape(3.dp)))
+        Column(Modifier.weight(1f)) {
+            Text(
+                hit.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            hit.author?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        },
-        leadingContent = { DirectoryCover(hit, Modifier.size(64.dp)) },
-        modifier = Modifier.clickable(role = Role.Button, onClick = onClick),
-    )
+            if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall)
+            if (hit.subscribedPodcastId != null) SubscribedLamp(Modifier.padding(top = 4.dp))
+        }
+    }
 }
 
 @Composable
@@ -160,7 +200,10 @@ internal fun SearchStatus(
     retry: () -> Unit,
     settings: () -> Unit,
 ) {
-    Column {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         val active = results.statuses.filterValues { it != ProviderStatus.Disabled }
         val failed = active.filterValues { it is ProviderStatus.Failed || it == ProviderStatus.RateLimited }
         when {
@@ -170,13 +213,13 @@ internal fun SearchStatus(
 
             active.isEmpty() -> {
                 Text(stringResource(Res.string.discovery_disabled))
-                NdTextButton(stringResource(Res.string.settings), settings)
+                KeyBank { MomentaryKey(stringResource(Res.string.settings), settings) }
             }
 
             failed.size == active.size -> {
                 val offline = failed.values.any { (it as? ProviderStatus.Failed)?.error == NetError.Offline }
                 Text(stringResource(if (offline) Res.string.net_offline else Res.string.discovery_unavailable))
-                NdTextButton(stringResource(Res.string.action_retry), retry)
+                KeyBank { MomentaryKey(stringResource(Res.string.action_retry), retry) }
             }
 
             results.hits.isEmpty() -> {

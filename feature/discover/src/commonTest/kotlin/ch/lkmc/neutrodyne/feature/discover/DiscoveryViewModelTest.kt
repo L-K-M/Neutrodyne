@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -148,7 +149,7 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun configurationChangeRestartsQueryAndHidesFailedCharts() =
+    fun configurationChangeRestartsQueryAndRefetchesTheChart() =
         runTest {
             repository.chartAnswer = Outcome.Failure(ProviderStatus.RateLimited)
             val vm = DiscoverViewModel(repository, groups)
@@ -156,10 +157,7 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             vm.loadChart(null)
             runCurrent()
-            assertTrue(
-                vm.state.value.charts
-                    .isEmpty(),
-            )
+            assertEquals(ProviderStatus.RateLimited, vm.state.value.chart.failure)
             vm.inputChanged("news")
             advanceUntilIdle()
             repository.providers.value =
@@ -167,6 +165,7 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
                     .map { it.copy(configurationVersion = 1) }
                     .toImmutableList()
             advanceUntilIdle()
+            assertNull(vm.state.value.chart.failure)
             vm.loadChart(null)
             advanceUntilIdle()
             assertEquals(listOf("news"), repository.queries)
@@ -178,7 +177,78 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun genreRowsWaitForVisibilityAndCoalesceMatchingGroups() =
+    fun chartsWaitForTheScreenAndLoadOnlyTheTunedStation() =
+        runTest {
+            val vm = DiscoverViewModel(repository, groups)
+            advanceUntilIdle()
+            assertTrue(repository.chartRequests.isEmpty())
+            vm.loadChart(null)
+            vm.loadChart(null)
+            advanceUntilIdle()
+            assertEquals(listOf<ChartGenre?>(null), repository.chartRequests)
+            assertNotNull(vm.state.value.chart.hits)
+            // A station the dial is not tuned to is never fetched.
+            vm.loadChart(ChartGenre.NEWS)
+            advanceUntilIdle()
+            assertEquals(listOf<ChartGenre?>(null), repository.chartRequests)
+            vm.tune(ChartGenre.NEWS)
+            assertEquals(
+                TunedChart(ChartGenre.NEWS, generation = vm.state.value.chart.generation),
+                vm.state.value.chart,
+            )
+            vm.loadChart(ChartGenre.NEWS)
+            vm.loadChart(ChartGenre.NEWS)
+            advanceUntilIdle()
+            assertEquals(listOf(null, ChartGenre.NEWS), repository.chartRequests)
+            assertNotNull(vm.state.value.chart.hits)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun retuningDropsTheAnswerForTheStationLeft() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            repository.chartGate = gate
+            repository.chartAnswer = Outcome.Success(persistentListOf(hit))
+            val vm = DiscoverViewModel(repository, groups)
+            advanceUntilIdle()
+            vm.loadChart(null)
+            runCurrent()
+            vm.tune(ChartGenre.HISTORY)
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(ChartGenre.HISTORY, vm.state.value.chart.genre)
+            assertNull(vm.state.value.chart.hits)
+            vm.loadChart(ChartGenre.HISTORY)
+            advanceUntilIdle()
+            assertEquals(listOf(hit), vm.state.value.chart.hits)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun aFailedChartIsFetchedAgainOnlyOnRetry() =
+        runTest {
+            repository.chartAnswer = Outcome.Failure(ProviderStatus.Failed(NetError.Offline))
+            val vm = DiscoverViewModel(repository, groups)
+            advanceUntilIdle()
+            vm.loadChart(null)
+            advanceUntilIdle()
+            assertEquals(ProviderStatus.Failed(NetError.Offline), vm.state.value.chart.failure)
+            vm.loadChart(null)
+            advanceUntilIdle()
+            assertEquals(1, repository.chartRequests.size)
+            repository.chartAnswer = Outcome.Success(persistentListOf(hit))
+            vm.retryChart()
+            vm.loadChart(null)
+            advanceUntilIdle()
+            assertEquals(2, repository.chartRequests.size)
+            assertNull(vm.state.value.chart.failure)
+            assertEquals(listOf(hit), vm.state.value.chart.hits)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun presetsCoalesceMatchingGroups() =
         runTest {
             repository.groupGenres["Tech"] = ChartGenre.TECHNOLOGY
             repository.groupGenres["Technology"] = ChartGenre.TECHNOLOGY
@@ -186,23 +256,13 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             groups.create(GroupDraft("Technology"))
             val vm = DiscoverViewModel(repository, groups)
             advanceUntilIdle()
+            assertEquals(listOf(null, ChartGenre.TECHNOLOGY), vm.state.value.presets)
             assertTrue(repository.chartRequests.isEmpty())
-            vm.loadChart(null)
-            advanceUntilIdle()
-            assertEquals(listOf<ChartGenre?>(null), repository.chartRequests)
-            vm.loadChart(ChartGenre.TECHNOLOGY)
-            vm.loadChart(ChartGenre.TECHNOLOGY)
-            advanceUntilIdle()
-            assertEquals(listOf(null, ChartGenre.TECHNOLOGY), repository.chartRequests)
-            assertTrue(
-                vm.state.value.charts
-                    .all { it.hits != null },
-            )
             vm.viewModelScope.cancel()
         }
 
     @Test
-    fun groupRowsFollowRealMatchingGroupsAndDeletion() =
+    fun presetsFollowRealMatchingGroupsAndDeletion() =
         runTest {
             repository.groupGenres["Tech"] = ChartGenre.TECHNOLOGY
             val vm = DiscoverViewModel(repository, groups)
@@ -210,18 +270,10 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             val id = (groups.create(GroupDraft("Tech")) as Outcome.Success).value
             groups.create(GroupDraft("Unmapped"))
             advanceUntilIdle()
-            assertEquals(
-                listOf(null, "Tech"),
-                vm.state.value.charts
-                    .map { it.title },
-            )
+            assertEquals(listOf(null, ChartGenre.TECHNOLOGY), vm.state.value.presets)
             groups.delete(id)
             advanceUntilIdle()
-            assertEquals(
-                listOf<String?>(null),
-                vm.state.value.charts
-                    .map { it.title },
-            )
+            assertEquals(listOf<ChartGenre?>(null), vm.state.value.presets)
             vm.viewModelScope.cancel()
         }
 

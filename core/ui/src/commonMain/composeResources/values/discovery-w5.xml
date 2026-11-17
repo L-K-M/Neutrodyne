@@ -6,8 +6,8 @@
     <string name="discovery_disclosure">Searches are sent to %1$s</string>
     <string name="discovery_disabled">Enable a directory in Discover settings</string>
     <string name="discovery_top">Top podcasts</string>
+    <string name="discovery_station_top">Top</string>
     <string name="discovery_popular">Popular in %1$s</string>
-    <string name="discovery_categories">Categories</string>
     <string name="discovery_add_link">Add this link</string>
     <string name="discovery_import">Import</string>
     <string name="discovery_more">More</string>
@@ -17,7 +17,6 @@
     <string name="discovery_partial">%1$s did not answer; showing available results</string>
     <string name="discovery_busy">%1$s is busy; showing available results</string>
     <string name="discovery_invalid">This directory is unavailable</string>
-    <string name="discovery_subscribed">Subscribed</string>
     <string name="discovery_search_for">Search for ‘%1$s’</string>
     <string name="add_lookup_once">Look up once with Apple</string>
     <string name="preview_subscribe_play">Subscribe to play</string>

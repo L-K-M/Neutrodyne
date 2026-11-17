@@ -25,6 +25,8 @@ class DiscoveryScreenshotTest {
 
     @Test fun content() = capture(DiscoveryShot.CONTENT)
 
+    @Test fun charts() = capture(DiscoveryShot.CHARTS)
+
     private fun capture(shot: DiscoveryShot) =
         runDesktopComposeUiTest(width = 360, height = 640) {
             val previous = Locale.getDefault()
