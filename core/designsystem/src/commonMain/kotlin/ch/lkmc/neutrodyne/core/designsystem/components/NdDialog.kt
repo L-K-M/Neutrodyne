@@ -2,8 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.designsystem.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -23,17 +21,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
-import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
 import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperCard
 
 /**
  * One dialog action button: resolved [label] plus the callback. [role] marks destructive
@@ -47,7 +44,7 @@ public data class NdDialogAction(
 )
 
 /**
- * The app's dialog (08 Nd wrappers, PO-55): a paper card in a brass rim with the title in
+ * The app's dialog (08 Nd wrappers, PO-55): the radio's screwed paper card with the title in
  * Courier and its actions as momentary piano keys. It is a `BasicAlertDialog`, so on the desktop it
  * is window-backed and renders above the expanded player, which is why navigation-level dialogs
  * use it too. The text body is bounded by the dialog's layout and scrolls, so long content (the
@@ -103,51 +100,58 @@ public fun NdDialog(
     content: @Composable () -> Unit,
 ) {
     BasicAlertDialog(onDismissRequest = onDismissRequest, modifier = modifier, properties = properties) {
-        Column(
-            Modifier
-                .widthIn(min = DIALOG_MIN_WIDTH, max = DIALOG_MAX_WIDTH)
-                .shadow(6.dp, DialogShape)
-                .clip(DialogShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                .border(1.5.dp, Brass, DialogShape)
-                .padding(DIALOG_PADDING),
-        ) {
-            if (icon != null) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = Ink,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp).size(24.dp),
-                )
+        // The rendered paper card: screwed paper in a thin brass edge, like the podcast header's.
+        PaperCard(Modifier.widthIn(min = DIALOG_MIN_WIDTH, max = DIALOG_MAX_WIDTH).shadow(6.dp, DialogShape)) {
+            DialogColumn(icon, title, confirm, dismiss, alternative, content)
+        }
+    }
+}
+
+@Composable
+private fun DialogColumn(
+    icon: ImageVector?,
+    title: String?,
+    confirm: NdDialogAction?,
+    dismiss: NdDialogAction?,
+    alternative: NdDialogAction?,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.padding(DIALOG_PADDING)) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = Ink,
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp).size(24.dp),
+            )
+        }
+        if (title != null) {
+            Text(
+                title,
+                Modifier
+                    .align(if (icon != null) Alignment.CenterHorizontally else Alignment.Start)
+                    .padding(bottom = 12.dp)
+                    .semantics { heading() },
+                color = Ink,
+                style = MaterialTheme.typography.headlineSmall,
+            )
+        }
+        // The body takes what the title and keys leave; long bodies scroll inside it.
+        Box(Modifier.weight(1f, fill = false)) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                ProvideTextStyle(MaterialTheme.typography.bodyMedium, content)
             }
-            if (title != null) {
-                Text(
-                    title,
-                    Modifier
-                        .align(if (icon != null) Alignment.CenterHorizontally else Alignment.Start)
-                        .padding(bottom = 12.dp)
-                        .semantics { heading() },
-                    color = Ink,
-                    style = MaterialTheme.typography.headlineSmall,
-                )
-            }
-            // The body takes what the title and keys leave; long bodies scroll inside it.
-            Box(Modifier.weight(1f, fill = false)) {
-                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
-                    ProvideTextStyle(MaterialTheme.typography.bodyMedium, content)
-                }
-            }
-            val actions = listOfNotNull(dismiss, alternative, confirm)
-            if (actions.isNotEmpty()) {
-                KeyBank(Modifier.align(Alignment.End).padding(top = 18.dp)) {
-                    for (action in actions) {
-                        MomentaryKey(
-                            action.label,
-                            action.onClick,
-                            enabled = action.enabled,
-                            destructive = action.role == NdActionRole.DESTRUCTIVE,
-                        )
-                    }
+        }
+        val actions = listOfNotNull(dismiss, alternative, confirm)
+        if (actions.isNotEmpty()) {
+            KeyBank(Modifier.align(Alignment.End).padding(top = 18.dp)) {
+                for (action in actions) {
+                    MomentaryKey(
+                        action.label,
+                        action.onClick,
+                        enabled = action.enabled,
+                        destructive = action.role == NdActionRole.DESTRUCTIVE,
+                    )
                 }
             }
         }

@@ -63,13 +63,14 @@ class NdScaffoldAndDialogTest {
                 }
             }
 
+            // Saturated red only: the keys' rendered ivory and brass shade into warm browns.
             fun redDominantPixelCount(label: String): Int {
                 val map = onNodeWithText(label).captureToImage().toPixelMap()
                 var count = 0
                 for (x in 0 until map.width) {
                     for (y in 0 until map.height) {
                         val c = map[x, y]
-                        if (c.alpha > 0f && c.red > c.green + c.blue) count++
+                        if (c.alpha > 0f && c.red > 0.6f && c.green < 0.25f && c.blue < 0.25f) count++
                     }
                 }
                 return count
