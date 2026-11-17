@@ -11,7 +11,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import kotlin.test.Test
@@ -24,7 +23,7 @@ class NdSheetHandleTargetTest {
         runDesktopComposeUiTest(width = 480, height = 640) {
             var open by mutableStateOf(true)
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     if (open) {
                         NdModalBottomSheet(onDismissRequest = { open = false }) { Text("Sheet body") }
                     }

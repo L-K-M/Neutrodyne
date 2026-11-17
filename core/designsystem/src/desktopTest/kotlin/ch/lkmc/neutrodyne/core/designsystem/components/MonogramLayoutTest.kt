@@ -15,7 +15,6 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.art.MonogramMode
@@ -30,7 +29,7 @@ class MonogramLayoutTest {
             val spec = MonogramSpec("H", 200.0)
             setContent {
                 CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                    NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         Image(rememberMonogramPainter(spec, "MMMMMMMMMMMM MMMMMMMMMMMM"), null, Modifier.size(100.dp))
                     }
                 }

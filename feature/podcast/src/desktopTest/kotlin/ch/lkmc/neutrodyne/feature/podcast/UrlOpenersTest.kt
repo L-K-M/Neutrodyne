@@ -9,7 +9,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
@@ -28,7 +27,7 @@ class UrlOpenersTest {
             val host = SnackbarHostState()
             setContent {
                 CompositionLocalProvider(LocalSnackbarHost provides host) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         val fallback = rememberNoHandlerFallback()
                         LaunchedEffect(Unit) { fallback("https://example.com/episode") }
                         SnackbarHost(host)

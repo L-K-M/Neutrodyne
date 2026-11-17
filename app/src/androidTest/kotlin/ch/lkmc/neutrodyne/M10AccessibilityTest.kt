@@ -21,7 +21,6 @@ import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -66,7 +65,6 @@ class M10AccessibilityTest {
         compose.activity.setContent {
             val density = LocalDensity.current
             NeutrodyneTheme(
-                AppearancePrefs(dynamicColor = false, pureBlack = sample.theme == AuditTheme.BLACK),
                 SystemUiState(sample.theme != AuditTheme.LIGHT, 0.0, true),
             ) {
                 CompositionLocalProvider(

@@ -21,7 +21,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import kotlin.math.max
@@ -36,7 +35,7 @@ class ArtworkToolbarContrastTest {
                 runDesktopComposeUiTest(width = 360, height = 160) {
                     setContent {
                         CompositionLocalProvider(LocalDensity provides Density(1f, font)) {
-                            NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState(false, 0.0, true)) {
+                            NeutrodyneTheme(SystemUiState(false, 0.0, true)) {
                                 Box(Modifier.fillMaxSize().background(background)) {
                                     NdTopAppBar(
                                         title = "MMMMMM",

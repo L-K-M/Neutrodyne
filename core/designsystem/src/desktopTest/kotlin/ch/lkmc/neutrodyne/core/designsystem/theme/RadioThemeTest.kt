@@ -9,7 +9,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
-import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -18,32 +17,19 @@ import kotlin.test.assertTrue
 /** Owner decision 2026-11-17: every screen wears the radio's paper and ink, with no other mode. */
 @OptIn(ExperimentalTestApi::class)
 class RadioThemeTest {
-    @Test fun retiredPreferencesOsDarkModeAndArtworkLeaveTheRadioScheme() =
+    @Test fun osDarkModeLeavesTheRadioScheme() =
         runComposeUiTest {
-            val prefs =
-                mutableStateOf(
-                    AppearancePrefs(ThemeMode.DARK, dynamicColor = true, pureBlack = true, artworkTint = true),
-                )
             val system = mutableStateOf(SystemUiState(dark = true, contrast = 0.0, reducedMotion = true))
             var app: ColorScheme? = null
-            var scoped: ColorScheme? = null
             setContent {
-                NeutrodyneTheme(prefs.value, system.value) {
-                    app = MaterialTheme.colorScheme
-                    ArtworkTheme(0xFF0044EE.toInt(), ArtworkSurface.FULL) { scoped = MaterialTheme.colorScheme }
-                }
+                NeutrodyneTheme(system.value) { app = MaterialTheme.colorScheme }
             }
             waitForIdle()
             assertEquals(RadioScheme.colors(0.0), app)
-            assertEquals(app, scoped)
 
-            runOnIdle {
-                prefs.value = AppearancePrefs(ThemeMode.LIGHT, dynamicColor = false)
-                system.value = system.value.copy(dark = false)
-            }
+            runOnIdle { system.value = system.value.copy(dark = false) }
             waitForIdle()
             assertEquals(RadioScheme.colors(0.0), app)
-            assertEquals(app, scoped)
         }
 
     @Test fun contrastRequestDarkensInkAndKeepsTheMaterials() {

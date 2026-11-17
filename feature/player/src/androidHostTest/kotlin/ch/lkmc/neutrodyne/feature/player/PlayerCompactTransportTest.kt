@@ -14,7 +14,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -54,7 +53,6 @@ class PlayerCompactTransportTest {
     @Test fun miniPlayerTransportKeepsDisjoint48DpTouchTargets() {
         rule.setContent {
             NeutrodyneTheme(
-                AppearancePrefs(dynamicColor = false),
                 SystemUiState.DEFAULT.copy(reducedMotion = true),
             ) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

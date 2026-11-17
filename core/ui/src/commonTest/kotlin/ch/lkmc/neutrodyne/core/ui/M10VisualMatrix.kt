@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.BrandMark
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -147,7 +146,6 @@ internal fun MatrixSurface(
 ) {
     val density = LocalDensity.current
     NeutrodyneTheme(
-        AppearancePrefs(dynamicColor = false, pureBlack = appearance.theme == "black"),
         SystemUiState(dark = appearance.theme != "light", contrast = appearance.contrast, reducedMotion = true),
     ) {
         CompositionLocalProvider(

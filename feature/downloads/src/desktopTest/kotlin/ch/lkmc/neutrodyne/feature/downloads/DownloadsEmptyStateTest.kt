@@ -7,7 +7,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -33,7 +32,6 @@ class DownloadsEmptyStateTest {
                         LocalPlatformKind provides PlatformKind.DESKTOP,
                     ) {
                         NeutrodyneTheme(
-                            AppearancePrefs(dynamicColor = false),
                             SystemUiState.DEFAULT,
                         ) {
                             DownloadsScreen(

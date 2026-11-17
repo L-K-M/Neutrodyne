@@ -2467,11 +2467,8 @@
 }
 -keep class ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory {
 }
--keep class ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs {
-  public <init>(ch.lkmc.neutrodyne.core.model.settings.ThemeMode, boolean, boolean, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
-}
 -keep class ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneThemeKt {
-  public static void NeutrodyneTheme(ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs, ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState, kotlin.jvm.functions.Function2, androidx.compose.runtime.Composer, int);
+  public static void NeutrodyneTheme(ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState, kotlin.jvm.functions.Function2, androidx.compose.runtime.Composer, int);
 }
 -keep class ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState {
   public <init>(boolean, double, boolean);
@@ -2971,7 +2968,7 @@
   public static org.jetbrains.compose.resources.StringResource getSettings(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
 -keep class ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRootKt {
-  public static void NeutrodyneRoot(ch.lkmc.neutrodyne.core.ui.root.RootUiState, ch.lkmc.neutrodyne.core.ui.root.RootActions, ch.lkmc.neutrodyne.core.ui.root.RootSlots, java.util.Set, androidx.compose.ui.Modifier, ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs, ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState, ch.lkmc.neutrodyne.core.model.BuildInfo$Platform, ch.lkmc.neutrodyne.core.navigation.TopLevelKey, kotlinx.coroutines.flow.Flow, kotlinx.coroutines.flow.Flow, androidx.compose.runtime.Composer, int, int, int);
+  public static void NeutrodyneRoot(ch.lkmc.neutrodyne.core.ui.root.RootUiState, ch.lkmc.neutrodyne.core.ui.root.RootActions, ch.lkmc.neutrodyne.core.ui.root.RootSlots, java.util.Set, androidx.compose.ui.Modifier, ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState, ch.lkmc.neutrodyne.core.model.BuildInfo$Platform, ch.lkmc.neutrodyne.core.navigation.TopLevelKey, kotlinx.coroutines.flow.Flow, kotlinx.coroutines.flow.Flow, androidx.compose.runtime.Composer, int, int);
 }
 -keep enum ch.lkmc.neutrodyne.core.ui.root.PlaybackKey {
 }

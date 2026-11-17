@@ -28,7 +28,6 @@ import androidx.navigationevent.NavigationEvent
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
 import ch.lkmc.neutrodyne.core.designsystem.components.Covers
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -337,7 +336,7 @@ internal class SharedArtFrameHostTest : NdNavHostHarness() {
         SideEffect { scopePresent = shared != null }
         CompositionLocalProvider(LocalSharedArtEnabled provides !prefetched) {
             if (prefetched) assertSame(Modifier, Modifier.sharedArt("prefetch-probe"))
-            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 Box(
                     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).testTag("art-page"),
                 ) { content() }

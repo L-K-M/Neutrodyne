@@ -8,7 +8,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
@@ -35,7 +34,7 @@ class BackupSettingsNavigationTest {
         try {
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         SettingsHomeRoute(FakeSettingsRepository())
                     }
                 }

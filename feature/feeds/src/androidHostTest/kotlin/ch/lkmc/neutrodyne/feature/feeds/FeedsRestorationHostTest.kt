@@ -17,7 +17,6 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.paging.LoadState
 import androidx.paging.LoadStates
 import androidx.paging.PagingData
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -99,7 +98,7 @@ class FeedsRestorationHostTest {
                 LocalUiClock provides TestClock(),
                 LocalDrawnReporter provides reporter,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     FeedsScreen(
                         state = state,
                         pagingFor = { feed },
@@ -137,7 +136,7 @@ class FeedsRestorationHostTest {
                 LocalAppNavigator provides RecordingAppNavigator(),
                 LocalUiClock provides TestClock(),
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     FeedsScreen(
                         state = state,
                         pagingFor = { feed },

@@ -9,7 +9,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -44,7 +43,6 @@ class DiscoveryScreenshotTest {
             rule.mainClock.autoAdvance = false
             rule.setContent {
                 NeutrodyneTheme(
-                    AppearancePrefs(dynamicColor = false),
                     SystemUiState(dark = false, contrast = 0.0, reducedMotion = true),
                 ) {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {

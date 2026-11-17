@@ -10,7 +10,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ChapterSource
@@ -33,7 +32,7 @@ class ChapterListTest {
                 )
             val seeks = mutableListOf<Long>()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     ChapterList(
                         listOf(first, current),
                         CurrentChapter(9, 1, 2, current),

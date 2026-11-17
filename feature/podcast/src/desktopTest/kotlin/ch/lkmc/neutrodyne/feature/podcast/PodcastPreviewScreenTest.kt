@@ -8,7 +8,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.AlreadySubscribed
@@ -44,7 +43,7 @@ class PodcastPreviewScreenTest {
                     episodes = listOf(PreviewEpisode("Episode one", null, null, "Summary", null, false)),
                 )
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     PodcastPreviewScreen(PodcastPreviewState(loading = false, preview = preview), {
                     }, { subscriptions++ }, {}, {}, {}, {}, {})
                 }
@@ -64,7 +63,7 @@ class PodcastPreviewScreenTest {
             var subscriptions = 0
             val preview = testFeedPreview().copy(alreadySubscribed = AlreadySubscribed(3, false))
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     PodcastPreviewScreen(PodcastPreviewState(loading = false, preview = preview), {
                     }, { subscriptions++ }, {}, {}, {}, {}, {})
                 }

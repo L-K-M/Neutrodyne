@@ -11,7 +11,6 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.runDesktopComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import java.util.Locale
@@ -44,7 +43,7 @@ class UiTextTest {
     fun joinedAppendsTheSuffixOnlyToJoinedTextInComposition() =
         runDesktopComposeUiTest(width = 300, height = 300) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     Column {
                         Text(UiText.Joined(emptyList()).asString(), Modifier.testTag("empty"))
                         Text(

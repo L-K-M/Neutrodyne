@@ -18,7 +18,6 @@ import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -62,7 +61,7 @@ class DownloadsScreenTest {
                     LocalAppNavigator provides RecordingAppNavigator(),
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { Screen(state.value) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { Screen(state.value) }
                 }
             }
             onNodeWithText("Loading downloads").assertIsDisplayed()
@@ -95,7 +94,7 @@ class DownloadsScreenTest {
                     LocalAppNavigator provides RecordingAppNavigator(),
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         Screen(
                             DownloadsUiState(overview = overview, storage = storage, offline = true),
                             onPlay = { played += it },
@@ -136,7 +135,7 @@ class DownloadsScreenTest {
                     LocalAppNavigator provides RecordingAppNavigator(),
                     LocalPlatformKind provides PlatformKind.ANDROID,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         Screen(
                             DownloadsUiState(overview = overview, storage = storage),
                         )
@@ -165,7 +164,7 @@ class DownloadsScreenTest {
                     LocalAppNavigator provides RecordingAppNavigator(),
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         Screen(DownloadsUiState(overview = overview, storage = overview.storage), onNotice = {
                             actions +=
                                 it

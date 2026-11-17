@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ArtworkColors
@@ -66,7 +65,7 @@ internal fun referenceArt(art: ReferenceArt): ArtworkRef = ArtworkRef("reference
 @Composable
 internal fun M10PlayerContent(visual: M10PlayerVisual) {
     val density = LocalDensity.current
-    NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState(visual.dark, 0.0, true)) {
+    NeutrodyneTheme(SystemUiState(visual.dark, 0.0, true)) {
         CompositionLocalProvider(LocalDensity provides Density(density.density, visual.font)) {
             key(visual) {
                 val now = sampleNow().copy(artwork = referenceArt(visual.art))

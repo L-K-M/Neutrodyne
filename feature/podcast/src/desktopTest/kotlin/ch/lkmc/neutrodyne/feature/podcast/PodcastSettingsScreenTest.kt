@@ -30,7 +30,6 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -563,7 +562,7 @@ class PodcastSettingsScreenTest {
                         override val notifications = requester
                     },
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     PodcastSettingsScreen(
                         state = state,
                         onCustomTitle = onCustomTitle,
@@ -595,7 +594,7 @@ class PodcastSettingsScreenTest {
                 LocalPlatformActions provides TestPlatformActions,
                 LocalSaveableStateRegistry provides registry,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     SettingsCredentialsDialog(onSubmit = onSubmit, onDismiss = onDismiss)
                 }
             }

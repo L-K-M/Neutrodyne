@@ -8,7 +8,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import io.github.takahirom.roborazzi.captureRoboImage
@@ -31,7 +30,7 @@ class RadioScreenshotTest {
             )) {
                 runDesktopComposeUiTest(width = dimensions.first, height = dimensions.second) {
                     setContent {
-                        NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                        NeutrodyneTheme(SystemUiState.DEFAULT) {
                             CompositionLocalProvider(
                                 LocalDensity provides Density(1f, if (name == "large_text") 1.3f else 1f),
                             ) {

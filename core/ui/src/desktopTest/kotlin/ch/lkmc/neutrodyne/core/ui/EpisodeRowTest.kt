@@ -23,7 +23,6 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -162,7 +161,7 @@ class EpisodeRowTest {
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                     LocalUiClock provides TestClock(),
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         EpisodeRow(
                             row = testEpisodeRow(1, downloadState = downloadState),
                             live = null,
@@ -260,7 +259,7 @@ class EpisodeRowTest {
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                     LocalUiClock provides TestClock(),
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         EpisodeRow(
                             row = testEpisodeRow(1, startedAt = startedAt, playedAt = playedAt),
                             live = live,
@@ -333,7 +332,7 @@ class EpisodeRowTest {
             val actions = mutableListOf<EpisodeAction>()
             var removed = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     EpisodeRow(
                         testEpisodeRow(1),
                         RowLive(isNowPlaying = true, isPlaying = true),
@@ -400,7 +399,7 @@ class EpisodeRowTest {
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     val density = LocalDensity.current
                     CompositionLocalProvider(
                         LocalDensity provides Density(density.density, fontScale),

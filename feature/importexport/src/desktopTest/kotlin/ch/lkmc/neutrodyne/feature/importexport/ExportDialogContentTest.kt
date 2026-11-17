@@ -12,7 +12,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ExportLayout
@@ -116,7 +115,7 @@ class ExportDialogContentTest {
     ) {
         setContent {
             CompositionLocalProvider(LocalPlatformKind provides kind) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     ExportDialogContent(
                         state = state,
                         canShare = kind == PlatformKind.ANDROID,

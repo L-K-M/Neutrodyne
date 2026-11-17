@@ -14,7 +14,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
@@ -54,7 +53,7 @@ class PlaybackPageTest {
             val navigator = RecordingAppNavigator()
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { SettingsHomeRoute(settings) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { SettingsHomeRoute(settings) }
                 }
             }
             onNodeWithText("Playback").performScrollTo()
@@ -71,7 +70,7 @@ class PlaybackPageTest {
             val vm = PlaybackSettingsViewModel(FakeSettingsRepository(), FakePlaybackMaintenance())
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.DESKTOP, vm) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.DESKTOP, vm) }
                 }
             }
             onNodeWithContentDescription("Default speed, 1.0×").assertIsDisplayed()
@@ -85,7 +84,7 @@ class PlaybackPageTest {
             val vm = PlaybackSettingsViewModel(settings, FakePlaybackMaintenance())
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
                 }
             }
             onNodeWithContentDescription("Skip back, 30 seconds").assertExists()
@@ -109,7 +108,7 @@ class PlaybackPageTest {
             val vm = PlaybackSettingsViewModel(settings, FakePlaybackMaintenance())
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
                 }
             }
             onNodeWithContentDescription("Increase Default speed").performClick()
@@ -129,7 +128,7 @@ class PlaybackPageTest {
             val vm = PlaybackSettingsViewModel(settings, FakePlaybackMaintenance())
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
                 }
             }
             onNodeWithText("Smart resume").performScrollTo().performClick()
@@ -143,7 +142,7 @@ class PlaybackPageTest {
             val vm = PlaybackSettingsViewModel(FakeSettingsRepository(), maintenance)
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
                 }
             }
             onNodeWithText("Clear streaming cache").performScrollTo().performClick()

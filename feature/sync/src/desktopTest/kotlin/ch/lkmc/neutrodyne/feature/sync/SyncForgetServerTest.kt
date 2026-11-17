@@ -24,7 +24,6 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -326,7 +325,7 @@ class SyncForgetServerTest {
                 LocalRootScope provides rootScope,
                 LocalPlatformActions provides harness.actions,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     if (show()) {
                         SyncSettingsScreen(harness.controller, harness.address, RUN_SERVER_URL)
                     }

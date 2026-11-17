@@ -8,7 +8,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -45,7 +44,7 @@ class RadioScreenshotTest {
 
     private fun capture(name: String) {
         rule.setContent {
-            NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 val density = LocalDensity.current
                 CompositionLocalProvider(
                     LocalDensity provides Density(density.density, if (name == "large_text") 1.3f else 1f),

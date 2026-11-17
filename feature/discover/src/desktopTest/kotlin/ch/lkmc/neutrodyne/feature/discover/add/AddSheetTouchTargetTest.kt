@@ -10,7 +10,6 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdModalBottomSheet
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -40,7 +39,7 @@ class AddSheetTouchTargetTest {
     fun everyA11yNodeKeepsA48DpTouchTarget() =
         runDesktopComposeUiTest(width = 320, height = 640) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     NdModalBottomSheet(onDismissRequest = {}) {
                         AddPodcastSheet(
                             initialInput = "https://example.com/feed",

@@ -18,7 +18,6 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -51,7 +50,6 @@ class GroupVisualsScreenshotTest {
     ) = runDesktopComposeUiTest(width = 360, height = height) {
         setContent {
             NeutrodyneTheme(
-                AppearancePrefs(dynamicColor = false),
                 SystemUiState(dark = dark, contrast = 0.0, reducedMotion = true),
             ) {
                 Surface(
@@ -79,7 +77,7 @@ class GroupVisualsScreenshotTest {
                 var selected = emptySet<String>()
                 var dismissed = false
                 setContent {
-                    NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         SuggestedGroupsFixture({ selected = it }, { dismissed = true })
                     }
                 }

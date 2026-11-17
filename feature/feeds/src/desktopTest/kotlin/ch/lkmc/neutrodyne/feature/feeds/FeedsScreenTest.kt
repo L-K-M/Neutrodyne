@@ -67,7 +67,6 @@ import androidx.paging.cachedIn
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.CategoryCount
@@ -910,7 +909,7 @@ class FeedsScreenTest {
                 LocalAppNavigator provides navigator,
                 LocalPlatformActions provides TestPlatformActions,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     val scope = rememberCoroutineScope()
                     if (selection != null) {
                         remember {
@@ -1199,7 +1198,7 @@ private class PagerFixture {
             LocalPlatformActions provides TestPlatformActions,
             LocalSnackbarHost provides snackbar,
         ) {
-            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 if (content == FeedContent.ROUTE) {
                     FeedsRoute(viewModel)
                 } else {

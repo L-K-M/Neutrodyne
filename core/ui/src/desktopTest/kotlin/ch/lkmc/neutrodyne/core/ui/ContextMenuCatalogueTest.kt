@@ -22,7 +22,6 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -61,7 +60,7 @@ class ContextMenuCatalogueTest {
                         LocalPlatformKind provides PlatformKind.DESKTOP,
                         LocalUiClock provides TestClock(),
                     ) {
-                        NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        NeutrodyneTheme(SystemUiState.DEFAULT) {
                             EpisodeRow(
                                 row = testEpisodeRow(1, downloadState = downloadState),
                                 live = null,
@@ -181,7 +180,7 @@ class ContextMenuCatalogueTest {
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     EpisodeRow(
                         row = row,
                         live = null,

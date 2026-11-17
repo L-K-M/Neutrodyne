@@ -42,7 +42,6 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.RadioScheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -90,7 +89,7 @@ import ch.lkmc.neutrodyne.desktop.resources.window_title_playing
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.settings.ReconnectDismissals
-import ch.lkmc.neutrodyne.feature.settings.observeAppearance
+import ch.lkmc.neutrodyne.feature.settings.awaitSettingsFiles
 import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.serialUserMessages
@@ -267,14 +266,16 @@ internal fun ApplicationScope.NeutrodyneWindow(
         onDispose { desktop?.removeAppEventListener(listener) }
     }
 
-    val appearance by produceState<AppearancePrefs?>(null, settings) {
+    // The window stays hidden until both settings files have loaded (1 s cap), so its first
+    // frame shows stored values rather than their defaults.
+    val settingsLoaded by produceState(false, settings) {
         launch {
-            delay(APPEARANCE_GATE_MS)
-            if (value == null) value = AppearancePrefs()
+            delay(SETTINGS_GATE_MS)
+            value = true
         }
-        if (settings == null) value = AppearancePrefs() else settings.observeAppearance().collect { value = it }
+        settings?.awaitSettingsFiles()
+        value = true
     }
-    val prefs = appearance ?: AppearancePrefs()
 
     // The Compose-side `hidden` owns visibility; a hand-off reveal clears it first, so the
     // activator's direct `isVisible` never fights the next recomposition.
@@ -297,7 +298,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
             )
         },
         state = state,
-        visible = !hidden && appearance != null,
+        visible = !hidden && settingsLoaded,
         title = windowTitle(nowPlaying?.takeIf { it.isPlaying }?.title),
         icon = icon,
         onKeyEvent = { event ->
@@ -384,7 +385,6 @@ internal fun ApplicationScope.NeutrodyneWindow(
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
-                prefs = prefs,
                 rowArt = rowArt,
                 installers = installers,
                 menuActions = menuActions,
@@ -657,7 +657,6 @@ internal fun NeutrodyneWindowContent(
     viewModelFactory: MetroViewModelFactory,
     playbackController: PlaybackController,
     playbackState: PlaybackStateSource,
-    prefs: AppearancePrefs = AppearancePrefs(),
     banners: DesktopBannerNotifier? = null,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
@@ -811,7 +810,6 @@ internal fun NeutrodyneWindowContent(
             slots = slots,
             installers = installers,
             systemUi = systemUi,
-            prefs = prefs,
             platform = BuildInfo.Platform.DESKTOP,
         )
     }
@@ -821,7 +819,7 @@ internal fun NeutrodyneWindowContent(
     // thread, and never sends without the user's click. It sits outside the root's own
     // theme provider, so it gets the same scheme in its own wrapper.
     if (crashOffer != null && (startup == StartupGateState.Ready || startup is StartupGateState.Recovered)) {
-        NeutrodyneTheme(prefs = prefs, system = systemUi) {
+        NeutrodyneTheme(system = systemUi) {
             DesktopCrashOfferDialog(
                 offer = crashOffer,
                 urls = crashOffer.urls ?: platformActions.urls,
@@ -831,4 +829,4 @@ internal fun NeutrodyneWindowContent(
     }
 }
 
-private const val APPEARANCE_GATE_MS = 1_000L
+private const val SETTINGS_GATE_MS = 1_000L

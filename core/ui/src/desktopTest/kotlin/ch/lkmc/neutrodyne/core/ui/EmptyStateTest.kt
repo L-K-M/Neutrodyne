@@ -17,7 +17,6 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import kotlin.math.abs
@@ -37,7 +36,7 @@ class EmptyStateTest {
         runDesktopComposeUiTest(width = 320, height = 180) {
             val clicked = mutableListOf<String>()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     EmptyState(
                         icon = NdIcons.Download,
                         title = "Your feeds live here",
@@ -62,7 +61,7 @@ class EmptyStateTest {
         runDesktopComposeUiTest(width = 320, height = 180) {
             var clicked = false
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     LazyColumn(Modifier.fillMaxSize()) {
                         item {
                             EmptyState(
@@ -84,7 +83,7 @@ class EmptyStateTest {
     fun ordinaryOnboardingStaysVerticallyCentered() =
         runDesktopComposeUiTest(width = 1000, height = 700) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     EmptyState(NdIcons.Download, "Nothing here", "Start with a podcast")
                 }
             }
@@ -98,7 +97,7 @@ class EmptyStateTest {
             var clicks = 0
             setContent {
                 CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         EmptyState(
                             NdIcons.GridView,
                             "Your feeds live here",
@@ -126,7 +125,7 @@ class EmptyStateTest {
         runDesktopComposeUiTest(width = 1000, height = 700) {
             val body = "Nothing matches this filter right now. ".repeat(10)
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     EmptyState(
                         icon = NdIcons.Download,
                         title = "Nothing here",

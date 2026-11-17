@@ -69,7 +69,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
-import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -311,17 +310,16 @@ internal fun PodcastScreen(
                 // LazyColumn stays unmounted until the first page settles.
                 items.loadState.refresh is LoadState.Loading && items.itemCount == 0 -> {
                     Column(Modifier.fillMaxSize()) {
-                        ArtworkTheme(state.colors?.seedArgb) {
-                            PodcastHeader(
-                                detail = detail,
-                                colors = state.colors,
-                                onArtworkBottomInWindow = { artworkBottom = it },
-                                nowMs = nowMs,
-                                groups = state.groups,
-                                onRemoveGroup = onRemoveGroup,
-                                onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
-                            )
-                        }
+                        PodcastHeader(
+                            detail = detail,
+                            colors = state.colors,
+                            onArtworkBottomInWindow = { artworkBottom = it },
+                            nowMs = nowMs,
+                            groups = state.groups,
+                            onRemoveGroup = onRemoveGroup,
+                            onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
+                        )
+
                         FeedStateBanner(
                             detail = detail,
                             nowMs = nowMs,
@@ -382,21 +380,20 @@ internal fun PodcastScreen(
                         offlineBannerItem(state.offline)
                         item(key = "header", contentType = "header") {
                             Column {
-                                ArtworkTheme(state.colors?.seedArgb) {
-                                    PodcastHeader(
-                                        detail = detail,
-                                        colors = state.colors,
-                                        modifier = Modifier.overlapHeaderChrome(headerInset),
-                                        topInset = headerInset,
-                                        onArtworkBottomInWindow = { artworkBottom = it },
-                                        nowMs = nowMs,
-                                        groups = state.groups,
-                                        onRemoveGroup = onRemoveGroup,
-                                        onAddToGroups = {
-                                            navigator.push(AddToGroupsKey(listOf(detail.id)))
-                                        },
-                                    )
-                                }
+                                PodcastHeader(
+                                    detail = detail,
+                                    colors = state.colors,
+                                    modifier = Modifier.overlapHeaderChrome(headerInset),
+                                    topInset = headerInset,
+                                    onArtworkBottomInWindow = { artworkBottom = it },
+                                    nowMs = nowMs,
+                                    groups = state.groups,
+                                    onRemoveGroup = onRemoveGroup,
+                                    onAddToGroups = {
+                                        navigator.push(AddToGroupsKey(listOf(detail.id)))
+                                    },
+                                )
+
                                 FeedStateBanner(
                                     detail = detail,
                                     nowMs = nowMs,

@@ -44,7 +44,6 @@ import androidx.paging.PagingState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -880,7 +879,7 @@ class PodcastScreenTest {
                 LocalAppNavigator provides navigator,
                 LocalPlatformActions provides TestPlatformActions,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     PodcastScreen(
                         state = state,
                         live = live,
@@ -924,7 +923,7 @@ class PodcastScreenTest {
                 LocalAppNavigator provides navigator,
                 LocalPlatformActions provides TestPlatformActions,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     CredentialsDialog(onSubmit = onSubmit, onDismiss = onDismiss)
                 }
             }

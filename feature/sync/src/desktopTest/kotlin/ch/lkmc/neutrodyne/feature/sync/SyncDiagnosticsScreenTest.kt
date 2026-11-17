@@ -33,7 +33,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -297,7 +296,7 @@ class SyncDiagnosticsScreenTest {
                 LocalPlatformActions provides harness.actions,
                 LocalClipboardManager provides harness.clipboard,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     if (shortWindow) {
                         Box(Modifier.size(360.dp, 300.dp)) { SyncDiagnosticsScreen(vm = harness.vm) }
                     } else {

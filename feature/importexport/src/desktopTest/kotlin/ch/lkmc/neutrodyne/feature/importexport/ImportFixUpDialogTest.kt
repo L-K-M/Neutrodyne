@@ -13,7 +13,6 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import java.util.Locale
@@ -32,7 +31,7 @@ class ImportFixUpDialogTest {
                     var visible by mutableStateOf(true)
                     setContent {
                         CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                            NeutrodyneTheme(SystemUiState.DEFAULT) {
                                 if (visible) ImportFixUpDialog(kind, { null }, { null }, { visible = false })
                             }
                         }

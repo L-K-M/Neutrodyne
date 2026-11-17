@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.runDesktopComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -34,7 +33,6 @@ class UpNextVisualsScreenshotTest {
             runDesktopComposeUiTest(width = QUEUE_DESKTOP_WIDTH_DP, height = QUEUE_CAPTURE_HEIGHT_DP) {
                 setContent {
                     NeutrodyneTheme(
-                        AppearancePrefs(dynamicColor = false),
                         SystemUiState(
                             dark = visual.appearance != QueueAppearance.LIGHT,
                             contrast = 0.0,

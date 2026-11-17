@@ -33,7 +33,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ChapterSource
@@ -588,7 +587,7 @@ class EpisodeScreenTest {
                 LocalClipboardManager provides clipboard,
                 LocalSnackbarHost provides host,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     EpisodeRoute(EpisodeKey(9), viewModel)
                 }
             }
@@ -625,7 +624,7 @@ class EpisodeScreenTest {
                 LocalPlatformActions provides platformActions,
                 LocalClipboardManager provides clipboard,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     val density = LocalDensity.current
                     CompositionLocalProvider(
                         LocalDensity provides Density(density.density, fontScale),

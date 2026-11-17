@@ -18,7 +18,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -188,7 +187,7 @@ class SpeedSheetTest {
             val calls = Calls()
             val now = mutableStateOf(testNowPlaying(groupContext()))
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     SpeedSheet(
                         now = now.value,
                         effective = testEffective(speed = Effective(1.5f, SettingSource.Group("u1", "news"))),
@@ -269,7 +268,7 @@ class SpeedSheetTest {
         presets: String = PRESETS,
     ) {
         setContent {
-            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 SpeedSheet(
                     now = now,
                     effective = effective,

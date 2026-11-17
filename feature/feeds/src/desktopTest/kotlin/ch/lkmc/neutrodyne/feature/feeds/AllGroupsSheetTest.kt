@@ -50,7 +50,6 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdModalBottomSheet
 import ch.lkmc.neutrodyne.core.designsystem.components.NdSheetExpansion
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsError
@@ -241,7 +240,7 @@ class AllGroupsSheetTest {
                     LocalDensity provides Density(1f, 2f),
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         AllGroupsSheet(AllGroupsUiState(loaded = true), {}, { created++ }, { managed++ }, {})
                     }
                 }
@@ -445,7 +444,7 @@ private class AllGroupsSheetFixture {
             LocalPlatformKind provides platform,
             LocalUiClock provides clock,
         ) {
-            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 if (host == SheetHost.RETAINED_EXIT) {
                     if (nav.stack(LibraryKey).lastOrNull() == PodcastKey(7)) Text("Underlying podcast")
                 } else if (host == SheetHost.FEEDS) {

@@ -14,7 +14,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
@@ -67,7 +66,7 @@ class PrivacyInventoryParityTest {
             assertEquals(PrivacyInventory.destinations.map { it.id }, ids)
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PrivacyScreen(DiscoverSettingsState()) }
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { PrivacyScreen(DiscoverSettingsState()) }
                 }
             }
             ids.forEach { onNodeWithTag("privacy-$it").performScrollTo().assertExists() }

@@ -6,7 +6,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.GroupError
@@ -51,7 +50,6 @@ class GroupEditScreenshotTest {
             setContent {
                 CompositionLocalProvider(LocalPlatformKind provides PlatformKind.ANDROID) {
                     NeutrodyneTheme(
-                        AppearancePrefs(),
                         SystemUiState(dark = false, contrast = 0.0, reducedMotion = true),
                     ) {
                         GroupEditScreen(state, groupId, {}, {}, {}, {}, {}, {})

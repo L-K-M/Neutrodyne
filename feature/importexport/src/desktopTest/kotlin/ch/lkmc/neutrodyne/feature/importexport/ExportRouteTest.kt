@@ -20,7 +20,6 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
@@ -151,7 +150,7 @@ class ExportRouteTest {
                     LocalSnackbarHost provides host,
                     LocalPlatformActions provides actions,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         if (ownerAlive) {
                             val rootScope = rememberCoroutineScope()
                             CompositionLocalProvider(LocalRootScope provides rootScope) {

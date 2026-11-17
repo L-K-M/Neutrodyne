@@ -11,7 +11,6 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.runDesktopComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import java.util.Locale
@@ -45,7 +44,7 @@ class FeedDatesTest {
     fun durationBoundariesRender() =
         runDesktopComposeUiTest(width = 300, height = 400) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     Column {
                         Text(FeedDates.duration(null).asString(), Modifier.testTag("unknown"))
                         Text(FeedDates.duration(-1L).asString(), Modifier.testTag("negative"))

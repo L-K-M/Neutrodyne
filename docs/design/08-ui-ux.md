@@ -41,7 +41,7 @@ Every module below is Kotlin Multiplatform with its code in `commonMain` unless 
 
 | Module | Contents from this document |
 |---|---|
-| `:core:designsystem` | common: `NeutrodyneTheme`, `SystemUiState`, `BrandColors` (M0b), `ArtworkTheme`, `ArtworkSchemeCache` (M10), `GroupTones`, `NeutrodyneShapes`, `NeutrodyneType`, `NeutrodyneMotion`, `CoverArt`, `Covers`, `MonogramPainter`, `NdIcons` and Material Symbols vectors (Compose resources), every `Nd*` wrapper including `NdBanner`, `NdContextMenu` and `NdScrollbar` ([Nd wrappers and icons](#nd-wrappers-and-icons)), `LocalScrollbars`; `androidMain`: the dynamic-colour `actual` (01's list), `StatusBarAppearance`, `rememberAndroidSystemUiState()` (night mode, animator scale, contrast; called by `MainActivity`); `desktopMain`: `DesktopScrollbars` (Compose desktop's `VerticalScrollbar` and its styles, provided as `LocalScrollbars` by `NeutrodyneWindow`) |
+| `:core:designsystem` | common: `NeutrodyneTheme`, `SystemUiState`, `RadioScheme` (PO-55), `GroupTones`, `NeutrodyneShapes`, `NeutrodyneType`, `NeutrodyneMotion`, `CoverArt`, `Covers`, `MonogramPainter`, `NdIcons` and Material Symbols vectors (Compose resources), every `Nd*` wrapper including `NdBanner`, `NdContextMenu` and `NdScrollbar` ([Nd wrappers and icons](#nd-wrappers-and-icons)), `LocalScrollbars`; `androidMain`: the dynamic-colour `actual` (01's list), `StatusBarAppearance`, `rememberAndroidSystemUiState()` (night mode, animator scale, contrast; called by `MainActivity`); `desktopMain`: `DesktopScrollbars` (Compose desktop's `VerticalScrollbar` and its styles, provided as `LocalScrollbars` by `NeutrodyneWindow`) |
 | `:core:ui` | common: `NeutrodyneRoot` layout and `ndPaneLayout` (the shared root, hosted by both shells, [01 Navigation](01-foundation.md#navigation)), `StartupGate` visuals, `rememberMonogram(title)`, `LocalDrawnReporter` (Android's `ReportDrawnWhen`, null on the desktop), `LocalUiClock`, `LocalPlatformKind`, `EpisodeRow`, `DownloadStateButton`, `DownloadRequestHandler`, `CoverTile`, `GroupMosaic`, `GroupTabLabel`, `PodcastHeader`, `ShowNotes` (renderer), `ChapterList`, `UpNextList`, `EmptyState`, `SelectionTopBar`, `FeedFilterChips`, `LiveRowState` helpers, `ContinueOnThisDeviceCard` (MS3), string mappers (`PlaybackMessages`, `DownloadStatusText`, `AttributionText`, `FeedErrorText`, `AvailabilityText`, `ExternalReasonText`, `SyncStatusText` (MS2)), `LocalMiniPlayerInset`, `LocalSnackbarHost`, `SharedKeys`, `SettingsGearButton` and `LocalSettingsBadge` (M11a, [Settings gear badge](#updates-settings)), the `PlatformActions` interfaces and `LocalPlatformActions` (below); `androidMain` and `desktopMain`: their implementations (`rememberAndroidPlatformActions()`, `rememberDesktopPlatformActions()`, called by the shells) |
 | `:core:model` | `RowLive` additions, `ArtColors`, `MonogramSpec`, `MonogramMode`, `ArtworkColors`, the setting enums of [Settings](#settings) |
 | `:core:common` | `Monogram` (initials and hue, on 01's `Nfc`; moved from `:core:model` 2026-10-05), `Graphemes` (pure-Kotlin leading-grapheme rule), `TitleCollator` (interface; `java.text.Collator` implementations contributed from `androidMain` and `desktopMain`) |
@@ -701,7 +701,7 @@ value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
 +--------------------------------------------------+
 ```
 
-- Top bar: refresh (`refreshNow(Podcasts([id]))`), gear → `PodcastSettingsKey(id)`, overflow. Header: [`PodcastHeader`](#podcast-header); colours from [`ArtworkTheme`](#artwork-scoped-schemes) with the podcast cover seed (M10); status bar icons per [System bars](#status-bar-and-system-bars) (Android). On the desktop the header sits in the detail pane beside the Library grid.
+- Top bar: refresh (`refreshNow(Podcasts([id]))`), gear → `PodcastSettingsKey(id)`, overflow. Header: [`PodcastHeader`](#podcast-header); the radio's paper and ink (PO-55; the cover-seeded scheme of M10 is retired); status bar icons per [System bars](#status-bar-and-system-bars) (Android). On the desktop the header sits in the detail pane beside the Library grid.
 - Feed-state banner (03 [Per-feed states](03-feeds-and-discovery.md#per-feed-states)): Pending "Fetching episodes…" (spinner); NeedsCredentials "This feed needs a password" → credentials dialog (`PodcastRepository.setCredentials`); Gone "This feed no longer exists" → Edit URL / Unsubscribe; PossiblyDead "This feed hasn't updated since {date} — it may have moved" → Edit URL / Try again (`retry`); a failing feed shows `FeedErrorText(lastErrorKind)` only on this screen, never as a toast.
 - List: `FeedRepository.pagedFeed(FeedSource.Podcast(id), transientFilters, order)`; `EpisodeRow` style `PODCAST` (no thumbnail unless the episode has its own art, date block 48 dp, season/episode overline from `EpisodeRow.episodeDisplay`, else `episodeType` "Trailer"/"Bonus"). Row play → `playFeed(Podcast(id), filters, order, startEpisodeId)`. The "Newest v" chip calls `FeedRepository.setFeedOrder(FeedSource.Podcast(id), order)` (persisted in `podcast.episodeOrder`, 05); the filter chips are transient ViewModel state (05 throws on `setFilters` for podcasts). Row swipes follow `appearance.swipe_*` (on by default outside Feeds, D55).
 - "Load older episodes": RSS when older pages exist → `RefreshController.loadOlderEpisodes(id)`; YouTube when `YouTubeCapabilitiesSource.capabilities.value.backCatalogue` (the engine is present and on, M9a) → `YouTubeChannelRepository.loadOlder(id)` with result "Loaded 30 more" / "No more episodes" / failure text ("YouTube isn't responding right now, try again later" for 04's `Failed` results, nothing for `Unsupported`, whose button is hidden). YouTube channels call `YouTubeChannelRepository.ensureChannelArt(id)` on open (04) and, with the engine, `YouTubeEngine.prewarm(SCREEN)` (04 [Capability consumers](04-youtube.md#capability-consumers); a no-op in external mode).
@@ -2343,9 +2343,15 @@ layers below, the app scheme is `RadioScheme`'s fixed paper and ink (enamel navy
 primary, brass secondary, signal-red tertiary and error), checked for WCAG AA on every
 paper tone by `RadioThemeTest`; only the OS contrast request (darker ink and outlines)
 and reduced motion still apply. The `appearance.theme`, `dynamic_color`,
-`pure_black` and `artwork_tint` keys are retained but ignored, `ArtworkTheme` falls
-back to the app scheme everywhere, and Settings › Appearance now holds Cover size,
-Show titles, YouTube row art and the gestures. The type scale keeps the M3 sizes with
+`pure_black` and `artwork_tint` keys stay in settings and backups for compatibility,
+but nothing reads them: `AppearancePrefs`, `ArtworkTheme`, `ArtworkSchemeCache` and
+`BrandColors` were removed (2026-11-17), so `NeutrodyneTheme` takes only the
+`SystemUiState`, and both shells hold their first frame (one-second cap) until the two
+settings files have loaded rather than for appearance values. MCU stays in
+`:core:artwork` for [colour extraction](#colour-extraction). The layer table, App scheme
+sketch and artwork-scoped schemes below record the superseded M0b to M10 design.
+Settings › Appearance now holds Cover size, Show titles, YouTube row art and the
+gestures. The type scale keeps the M3 sizes with
 Courier Prime Bold for display, headline and title roles and Barlow for body and
 label roles. The radio's textures, fonts, `MaterialPlate`, `ValveDeck`, `EnamelSign`
 and `IvoryKeyCap` moved to `:core:designsystem`. Every navigation entry except the
@@ -2571,7 +2577,7 @@ flowchart LR
   FS --> PROV["ArtworkProvider content URIs (Android)"]
   PROV --> SYS["notification, lock screen, Auto, resumption card (06), widgets (v1.x)"]
   FS --> OSM["desktop OS media sessions read the files (11)"]
-  DB --> THEME["ArtworkRepository colours: ArtworkTheme and placeholders"]
+  DB --> THEME["ArtworkRepository colours: placeholders"]
 ```
 
 ### Keys and versions

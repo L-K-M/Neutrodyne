@@ -21,7 +21,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.viewModelScope
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ChartGenre
@@ -87,7 +86,7 @@ class DiscoveryScreenTest {
                 dispatcher.scheduler.advanceUntilIdle()
                 setContent {
                     CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                        NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        NeutrodyneTheme(SystemUiState.DEFAULT) {
                             DiscoverRoute(vm)
                         }
                     }
@@ -126,7 +125,7 @@ class DiscoveryScreenTest {
         runComposeUiTest {
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(DiscoverState(), {}, {}, navigator)
                     }
                 }
@@ -140,7 +139,7 @@ class DiscoveryScreenTest {
         runComposeUiTest {
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(DiscoverState(input = "AI"), {}, {}, navigator)
                     }
                 }
@@ -158,7 +157,7 @@ class DiscoveryScreenTest {
         runComposeUiTest {
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(DiscoverState(input = "https://private.test/feed"), {}, {}, navigator)
                     }
                 }
@@ -180,7 +179,7 @@ class DiscoveryScreenTest {
             val hits = persistentListOf(hit("Subscribed show", 7L), hit("New show"))
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DirectoryScreen(
                             DirectoryKey("news", null),
                             DirectoryState(loading = false, hits = hits),
@@ -212,7 +211,7 @@ class DiscoveryScreenTest {
                 )
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DirectoryScreen(
                             DirectoryKey("", null),
                             DirectoryState(loading = false, hits = hits),
@@ -233,7 +232,7 @@ class DiscoveryScreenTest {
                 listOf(hit("Listing A").copy(feedUrl = SHARED_FEED), hit("Listing B").copy(feedUrl = SHARED_FEED))
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(DiscoverState(chart = TunedChart(null, hits)), {}, {}, navigator)
                     }
                 }
@@ -248,7 +247,7 @@ class DiscoveryScreenTest {
             var state by mutableStateOf(DirectoryState(loading = true))
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DirectoryScreen(DirectoryKey("", null), state, {}, navigator)
                     }
                 }
@@ -268,7 +267,7 @@ class DiscoveryScreenTest {
             var retries = 0
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DirectoryScreen(
                             DirectoryKey(
                                 "",
@@ -303,7 +302,7 @@ class DiscoveryScreenTest {
                 )
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(
                             DiscoverState(
                                 input = "news",
@@ -332,7 +331,7 @@ class DiscoveryScreenTest {
         runComposeUiTest {
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         SearchStatus(
                             SearchResults(
                                 "news",
@@ -357,7 +356,7 @@ class DiscoveryScreenTest {
             val visible = mutableListOf<ChartGenre?>()
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(
                             DiscoverState(
                                 presets = listOf(null, ChartGenre.TECHNOLOGY),
@@ -399,7 +398,7 @@ class DiscoveryScreenTest {
             var retried = 0
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides navigator) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         DiscoverScreen(state, {}, {}, navigator, onChartRetry = { retried++ })
                     }
                 }

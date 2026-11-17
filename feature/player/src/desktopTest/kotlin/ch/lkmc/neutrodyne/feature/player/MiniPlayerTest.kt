@@ -23,7 +23,6 @@ import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.navigation3.runtime.NavKey
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
@@ -149,7 +148,7 @@ private class MiniFixture {
 
     @androidx.compose.runtime.Composable
     fun Content() {
-        NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT.copy(reducedMotion = true)) {
+        NeutrodyneTheme(SystemUiState.DEFAULT.copy(reducedMotion = true)) {
             BoxWithConstraints {
                 MiniPlayer(
                     ui = PlayerUiState(now = now, consent = consent, skipBackMs = 30_000, skipForwardMs = 30_000),

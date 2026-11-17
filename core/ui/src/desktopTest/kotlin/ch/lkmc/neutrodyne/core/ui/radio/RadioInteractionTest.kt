@@ -46,7 +46,6 @@ import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -66,7 +65,7 @@ class RadioInteractionTest {
             var discarded: Long? = null
             val original = state
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(
                         state,
                         RadioActions(discard = { id ->
@@ -100,7 +99,7 @@ class RadioInteractionTest {
             var discards = 0
             var selections = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(
                         radioFixture(),
                         RadioActions(discard = { discards++ }, selectEpisode = { selections++ }),
@@ -131,7 +130,7 @@ class RadioInteractionTest {
                     )
                 }
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(fixture, RadioActions())
                 }
             }
@@ -151,7 +150,7 @@ class RadioInteractionTest {
                     val current = remember { SaveableStateRegistry(saved) { true } }
                     registry = current
                     CompositionLocalProvider(LocalSaveableStateRegistry provides current) {
-                        NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                        NeutrodyneTheme(SystemUiState.DEFAULT) {
                             Box(Modifier.width(width.dp).fillMaxHeight()) {
                                 RadioScreen(radioFixture(), RadioActions())
                             }
@@ -174,7 +173,7 @@ class RadioInteractionTest {
     @Test fun homeOffersNoPlaylistCreationOrSwipeHint() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(radioFixture(), RadioActions())
                 }
             }
@@ -189,7 +188,7 @@ class RadioInteractionTest {
             var playing by mutableStateOf(false)
             var toggles = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(
                         radioFixture().copy(playing = playing),
                         RadioActions(togglePlay = {
@@ -219,7 +218,7 @@ class RadioInteractionTest {
         runDesktopComposeUiTest(width = 390, height = 844) {
             var toggles = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(radioFixture().copy(selectedId = null), RadioActions(togglePlay = { toggles++ }))
                 }
             }
@@ -231,7 +230,7 @@ class RadioInteractionTest {
     @Test fun emptyChooserExplainsWhereToCreatePlaylists() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(RadioState(), RadioActions())
                 }
             }
@@ -243,7 +242,7 @@ class RadioInteractionTest {
         runDesktopComposeUiTest(width = 390, height = 844) {
             var retries = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(radioFixture().copy(loadError = true), RadioActions(retry = { retries++ }))
                 }
             }
@@ -257,7 +256,7 @@ class RadioInteractionTest {
             var menuClicks = 0
             setContent {
                 CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                    NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         RadioScreen(radioFixture(), RadioActions(menu = { menuClicks++ }))
                     }
                 }
@@ -271,7 +270,7 @@ class RadioInteractionTest {
         runDesktopComposeUiTest(width = 390, height = 844) {
             var state by mutableStateOf(radioFixture())
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(state, RadioActions(), Modifier.padding(top = 48.dp, bottom = 24.dp))
                 }
             }
@@ -300,7 +299,7 @@ class RadioInteractionTest {
             var width by mutableIntStateOf(390)
             var discards = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     Box(Modifier.width(width.dp).fillMaxHeight()) {
                         RadioScreen(radioFixture(), RadioActions(discard = { discards++ }))
                     }
@@ -319,7 +318,7 @@ class RadioInteractionTest {
         runDesktopComposeUiTest(width = 390, height = 844) {
             var removed: Long? = null
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(radioFixture(), RadioActions(discard = { removed = it }))
                 }
             }

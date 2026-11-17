@@ -16,7 +16,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -36,7 +35,7 @@ class GroupVisualsSemanticsTest {
         runDesktopComposeUiTest(width = 360, height = 560) {
             installFakeImageLoader()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     GroupMosaic(groupFixture(memberCount = 5), mosaicMembers(4), unplayedCount = 14, newCount = 3)
                 }
             }
@@ -58,7 +57,7 @@ class GroupVisualsSemanticsTest {
         runDesktopComposeUiTest(width = 360, height = 160) {
             installFakeImageLoader()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     GroupMosaic(
                         groupFixture(),
                         mosaicMembers(2),
@@ -79,7 +78,7 @@ class GroupVisualsSemanticsTest {
         runDesktopComposeUiTest(width = 360, height = 560) {
             installFakeImageLoader()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     GroupMosaic(
                         groupFixture(showAsTab = false, iconKey = "future_icon"),
                         mosaicMembers(2),
@@ -106,7 +105,7 @@ class GroupVisualsSemanticsTest {
     ) = runDesktopComposeUiTest(width = 360, height = 560) {
         installFakeImageLoader()
         setContent {
-            NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 GroupMosaic(groupFixture(name = name, iconKey = null, memberCount = 0), emptyList(), 0, 0)
             }
         }
@@ -119,7 +118,7 @@ class GroupVisualsSemanticsTest {
         runDesktopComposeUiTest(width = 360, height = 160) {
             installFakeImageLoader()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     GroupTabLabel(groupFixture(), unplayedCount = 9, newCount = 4, selected = true)
                 }
             }
@@ -137,7 +136,7 @@ class GroupVisualsSemanticsTest {
         runDesktopComposeUiTest(width = 360, height = 160) {
             installFakeImageLoader()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     GroupTabLabel(groupFixture(), unplayedCount = 0, newCount = 0, selected = false)
                 }
             }

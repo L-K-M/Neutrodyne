@@ -30,7 +30,6 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdScrollbarStyle
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -203,7 +202,6 @@ private fun Md4MatrixSurface(
     content: @Composable () -> Unit,
 ) {
     NeutrodyneTheme(
-        AppearancePrefs(dynamicColor = false),
         SystemUiState(dark = dark, contrast = 0.0, reducedMotion = true),
     ) {
         CompositionLocalProvider(

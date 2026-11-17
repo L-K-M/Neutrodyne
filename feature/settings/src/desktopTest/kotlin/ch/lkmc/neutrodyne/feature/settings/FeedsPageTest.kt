@@ -19,7 +19,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
@@ -139,7 +138,7 @@ class FeedsPageTest {
                 LocalAppNavigator provides RecordingAppNavigator(),
                 LocalPlatformKind provides PlatformKind.DESKTOP,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     FeedsPage(platform = PlatformKind.DESKTOP, viewModel = viewModel, notificationRequester = requester)
                 }
             }

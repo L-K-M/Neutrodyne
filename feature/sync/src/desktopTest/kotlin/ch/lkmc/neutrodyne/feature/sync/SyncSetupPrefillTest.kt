@@ -22,7 +22,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
@@ -267,7 +266,7 @@ class SyncSetupPrefillTest {
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                     LocalPlatformActions provides testActions(),
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         provider(SyncSetupKey(ROUTE)).Content()
                     }
                 }
@@ -285,7 +284,7 @@ class SyncSetupPrefillTest {
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalPlatformActions provides harness.actions,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     if (harness.show) {
                         SyncSetupScreen(
                             harness.controller,

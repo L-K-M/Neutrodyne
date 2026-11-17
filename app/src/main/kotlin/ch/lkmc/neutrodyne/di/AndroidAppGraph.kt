@@ -116,7 +116,7 @@ interface AndroidAppGraph : DownloadComponentsInjector {
 
     val buildInfo: BuildInfo
 
-    /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
+    /** `MainActivity` holds the splash until both settings files have loaded through it. */
     val settingsRepository: SettingsRepository
 
     val appUpdateChecker: AppUpdateChecker

@@ -21,7 +21,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.GroupDraft
@@ -103,7 +102,7 @@ class AddToGroupsSheetTest {
     private fun ComposeUiTest.setSheet() {
         setContent {
             val state by vm.uiState.collectAsStateWithLifecycle(lifecycle = lifecycleOwner.lifecycle)
-            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 AddToGroupsSheet(state, vm::toggle, vm::editName, vm::createGroup, vm::done, { cancelled = true })
             }
         }

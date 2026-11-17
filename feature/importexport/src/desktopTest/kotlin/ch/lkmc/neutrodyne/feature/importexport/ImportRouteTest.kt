@@ -53,7 +53,6 @@ import androidx.paging.PagingState
 import androidx.paging.testing.asPagingSourceFactory
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
@@ -671,7 +670,7 @@ class ImportRouteTest {
                     LocalPlatformActions provides actions,
                     LocalMiniPlayerInset provides miniPlayerInset,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         val saved = rememberSaveableStateHolder()
                         if (visible.value) {
                             saved.SaveableStateProvider("import") {

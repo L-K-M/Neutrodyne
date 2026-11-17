@@ -15,7 +15,6 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -45,7 +44,6 @@ class UnavailableRowContrastTest {
                                     LocalUiClock provides TestClock(),
                                 ) {
                                     NeutrodyneTheme(
-                                        AppearancePrefs(dynamicColor = false, pureBlack = theme == "black"),
                                         SystemUiState(theme != "light", 0.0, true),
                                     ) {
                                         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {

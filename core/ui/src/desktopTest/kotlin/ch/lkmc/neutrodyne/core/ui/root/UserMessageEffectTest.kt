@@ -14,7 +14,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -124,7 +123,7 @@ class UserMessageEffectTest {
             val acknowledged = mutableListOf<Long>()
             setContent {
                 CompositionLocalProvider(LocalSnackbarHost provides host) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         ShowUserMessages(
                             messages = messages,
                             onAcknowledgeMessage = { id ->
@@ -171,7 +170,7 @@ class UserMessageEffectTest {
             val actioned = mutableListOf<Long>()
             setContent {
                 CompositionLocalProvider(LocalSnackbarHost provides host) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         ShowUserMessages(
                             messages = messages,
                             onAcknowledgeMessage = { id ->
@@ -203,7 +202,7 @@ class UserMessageEffectTest {
                 )
             setContent {
                 CompositionLocalProvider(LocalSnackbarHost provides host) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         ShowUserMessages(
                             messages = messages,
                             onAcknowledgeMessage = { id ->

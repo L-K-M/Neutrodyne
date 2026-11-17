@@ -61,7 +61,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.TitleCollator
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
@@ -1032,7 +1031,7 @@ class LibraryScreenTest {
                 LocalAppNavigator provides navigator,
                 LocalPlatformActions provides TestPlatformActions,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     LibraryScreen(
                         state = state,
                         pendingUnsubscribe = pendingUnsubscribe,
@@ -1095,7 +1094,7 @@ class LibraryScreenTest {
                     LocalSaveableStateRegistry provides registry,
                     LocalDensity provides Density(1f, fontScale),
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
                         Surface {
                             val holder = rememberSaveableStateHolder()
                             if (showRoute()) {

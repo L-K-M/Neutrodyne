@@ -25,7 +25,6 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntRect
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import java.util.Locale
@@ -61,7 +60,7 @@ class NdSheetHandleExportBoundsTest {
         runDesktopComposeUiTest(width = 320, height = 640) {
             val scroll = ScrollState(0)
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     NdModalBottomSheet(onDismissRequest = {}) { ScrollableSheetBody(scroll) }
                 }
             }

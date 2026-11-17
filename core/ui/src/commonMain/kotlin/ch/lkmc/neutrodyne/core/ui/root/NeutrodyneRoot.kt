@@ -71,7 +71,6 @@ import ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.StatusBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.radioStage
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -122,8 +121,8 @@ import org.jetbrains.compose.resources.getString
  * The shells additionally provide `LocalPlatformActions` (`rememberAndroidPlatformActions()` /
  * `rememberDesktopPlatformActions(portal)`) and `LocalScrollbars` (desktop) around this call.
  *
- * Contract deltas from 01's sketch (recorded in 08 "Navigation", 2026-10-06): [prefs] and
- * [systemUi] moved in so the theme lives inside the root; [platform] gates the desktop-only key
+ * Contract deltas from 01's sketch (recorded in 08 "Navigation", 2026-10-06): [systemUi] moved
+ * in so the theme lives inside the root; [platform] gates the desktop-only key
  * chords; `RootUiState` gained `hasNowPlaying` for `ndPaneLayout`; `RootActions`
  * gained `manageStorage`, `reportStartupFailure` and `disableUpdateChecks` for the gate and the
  * first-run card.
@@ -136,7 +135,6 @@ public fun NeutrodyneRoot(
     slots: RootSlots,
     installers: Set<EntryProviderInstaller>,
     modifier: Modifier = Modifier,
-    prefs: AppearancePrefs = AppearancePrefs(),
     systemUi: SystemUiState = SystemUiState.DEFAULT,
     platform: BuildInfo.Platform = BuildInfo.Platform.ANDROID,
     initialTab: TopLevelKey = FeedsKey,
@@ -149,7 +147,7 @@ public fun NeutrodyneRoot(
     val snackbarHost = remember { SnackbarHostState() }
     val rootScope = rememberCoroutineScope()
 
-    NeutrodyneTheme(prefs = prefs, system = systemUi) {
+    NeutrodyneTheme(system = systemUi) {
         CompositionLocalProvider(
             LocalAppNavigator provides navigation,
             LocalSnackbarHost provides snackbarHost,

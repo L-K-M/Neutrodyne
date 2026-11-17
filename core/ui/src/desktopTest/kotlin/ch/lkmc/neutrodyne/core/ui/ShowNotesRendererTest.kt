@@ -28,7 +28,6 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
@@ -304,7 +303,7 @@ class ShowNotesRendererTest {
             // not fill the width and crop 120 dp off each end (UI review round 3).
             installFakeImageLoader(mapOf(TALL_IMAGE_URL to FakeImage(600, 1200)))
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     Column(Modifier.width(360.dp)) {
                         LazyColumn {
                             showNotes(
@@ -345,7 +344,7 @@ class ShowNotesRendererTest {
             // 480 dp cap, not the hinted 360 x 360 (08: "at the intrinsic aspect").
             installFakeImageLoader(mapOf(TALL_IMAGE_URL to FakeImage(600, 1200)))
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     Column(Modifier.width(360.dp)) {
                         LazyColumn {
                             showNotes(
@@ -531,7 +530,7 @@ class ShowNotesRendererTest {
         onLoadImages: () -> Unit = {},
     ) {
         setContent {
-            NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+            NeutrodyneTheme(SystemUiState.DEFAULT) {
                 LazyColumn {
                     showNotes(
                         notes = notes,

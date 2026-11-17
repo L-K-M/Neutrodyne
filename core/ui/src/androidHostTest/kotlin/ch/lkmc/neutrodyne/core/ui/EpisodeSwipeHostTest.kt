@@ -14,7 +14,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.SwipeAction
@@ -40,7 +39,7 @@ class EpisodeSwipeHostTest {
         val actions = mutableListOf<EpisodeAction>()
         rule.setContent {
             CompositionLocalProvider(LocalPlatformKind provides PlatformKind.ANDROID) {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     Box(Modifier.width(400.dp)) {
                         EpisodeRow(
                             testEpisodeRow(1),

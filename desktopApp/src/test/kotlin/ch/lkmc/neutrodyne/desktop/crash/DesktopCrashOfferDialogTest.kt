@@ -7,7 +7,6 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.InstallKind
@@ -63,7 +62,7 @@ class DesktopCrashOfferDialogTest {
                     crashReporter = FakeCrashReporter(true),
                 )
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer = offer,
                         urls =
@@ -98,7 +97,7 @@ class DesktopCrashOfferDialogTest {
                     crashReporter = FakeCrashReporter(true),
                 )
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer = offer,
                         urls = ExternalUrlOpener { OpenResult.OPENED },
@@ -133,7 +132,7 @@ class DesktopCrashOfferDialogTest {
                     crashReporter = FakeCrashReporter(true),
                 )
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer = offer,
                         urls = ExternalUrlOpener { OpenResult.OPENED },
@@ -166,7 +165,7 @@ class DesktopCrashOfferDialogTest {
                     crashReporter = FakeCrashReporter(true),
                 )
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer = offer,
                         urls =
@@ -198,7 +197,7 @@ class DesktopCrashOfferDialogTest {
             val dirs = crashDirs("nd-crash-offer-none")
             dirs.writeCrashFile("crash-20261106-120000.txt", "report body")
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer =
                             DesktopCrashOffer(
@@ -224,7 +223,7 @@ class DesktopCrashOfferDialogTest {
             dirs.writeCrashFile("crash-20261106-120000.txt", "report body")
             val info = crashDialogBuildInfo(installKind = InstallKind.DEV)
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer =
                             DesktopCrashOffer(
@@ -249,7 +248,7 @@ class DesktopCrashOfferDialogTest {
             dirs.writeCrashFile("crash-20261106-120000.txt", "report body")
             val info = crashDialogBuildInfo(mailto = "")
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     DesktopCrashOfferDialog(
                         offer =
                             DesktopCrashOffer(

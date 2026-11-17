@@ -8,7 +8,6 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import kotlin.test.Test
@@ -19,7 +18,7 @@ class NdIconButtonTargetTest {
     @Test fun glyphOnlyButtonsHaveReal48DpClickLayouts() =
         runDesktopComposeUiTest(width = 160, height = 160) {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     NdIconButton({}, NdIcons.MoreVert, "More")
                 }
             }

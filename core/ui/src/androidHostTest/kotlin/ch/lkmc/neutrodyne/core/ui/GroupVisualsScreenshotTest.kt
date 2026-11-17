@@ -18,7 +18,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -55,7 +54,6 @@ class GroupVisualsScreenshotTest {
     ) {
         rule.setContent {
             NeutrodyneTheme(
-                AppearancePrefs(dynamicColor = false),
                 SystemUiState(dark = dark, contrast = 0.0, reducedMotion = true),
             ) {
                 Surface(

@@ -20,7 +20,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -339,7 +338,7 @@ class SyncHeldChangesDialogTest {
                 LocalAppNavigator provides harness.navigator,
                 LocalSnackbarHost provides harness.snackbar,
             ) {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     if (constrained) {
                         Box(Modifier.size(360.dp, 300.dp)) {
                             SyncHeldChangesDialog(harness.controller, SyncHeldChangesKey(ID))

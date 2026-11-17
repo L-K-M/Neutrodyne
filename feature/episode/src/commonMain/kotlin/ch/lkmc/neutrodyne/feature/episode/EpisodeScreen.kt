@@ -59,7 +59,6 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.ActionKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.ActionKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
-import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -170,9 +169,7 @@ internal fun EpisodeScreen(
                 ) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
-                        ArtworkTheme(state.colors?.seedArgb) {
-                            EpisodeHeader(episode, state, onAction)
-                        }
+                        EpisodeHeader(episode, state, onAction)
                     }
                     if (state.chapters.isNotEmpty()) {
                         item(key = "chapters", contentType = "chapters") {

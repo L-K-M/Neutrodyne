@@ -17,7 +17,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.DEFAULT_ARGS_KEY
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.MutableCreationExtras
 import ch.lkmc.neutrodyne.core.common.GraphHolder
@@ -29,7 +28,6 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.rememberAndroidSystemUiState
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -53,7 +51,7 @@ import ch.lkmc.neutrodyne.core.ui.root.dispatchPlaybackKey
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
-import ch.lkmc.neutrodyne.feature.settings.observeAppearance
+import ch.lkmc.neutrodyne.feature.settings.awaitSettingsFiles
 import ch.lkmc.neutrodyne.feature.settings.rememberSyncRootPresentation
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
@@ -69,8 +67,8 @@ import kotlin.time.Duration.Companion.seconds
  * Player state observation does not bind or start the playback service.
  */
 class MainActivity : AppCompatActivity() {
-    /** `appearance.*` once the settings file has emitted; null until then (08 App scheme). */
-    private val appearance = mutableStateOf<AppearancePrefs?>(null)
+    /** Whether both settings files have loaded; the splash waits for it (01 Splash and start-up gate). */
+    private val settingsLoaded = mutableStateOf(false)
 
     internal val routing: MainIntentViewModel by lazy {
         // Intent extras are untrusted; only restored routing state may seed the handle.
@@ -88,7 +86,7 @@ class MainActivity : AppCompatActivity() {
 
         val graph = (application as GraphHolder).graph as AndroidAppGraph
         if (savedInstanceState == null) routing.receive(intent, packageName)
-        holdSplashForAppearance(splash, graph.settingsRepository)
+        holdSplashForSettings(splash, graph.settingsRepository)
 
         setContent {
             val opener = graph.databaseOpener
@@ -198,13 +196,12 @@ class MainActivity : AppCompatActivity() {
                     slots = slots,
                     routes = routing.routes,
                     installers = graph.entryInstallers,
-                    prefs = appearance.value ?: AppearancePrefs(),
                     systemUi = systemUi,
                     platform = BuildInfo.Platform.ANDROID,
                 )
                 val importError by routing.error.collectAsStateWithLifecycle()
                 importError?.let { error ->
-                    NeutrodyneTheme(prefs = appearance.value ?: AppearancePrefs(), system = systemUi) {
+                    NeutrodyneTheme(system = systemUi) {
                         NdDialog(
                             onDismissRequest = { routing.dismissError() },
                             title = getString(R.string.import_into_neutrodyne),
@@ -224,28 +221,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 08 App scheme: the splash stays until the settings file's first emission (1 s cap, then the
-     * key defaults), so a stored dark theme never flashes light. Collected on the activity's
+     * 01 Splash and start-up gate: the splash stays until both settings files have loaded (1 s cap,
+     * then the key defaults), so the first frame shows stored values. Awaited on the activity's
      * lifecycle scope, outside composition: a kept splash blocks every frame, so a gate that waited
      * on a composition effect would wait on frames it blocks itself (and on the test clock under
      * Compose tests, which only advances once the UI is idle).
      */
-    private fun holdSplashForAppearance(
+    private fun holdSplashForSettings(
         splash: SplashScreen,
         settings: SettingsRepository,
     ) {
         var gateExpired = false
-        splash.setKeepOnScreenCondition { appearance.value == null && !gateExpired }
+        splash.setKeepOnScreenCondition { !settingsLoaded.value && !gateExpired }
 
         lifecycleScope.launch {
             delay(PREFS_GATE_TIMEOUT)
             gateExpired = true
         }
         lifecycleScope.launch {
-            settings
-                .observeAppearance()
-                .flowWithLifecycle(lifecycle)
-                .collect { appearance.value = it }
+            settings.awaitSettingsFiles()
+            settingsLoaded.value = true
         }
     }
 

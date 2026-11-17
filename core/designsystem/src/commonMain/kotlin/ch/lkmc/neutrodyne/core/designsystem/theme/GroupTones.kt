@@ -23,8 +23,7 @@ public data class GroupTones(
 
 /**
  * The tones for a group seed ARGB. `null` (the user picked "no colour") falls back to the theme's
- * primary roles, per 08. Uses the resolved app theme because dots and stripes must contrast
- * against its surface even when the appearance preference overrides the OS theme.
+ * primary roles, per 08. The tones are the light ones: the radio's paper is the only surface.
  */
 @Composable
 public fun groupTones(seedArgb: Int?): GroupTones {
@@ -37,20 +36,11 @@ public fun groupTones(seedArgb: Int?): GroupTones {
         )
     }
 
-    val dark = LocalAppDarkTheme.current
-    return if (dark) {
-        GroupTones(
-            dot = groupTone(seedArgb, DOT_DARK_L),
-            container = groupTone(seedArgb, CONTAINER_DARK_L),
-            onContainer = groupTone(seedArgb, ON_CONTAINER_DARK_L),
-        )
-    } else {
-        GroupTones(
-            dot = groupTone(seedArgb, DOT_LIGHT_L),
-            container = groupTone(seedArgb, CONTAINER_LIGHT_L),
-            onContainer = groupTone(seedArgb, ON_CONTAINER_LIGHT_L),
-        )
-    }
+    return GroupTones(
+        dot = groupTone(seedArgb, DOT_L),
+        container = groupTone(seedArgb, CONTAINER_L),
+        onContainer = groupTone(seedArgb, ON_CONTAINER_L),
+    )
 }
 
 private fun groupTone(
@@ -59,9 +49,6 @@ private fun groupTone(
 ): Color = Color(ArtColors.tone(seedArgb, l, maxChroma = GROUP_MAX_CHROMA))
 
 private const val GROUP_MAX_CHROMA: Double = 48.0
-private const val DOT_LIGHT_L: Double = 40.0
-private const val DOT_DARK_L: Double = 80.0
-private const val CONTAINER_LIGHT_L: Double = 90.0
-private const val CONTAINER_DARK_L: Double = 30.0
-private const val ON_CONTAINER_LIGHT_L: Double = 10.0
-private const val ON_CONTAINER_DARK_L: Double = 90.0
+private const val DOT_L: Double = 40.0
+private const val CONTAINER_L: Double = 90.0
+private const val ON_CONTAINER_L: Double = 10.0

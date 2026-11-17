@@ -12,7 +12,6 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -68,7 +67,7 @@ class MarkFeedPlayedDialogTest {
                     }
                 }
                 val state by controller.state.collectAsState()
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     state?.let {
                         MarkFeedPlayedDialog(it, controller::select, controller::confirm, controller::dismiss)
                     }
@@ -101,7 +100,7 @@ class MarkFeedPlayedDialogTest {
         runComposeUiTest {
             var state by androidx.compose.runtime.mutableStateOf(MarkFeedPlayedState(FeedSource.All, UiText.Raw("All")))
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     MarkFeedPlayedDialog(state, {}, { error("Must not confirm") }, {})
                 }
             }
@@ -122,7 +121,7 @@ class MarkFeedPlayedDialogTest {
                 MarkFeedPlayedState(FeedSource.Group(7), UiText.Raw("tech"), count = 1, phase = MarkPlayedPhase.READY),
             )
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     MarkFeedPlayedDialog(state, {}, {}, {})
                 }
             }

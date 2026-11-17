@@ -65,7 +65,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.CABINET_DECK_TAG
 import ch.lkmc.neutrodyne.core.designsystem.radio.CABINET_TRAY_TAG
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.RadioScheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -153,7 +152,6 @@ class NeutrodyneRootTest {
                             actions = testActions { true },
                             slots = TestSlots,
                             installers = TestInstallers,
-                            prefs = AppearancePrefs(dynamicColor = false),
                             systemUi = SystemUiState(dark, 0.0, true),
                             platform = BuildInfo.Platform.DESKTOP,
                             initialTab = LibraryKey,

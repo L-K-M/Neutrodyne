@@ -12,7 +12,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
@@ -40,7 +39,7 @@ class SleepTimerSheetTest {
         runComposeUiTest {
             val calls = mutableListOf<SleepTimerMode>()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     SleepTimerSheet(SleepTimerState.Off, 45, true, calls::add, {}, {})
                 }
             }
@@ -72,7 +71,7 @@ class SleepTimerSheetTest {
         runComposeUiTest {
             val calls = mutableListOf<SleepTimerMode>()
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     SleepTimerSheet(SleepTimerState.Off, 30, true, calls::add, {}, {})
                 }
             }
@@ -97,7 +96,7 @@ class SleepTimerSheetTest {
             val extensions = mutableListOf<Int>()
             var dismisses = 0
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
                     SleepTimerSheet(
                         timer.value,
                         30,
