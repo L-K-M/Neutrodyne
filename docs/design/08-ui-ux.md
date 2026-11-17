@@ -2219,7 +2219,7 @@ on every page and page headers no longer lease it. `NdTopAppBar` is a metal face
 with the title on an enamel sign; `NdIconButton` and `NdTooltipIconButton` on a
 faceplate draw ivory key caps, and a page without its own navigation key gets the
 cabinet's Back key, which returns to the radio from a destination's root. Mockups:
-owner-held `/Users/lkm/nd-wt/design/radio-wide/`. Later PRs replace the remaining
+owner-held `~/nd-wt/design/radio-wide/`. Later PRs replace the remaining
 Material controls screen by screen (keys, bat-handle toggles, glass dials, paper slips
 with the radio's left-swipe discard).
 
