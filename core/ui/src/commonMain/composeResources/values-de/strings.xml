@@ -256,6 +256,10 @@
     <string name="filter_in_progress">Angefangen</string>
     <string name="order_newest">Neueste zuerst</string>
     <string name="order_oldest">Älteste zuerst</string>
+    <!-- Short labels printed on piano keys; the keys are read with the full labels above. -->
+    <string name="filter_clear_key">Zurücksetzen</string>
+    <string name="order_newest_key">Neueste</string>
+    <string name="order_oldest_key">Älteste</string>
 
     <string name="library_sort">Sortieren</string>
     <string name="library_show_titles">Titel anzeigen</string>

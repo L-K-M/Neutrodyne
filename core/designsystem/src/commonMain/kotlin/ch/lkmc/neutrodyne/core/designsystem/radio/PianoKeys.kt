@@ -5,15 +5,20 @@ package ch.lkmc.neutrodyne.core.designsystem.radio
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -22,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
@@ -54,6 +60,29 @@ public fun <T> PianoKeys(
     modifier: Modifier = Modifier,
     tag: (T) -> String? = { null },
 ) {
+    PianoKeySlot(modifier) {
+        options.forEach { option ->
+            PianoKey(
+                label(option),
+                pressed = option == selected,
+                onClick = { onSelect(option) },
+                modifier = Modifier.weight(1f).let { m -> tag(option)?.let { m.testTag(it) } ?: m },
+                role = Role.Tab,
+            )
+        }
+    }
+}
+
+/**
+ * The metal slot that holds a bank of [PianoKey]s side by side. Keys that should share the width
+ * take `Modifier.weight(1f)`; a bank of latching keys whose labels vary in length can pass a
+ * `horizontalScroll` [modifier] instead so long translations stay whole.
+ */
+@Composable
+public fun PianoKeySlot(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
     MaterialPlate(
         RadioMaterial.METAL,
         modifier
@@ -62,24 +91,49 @@ public fun <T> PianoKeys(
             .border(1.dp, Brass.copy(alpha = 0.8f), SlotShape),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp).selectableGroup(),
+            Modifier.padding(horizontal = 6.dp, vertical = 4.dp).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(KEY_GAP),
-        ) {
-            options.forEach { option ->
-                val chosen = option == selected
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                        .let { m -> tag(option)?.let { m.testTag(it) } ?: m }
-                        .selectable(chosen, role = Role.Tab, onClick = { onSelect(option) }),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Lamp(chosen)
-                    PianoKey(label(option), chosen)
+            content = content,
+        )
+    }
+}
+
+/**
+ * One piano key with its lamp: raised, or [pressed] in with the lamp lit. [role] is [Role.Tab] for
+ * exclusive banks and [Role.Checkbox] for latching keys, which expose `selected`; [Role.Button]
+ * makes a momentary key that never latches. A short printed [label] can be read as a fuller
+ * [spokenLabel] that contains it (WCAG 2.5.3).
+ * A disabled key is dimmed and ignores clicks. At least 48 dp tall.
+ */
+@Composable
+public fun PianoKey(
+    label: String,
+    pressed: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    role: Role = Role.Tab,
+    enabled: Boolean = true,
+    spokenLabel: String = label,
+) {
+    Column(
+        modifier
+            // Content-sized unless the bank fixes the width (weights): a lone key never
+            // stretches across its slot.
+            .width(IntrinsicSize.Max)
+            .heightIn(min = 48.dp)
+            .alpha(if (enabled) 1f else DISABLED_ALPHA)
+            .let {
+                // A momentary key (Clear, a sort key) is a plain button; it never latches.
+                if (role == Role.Button) {
+                    it.clickable(enabled = enabled, role = role, onClick = onClick)
+                } else {
+                    it.selectable(pressed, enabled = enabled, role = role, onClick = onClick)
                 }
-            }
-        }
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Lamp(pressed)
+        KeyCap(label, spokenLabel, pressed)
     }
 }
 
@@ -102,14 +156,16 @@ private fun Lamp(lit: Boolean) {
 }
 
 @Composable
-private fun PianoKey(
+private fun KeyCap(
     text: String,
+    spokenText: String,
     pressed: Boolean,
 ) {
     Box(
         Modifier
             .fillMaxWidth()
             .heightIn(min = KEY_HEIGHT)
+            .widthIn(min = KEY_MIN_WIDTH)
             // A pressed key sits lower in the slot and loses most of its shadow.
             .offset(y = if (pressed) 1.5.dp else 0.dp)
             .shadow(if (pressed) 0.5.dp else 3.dp, KeyShape)
@@ -124,13 +180,13 @@ private fun PianoKey(
                     it
                 }
             }.border(1.dp, if (pressed) Color(0xFF5E4526) else Color(0xFF9A7E4E), KeyShape)
-            .padding(horizontal = 6.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         // Engraved in capitals, read as written: screen readers spell some all-caps words.
         Text(
             text.uppercase(),
-            Modifier.clearAndSetSemantics { this.text = AnnotatedString(text) },
+            Modifier.clearAndSetSemantics { this.text = AnnotatedString(spokenText) },
             color = Ink,
             fontFamily = barlow(),
             fontWeight = FontWeight.SemiBold,
@@ -148,12 +204,13 @@ private val SlotShape = RoundedCornerShape(6.dp)
 private val KeyShape = RoundedCornerShape(3.dp)
 private val Amber = Color(0xFFF3B35E)
 private val UnlitLamp = Color(0xFF4F4130)
-private val LitLamp = Brush.radialGradient(listOf(Color(0xFFFFF0B8), Amber, Color(0xFFB8661A)))
 private val RaisedIvory = listOf(Color(0xFFF8EED6), Color(0xFFE3CFA5))
 private val PressedIvory = listOf(Color(0xFFCDB27E), Color(0xFFDCC69A))
 private val KEY_GAP = 6.dp
 private val KEY_HEIGHT = 36.dp
 private val LAMP_SIZE = 9.dp
+private val KEY_MIN_WIDTH = 64.dp
+private const val DISABLED_ALPHA = 0.5f
 
 /** The slot's shadow falls on the top of a pressed key. */
 private fun DrawScope.drawPressShade() {

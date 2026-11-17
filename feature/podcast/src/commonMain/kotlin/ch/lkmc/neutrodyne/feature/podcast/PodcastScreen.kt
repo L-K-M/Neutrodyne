@@ -45,6 +45,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -57,7 +58,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
-import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdScaffold
@@ -68,6 +68,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
@@ -121,7 +123,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
 import ch.lkmc.neutrodyne.core.ui.resources.order_newest
+import ch.lkmc.neutrodyne.core.ui.resources.order_newest_key
 import ch.lkmc.neutrodyne.core.ui.resources.order_oldest
+import ch.lkmc.neutrodyne.core.ui.resources.order_oldest_key
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_copy_feed
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_copy_feed_warning
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_enter_password
@@ -807,7 +811,16 @@ private fun ChipsRow(
     onOrderChange: (FeedOrder) -> Unit,
 ) {
     var orderOpen by remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+    val newest = order == FeedOrder.NEWEST_FIRST
+    val orderLabel = stringResource(if (newest) Res.string.order_newest_key else Res.string.order_oldest_key)
+    val orderSpoken = stringResource(if (newest) Res.string.order_newest else Res.string.order_oldest)
+    // Two key banks (PO-55): the latching filter keys, and a momentary order key that opens
+    // the order menu.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
         FeedFilterChips(
             availableFilters = AVAILABLE_FEED_FILTER_CAPABILITIES,
             filters = filters,
@@ -815,19 +828,15 @@ private fun ChipsRow(
             modifier = Modifier.weight(1f),
         )
         Box {
-            NdFilterChip(
-                selected = false,
-                onClick = { orderOpen = true },
-                label =
-                    stringResource(
-                        if (order == FeedOrder.NEWEST_FIRST) {
-                            Res.string.order_newest
-                        } else {
-                            Res.string.order_oldest
-                        },
-                    ),
-                leadingIcon = NdIcons.Sort,
-            )
+            PianoKeySlot {
+                PianoKey(
+                    orderLabel,
+                    pressed = false,
+                    onClick = { orderOpen = true },
+                    role = Role.Button,
+                    spokenLabel = orderSpoken,
+                )
+            }
             DropdownMenu(expanded = orderOpen, onDismissRequest = { orderOpen = false }) {
                 for (option in FeedOrder.entries) {
                     DropdownMenuItem(
