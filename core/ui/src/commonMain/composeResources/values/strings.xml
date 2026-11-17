@@ -692,6 +692,11 @@
     <string name="radio_menu">Menu</string>
     <string name="radio_menu_speed">Playback speed</string>
     <string name="radio_menu_sleep">Sleep timer</string>
+    <string name="radio_menu_speed_key">Speed</string>
+    <string name="radio_menu_sleep_key">Sleep</string>
+    <string name="radio_menu_playback">Playback</string>
+    <string name="radio_menu_go_to">Go to</string>
+    <string name="radio_menu_close">Close</string>
     <string name="radio_episodes">Episodes</string>
     <string name="radio_removed">Removed from this playlist.</string>
     <string name="radio_ready">READY TO PLAY</string>
