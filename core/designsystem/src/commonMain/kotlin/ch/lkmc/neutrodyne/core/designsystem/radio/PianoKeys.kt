@@ -179,7 +179,7 @@ public fun ActionKeySlot(
     content: @Composable () -> Unit,
 ) {
     MaterialPlate(RadioMaterial.METAL, modifier.slotFrame()) {
-        Layout(content, Modifier.padding(SlotPadding)) { measurables, constraints ->
+        Layout(content, Modifier.padding(ActionSlotPadding)) { measurables, constraints ->
             if (measurables.isEmpty()) return@Layout layout(0, 0) {}
             val gap = KEY_GAP.roundToPx()
             val minWidths = measurables.map { it.minIntrinsicWidth(Constraints.Infinity) }
@@ -328,6 +328,10 @@ private val RAISED_LIP = 4.5.dp
 private val PRESSED_LIP = 1.5.dp
 private val KEY_DROP = 2.dp
 private val SlotPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+
+// The action bank keeps its drawn metal edge, whose thin rim needs less room than the rendered
+// slot's frame, so a phone's four episode actions still share one row.
+private val ActionSlotPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
 private val KEY_HEIGHT = 36.dp
 private val LAMP_SIZE = 9.dp
 
