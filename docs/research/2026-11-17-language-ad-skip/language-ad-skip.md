@@ -10,7 +10,7 @@ Many English podcasts carry dynamically inserted ads in the listener's local lan
 
 - Seven English episodes, the newest full episode of each feed, fetched on 2026-11-17 from a Swiss IP address, so each host inserted the ads it targets at Switzerland.
 - Spoken-language identification (LID) over 4 s windows, 2 s hop, with Whisper's language-ID head ([faster-whisper](https://github.com/SYSTRAN/faster-whisper), int8, CPU). Each window yields the top language and P(English).
-- Ground truth: every flagged stretch was transcribed with Whisper and checked with a second LID model, SpeechBrain's [VoxLingua107 ECAPA](https://huggingface.co/speechbrain/lang-id-voxlingua107-ecapa). Nobody listened to the audio. English ads were looked for only in samples (the first 90 s and 60 s at the start, middle and end).
+- Ground truth: every flagged stretch was transcribed with Whisper and checked with a second LID model, SpeechBrain's [VoxLingua107 ECAPA](https://huggingface.co/speechbrain/lang-id-voxlingua107-ecapa) (its labels on this audio proved unreliable; see below). Nobody listened to the audio. English ads were looked for only in samples (the first 90 s and 60 s at the start, middle and end).
 - A frame-header scan of each MP3 looked for stitch marks: mid-stream tags, format changes and junk between frames.
 - Runs on an Apple M4 Max CPU while another build used most of its cores, so the timings are pessimistic and not a benchmark.
 
@@ -41,7 +41,7 @@ A "run" is a stretch of windows whose P(English) is below 0.3, bridging one wind
 | Any run of at least 6 s | SpeechBrain ECAPA, 2 s hop | 584 of 606 s | 2,344 s |
 | Ad-language rule | SpeechBrain ECAPA, 2 s hop | 64 of 606 s | 6 s |
 
-Why "any other language" fails: English spoken with a strong accent was labelled Arabic, Welsh, Swahili or Latin, with a run's mean P(English) as low as 0.03 and runs up to 28 s long. One 15-minute interview would have lost 16% of its audio. A genuine Arabic clip inside a BBC news report would also have been skipped. Restricting skips to runs of at least 8 s that are mostly in the languages the ads are targeted in removed all 23 in this sample: 21 were labelled with other languages, and the two with a German-labelled window lasted only 6 s.
+Why "any other language" fails: English spoken with a strong accent was labelled Arabic, Welsh, Swahili or Latin, with a run's mean P(English) as low as 0.03 and runs up to 28 s long. One 15-minute interview would have lost 16% of its audio. A genuine Arabic clip inside a BBC news report would also have been skipped. Restricting skips to runs of at least 8 s that are mostly in the languages the ads are targeted in eliminated all 23 false positives in this sample: 21 were labelled with other languages, and the two with a German-labelled window lasted only 6 s, below the 8 s minimum.
 
 Why the ECAPA model is out: on produced podcast audio it read about 39 minutes of English as foreign and labelled the Swiss German ads as Dutch, Afrikaans or Estonian. It is fast and Apache-2.0, but unusable here.
 
@@ -55,7 +55,7 @@ Why the ECAPA model is out: on produced podcast audio it read about 39 minutes o
 | Model | Hop | Speed (audio time / CPU time) | CPU per hour of audio |
 |---|---|---|---|
 | Whisper-base (74M parameters) | 2 s | 9 to 10× | about 6 min |
-| Whisper-tiny (39M parameters, 75 MB fp16 file) | 4 s | 36 to 46× | about 1.5 min |
+| Whisper-tiny (39M parameters, 75 MB fp16 file; measured in int8) | 4 s | 36 to 46× | about 1.5 min |
 | SpeechBrain ECAPA (21M parameters) | 2 s | 143 to 161× | under 30 s |
 
 Language ID only; no transcription. Each Whisper call pads the 4 s window to Whisper's 30 s input, so a runtime that shortens the encoder context may cut the cost further (unverified). Phones were not measured.
