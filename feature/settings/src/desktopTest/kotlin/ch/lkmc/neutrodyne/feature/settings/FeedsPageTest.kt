@@ -65,6 +65,8 @@ class FeedsPageTest {
                 onNodeWithContentDescription(description).performClick()
                 waitForIdle()
             }
+            // The steps below start from the default, every 4 hours.
+            onNodeWithContentDescription("Refresh interval, Every 4 hours").assertIsDisplayed()
             listOf(120, 60, 0).forEach { minutes ->
                 step("Decrease Refresh interval")
                 assertEquals(minutes, runBlocking { settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES) })

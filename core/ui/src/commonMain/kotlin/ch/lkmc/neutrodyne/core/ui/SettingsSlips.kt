@@ -148,6 +148,9 @@ public fun SettingsSwitchRow(
  * piano keys under the title, the chosen one pressed in; longer lists, which are ordered (sizes,
  * counts, intervals), are a counter under the title whose keys step to the neighbouring option.
  * [details] adds lines under the summary, such as where an inherited value comes from.
+ * Disabling the row dims only its keys: the title, summary and details stay readable, since
+ * they say why it is disabled. A [selected] value missing from [options], such as an invalid
+ * stored value, presses no key; on the counter, stepping up then picks the first option.
  */
 @Composable
 public fun <T> SettingsChoiceRow(
