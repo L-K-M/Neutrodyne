@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -266,10 +267,12 @@ private fun MiniBar(
                 if (wide) {
                     SkipKey(
                         stringResource(Res.string.player_back_value, ui.skipBackMs / MILLIS_PER_SECOND),
+                        NdIcons.ArrowBack,
                         back,
                     )
                     SkipKey(
                         stringResource(Res.string.player_forward_value, ui.skipForwardMs / MILLIS_PER_SECOND),
+                        NdIcons.ArrowForward,
                         forward,
                     )
                 }
@@ -378,14 +381,18 @@ private fun PaperLabel(
     }
 }
 
-/** A small ivory skip key ("-30", "+30"); its action is also a custom accessibility action. */
+/**
+ * A small ivory skip key, its [arrow] over the seconds it skips, like the radio's skip keys; its
+ * action is also a custom accessibility action.
+ */
 @Composable
 private fun SkipKey(
     text: String,
+    arrow: ImageVector,
     onClick: () -> Unit,
 ) {
     Box(Modifier.size(SKIP_KEY_TARGET).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        IvoryKeyCap(text, size = SKIP_KEY_CAP)
+        IvoryKeyCap(text, size = SKIP_KEY_CAP, icon = arrow)
     }
 }
 
@@ -433,7 +440,7 @@ private val MINI_END_GAP = 12.dp
 private val NEEDLE_HEIGHT = 14.dp
 private val SKIP_KEYS_MIN_WIDTH = 520.dp
 private val SKIP_KEY_TARGET = 48.dp
-private val SKIP_KEY_CAP = 34.dp
+private val SKIP_KEY_CAP = 40.dp
 private val TOGGLE_WIDTH = 40.dp
 private val TOGGLE_HEIGHT = 52.dp
 private val MINI_HEIGHT = 64.dp

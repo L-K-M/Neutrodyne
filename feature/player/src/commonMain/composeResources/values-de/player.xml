@@ -42,8 +42,8 @@
     <string name="player_unknown_duration">Unbekannte Dauer</string>
     <string name="player_speed">Geschwindigkeit %1$s×</string>
     <string name="player_retry">Erneut versuchen</string>
-    <string name="player_back_value">−%1$d</string>
-    <string name="player_forward_value">+%1$d</string>
+    <string name="player_back_value">%1$d</string>
+    <string name="player_forward_value">%1$d</string>
     <string name="player_previous_symbol">│‹</string>
     <string name="player_next_symbol">›│</string>
     <string name="player_audio_gone">Die Audiodatei dieser Episode ist nicht mehr verfügbar</string>

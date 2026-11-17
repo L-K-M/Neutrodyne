@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,12 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +47,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdPullToRefresh
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.radio.MomentaryKey
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKeySlot
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -413,10 +411,9 @@ private fun FeedHeader(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        FilledTonalButton(onClick = onPlay, modifier = Modifier.padding(start = HEADER_PAD)) {
-            Icon(NdIcons.PlayArrow, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text(stringResource(Res.string.play))
+        // A momentary piano key in its own slot, like the podcast page's order key (PO-55).
+        PianoKeySlot(Modifier.padding(start = HEADER_PAD, end = HEADER_KEY_GAP)) {
+            MomentaryKey(stringResource(Res.string.play), onPlay)
         }
         FeedFilterChips(
             availableFilters = AVAILABLE_FEED_FILTER_CAPABILITIES,
@@ -491,6 +488,7 @@ private fun Modifier.skeletonBlock(): Modifier = background(MaterialTheme.colorS
 private val ROW_HEIGHT = 72.dp
 private val DAY_PADDING = 16.dp
 private val HEADER_PAD = 16.dp
+private val HEADER_KEY_GAP = 6.dp
 private val DAY_TOP = 16.dp
 private val DAY_BOTTOM = 4.dp
 private val FOOTER_PAD = 16.dp

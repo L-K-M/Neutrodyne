@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -36,10 +37,11 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
  * The page header (08 Nd wrappers, radio look since 2026-11-17): a metal faceplate across the top
  * of the cabinet's paper tray, with the navigation key at the start, [title] on a centred enamel
  * sign and the actions at the end. Icon buttons in either slot become ivory keys through
- * [LocalRadioFaceplate]; other content is drawn in cream. A blank [title] shows no sign. Without
- * a [navigation] key the page's cabinet supplies its Back key ([LocalCabinetBackKey]), so pages
- * opened from the radio's Menu return home like every other radio part.
- * [elevated] (content scrolled under the plate) deepens the plate's shadow on the paper.
+ * [LocalRadioFaceplate]; other content, text buttons included, is drawn in cream. A blank
+ * [title] shows no sign. Without a [navigation] key the page's cabinet supplies its Back key
+ * ([LocalCabinetBackKey]), so pages opened from the radio's Menu return home like every other
+ * radio part. [elevated] (content scrolled under the plate) deepens the plate's shadow on the
+ * paper.
  */
 @Composable
 public fun NdTopAppBar(
@@ -65,7 +67,12 @@ public fun NdTopAppBar(
                         EnamelSign(title, Modifier.semantics { heading() })
                     }
                 },
-                actions = { Row(verticalAlignment = Alignment.CenterVertically, content = actions) },
+                actions = {
+                    // Text actions print in cream on the dark plate, as the keys' labels do.
+                    MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = Cream)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, content = actions)
+                    }
+                },
             )
         }
     }
