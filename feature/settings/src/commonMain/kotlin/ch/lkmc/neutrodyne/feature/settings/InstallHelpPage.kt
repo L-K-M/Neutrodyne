@@ -58,7 +58,6 @@ import ch.lkmc.neutrodyne.feature.settings.resources.help_check_body
 import ch.lkmc.neutrodyne.feature.settings.resources.help_check_title
 import ch.lkmc.neutrodyne.feature.settings.resources.help_collapsed
 import ch.lkmc.neutrodyne.feature.settings.resources.help_copy
-import ch.lkmc.neutrodyne.feature.settings.resources.help_developer_options
 import ch.lkmc.neutrodyne.feature.settings.resources.help_download_android
 import ch.lkmc.neutrodyne.feature.settings.resources.help_download_body
 import ch.lkmc.neutrodyne.feature.settings.resources.help_download_title

@@ -8,9 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,7 +26,6 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
-import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res

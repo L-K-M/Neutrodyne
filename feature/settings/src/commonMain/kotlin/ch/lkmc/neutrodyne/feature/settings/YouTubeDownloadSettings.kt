@@ -4,10 +4,8 @@ package ch.lkmc.neutrodyne.feature.settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -16,7 +14,6 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
-import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res

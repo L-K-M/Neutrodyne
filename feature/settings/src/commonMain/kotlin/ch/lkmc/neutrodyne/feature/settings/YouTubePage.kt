@@ -11,10 +11,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -31,7 +29,6 @@ import ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceRow
-import ch.lkmc.neutrodyne.core.ui.SettingsRow
 import ch.lkmc.neutrodyne.core.ui.SettingsSwitchRow
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadExternalReasonText
@@ -39,7 +36,6 @@ import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
 import ch.lkmc.neutrodyne.feature.settings.resources.youtube_audio_quality
-import ch.lkmc.neutrodyne.feature.settings.resources.youtube_auto_download
 import ch.lkmc.neutrodyne.feature.settings.resources.youtube_breaker_open
 import ch.lkmc.neutrodyne.feature.settings.resources.youtube_engine_absent
 import ch.lkmc.neutrodyne.feature.settings.resources.youtube_engine_disabled

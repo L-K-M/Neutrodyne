@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,13 +42,10 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggleFace
-import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.EngravedHeading
 import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
-import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleWindow
 import ch.lkmc.neutrodyne.core.designsystem.radio.PanelLabel
-import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
 import ch.lkmc.neutrodyne.core.designsystem.radio.StepCounter
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
