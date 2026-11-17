@@ -269,7 +269,9 @@ public fun ValveDeck(modifier: Modifier = Modifier) {
 
 private fun DrawScope.drawValveDeck(art: ImageBitmap) {
     if (size.width <= 0f || size.height <= 0f) return
-    val long = art.width * size.height / art.height <= size.width
+    // A node within half a pixel of the artwork's proportions (the home's full-width deck, sized
+    // from VALVE_DECK_ASPECT) fits it whole rather than tiling a rounding error.
+    val long = art.width * size.height / art.height < size.width - 0.5f
     val scale = if (long) size.height / art.height else size.width / art.width
     val extra = if (long) size.width - art.width * scale else 0f
     val top = (size.height - art.height * scale) / 2f
