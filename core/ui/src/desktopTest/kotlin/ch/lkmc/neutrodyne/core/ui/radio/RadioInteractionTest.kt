@@ -309,7 +309,7 @@ class RadioInteractionTest {
             onNodeWithTag("radio_play").performScrollTo().assertIsDisplayed()
         }
 
-    @Test fun aLongSelectedTitleStowsTheDeckWithoutOscillating() =
+    @Test fun aLongSelectedTitleKeepsTheDeckAndThePlayer() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             var state by mutableStateOf(radioFixture())
             setContent {
@@ -331,8 +331,40 @@ class RadioInteractionTest {
                             },
                     )
             }
-            onNodeWithTag("radio_valve_deck").assertDoesNotExist()
-            mainClock.advanceTimeBy(500)
+            onNodeWithTag("radio_valve_deck").assertIsDisplayed()
+            onNodeWithTag("radio_play").assertIsDisplayed()
+        }
+
+    // The tubes stay on every screen (owner decision 2026-11-17): large text and small phones keep
+    // the deck, with the play switch still on screen; only windows too short for it stow it.
+    @Test fun largeTextKeepsTheDeckAndThePlaySwitch() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 1.3f)) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(radioFixture(), RadioActions()) }
+                }
+            }
+            onNodeWithTag("radio_valve_deck").assertIsDisplayed()
+            onNodeWithTag("radio_play").assertIsDisplayed()
+        }
+
+    @Test fun aSmallPhoneKeepsTheDeckAndThePlaySwitch() =
+        runDesktopComposeUiTest(width = 320, height = 568) {
+            setContent { NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(radioFixture(), RadioActions()) } }
+            onNodeWithTag("radio_valve_deck").assertIsDisplayed()
+            onNodeWithTag("radio_play").assertIsDisplayed()
+        }
+
+    @Test fun aWideWindowKeepsTheDeck() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            setContent { NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(radioFixture(), RadioActions()) } }
+            onNodeWithTag("radio_valve_deck").assertIsDisplayed()
+            onNodeWithTag("radio_play").assertIsDisplayed()
+        }
+
+    @Test fun aShortWindowStowsTheDeck() =
+        runDesktopComposeUiTest(width = 700, height = 360) {
+            setContent { NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(radioFixture(), RadioActions()) } }
             onNodeWithTag("radio_valve_deck").assertDoesNotExist()
             onNodeWithTag("radio_play").assertIsDisplayed()
         }

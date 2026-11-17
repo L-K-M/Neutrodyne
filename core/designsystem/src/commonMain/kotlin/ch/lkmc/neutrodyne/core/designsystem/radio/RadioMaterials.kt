@@ -20,15 +20,21 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.resources.Res
 import ch.lkmc.neutrodyne.core.designsystem.resources.arvo_bold
@@ -46,6 +52,8 @@ import ch.lkmc.neutrodyne.core.designsystem.resources.radio_wood
 import org.jetbrains.compose.resources.Font
 import org.jetbrains.compose.resources.imageResource
 import org.jetbrains.compose.resources.painterResource
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /** Ink printed on the radio's paper and keys. */
 public val Ink: Color = Color(0xFF4B3521)
@@ -247,8 +255,97 @@ public const val VALVE_DECK_ASPECT: Float = 1100f / 423f
 /**
  * The radio's valve deck: two glowing tubes on a metal chassis. The home shows it across the
  * cabinet; every other page carries a smaller one on its cabinet roof (owner decision 2026-11-17).
+ *
+ * The deck fills the node's height. A node wider than the artwork gets a longer chassis rather
+ * than larger tubes: the plain stretches of plate beside the outer terminals repeat, mirrored so
+ * their lighting meets without seams, until the plate spans the node. A narrower node fits the
+ * whole deck inside it.
  */
 @Composable
 public fun ValveDeck(modifier: Modifier = Modifier) {
-    Image(painterResource(Res.drawable.radio_valve_deck), null, modifier, contentScale = ContentScale.Fit)
+    val art = imageResource(Res.drawable.radio_valve_deck)
+    Box(modifier.drawBehind { drawValveDeck(art) })
 }
+
+private fun DrawScope.drawValveDeck(art: ImageBitmap) {
+    if (size.width <= 0f || size.height <= 0f) return
+    val long = art.width * size.height / art.height <= size.width
+    val scale = if (long) size.height / art.height else size.width / art.width
+    val extra = if (long) size.width - art.width * scale else 0f
+    val top = (size.height - art.height * scale) / 2f
+    val height = art.height * scale
+    // Source columns: the left end, a plain stretch, the tubes and circuit, a plain stretch, the
+    // right end. Only the plain stretches grow, each by half of the extra width.
+    val columns =
+        intArrayOf(
+            0,
+            DECK_PLAIN_LEFT.first,
+            DECK_PLAIN_LEFT.last,
+            DECK_PLAIN_RIGHT.first,
+            DECK_PLAIN_RIGHT.last,
+            art.width,
+        )
+    var x = 0f
+    for (segment in 0 until columns.size - 1) {
+        val from = columns[segment]
+        val to = columns[segment + 1]
+        val natural = (to - from) * scale
+        if ((segment == 1 || segment == 3) && extra > 0f) {
+            drawMirroredTiles(art, from, to, x, top, natural + extra / 2f, height, natural)
+            x += natural + extra / 2f
+        } else {
+            drawPart(art, from, to, x, top, natural, height, mirrored = false)
+            x += natural
+        }
+    }
+}
+
+/** Fills [width] from [left] with copies of the [from]..[to] columns, every other one mirrored. */
+private fun DrawScope.drawMirroredTiles(
+    art: ImageBitmap,
+    from: Int,
+    to: Int,
+    left: Float,
+    top: Float,
+    width: Float,
+    height: Float,
+    tile: Float,
+) {
+    val count = ceil(width / tile).toInt()
+    val each = width / count
+    for (index in 0 until count) {
+        drawPart(art, from, to, left + index * each, top, each, height, mirrored = index % 2 == 1)
+    }
+}
+
+private fun DrawScope.drawPart(
+    art: ImageBitmap,
+    from: Int,
+    to: Int,
+    left: Float,
+    top: Float,
+    width: Float,
+    height: Float,
+    mirrored: Boolean,
+) {
+    val dstLeft = left.roundToInt()
+    val dstTop = top.roundToInt()
+    val dstSize = IntSize((left + width).roundToInt() - dstLeft, (top + height).roundToInt() - dstTop)
+    if (dstSize.width <= 0 || dstSize.height <= 0) return
+    val center = Offset(dstLeft + dstSize.width / 2f, 0f)
+    scale(if (mirrored) -1f else 1f, 1f, center) {
+        drawImage(
+            art,
+            IntOffset(from, 0),
+            IntSize(to - from, art.height),
+            IntOffset(dstLeft, dstTop),
+            dstSize,
+            filterQuality = FilterQuality.High,
+        )
+    }
+}
+
+// Columns of plain chassis plate in the deck artwork, between each outer terminal and the plate's
+// end: only plate texture and its front edge, so they repeat without showing.
+private val DECK_PLAIN_LEFT = 86..100
+private val DECK_PLAIN_RIGHT = 998..1010

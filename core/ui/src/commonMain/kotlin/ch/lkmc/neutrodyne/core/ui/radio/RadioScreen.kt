@@ -29,22 +29,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Chassis
@@ -52,6 +46,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
+import ch.lkmc.neutrodyne.core.designsystem.radio.VALVE_DECK_ASPECT
 import ch.lkmc.neutrodyne.core.designsystem.radio.ValveDeck
 import ch.lkmc.neutrodyne.core.designsystem.radio.cabinetEdges
 import ch.lkmc.neutrodyne.core.designsystem.radio.radioStage
@@ -124,19 +119,24 @@ private fun RadioCabinet(
                 wide -> RadioRows.WIDE
                 else -> RadioRows.STANDARD
             }
-        val density = LocalDensity.current
-        val scale = density.fontScale
-        var measuredPlayer by remember(width, scale, compact, short) { mutableStateOf<Dp?>(null) }
-        // Always calculate against the unhidden deck, independent of content and the last result.
+        val scale = LocalDensity.current.fontScale
+        // The deck spans the cabinet, its height following the width up to a share of the window's
+        // height; beyond that its chassis grows longer instead. It shows whenever the window is tall
+        // enough for it at all (the tubes stay on every screen, owner decision 2026-11-17): the
+        // cabinet takes the rest, and the whole radio scrolls when that falls short of the cabinet's
+        // minimum.
         val deckWidth = width - (if (narrow) 20.dp else 24.dp) + 18.dp
-        val naturalDeck = deckWidth * (423f / 1100f)
-        val playerBudget = if (wide) 0.dp else measuredPlayer ?: (if (compact) 207.dp else 240.dp) * scale
-        val programmeBudget = (if (compact) 230.dp else 280.dp) * scale
-        val deckVisible = height >= 660.dp && height - naturalDeck - playerBudget - 80.dp >= programmeBudget
-        val minimumHeight = (if (wide) 280.dp else 500.dp) * scale
-        val needsScroll = height < minimumHeight
+        val deckHeight = minOf(deckWidth / VALVE_DECK_ASPECT, height * DECK_HEIGHT_SHARE)
+        val deckVisible = height >= DECK_MIN_HEIGHT
+        val minimumHeight =
+            when {
+                wide -> 280.dp
+                compact -> 440.dp
+                else -> 500.dp
+            } * scale
+        val contentHeight = maxOf(height, minimumHeight + if (deckVisible) deckHeight else 0.dp)
+        val needsScroll = contentHeight > height
         Column(if (needsScroll) Modifier.verticalScroll(rememberScrollState()) else Modifier) {
-            val contentHeight = maxOf(height, minimumHeight)
             Column(Modifier.height(contentHeight).fillMaxWidth().padding(horizontal = if (narrow) 10.dp else 12.dp)) {
                 if (deckVisible) {
                     ValveDeck(
@@ -144,7 +144,7 @@ private fun RadioCabinet(
                             .testTag("radio_valve_deck")
                             .requiredWidth(
                                 deckWidth,
-                            ).height(naturalDeck)
+                            ).height(deckHeight)
                             .align(Alignment.CenterHorizontally)
                             .offset(y = 5.dp),
                     )
@@ -192,9 +192,6 @@ private fun RadioCabinet(
                                         actions,
                                         compact,
                                         short,
-                                        Modifier.onSizeChanged {
-                                            measuredPlayer = with(density) { it.height.toDp() }
-                                        },
                                     )
                                 }
                             }
@@ -231,9 +228,6 @@ private fun RadioCabinet(
                                     actions,
                                     compact,
                                     short,
-                                    Modifier.onSizeChanged {
-                                        measuredPlayer = with(density) { it.height.toDp() }
-                                    },
                                 )
                             }
                         }
@@ -271,3 +265,8 @@ private fun RadioCabinet(
         }
     }
 }
+
+// The shortest window that shows the deck, as on every other page, and the largest share of the
+// window's height the deck takes.
+private val DECK_MIN_HEIGHT = 560.dp
+private const val DECK_HEIGHT_SHARE = 0.22f
