@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_pause
+import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
@@ -257,6 +259,25 @@ class RadioInteractionTest {
             onNodeWithTag("radio_skip_forward").assertIsNotEnabled().performClick()
             assertEquals(1, back)
             assertEquals(1, forward)
+        }
+
+    @Test fun eachSlipHasAPlayKeyThatPausesThePlayingSlip() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val played = mutableListOf<Long>()
+            val state = radioFixture(true)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(state, RadioActions(playEpisode = { played += it }))
+                }
+            }
+            val playing = state.selectedId!!
+            val other = state.episodes.first { it.id != playing }.id
+            onNodeWithTag("radio_slip_play_$playing").assertContentDescriptionEquals(getString(Res.string.action_pause))
+            onNodeWithTag("radio_slip_play_$other")
+                .assertContentDescriptionEquals(getString(Res.string.action_play))
+                .performClick()
+            onNodeWithTag("radio_slip_play_$playing").performClick()
+            assertEquals(listOf(other, playing), played)
         }
 
     @Test fun doubleTextScaleOnANarrowScreenLeavesSkippingToTheNeedle() =

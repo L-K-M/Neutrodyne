@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -239,6 +240,7 @@ internal fun RadioPlayer(
                                     ),
                                 enabled = selected != null,
                                 scale = capScale,
+                                arrow = NdIcons.ArrowBack,
                                 tag = "radio_skip_back",
                                 modifier = Modifier.offset(y = keyDrop),
                                 onClick = actions.skipBack,
@@ -259,6 +261,7 @@ internal fun RadioPlayer(
                                     ),
                                 enabled = selected != null,
                                 scale = capScale,
+                                arrow = NdIcons.ArrowForward,
                                 tag = "radio_skip_forward",
                                 modifier = Modifier.offset(y = keyDrop),
                                 onClick = actions.skipForward,
@@ -280,13 +283,14 @@ internal fun RadioPlayer(
     }
 }
 
-/** A round ivory key beside the counter, engraved with the seconds it skips ("−15", "+30"). */
+/** A round ivory key beside the counter, engraved with an [arrow] over the seconds it skips. */
 @Composable
 private fun SkipKey(
     legend: String,
     description: String,
     enabled: Boolean,
     scale: Float,
+    arrow: ImageVector,
     tag: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -300,7 +304,7 @@ private fun SkipKey(
             .testTag(tag),
         contentAlignment = Alignment.Center,
     ) {
-        IvoryKeyCap(legend, enabled = enabled, size = SKIP_CAP * scale)
+        IvoryKeyCap(legend, enabled = enabled, size = SKIP_CAP * scale, icon = arrow)
     }
 }
 
@@ -523,8 +527,8 @@ private const val CATHODE_GHOST = '8'
 
 private const val FIXED_CAP_FONT_SCALE = 1.3f
 private const val MILLIS_PER_SECOND = 1_000L
-private val SKIP_TARGET = 48.dp
-private val SKIP_CAP = 40.dp
+private val SKIP_TARGET = 52.dp
+private val SKIP_CAP = 52.dp
 
 // Room the row needs besides the counter when the skip keys show: its padding, the play
 // switch and two key targets (all scaled with the cap), then the narrowest counter whose

@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.radioStage
 
 public data class RadioActions(
     val selectEpisode: (Long) -> Unit = {},
+    val playEpisode: (Long) -> Unit = {},
     val discard: (Long) -> Unit = {},
     val undo: () -> Unit = {},
     val togglePlay: () -> Unit = {},

@@ -110,6 +110,43 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun aSlipsPlayKeyPlaysThatEpisodeAndPausesItWhilePlaying() =
+        runTest {
+            withRadio { model, id ->
+                // A silent radio: the key selects the slip and starts it.
+                model.playEpisode(2)
+                runCurrent()
+                assertEquals(2L, model.state.value.selectedId)
+                val start = controller.calls.filterIsInstance<FakePlaybackController.Call.Feed>().last()
+                assertEquals(FeedSource.Group(id), start.source)
+                assertEquals(2L, start.startId)
+
+                // The playing slip's key pauses it.
+                controller.state.nowPlaying.value = testNowPlaying(2).copy(isPlaying = true)
+                runCurrent()
+                assertTrue(model.state.value.playing)
+                model.playEpisode(2)
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.last(),
+                )
+
+                // Another slip's key, while the radio plays, switches to that episode.
+                controller.state.nowPlaying.value = testNowPlaying(2).copy(isPlaying = true)
+                runCurrent()
+                model.playEpisode(3)
+                runCurrent()
+                assertEquals(3L, model.state.value.selectedId)
+                assertEquals(
+                    3L,
+                    controller.calls
+                        .filterIsInstance<FakePlaybackController.Call.Feed>()
+                        .last()
+                        .startId,
+                )
+            }
+        }
+
     @Test fun skipKeysMoveByTheListenersIntervalsAndStopAtTheEnds() =
         runTest {
             settings.set(PlaybackSettingKeys.SKIP_BACK_MS, 15_000L)

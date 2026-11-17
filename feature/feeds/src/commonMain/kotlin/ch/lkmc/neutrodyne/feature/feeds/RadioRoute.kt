@@ -77,6 +77,7 @@ internal fun RadioRoute(model: RadioViewModel = metroViewModel()) {
         state.copy(loading = loading, loadError = loadError),
         RadioActions(
             selectEpisode = model::selectEpisode,
+            playEpisode = model::playEpisode,
             discard = model::discard,
             undo = model::undoDiscard,
             togglePlay = model::togglePlay,

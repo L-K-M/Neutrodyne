@@ -318,6 +318,21 @@ public class RadioViewModel(
         if (playing) start(id)
     }
 
+    /**
+     * A slip's own play key: plays that episode, or pauses it when it is the one playing. Choosing
+     * another slip while the radio plays already starts it, so only a silent radio needs the switch.
+     */
+    public fun playEpisode(id: Long) {
+        if (state.value.episodes.none { it.id == id }) return
+        if (id == state.value.selectedId) {
+            togglePlay()
+            return
+        }
+        val wasPlaying = state.value.playing
+        selectEpisode(id)
+        if (!wasPlaying) togglePlay()
+    }
+
     public fun togglePlay() {
         val current = state.value
         val id = current.selectedId ?: return
