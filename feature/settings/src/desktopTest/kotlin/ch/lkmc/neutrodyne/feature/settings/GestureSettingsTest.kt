@@ -6,8 +6,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -31,6 +31,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class GestureSettingsTest {
@@ -57,17 +58,19 @@ class GestureSettingsTest {
                 SwipeAction.ADD_UP_NEXT,
                 runBlocking { settings.get(AppearanceSettingKeys.SWIPE_START_ACTION) },
             )
-            onNodeWithText("Swipe right").performScrollTo().performClick()
+            onNodeWithText("Swipe right").performScrollTo()
             onNodeWithText("Add to Up next").assertDoesNotExist()
             onNodeWithText("Download").assertDoesNotExist()
-            onAllNodesWithText("Mark played / unplayed").onLast().performClick()
+            // Add to Up next is stored but not offered yet, so None is the lit key.
+            onNodeWithTag("swipe:START_TO_END:NONE").assertIsSelected()
+            onNodeWithTag("swipe:START_TO_END:MARK_PLAYED").performScrollTo().performClick()
             waitForIdle()
             assertEquals(
                 SwipeAction.MARK_PLAYED,
                 runBlocking { settings.get(AppearanceSettingKeys.SWIPE_START_ACTION) },
             )
-            onNodeWithText("Swipe left").performScrollTo().performClick()
-            onAllNodesWithText("None").onLast().performClick()
+            onNodeWithTag("swipe:START_TO_END:MARK_PLAYED").assertIsSelected()
+            onNodeWithTag("swipe:END_TO_START:NONE").performScrollTo().performClick()
             waitForIdle()
             assertEquals(
                 SwipeAction.NONE,
@@ -80,8 +83,17 @@ class GestureSettingsTest {
         runComposeUiTest {
             val settings = FakeSettingsRepository()
             setAppearance(settings, PlatformKind.ANDROID, LayoutDirection.Rtl)
-            onNodeWithText("Swipe left").performScrollTo().performClick()
-            onAllNodesWithText("Mark played / unplayed").onLast().performClick()
+            // In RTL the start-to-end swipe moves left, so its keys sit on the "Swipe left" slip,
+            // which comes first.
+            val leftTop =
+                onNodeWithText("Swipe left")
+                    .performScrollTo()
+                    .fetchSemanticsNode()
+                    .boundsInRoot.top
+            val rightTop = onNodeWithText("Swipe right").fetchSemanticsNode().boundsInRoot.top
+            val key = onNodeWithTag("swipe:START_TO_END:MARK_PLAYED")
+            assertTrue(key.fetchSemanticsNode().boundsInRoot.top in leftTop..rightTop)
+            key.performClick()
             waitForIdle()
             assertEquals(
                 SwipeAction.MARK_PLAYED,
