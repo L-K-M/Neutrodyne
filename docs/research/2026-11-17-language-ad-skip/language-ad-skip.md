@@ -41,7 +41,7 @@ A "run" is a stretch of windows whose P(English) is below 0.3, bridging one wind
 | Any run of at least 6 s | SpeechBrain ECAPA, 2 s hop | 584 of 606 s | 2,344 s |
 | Ad-language rule | SpeechBrain ECAPA, 2 s hop | 64 of 606 s | 6 s |
 
-Why "any other language" fails: English spoken with a strong accent was labelled Arabic, Welsh, Swahili or Latin, with a run's mean P(English) as low as 0.03 and runs up to 28 s long. One 15-minute interview would have lost 16% of its audio. A genuine Arabic clip inside a BBC news report would also have been skipped. Restricting skips to runs of at least 8 s that are mostly in the languages the ads are targeted in eliminated all 23 false positives in this sample: 21 were labelled with other languages, and the two with a German-labelled window lasted only 6 s, below the 8 s minimum.
+Why "any other language" fails: English spoken with a strong accent was labelled Arabic, Welsh, Swahili or Latin, with a run's mean P(English) as low as 0.03 and runs up to 28 s long. One 15-minute interview would have lost 16% of its audio. A genuine Arabic clip inside a BBC news report would also have been skipped. Restricting skips to runs of at least 8 s with at least half their windows in the languages the ads are targeted in eliminated all 23 false positives in this sample: 21 were labelled with other languages, and the two with a German-labelled window lasted only 6 s, below the 8 s minimum.
 
 Why the ECAPA model is out: on produced podcast audio it read about 39 minutes of English as foreign and labelled the Swiss German ads as Dutch, Afrikaans or Estonian. It is fast and Apache-2.0, but unusable here.
 
