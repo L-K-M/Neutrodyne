@@ -258,8 +258,8 @@ until its replacement starts.
 scale; when the controls and programme need more height, the whole assembly
 scrolls. The normal 56–60 dp transport cap is retained through 1.3× text and
 grows above that scale to keep its label inside. Content titles use at most
-two lines with ellipsis and retain their full accessible text. Deck fitting
-uses the measured player height independently of whether the deck is shown.
+two lines with ellipsis and retain their full accessible text. Large text never
+stows the deck (2026-11-17); the cabinet scrolls instead.
 The printed needle scale retains uncapped minutes and seconds; only the
 four-tube counter uses PO-53's capped hours format.
 
@@ -289,10 +289,11 @@ specified above.
 
 Responsive dimensions are dp after system insets: stacked below 600; two
 columns from 600, programme left and speaker/player right; tighter insets
-below 370; compact header/player below 800 high; deck stowed below 660.
-The deck also stows if its natural height leaves fewer than about two rows,
-computed from available space independently of episode count and without
-feedback from the hidden result. Extremely short narrow surfaces scroll
+below 370; compact header/player below 800 high. The tubes stay on every
+screen (owner decision 2026-11-17): the deck shows on every window at least
+560 high, up to 22 % of the height, and on wider windows its chassis grows
+longer instead of the tubes growing; the cabinet takes the rest and scrolls
+when that falls short of its minimum. Extremely short narrow surfaces scroll
 outside; font scaling must not clip or hide controls. Materials ignore theme
 and dynamic colour; other screens retained Appearance until PO-55 (2026-11-17) gave every
 screen the radio's materials ([Theming and colour](#theming-and-colour)). Bundle Barlow
@@ -2356,8 +2357,8 @@ Courier Prime Bold for display, headline and title roles and Barlow for body and
 label roles. The radio's textures, fonts, `MaterialPlate`, `ValveDeck`, `EnamelSign`
 and `IvoryKeyCap` moved to `:core:designsystem`. Every navigation entry except the
 radio home (`FeedsKey`) and overlays renders inside `RadioCabinetPage`: the charcoal
-stage, an 84 dp valve deck on the cabinet roof (stowed below 560 dp of height and on
-later panes of a pane row), walnut walls and a recessed paper tray. The frame consumes
+stage, the valve deck as the cabinet's lid, sized like the home's (stowed below 560 dp
+of height and on later panes of a pane row), walnut walls and a recessed paper tray. The frame consumes
 the status bar, cutout and navigation bar insets, so the status bar keeps light icons
 on every page and page headers no longer lease it. `NdTopAppBar` is a metal faceplate
 with the title on an enamel sign; `NdIconButton` and `NdTooltipIconButton` on a
