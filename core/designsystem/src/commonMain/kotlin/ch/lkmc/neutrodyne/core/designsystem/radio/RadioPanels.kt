@@ -140,7 +140,8 @@ public fun Modifier.threePatch(
     srcCap: Int,
 ): Modifier =
     drawBehind {
-        val cap = srcCap * size.height / image.height
+        // A node too narrow for both ends squeezes them rather than overlapping them.
+        val cap = minOf(srcCap * size.height / image.height, size.width / 2f)
         drawSlices(
             image,
             intArrayOf(0, srcCap, image.width - srcCap, image.width),
