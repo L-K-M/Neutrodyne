@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -225,6 +226,7 @@ private fun MenuKey(
             lineHeight = 15.sp,
             textAlign = TextAlign.Center,
             maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -252,6 +254,8 @@ private fun CountLamp(
             fontWeight = FontWeight.Bold,
             fontSize = 10.sp,
             lineHeight = 11.sp,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
