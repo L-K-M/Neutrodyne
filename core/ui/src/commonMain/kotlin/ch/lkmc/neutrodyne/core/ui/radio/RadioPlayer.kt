@@ -71,6 +71,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggle
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.DialOpening
+import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.IvoryKeyCap
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
@@ -203,22 +204,17 @@ internal fun RadioPlayer(
                 if (!compact) RadioText(radioTimeline(duration), 11, modifier = Modifier.align(Alignment.End))
             }
         }
-        MaterialPlate(
-            RadioMaterial.METAL,
-            Modifier.padding(top = if (compact) 6.dp else 8.dp).fillMaxWidth().border(
-                1.dp,
-                Brass,
-            ),
-        ) {
+        Faceplate(Modifier.padding(top = if (compact) 6.dp else 8.dp).fillMaxWidth()) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 // The skip keys flank the counter while the counter keeps room for legible tubes;
                 // the needle still seeks when very large text leaves no room for them.
                 val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
                 val skipKeys = maxWidth >= SKIP_ROW_RESERVE * capScale + NIXIE_MIN_WIDTH * fontScale
+                // Clear of the faceplate's corner screws.
                 Row(
                     Modifier.fillMaxWidth().padding(
-                        vertical = 7.dp,
-                        horizontal = 9.dp,
+                        vertical = 10.dp,
+                        horizontal = 12.dp,
                     ),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically,
@@ -534,5 +530,5 @@ private val SKIP_CAP = 40.dp
 // Room the row needs besides the counter when the skip keys show: its padding, the play
 // switch and two key targets (all scaled with the cap), then the narrowest counter whose
 // tubes still hold their digits (scaled with the text).
-private val SKIP_ROW_RESERVE = 18.dp + 58.dp + SKIP_TARGET * 2
+private val SKIP_ROW_RESERVE = 24.dp + 58.dp + SKIP_TARGET * 2
 private val NIXIE_MIN_WIDTH = 112.dp

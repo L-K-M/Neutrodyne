@@ -20,6 +20,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_dial_window
+import org.jetbrains.compose.resources.imageResource
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -41,9 +44,7 @@ public fun NeedleGauge(
     Box(
         modifier
             .aspectRatio(GAUGE_ASPECT)
-            .recess(GaugeShape)
-            .dialPaper()
-            .radioGlass()
+            .dialWindow(imageResource(Res.drawable.radio_dial_window))
             .clearAndSetSemantics {},
     ) {
         Canvas(Modifier.fillMaxSize()) {
@@ -106,7 +107,6 @@ private fun GaugeText(
     )
 }
 
-private val GaugeShape = RoundedCornerShape(6.dp)
 private val NeedleRed = Color(0xFFB3261E)
 private const val GAUGE_ASPECT = 2.8f
 private const val PIVOT_Y = 1.18f

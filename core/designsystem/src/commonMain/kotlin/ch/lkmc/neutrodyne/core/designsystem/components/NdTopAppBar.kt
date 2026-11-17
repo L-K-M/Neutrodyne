@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.EnamelSign
+import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.LocalCabinetBackKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.LocalRadioFaceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
@@ -49,8 +50,7 @@ public fun NdTopAppBar(
     elevated: Boolean = false,
 ) {
     // Pinned chrome must win overlap with off-screen semantics from scrolling siblings.
-    MaterialPlate(
-        RadioMaterial.METAL,
+    Faceplate(
         modifier
             .fillMaxWidth()
             .zIndex(PINNED_BAR_Z_INDEX)

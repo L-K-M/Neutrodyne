@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggleFace
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.EngravedHeading
+import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.NeedleWindow
 import ch.lkmc.neutrodyne.core.designsystem.radio.PanelLabel
@@ -302,14 +303,11 @@ private fun PlaybackPanel(
     platform: PlatformKind,
     actions: PlaybackPanelActions,
 ) {
-    MaterialPlate(
-        RadioMaterial.METAL,
+    Faceplate(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
-            .shadow(3.dp, PanelShape)
-            .clip(PanelShape)
-            .border(1.dp, Brass, PanelShape),
+            .shadow(3.dp, PanelShape),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             val speedLabel = stringResource(Res.string.playback_default_speed)

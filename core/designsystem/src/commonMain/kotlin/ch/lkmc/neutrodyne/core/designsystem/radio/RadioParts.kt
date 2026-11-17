@@ -45,7 +45,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_enamel_sign
 import ch.lkmc.neutrodyne.core.designsystem.resources.radio_key_round_up
+import org.jetbrains.compose.resources.imageResource
 import org.jetbrains.compose.resources.painterResource
 
 /**
@@ -105,30 +107,19 @@ private fun EnamelPlaque(
     small: Boolean = false,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(5.dp)
+    // The rendered sign (owner-approved renders, 2026-11-17) scales its rounded, riveted ends with
+    // its height, so the lettering keeps clear of the rivets by a share of that height.
+    val lineHeight = with(LocalDensity.current) { (if (small) SMALL_SIGN_LINE else SIGN_LINE).toDp() }
+    val vertical = if (small) 6.dp else 8.dp
     Row(
         modifier
-            .dropShadow(shape, Shadow(radius = 5.dp, color = Color(0xB3000000), offset = DpOffset(0.dp, 2.dp)))
-            .background(Brush.verticalGradient(listOf(Color(0xFF33495F), Color(0xFF1C2A39), Color(0xFF111A24))), shape)
-            // Vitreous enamel is domed: a soft gloss over its upper half.
-            .drawBehind {
-                drawRect(
-                    Brush.verticalGradient(
-                        0f to Color(0x33FFFFFF),
-                        0.48f to Color(0x0AFFFFFF),
-                        0.5f to Color.Transparent,
-                    ),
-                )
-            }.bevel(shape, depth = 1.dp, light = Color(0x40FFFFFF), shade = Color(0x99000000))
-            .brassRim(shape, width = 2.5.dp)
-            .padding(horizontal = 8.dp, vertical = if (small) 5.dp else 7.dp),
+            .dropShadow(SignShape, Shadow(radius = 5.dp, color = Color(0xB3000000), offset = DpOffset(0.dp, 2.dp)))
+            .threePatch(imageResource(Res.drawable.radio_enamel_sign), SIGN_SRC_CAP)
+            .padding(horizontal = (lineHeight + vertical * 2) * SIGN_RIVET_CLEARANCE, vertical = vertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (small) 5.dp else 7.dp),
-    ) {
-        SignRivet()
-        content()
-        SignRivet()
-    }
+        content = content,
+    )
 }
 
 @Composable
@@ -144,7 +135,7 @@ private fun SignText(
         fontFamily = courier(),
         fontWeight = FontWeight.Bold,
         fontSize = if (small) 14.sp else 18.sp,
-        lineHeight = if (small) 17.sp else 22.sp,
+        lineHeight = if (small) SMALL_SIGN_LINE else SIGN_LINE,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
@@ -180,11 +171,6 @@ public fun BrassCountBadge(
             maxLines = 1,
         )
     }
-}
-
-@Composable
-private fun SignRivet() {
-    Canvas(Modifier.size(7.dp)) { drawRivet(center, size.minDimension / 2) }
 }
 
 /**
@@ -247,3 +233,11 @@ private const val MAX_BADGE_COUNT = 99
 private val BADGE_SIZE = 24.dp
 private const val ICON_FRACTION = 20f / 36f
 private const val LEGEND_FRACTION = 0.28f
+private val SIGN_LINE = 22.sp
+private val SMALL_SIGN_LINE = 17.sp
+private val SignShape = RoundedCornerShape(percent = 50)
+
+// The sign picture's rounded end spans its first 85 px; its rivet ends 0.41 of the height in,
+// and the lettering starts a little clear of it.
+private const val SIGN_SRC_CAP = 85
+private const val SIGN_RIVET_CLEARANCE = 0.6f

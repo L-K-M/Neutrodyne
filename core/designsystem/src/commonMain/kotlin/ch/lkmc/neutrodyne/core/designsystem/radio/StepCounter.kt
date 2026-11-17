@@ -33,6 +33,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_dial_window
+import org.jetbrains.compose.resources.imageResource
 
 /**
  * A mechanical counter on a metal panel: [label] engraved above, [value] printed on cream number
@@ -62,8 +65,9 @@ public fun StepCounter(
                 Modifier
                     .widthIn(min = WINDOW_MIN_WIDTH)
                     .heightIn(min = WINDOW_HEIGHT)
-                    .recess(WindowShape)
-                    .background(Brush.verticalGradient(WheelPaper), WindowShape)
+                    .dialWindow(imageResource(Res.drawable.radio_dial_window))
+                    // The number wheels turn behind the glass: their drum shades away top and bottom.
+                    .background(Brush.verticalGradient(WheelPaper))
                     .let {
                         if (onWindowClick !=
                             null
@@ -146,7 +150,6 @@ private fun StepKey(
     }
 }
 
-private val WindowShape = RoundedCornerShape(4.dp)
 private val WheelPaper = listOf(Color(0xFFD9C7A0), Color(0xFFF8EFD8), Color(0xFFD9C7A0))
 private val WINDOW_MIN_WIDTH = 88.dp
 private val WINDOW_HEIGHT = 56.dp

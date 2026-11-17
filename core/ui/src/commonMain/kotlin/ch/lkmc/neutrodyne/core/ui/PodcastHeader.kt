@@ -57,6 +57,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.PaperCard
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
 import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
@@ -145,16 +146,13 @@ public fun PodcastHeader(
                         .border(2.dp, Brass, CoverShape),
             )
             Spacer(Modifier.width(CARD_GAP))
-            MaterialPlate(
-                RadioMaterial.PAPER,
+            PaperCard(
                 Modifier
                     .weight(1f)
                     .heightIn(min = HERO_SIZE)
-                    .shadow(2.dp, CardShape)
-                    .clip(CardShape)
-                    .border(1.dp, Brass, CardShape),
+                    .shadow(2.dp, CardShape),
             ) {
-                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         detail.displayTitle,
                         style = MaterialTheme.typography.titleLarge,

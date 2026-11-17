@@ -82,6 +82,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
+import ch.lkmc.neutrodyne.core.designsystem.radio.EnamelSelector
+import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
@@ -124,62 +126,6 @@ internal enum class RadioRows(
 }
 
 private val SlipCoverShape = RoundedCornerShape(3.dp)
-
-/**
- * The playlist selector is an enamel sign screwed above the slips: small, centred, and
- * still a 48 dp target. Tapping it opens the playlist chooser.
- */
-@Composable
-private fun PlaylistSign(
-    name: String,
-    compact: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(4.dp)
-    Box(
-        modifier
-            .heightIn(min = 48.dp)
-            .focusProperties { canFocus = true }
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            Modifier
-                .shadow(3.dp, shape)
-                .background(Brush.verticalGradient(listOf(Color(0xFF2B3A4A), Color(0xFF16212D))), shape)
-                .border(2.dp, Brush.verticalGradient(listOf(Color(0xFFE2C98F), Brass, Color(0xFF6E5530))), shape)
-                .padding(horizontal = 8.dp, vertical = if (compact) 4.dp else 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            SignScrew()
-            RadioText(
-                name,
-                if (compact) 13 else 14,
-                modifier = Modifier.weight(1f, fill = false),
-                color = Cream,
-                bold = true,
-                maxLines = 1,
-            )
-            Icon(NdIcons.ArrowForwardIos, null, Modifier.size(11.dp).rotate(90f), tint = Cream)
-            SignScrew()
-        }
-    }
-}
-
-@Composable
-private fun SignScrew() {
-    Canvas(Modifier.size(7.dp)) {
-        drawCircle(Brush.radialGradient(listOf(Color(0xFFF6E7C1), Color(0xFF8A6D3E)), radius = size.minDimension))
-        drawLine(
-            Color(0xFF5A4424),
-            Offset(size.width * 0.2f, size.height * 0.8f),
-            Offset(size.width * 0.8f, size.height * 0.2f),
-            1.dp.toPx(),
-        )
-    }
-}
 
 @Composable
 internal fun RadioProgramme(
@@ -269,24 +215,26 @@ internal fun RadioProgramme(
             undoFocus.requestFocus()
         }
     }
-    MaterialPlate(
-        RadioMaterial.METAL,
+    Faceplate(
         modifier
             .onGloballyPositioned {
                 bounds = it.boundsInWindow()
-            }.border(1.dp, Brass)
-            .padding(6.dp),
+            }.padding(6.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 // Balances the Menu key so the sign stays centred over the slips.
                 Spacer(Modifier.width(radioKeyWidth()))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    PlaylistSign(
+                    // The playlist selector is an enamel sign above the slips that opens the chooser.
+                    EnamelSelector(
                         state.playlist?.name ?: stringResource(Res.string.radio_playlists),
-                        compact,
                         onClick = form::open,
-                        modifier = Modifier.focusRequester(pickerFocus).testTag("radio_playlist"),
+                        modifier =
+                            Modifier
+                                .focusRequester(pickerFocus)
+                                .focusProperties { canFocus = true }
+                                .testTag("radio_playlist"),
                     )
                 }
                 SmallRadioKey(menuLabel, NdIcons.DragHandle, "radio_menu", actions.menu, modifier = menuNotice)

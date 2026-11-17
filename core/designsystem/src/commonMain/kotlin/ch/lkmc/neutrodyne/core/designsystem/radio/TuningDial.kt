@@ -41,6 +41,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_dial_window
+import org.jetbrains.compose.resources.imageResource
 
 /**
  * A radio's station scale: [stations] printed along a strip of dial paper behind glass, with a
@@ -80,9 +83,7 @@ public fun TuningDial(
         modifier
             .fillMaxWidth()
             .height(DIAL_HEIGHT)
-            .recess(DialShape)
-            .dialPaper()
-            .radioGlass()
+            .dialWindow(imageResource(Res.drawable.radio_dial_window))
             .onSizeChanged { viewport = it.width },
     ) {
         Row(
@@ -153,7 +154,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNeedle(x: Float
     drawLine(NeedleRed, Offset(x, top), Offset(x, bottom), 2.dp.toPx(), StrokeCap.Round)
 }
 
-private val DialShape = RoundedCornerShape(6.dp)
 private val NeedleRed = Color(0xFFB3261E)
 private val NeedleShadow = Color(0x33201208)
 private val DIAL_HEIGHT = 64.dp

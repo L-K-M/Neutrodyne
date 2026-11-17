@@ -10,6 +10,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.resources.Res
+import ch.lkmc.neutrodyne.core.designsystem.resources.radio_dial_window
+import org.jetbrains.compose.resources.imageResource
 
 /**
  * A small linear dial behind glass, like the home radio's progress window: a printed tick scale
@@ -23,9 +26,7 @@ public fun NeedleWindow(
 ) {
     Canvas(
         modifier
-            .recess(WindowShape)
-            .dialPaper()
-            .radioGlass()
+            .dialWindow(imageResource(Res.drawable.radio_dial_window))
             .clearAndSetSemantics {},
     ) {
         val inset = 6.dp.toPx()
@@ -43,7 +44,6 @@ public fun NeedleWindow(
     }
 }
 
-private val WindowShape = RoundedCornerShape(3.dp)
 private val NeedleRed = Color(0xFFB3261E)
 private const val TICKS = 20
 private const val MAJOR_EVERY = 5

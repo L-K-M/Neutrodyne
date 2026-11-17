@@ -74,6 +74,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggle
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
+import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
 import ch.lkmc.neutrodyne.core.designsystem.radio.IvoryKeyCap
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
@@ -196,8 +197,7 @@ private fun MiniBar(
     val openRadio: () -> Unit = slot.openRadio
     val navigate: (NavKey) -> Unit = slot.navigate
 
-    MaterialPlate(
-        RadioMaterial.METAL,
+    Faceplate(
         modifier =
             modifier
                 .offset { IntOffset(0, dragOffset.roundToInt()) }
@@ -214,8 +214,6 @@ private fun MiniBar(
                         animate(dragOffset, 0f) { value, _ -> dragOffset = value }
                     },
                 ).shadow(MINI_ELEVATION, StripShape)
-                .clip(StripShape)
-                .border(1.dp, Brass, StripShape)
                 .testTag("player_sheet"),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -288,7 +286,7 @@ private fun MiniBar(
                 shape = RoundedCornerShape(MINI_ART_CORNER),
                 modifier =
                     Modifier
-                        .offset(MINI_ART_OFFSET, MINI_ART_OFFSET)
+                        .offset(MINI_ART_START, MINI_ART_OFFSET)
                         .size(MINI_ART)
                         .recess(RoundedCornerShape(MINI_ART_CORNER))
                         .testTag("playerArtwork"),
@@ -296,7 +294,7 @@ private fun MiniBar(
             if (now.issue != null || now.phase == PlayerPhase.ERROR) {
                 Box(
                     Modifier
-                        .offset(MINI_ART_OFFSET + 4.dp, MINI_ART_OFFSET + 4.dp)
+                        .offset(MINI_ART_START + 4.dp, MINI_ART_OFFSET + 4.dp)
                         .size(8.dp)
                         .clip(RoundedCornerShape(4.dp))
                         .background(SignalRed),
@@ -429,7 +427,9 @@ private val LabelShape = RoundedCornerShape(3.dp)
 private val SignalRed = Color(0xFFB3261E)
 private val Amber = Color(0xFFF3881C)
 private val MINI_ELEVATION = 6.dp
-private val MINI_END_GAP = 6.dp
+
+// The art and the switch keep clear of the faceplate's corner screws.
+private val MINI_END_GAP = 12.dp
 private val NEEDLE_HEIGHT = 14.dp
 private val SKIP_KEYS_MIN_WIDTH = 520.dp
 private val SKIP_KEY_TARGET = 48.dp
@@ -443,8 +443,9 @@ private val MINI_ANCHOR_SPACE = 72.dp
 private val MINI_INSET = 15.dp
 private val MINI_ART = 48.dp
 private val MINI_ART_OFFSET = 8.dp
+private val MINI_ART_START = 12.dp
 private val MINI_ART_CORNER = 3.dp
-private val MINI_TEXT_START = 64.dp
+private val MINI_TEXT_START = 68.dp
 private val DISMISS_DISTANCE = 96.dp
 private const val DISMISS_FRACTION = 0.5f
 private const val MILLIS_PER_SECOND = 1_000L

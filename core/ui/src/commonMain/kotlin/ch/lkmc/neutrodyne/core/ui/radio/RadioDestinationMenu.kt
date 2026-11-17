@@ -49,6 +49,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
 import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.EnamelSign
+import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.IvoryKeyCap
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
@@ -101,13 +102,10 @@ public fun RadioDestinationMenu(
         if (key is TopLevelKey) navigator.selectTab(key) else navigator.push(key)
     }
     Dialog(onDismissRequest = onDismiss) {
-        MaterialPlate(
-            RadioMaterial.METAL,
+        Faceplate(
             modifier
                 .widthIn(max = PLATE_MAX_WIDTH)
                 .shadow(12.dp, PlateShape)
-                .clip(PlateShape)
-                .border(2.dp, Brass, PlateShape)
                 .testTag("radio_destinations"),
         ) {
             Column(
