@@ -22,6 +22,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -137,7 +138,26 @@ class MiniPlayerTest {
             onNodeWithText("Cancel").performClick()
             assertEquals(listOf("decline"), fixture.calls)
         }
+
+    /**
+     * 08 The docked bar: the root reserves 80 dp at the content's bottom edge while the bar shows,
+     * and the radio's cabinet ends every tray above that reservation. The bar must stay inside it,
+     * or it covers the bottom of every page again.
+     */
+    @Test fun theBarStaysInsideTheRootsReservation() =
+        runComposeUiTest {
+            val fixture = MiniFixture()
+            setContent { fixture.Content() }
+            val host = onNodeWithTag("playerHost").fetchSemanticsNode().boundsInRoot
+            val bar = onNodeWithTag("player_sheet").fetchSemanticsNode().boundsInRoot
+            val reach = with(density) { (host.bottom - bar.top).toDp() }
+            assertTrue(reach <= ROOT_RESERVATION, "the bar reaches $reach above the content's bottom")
+            assertTrue(bar.bottom <= host.bottom, "the bar hangs below the content's bottom")
+        }
 }
+
+// `NeutrodyneRoot` reserves this much at the content's bottom edge while the bar shows (08).
+private val ROOT_RESERVATION = 80.dp
 
 private class MiniFixture {
     var now by mutableStateOf<NowPlaying?>(sampleNow())
