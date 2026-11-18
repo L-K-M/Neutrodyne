@@ -2864,7 +2864,7 @@ The desktop window is resizable between the minimum 600 × 480 dp ([PO-19](../PL
 
 - Height is never compact (the minimum is 480 dp), so the radio home is full-bleed and the mini player docks above the navigation chrome at every width; tabletop and book postures do not exist.
 - Window resizes recompute `ndPaneLayout` without recreating anything (no configuration change on the desktop); detail entries stay on their stacks when the pane count drops, exactly as on an unfolding phone.
-- Lists cap their row width at 720 dp and centre inside wider panes, as on tablets; the Library grid and the Discover rows use the extra width for more columns.
+- Lists cap their row width at 720 dp and centre inside wider panes, as on tablets; the Library grid uses the extra width for more columns. Up next, Downloads, Discover and Manage groups keep their whole column (headers, slips, the storage meter, which stops at 480 dp) within 720 dp, centred, while the list itself spans the page so it scrolls from anywhere and its scrollbar stays at the edge (`PageColumnInset` and `pageColumn` in `:core:ui`, 2026-11-18).
 - MD4 AC2's screenshot widths 600, 900 and 1,400 dp cover the one-pane, two-pane and three-pane cases.
 
 ### Pane directive
