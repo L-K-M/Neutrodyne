@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.resources.action_continue
 import ch.lkmc.neutrodyne.core.ui.root.LocalRootScope
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_approve_code_hint
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_approve_code_label
@@ -185,7 +186,7 @@ private fun SyncApproveBody(
             placeholder = { Text(stringResource(Res.string.sync_approve_code_hint)) },
             isError = error != null,
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
         )
         error?.let {
             Text(

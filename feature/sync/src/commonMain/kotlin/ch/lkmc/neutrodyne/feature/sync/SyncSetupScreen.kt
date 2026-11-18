@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.export_passwords
 import ch.lkmc.neutrodyne.core.ui.resources.export_private_links
 import ch.lkmc.neutrodyne.core.ui.resources.group_count
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_address_hint
@@ -474,7 +475,7 @@ private fun AddressStep(
             label = { Text(stringResource(Res.string.sync_setup_title)) },
             placeholder = { Text(stringResource(Res.string.sync_setup_address_hint)) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
         )
         Button(onClick = onContinue, enabled = address.isNotBlank()) {
             Text(stringResource(Res.string.sync_continue))
@@ -603,7 +604,7 @@ private fun InviteInput(
             onValueChange = onCode,
             label = { Text(stringResource(Res.string.sync_setup_invite_label)) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
         )
         Button(onClick = onSubmit, enabled = code.isNotBlank()) {
             Text(stringResource(Res.string.sync_continue))
@@ -625,7 +626,7 @@ private fun PasswordInput(
             onValueChange = onUsername,
             label = { Text(stringResource(Res.string.sync_setup_username_label)) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
         )
         OutlinedTextField(
             value = password,
@@ -633,7 +634,7 @@ private fun PasswordInput(
             label = { Text(stringResource(Res.string.sync_setup_password_label)) },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
         )
         Button(
             onClick = onSubmit,

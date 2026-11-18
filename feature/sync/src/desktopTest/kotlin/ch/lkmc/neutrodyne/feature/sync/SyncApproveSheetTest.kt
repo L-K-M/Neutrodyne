@@ -8,7 +8,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -32,6 +34,8 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.root.LocalRootScope
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.LocalTextFieldFocusState
+import ch.lkmc.neutrodyne.core.ui.root.TextFieldFocusState
 import ch.lkmc.neutrodyne.sync.api.ForgetServerError
 import ch.lkmc.neutrodyne.sync.api.LinkPurpose
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
@@ -50,6 +54,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -74,6 +79,50 @@ class SyncApproveSheetTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test
+    fun theCodeFieldReportsFocusSoGlobalShortcutsStandDown() =
+        runComposeUiTest {
+            val harness = Harness()
+            setSheet(harness)
+
+            onNode(hasSetTextAction()).performClick().assertIsFocused()
+            waitForIdle()
+
+            assertTrue(
+                harness.focusState.active,
+                "a focused field must suspend the root's Space and arrow shortcuts",
+            )
+        }
+
+    @Test
+    fun releasingTheCodeFieldResumesGlobalShortcuts() =
+        runComposeUiTest {
+            val harness = Harness()
+            setSheet(harness)
+
+            onNode(hasSetTextAction()).performClick()
+            onNode(hasSetTextAction()).performTextInput("wdjb-mjht")
+            onNode(hasSetTextAction()).assertIsFocused()
+            waitForIdle()
+            assertTrue(harness.focusState.active)
+
+            // Continuing moves focus to its button; the field must let go even
+            // though the sheet keeps it composed for another code.
+            onNodeWithText("Continue").performClick()
+            waitForIdle()
+            val codeFields = onAllNodes(hasSetTextAction())
+            assertTrue(
+                codeFields.fetchSemanticsNodes().isNotEmpty(),
+                "the sheet must keep the code field composed for another code",
+            )
+            codeFields[0].assertIsNotFocused()
+
+            assertFalse(
+                harness.focusState.active,
+                "releasing focus must resume the root's Space and arrow shortcuts",
+            )
+        }
 
     @Test
     fun codeAloneNeverLinksAndLookupNamesThePendingDevice() =
@@ -344,6 +393,7 @@ class SyncApproveSheetTest {
                 LocalUiClock provides harness.clock,
                 LocalSnackbarHost provides harness.snackbar,
                 LocalRootScope provides rootScope,
+                LocalTextFieldFocusState provides harness.focusState,
             ) {
                 NeutrodyneTheme(SystemUiState.DEFAULT) {
                     SyncApproveSheet(harness.controller, "")
@@ -366,6 +416,7 @@ class SyncApproveSheetTest {
         val navigator = RecordingAppNavigator()
         val clock = TestClock()
         val snackbar = SnackbarHostState()
+        val focusState = TextFieldFocusState()
 
         init {
             controller.fake.approveResult = Outcome.Success(PENDING)

@@ -60,6 +60,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.review
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_idle
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_activity_live
@@ -281,7 +282,7 @@ private fun ColumnScope.NotConfiguredBody(
         label = { Text(stringResource(Res.string.sync_server_address)) },
         placeholder = { Text(stringResource(Res.string.sync_setup_address_hint)) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
     )
     Button(
         onClick = { onContinue(serverAddress.orEmpty().trim()) },
@@ -751,7 +752,7 @@ private fun OwnNameDialog(
                 onValueChange = { name = it },
                 label = stringResource(Res.string.sync_device_name_label),
                 errorText = if (!valid) stringResource(Res.string.sync_device_name_hint) else null,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
             )
             // PaperTextField prints no supporting line; the old hint stays visible below.
             Text(stringResource(Res.string.sync_device_name_hint))

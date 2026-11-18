@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.radio.PaperTextField
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_delete_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_delete_confirm
@@ -210,7 +211,7 @@ private fun DeleteServerDataDialog(
                 value = typed,
                 onValueChange = { typed = it },
                 label = stringResource(Res.string.sync_delete_field),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
             )
         }
     }
