@@ -732,5 +732,6 @@ private enum class DownloadSelectionMode { BROWSE, SELECT }
 
 private val SlipShape = RoundedCornerShape(4.dp)
 
-// The storage meter keeps a phone's proportions on a wide page.
+// The storage meter keeps a phone's proportions on a wide page, start-aligned with the text
+// above and below it.
 private val GAUGE_MAX_WIDTH = 480.dp
