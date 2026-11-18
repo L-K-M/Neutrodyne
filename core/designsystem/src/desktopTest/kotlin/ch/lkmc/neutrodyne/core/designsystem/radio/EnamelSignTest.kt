@@ -11,13 +11,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Dp
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** A page's sign keeps its whole name in a narrow pane (08 Nd wrappers). */
@@ -25,7 +29,7 @@ import kotlin.test.assertTrue
 class EnamelSignTest {
     /**
      * A list pane beside a detail is narrow: the Library's sign, between its keys, had room for
-     * "Libra…" only. Somewhat less room than the sign's natural width letters the name smaller.
+     * "Libra…" only. Somewhat less room letters the name smaller; far too little cuts it short.
      */
     @Test
     fun aNarrowSignLettersItsNameSmallerBeforeCuttingIt() =
@@ -37,23 +41,44 @@ class EnamelSignTest {
                     EnamelSign(NAME, Modifier.testTag(SIGN))
                 }
             }
-            val natural =
-                with(density) {
-                    onNodeWithTag(SIGN)
-                        .fetchSemanticsNode()
-                        .size.width
-                        .toDp()
-                }
-            assertTrue(layout().showsWholeName(), "the sign cut its name short at its natural width")
+            val sign = width(onNodeWithTag(SIGN))
+            val name = width(onNodeWithText(NAME, useUnmergedTree = true))
+            val frame = sign - name
+            val whole = layout()
+            assertTrue(whole.showsWholeName(), "the sign cut its name short at its natural width")
+            val lettering = whole.lettering()
 
-            room = natural * NARROWER
+            // The rooms leave the sign's frame whole and squeeze only its name.
+            room = frame + name * SOMEWHAT_LESS
             waitForIdle()
-            assertTrue(layout().showsWholeName(), "the sign cut \"$NAME\" short in $room")
+            val smaller = layout()
+            assertTrue(smaller.showsWholeName(), "the sign cut \"$NAME\" short in $room")
+            assertTrue(smaller.lettering() < lettering, "the sign kept its full-size lettering in $room")
+
+            // Far too little room: the lettering stops at three quarters of its size and the name
+            // is cut short instead.
+            room = frame + name * FAR_TOO_LITTLE
+            waitForIdle()
+            val cut = layout()
+            assertFalse(cut.showsWholeName(), "the sign kept \"$NAME\" whole in $room")
+            assertEquals(lettering * SMALLEST_LETTERING, cut.lettering(), ADVANCE_TOLERANCE, "letter advance in $room")
+        }
+
+    private fun ComposeUiTest.width(node: SemanticsNodeInteraction): Dp =
+        with(density) {
+            node
+                .fetchSemanticsNode()
+                .size.width
+                .toDp()
         }
 
     // The visible end: isLineEllipsized misses a cut single line here, and the sign's tight line
     // height makes every layout overflow vertically.
     private fun TextLayoutResult.showsWholeName(): Boolean = getLineEnd(0, visibleEnd = true) == NAME.length
+
+    // The resolved auto size is not in the layout's style; the sign's Courier is monospaced, so its
+    // first letter's advance scales with the lettering.
+    private fun TextLayoutResult.lettering(): Float = getHorizontalPosition(1, true) - getHorizontalPosition(0, true)
 
     private fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.layout(): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
@@ -69,6 +94,9 @@ class EnamelSignTest {
     private companion object {
         const val NAME = "Library"
         const val SIGN = "sign"
-        const val NARROWER = 0.85f
+        const val SOMEWHAT_LESS = 0.9f
+        const val FAR_TOO_LITTLE = 0.6f
+        const val SMALLEST_LETTERING = 0.75f
+        const val ADVANCE_TOLERANCE = 0.05f
     }
 }
