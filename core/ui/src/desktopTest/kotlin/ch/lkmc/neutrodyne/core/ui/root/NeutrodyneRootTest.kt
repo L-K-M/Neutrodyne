@@ -214,6 +214,69 @@ class NeutrodyneRootTest {
             onAllNodesWithTag(CABINET_DECK_TAG).assertCountEquals(1)
         }
 
+    /**
+     * 08 Pane roles and detail placeholders: a list with nothing beside it fills a wide window
+     * as one cabinet under its own deck, instead of standing in a narrow pane beside empty ones.
+     */
+    @Test
+    fun aLoneListFillsAWideWindow() {
+        for (width in listOf(840, 1200)) {
+            runDesktopComposeUiTest(width = width, height = 800) {
+                setContent { TestRoot(initialTab = LibraryKey) }
+                onNodeWithText("count:0", useUnmergedTree = true).assertIsDisplayed()
+
+                val window = onNodeWithTag("root-box").fetchSemanticsNode().boundsInRoot
+                val tray = onAllNodesWithTag(CABINET_TRAY_TAG).fetchSemanticsNodes().single().boundsInRoot
+                val share = tray.width / window.width
+                kotlin.test.assertTrue(share > LONE_TRAY_MIN_SHARE, "width $width: the tray covers $share")
+                onAllNodesWithTag(CABINET_DECK_TAG).assertCountEquals(1)
+            }
+        }
+    }
+
+    /** Opening a detail splits the window into a cabinet row; closing it gives the list it all. */
+    @Test
+    fun aListFillsTheWindowAgainWhenItsDetailCloses() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            pending.trySend(Route.Navigate(LibraryKey, listOf(PodcastKey(3))))
+            setContent { TestRoot(routes = pending.receiveAsFlow(), initialTab = LibraryKey) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            onAllNodesWithTag(CABINET_TRAY_TAG).assertCountEquals(2)
+
+            pressEscape()
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("count:0", useUnmergedTree = true).assertIsDisplayed()
+            val window = onNodeWithTag("root-box").fetchSemanticsNode().boundsInRoot
+            val tray = onAllNodesWithTag(CABINET_TRAY_TAG).fetchSemanticsNodes().single().boundsInRoot
+            kotlin.test.assertTrue(tray.width / window.width > LONE_TRAY_MIN_SHARE, "the tray covers ${tray.width}")
+            onAllNodesWithTag(CABINET_DECK_TAG).assertCountEquals(1)
+        }
+
+    /**
+     * A detail placeholder is no back-stack entry, yet it stands in the cabinet beside its list:
+     * one roof line, one deck, and the placeholder inside the second tray.
+     */
+    @Test
+    fun aDetailPlaceholderStandsInTheCabinetRow() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            setContent { TestRoot() }
+            onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            onNodeWithText("settings-home").assertIsDisplayed()
+            onNodeWithText("settings-placeholder").assertIsDisplayed()
+
+            val trays =
+                onAllNodesWithTag(CABINET_TRAY_TAG)
+                    .fetchSemanticsNodes()
+                    .map { it.boundsInRoot }
+                    .sortedBy { it.left }
+            kotlin.test.assertEquals(2, trays.size)
+            kotlin.test.assertEquals(trays[0].top, trays[1].top, "one roof line")
+            val placeholder = onNodeWithText("settings-placeholder").fetchSemanticsNode().boundsInRoot
+            kotlin.test.assertTrue(placeholder.left >= trays[1].left && placeholder.right <= trays[1].right)
+            onAllNodesWithTag(CABINET_DECK_TAG).assertCountEquals(1)
+        }
+
     @Test
     fun playerDeepLinkOpensTheRadioHomeWithoutASidePanel() =
         runDesktopComposeUiTest(width = 1200, height = 800) {
@@ -1103,7 +1166,11 @@ private val TestInstallers: Set<EntryProviderInstaller> =
                 Text("verification-notice")
             }
         }
-        add { entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") } }
+        add {
+            entry<SettingsHomeKey>(
+                metadata = NdSceneMetadata.paneList(detailPlaceholder = { Text("settings-placeholder") }),
+            ) { Text("settings-home") }
+        }
         add {
             entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
                 Text("podcast-${key.podcastId}")
@@ -1193,3 +1260,6 @@ private fun TestTopBar(title: StringResource) {
 
 // The stage's radial gradient stays darker than this everywhere; paper is far above it.
 private const val STAGE_MAX_LUMINANCE = 0.1f
+
+// A lone cabinet keeps only its side gaps and walls off the window's width.
+private const val LONE_TRAY_MIN_SHARE = 0.9f

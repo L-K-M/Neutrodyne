@@ -21,6 +21,8 @@ import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.radio.RadioEpisode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
@@ -172,6 +174,42 @@ class RadioViewModelTest : MainDispatcherTest() {
                     FakePlaybackController.Call.Transport(FakePlaybackController.Action.SEEK, 0),
                     controller.calls.last(),
                 )
+            }
+        }
+
+    @Test fun transportPhaseAndIssueReachTheRadioState() =
+        runTest {
+            withRadio { model, _ ->
+                controller.state.nowPlaying.value =
+                    testNowPlaying(1).copy(isPlaying = false, phase = PlayerPhase.BUFFERING)
+                runCurrent()
+                assertEquals(PlayerPhase.BUFFERING, model.state.value.phase)
+                controller.state.nowPlaying.value =
+                    testNowPlaying(1)
+                        .copy(isPlaying = false, phase = PlayerPhase.ERROR, issue = PlaybackIssue.NETWORK_LOST)
+                runCurrent()
+                assertEquals(PlayerPhase.ERROR, model.state.value.phase)
+                assertEquals(PlaybackIssue.NETWORK_LOST, model.state.value.issue)
+                controller.state.nowPlaying.value = null
+                runCurrent()
+                assertNull(model.state.value.phase)
+                assertNull(model.state.value.issue)
+            }
+        }
+
+    @Test fun aPagingSnapshotDoesNotKeepAStaleTransportPhase() =
+        runTest {
+            withRadio { model, id ->
+                controller.state.nowPlaying.value =
+                    testNowPlaying(1).copy(phase = PlayerPhase.ERROR, issue = PlaybackIssue.PLAYER_ERROR)
+                runCurrent()
+                assertEquals(PlayerPhase.ERROR, model.state.value.phase)
+                controller.state.nowPlaying.value = null
+                runCurrent()
+                model.onRows(id, rows)
+                runCurrent()
+                assertNull(model.state.value.phase)
+                assertNull(model.state.value.issue)
             }
         }
 

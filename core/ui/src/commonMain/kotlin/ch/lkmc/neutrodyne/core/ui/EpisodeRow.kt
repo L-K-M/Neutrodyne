@@ -358,7 +358,7 @@ private fun EpisodeRowLayout(
 }
 
 private const val LARGE_TEXT_FONT_SCALE = 1.5f
-private val ROW_MAX_WIDTH = 720.dp
+private val ROW_MAX_WIDTH = PAGE_COLUMN_MAX_WIDTH
 
 /** Identifies the capped reading block; the interactive track spans the full list line. */
 internal const val READING_BLOCK_TAG = "episode_reading_block"

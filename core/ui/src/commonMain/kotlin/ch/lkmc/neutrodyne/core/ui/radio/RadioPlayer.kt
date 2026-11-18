@@ -84,10 +84,13 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.chapter_seek
+import ch.lkmc.neutrodyne.core.ui.resources.radio_buffering
 import ch.lkmc.neutrodyne.core.ui.resources.radio_choose_other
 import ch.lkmc.neutrodyne.core.ui.resources.radio_cleared
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
+import ch.lkmc.neutrodyne.core.ui.resources.radio_ended
+import ch.lkmc.neutrodyne.core.ui.resources.radio_error
 import ch.lkmc.neutrodyne.core.ui.resources.radio_nothing
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
 import ch.lkmc.neutrodyne.core.ui.resources.radio_play
@@ -99,6 +102,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward_value
 import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_off
 import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_on
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.PI
 import kotlin.math.cos
@@ -119,6 +123,9 @@ internal fun RadioPlayer(
     val status =
         when {
             selected == null -> Res.string.radio_cleared
+            state.phase == PlayerPhase.BUFFERING -> Res.string.radio_buffering
+            state.phase == PlayerPhase.ENDED -> Res.string.radio_ended
+            state.phase == PlayerPhase.ERROR -> Res.string.radio_error
             state.playing -> Res.string.radio_playing
             state.hasPlayed || state.elapsedMs > 0 -> Res.string.radio_paused
             else -> Res.string.radio_ready
@@ -152,19 +159,18 @@ internal fun RadioPlayer(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
+                        val lamp =
+                            when {
+                                state.phase == PlayerPhase.ERROR || state.issue != null -> Brush.radialGradient(LampRed)
+                                state.phase == PlayerPhase.BUFFERING -> Brush.radialGradient(LampAmber)
+                                state.playing -> Brush.radialGradient(LampLit)
+                                else -> Brush.radialGradient(LampDim)
+                            }
                         Box(
                             Modifier
                                 .size(7.dp)
-                                .background(
-                                    Brush.radialGradient(
-                                        if (state.playing) {
-                                            listOf(Color(0xFFFFE9AD), Color(0xFF995017))
-                                        } else {
-                                            listOf(Color(0xFFBDA177), Color(0xFF664422))
-                                        },
-                                    ),
-                                    CircleShape,
-                                ).border(0.5.dp, Color(0xFF654A24), CircleShape),
+                                .background(lamp, CircleShape)
+                                .border(0.5.dp, Color(0xFF654A24), CircleShape),
                         )
                         RadioText(statusText, 11, mono = false, modifier = Modifier.weight(1f))
                         val index = state.episodes.indexOfFirst { it.id == state.selectedId }
@@ -535,3 +541,9 @@ private val SKIP_CAP = 52.dp
 // tubes still hold their digits (scaled with the text).
 private val SKIP_ROW_RESERVE = 24.dp + 58.dp + SKIP_TARGET * 2
 private val NIXIE_MIN_WIDTH = 112.dp
+
+// The pilot lamp: warm while playing, amber while the stream loads, red on a problem.
+private val LampLit = listOf(Color(0xFFFFE9AD), Color(0xFF995017))
+private val LampDim = listOf(Color(0xFFBDA177), Color(0xFF664422))
+private val LampAmber = listOf(Color(0xFFFFE9AD), Color(0xFFB25B12))
+private val LampRed = listOf(Color(0xFFFFB4A9), Color(0xFFB3261E))

@@ -62,6 +62,7 @@ import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.GroupMosaicLayout
+import ch.lkmc.neutrodyne.core.ui.PageColumnInset
 import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.radio.RadioSwitch
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -180,47 +181,49 @@ internal fun GroupsManageScreen(
                     // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
                     val scrollbars = LocalScrollbars.current
                     val scrollbarColor = ndScrollbarColor(scrollbars)
-                    LazyColumn(
-                        state = listState,
-                        modifier =
-                            Modifier
-                                .fillMaxSize()
-                                .testTag("groupsManageList")
-                                .ndScrollbar(listState, scrollbars, scrollbarColor),
-                        contentPadding = PaddingValues(bottom = 96.dp),
-                    ) {
-                        itemsIndexed(state.groups, key = { _, group -> group.id }) { index, group ->
-                            ReorderableItem(reorderState, key = group.id) {
-                                ManageRow(
-                                    state,
-                                    group,
-                                    index,
-                                    onMove,
-                                    onShowAsTab,
-                                    onEdit,
-                                    onDelete,
-                                    onSettings,
-                                    handle = {
-                                        Box(
-                                            Modifier
-                                                .size(48.dp)
-                                                .testTag("groupDrag${group.id}")
-                                                .clearAndSetSemantics {}
-                                                .draggableHandle(
-                                                    enabled = !state.busy && !state.loadFailed,
-                                                    onDragStarted = { onStartDrag(group.id) },
-                                                    dragGestureDetector = detector,
-                                                ),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(
-                                                NdIcons.DragHandle,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    },
-                                )
+                    PageColumnInset(Modifier.fillMaxSize()) { inset ->
+                        LazyColumn(
+                            state = listState,
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    .testTag("groupsManageList")
+                                    .ndScrollbar(listState, scrollbars, scrollbarColor),
+                            contentPadding = PaddingValues(start = inset, end = inset, bottom = 96.dp),
+                        ) {
+                            itemsIndexed(state.groups, key = { _, group -> group.id }) { index, group ->
+                                ReorderableItem(reorderState, key = group.id) {
+                                    ManageRow(
+                                        state,
+                                        group,
+                                        index,
+                                        onMove,
+                                        onShowAsTab,
+                                        onEdit,
+                                        onDelete,
+                                        onSettings,
+                                        handle = {
+                                            Box(
+                                                Modifier
+                                                    .size(48.dp)
+                                                    .testTag("groupDrag${group.id}")
+                                                    .clearAndSetSemantics {}
+                                                    .draggableHandle(
+                                                        enabled = !state.busy && !state.loadFailed,
+                                                        onDragStarted = { onStartDrag(group.id) },
+                                                        dragGestureDetector = detector,
+                                                    ),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(
+                                                    NdIcons.DragHandle,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
                     }

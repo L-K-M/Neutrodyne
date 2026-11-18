@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.core.ui.radio
 
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 
 /** Immutable presentation data; production adapters retain repository IDs, never fixture indices. */
 public data class RadioEpisode(
@@ -36,6 +38,13 @@ public data class RadioState(
     val elapsedMs: Long = 0,
     val playing: Boolean = false,
     val hasPlayed: Boolean = false,
+    /**
+     * The loaded player's phase, so the transport can say BUFFERING, ENDED or ERROR instead of
+     * guessing from [playing]. Null when nothing is loaded or the phase is not tracked.
+     */
+    val phase: PlayerPhase? = null,
+    /** The loaded player's current issue, such as a lost network or a metered block. */
+    val issue: PlaybackIssue? = null,
     val removed: RadioEpisode? = null,
     /** The listener's skip intervals (Playback settings), printed on the keys beside the counter. */
     val skipBackMs: Long = PlaybackSettingKeys.SKIP_BACK_MS.default,

@@ -98,7 +98,7 @@ public fun NeutrodyneNavHost(
                             rememberHeaderBarDecorator(state, tab, directive.maxHorizontalPartitions, pageFrame),
                             rememberCabinetDecorator(directive.maxHorizontalPartitions, pageFrame),
                         ),
-                    entryProvider = { key -> withPaneRole(key, provider(key), tab) },
+                    entryProvider = { key -> withPaneRole(key, provider(key), tab, pageFrame) },
                 )
             }
         }
@@ -107,8 +107,8 @@ public fun NeutrodyneNavHost(
 
     val adaptive = rememberListDetailSceneStrategy<NavKey>(directive = directive)
     val panes =
-        remember(state, provider) {
-            PaneSceneStrategy(state) { key, tab -> withPaneRole(key, provider(key), tab) }
+        remember(state, provider, pageFrame) {
+            PaneSceneStrategy(state) { key, tab -> withPaneRole(key, provider(key), tab, pageFrame) }
         }
     panes.updateCurrent(
         adaptive,
@@ -291,12 +291,14 @@ public fun rememberTabLocalNavEntryDecorator(tab: TopLevelKey): NavEntryDecorato
  * produce the same rendered entries, so the transition spec needs the recorded owner — and
  * translates the platform-neutral [NdSceneMetadata.KEY_PANE] marker into
  * `ListDetailSceneStrategy`'s metadata with [tab] as the `sceneKey`, so a scene never merges
- * entries from two stacks.
+ * entries from two stacks. A detail placeholder stands in the cabinet beside its list, framed
+ * like the pages under [pageFrame].
  */
 private fun withPaneRole(
     key: NavKey,
     entry: NavEntry<NavKey>,
     tab: TopLevelKey,
+    pageFrame: PageFrame,
 ): NavEntry<NavKey> {
     val role = entry.metadata[NdSceneMetadata.KEY_PANE] as? String
     val placeholder =
@@ -308,8 +310,13 @@ private fun withPaneRole(
                 if (placeholder != null) {
                     ListDetailSceneStrategy.listPane(
                         sceneKey = tab,
-                        detailPlaceholder = { placeholder() },
-                    )
+                        detailPlaceholder =
+                            if (pageFrame == PageFrame.RADIO_CABINET) {
+                                { CabinetPlaceholder(placeholder) }
+                            } else {
+                                { placeholder() }
+                            },
+                    ) + mapOf(PANE_HAS_PLACEHOLDER to true)
                 } else {
                     ListDetailSceneStrategy.listPane(sceneKey = tab)
                 }
@@ -335,6 +342,19 @@ private fun withPaneRole(
                 pane + mapOf(NdSceneMetadata.KEY_TAB to tab, PANE_NAV_KEY to key),
         content = { entry.Content() },
     )
+}
+
+/**
+ * A detail placeholder is no back-stack entry, so no entry decorator frames it: in the radio's
+ * cabinet it takes the detail pane's place in the row, under the deck its list carries.
+ */
+@Composable
+@Suppress("FunctionNaming") // Compose functions use PascalCase.
+private fun CabinetPlaceholder(placeholder: @Composable () -> Unit) {
+    RadioCabinetPage(
+        CabinetDeck.HIDDEN,
+        span = cabinetSpan(NdSceneMetadata.PANE_DETAIL, LocalPaneRow.current),
+    ) { placeholder() }
 }
 
 @Composable

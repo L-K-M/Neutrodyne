@@ -685,6 +685,9 @@
     <string name="radio_playing">WIEDERGABE LÄUFT</string>
     <string name="radio_paused">PAUSIERT</string>
     <string name="radio_cleared">PLAYLIST GELEERT</string>
+    <string name="radio_buffering">LÄDT</string>
+    <string name="radio_ended">BEENDET</string>
+    <string name="radio_error">WIEDERGABEFEHLER</string>
     <string name="radio_play">Abspielen</string>
     <string name="radio_switch_on">EIN</string>
     <string name="settings_step_up">%1$s erhöhen</string>

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -86,6 +87,7 @@ import ch.lkmc.neutrodyne.core.ui.DownloadStateButton
 import ch.lkmc.neutrodyne.core.ui.DownloadStatusText
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.PageColumnInset
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.asString
@@ -187,183 +189,193 @@ internal fun DownloadsScreen(
         val scrollbars = LocalScrollbars.current
         val scrollbarColor = ndScrollbarColor(scrollbars)
         engineNotice()
-        LazyColumn(
-            state = list,
-            modifier = Modifier.weight(1f).ndScrollbar(list, scrollbars, scrollbarColor),
-            contentPadding =
-                PaddingValues(
-                    bottom =
-                        LocalMiniPlayerInset.current,
-                ),
-        ) {
-            item("storage") {
-                Column(Modifier.padding(16.dp)) {
-                    Text(
-                        state.storage?.let {
-                            stringResource(
-                                Res.string.downloads_storage,
-                                downloadSize(it.usedBytes),
-                                it.freeBytes?.let(::downloadSize) ?: "—",
-                            )
-                        } ?: "—",
-                    )
-                    state.storage?.let { usage ->
-                        val free = usage.freeBytes
-                        if (free != null && usage.usedBytes + free > 0) {
-                            // A storage meter behind glass (PO-55); the line above states the values.
-                            NeedleGauge(
-                                fraction = usage.usedBytes.toFloat() / (usage.usedBytes + free),
-                                caption = stringResource(Res.string.downloads_gauge_storage),
-                                endLabel = stringResource(Res.string.downloads_gauge_full),
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            )
-                        }
+        PageColumnInset(Modifier.weight(1f)) { inset ->
+            LazyColumn(
+                state = list,
+                modifier = Modifier.fillMaxSize().ndScrollbar(list, scrollbars, scrollbarColor),
+                contentPadding =
+                    PaddingValues(
+                        start = inset,
+                        end = inset,
+                        bottom =
+                            LocalMiniPlayerInset.current,
+                    ),
+            ) {
+                item("storage") {
+                    Column(Modifier.padding(16.dp)) {
                         Text(
-                            stringResource(
-                                Res.string.downloads_partial,
-                                downloadSize(usage.partialBytes),
-                                downloadSize(usage.orphanBytes),
-                            ),
+                            state.storage?.let {
+                                stringResource(
+                                    Res.string.downloads_storage,
+                                    downloadSize(it.usedBytes),
+                                    it.freeBytes?.let(::downloadSize) ?: "—",
+                                )
+                            } ?: "—",
                         )
-                    }
-                    KeyBank(Modifier.padding(top = 8.dp)) {
-                        MomentaryKey(stringResource(Res.string.downloads_settings), onSettings)
-                    }
-                }
-            }
-            if (rows == null) {
-                item("loading") {
-                    if (state.failed) {
-                        NdTextButton(stringResource(Res.string.action_retry), onClick = onReload)
-                    } else {
-                        Column {
-                            Text(stringResource(Res.string.downloads_loading))
-                            repeat(3) { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp)) }
+                        state.storage?.let { usage ->
+                            val free = usage.freeBytes
+                            if (free != null && usage.usedBytes + free > 0) {
+                                // A storage meter behind glass (PO-55); the line above states the values.
+                                NeedleGauge(
+                                    fraction = usage.usedBytes.toFloat() / (usage.usedBytes + free),
+                                    caption = stringResource(Res.string.downloads_gauge_storage),
+                                    endLabel = stringResource(Res.string.downloads_gauge_full),
+                                    modifier =
+                                        Modifier
+                                            .widthIn(max = GAUGE_MAX_WIDTH)
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                )
+                            }
+                            Text(
+                                stringResource(
+                                    Res.string.downloads_partial,
+                                    downloadSize(usage.partialBytes),
+                                    downloadSize(usage.orphanBytes),
+                                ),
+                            )
+                        }
+                        KeyBank(Modifier.padding(top = 8.dp)) {
+                            MomentaryKey(stringResource(Res.string.downloads_settings), onSettings)
                         }
                     }
                 }
-                return@LazyColumn
-            }
-            item("notices") {
-                ch.lkmc.neutrodyne.core.ui
-                    .DownloadNotices(rows, LocalPlatformKind.current, onNotice)
-            }
-            if (rows.inProgress.isEmpty() && rows.failed.isEmpty() && rows.completed.isEmpty()) {
-                item("empty") {
-                    NdEmptyState(
-                        NdIcons.Download,
-                        stringResource(Res.string.downloads_empty_manual),
-                        stringResource(Res.string.downloads_empty_body),
-                    )
-                }
-            }
-            if (rows.inProgress.isNotEmpty()) {
-                item("progress-header") {
-                    SectionHeader(stringResource(Res.string.downloads_in_progress, rows.inProgress.size)) {
-                        MomentaryKey(stringResource(Res.string.downloads_pause_all), onPauseAll)
-                        MomentaryKey(stringResource(Res.string.downloads_resume_all), onResumeAll)
-                    }
-                }
-                items(rows.inProgress, key = { it.status.episodeId }) { entry ->
-                    // A constrained runner may not have started to persist NETWORK yet.
-                    val displayEntry =
-                        if (state.offline && entry.status.state == DownloadState.QUEUED &&
-                            entry.status.waitReason in setOf(WaitReason.NONE, WaitReason.SLOT)
-                        ) {
-                            entry.copy(status = entry.status.copy(waitReason = WaitReason.NETWORK))
+                if (rows == null) {
+                    item("loading") {
+                        if (state.failed) {
+                            NdTextButton(stringResource(Res.string.action_retry), onClick = onReload)
                         } else {
-                            entry
+                            Column {
+                                Text(stringResource(Res.string.downloads_loading))
+                                repeat(3) { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp)) }
+                            }
                         }
-                    DownloadEntryRow(
-                        displayEntry,
-                        live[entry.status.episodeId],
-                        false,
-                        onOpen,
-                        onToggle,
-                        onCommand,
-                        onCancel,
-                        onDelete,
-                        onPlay,
-                        onShare,
-                        onSelect,
-                    )
-                }
-            }
-            if (rows.failed.isNotEmpty()) {
-                item("failed-header") {
-                    SectionHeader(
-                        stringResource(
-                            Res.string.downloads_failed,
-                            rows.failed.size,
-                        ),
-                    ) {
-                        MomentaryKey(stringResource(Res.string.downloads_retry_all), onRetryAll)
                     }
+                    return@LazyColumn
                 }
-                items(rows.failed, key = { it.status.episodeId }) { entry ->
-                    DownloadEntryRow(
-                        entry,
-                        null,
-                        false,
-                        onOpen,
-                        onToggle,
-                        onCommand,
-                        onCancel,
-                        onDelete,
-                        onPlay,
-                        onShare,
-                        onSelect,
-                    )
+                item("notices") {
+                    ch.lkmc.neutrodyne.core.ui
+                        .DownloadNotices(rows, LocalPlatformKind.current, onNotice)
                 }
-            }
-            if (rows.completed.isNotEmpty()) {
-                item("completed-header") {
-                    SectionHeader(
-                        stringResource(
-                            Res.string.downloads_completed,
-                            rows.completed.size,
-                            downloadSize(rows.completed.sumOf { it.status.totalBytes ?: it.status.downloadedBytes }),
-                        ),
-                    ) {
-                        MomentaryKey(stringResource(Res.string.downloads_play_all), { onPlay(null) })
-                        // Selection is limited to completed files; queued transfers cannot be deleted
-                        // accidentally.
-                        MomentaryKey(stringResource(Res.string.downloads_select_all), onSelectAll)
-                        MomentaryKey(stringResource(Res.string.downloads_select_played), onSelectPlayedEpisodes)
-                    }
-                    if (state.selected.isNotEmpty()) {
-                        Text(
-                            stringResource(Res.string.downloads_selected, state.selected.size),
-                            Modifier.padding(start = 16.dp, top = 8.dp),
-                            style = MaterialTheme.typography.labelLarge,
+                if (rows.inProgress.isEmpty() && rows.failed.isEmpty() && rows.completed.isEmpty()) {
+                    item("empty") {
+                        NdEmptyState(
+                            NdIcons.Download,
+                            stringResource(Res.string.downloads_empty_manual),
+                            stringResource(Res.string.downloads_empty_body),
                         )
-                        KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            MomentaryKey(stringResource(Res.string.action_delete_download), onDeleteSelection)
-                            MomentaryKey(stringResource(Res.string.downloads_cancel_selection), onClearSelection)
-                        }
                     }
                 }
-                items(rows.completed, key = { it.status.episodeId }) { entry ->
-                    DownloadEntryRow(
-                        entry,
-                        null,
-                        entry.status.episodeId in state.selected,
-                        onOpen,
-                        onToggle,
-                        onCommand,
-                        onCancel,
-                        onDelete,
-                        onPlay,
-                        onShare,
-                        onSelect,
-                        onReveal = onReveal,
-                        selectionMode =
-                            if (state.selected.isEmpty()) {
-                                DownloadSelectionMode.BROWSE
+                if (rows.inProgress.isNotEmpty()) {
+                    item("progress-header") {
+                        SectionHeader(stringResource(Res.string.downloads_in_progress, rows.inProgress.size)) {
+                            MomentaryKey(stringResource(Res.string.downloads_pause_all), onPauseAll)
+                            MomentaryKey(stringResource(Res.string.downloads_resume_all), onResumeAll)
+                        }
+                    }
+                    items(rows.inProgress, key = { it.status.episodeId }) { entry ->
+                        // A constrained runner may not have started to persist NETWORK yet.
+                        val displayEntry =
+                            if (state.offline && entry.status.state == DownloadState.QUEUED &&
+                                entry.status.waitReason in setOf(WaitReason.NONE, WaitReason.SLOT)
+                            ) {
+                                entry.copy(status = entry.status.copy(waitReason = WaitReason.NETWORK))
                             } else {
-                                DownloadSelectionMode.SELECT
-                            },
-                    )
+                                entry
+                            }
+                        DownloadEntryRow(
+                            displayEntry,
+                            live[entry.status.episodeId],
+                            false,
+                            onOpen,
+                            onToggle,
+                            onCommand,
+                            onCancel,
+                            onDelete,
+                            onPlay,
+                            onShare,
+                            onSelect,
+                        )
+                    }
+                }
+                if (rows.failed.isNotEmpty()) {
+                    item("failed-header") {
+                        SectionHeader(
+                            stringResource(
+                                Res.string.downloads_failed,
+                                rows.failed.size,
+                            ),
+                        ) {
+                            MomentaryKey(stringResource(Res.string.downloads_retry_all), onRetryAll)
+                        }
+                    }
+                    items(rows.failed, key = { it.status.episodeId }) { entry ->
+                        DownloadEntryRow(
+                            entry,
+                            null,
+                            false,
+                            onOpen,
+                            onToggle,
+                            onCommand,
+                            onCancel,
+                            onDelete,
+                            onPlay,
+                            onShare,
+                            onSelect,
+                        )
+                    }
+                }
+                if (rows.completed.isNotEmpty()) {
+                    item("completed-header") {
+                        SectionHeader(
+                            stringResource(
+                                Res.string.downloads_completed,
+                                rows.completed.size,
+                                downloadSize(
+                                    rows.completed.sumOf { it.status.totalBytes ?: it.status.downloadedBytes },
+                                ),
+                            ),
+                        ) {
+                            MomentaryKey(stringResource(Res.string.downloads_play_all), { onPlay(null) })
+                            // Selection is limited to completed files; queued transfers cannot be deleted
+                            // accidentally.
+                            MomentaryKey(stringResource(Res.string.downloads_select_all), onSelectAll)
+                            MomentaryKey(stringResource(Res.string.downloads_select_played), onSelectPlayedEpisodes)
+                        }
+                        if (state.selected.isNotEmpty()) {
+                            Text(
+                                stringResource(Res.string.downloads_selected, state.selected.size),
+                                Modifier.padding(start = 16.dp, top = 8.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                MomentaryKey(stringResource(Res.string.action_delete_download), onDeleteSelection)
+                                MomentaryKey(stringResource(Res.string.downloads_cancel_selection), onClearSelection)
+                            }
+                        }
+                    }
+                    items(rows.completed, key = { it.status.episodeId }) { entry ->
+                        DownloadEntryRow(
+                            entry,
+                            null,
+                            entry.status.episodeId in state.selected,
+                            onOpen,
+                            onToggle,
+                            onCommand,
+                            onCancel,
+                            onDelete,
+                            onPlay,
+                            onShare,
+                            onSelect,
+                            onReveal = onReveal,
+                            selectionMode =
+                                if (state.selected.isEmpty()) {
+                                    DownloadSelectionMode.BROWSE
+                                } else {
+                                    DownloadSelectionMode.SELECT
+                                },
+                        )
+                    }
                 }
             }
         }
@@ -719,3 +731,7 @@ private fun downloadEntryText(
 private enum class DownloadSelectionMode { BROWSE, SELECT }
 
 private val SlipShape = RoundedCornerShape(4.dp)
+
+// The storage meter keeps a phone's proportions on a wide page, start-aligned with the text
+// above and below it.
+private val GAUGE_MAX_WIDTH = 480.dp

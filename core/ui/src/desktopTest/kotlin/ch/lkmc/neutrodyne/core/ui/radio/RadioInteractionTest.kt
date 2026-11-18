@@ -4,11 +4,13 @@ package ch.lkmc.neutrodyne.core.ui.radio
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
@@ -33,6 +35,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -46,6 +49,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -53,12 +57,19 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
+import ch.lkmc.neutrodyne.core.ui.resources.radio_buffering
 import ch.lkmc.neutrodyne.core.ui.resources.radio_discard_episode
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
+import ch.lkmc.neutrodyne.core.ui.resources.radio_ended
+import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
+import ch.lkmc.neutrodyne.core.ui.resources.radio_error
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
+import ch.lkmc.neutrodyne.core.ui.resources.radio_playing
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
+import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -165,6 +176,155 @@ class RadioInteractionTest {
             onNodeWithText(getString(Res.string.radio_paused)).assertIsDisplayed()
             onNodeWithContentDescription(getString(Res.string.radio_elapsed_full, 12L, 0L, 0L)).assertIsDisplayed()
             onAllNodes(hasText("900:00")).assertCountEquals(2)
+        }
+
+    @Test
+    fun transportStatusFollowsTheLoadedPhase() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var phase by mutableStateOf<PlayerPhase?>(null)
+            var issue by mutableStateOf<PlaybackIssue?>(null)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(playing = true, phase = phase, issue = issue),
+                        RadioActions(),
+                    )
+                }
+            }
+            onNodeWithText(getString(Res.string.radio_playing)).assertIsDisplayed()
+            runOnIdle { phase = PlayerPhase.BUFFERING }
+            onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
+            runOnIdle { phase = PlayerPhase.ENDED }
+            onNodeWithText(getString(Res.string.radio_ended)).assertIsDisplayed()
+            runOnIdle {
+                phase = PlayerPhase.ERROR
+                issue = null
+            }
+            onNodeWithText(getString(Res.string.radio_error)).assertIsDisplayed()
+            // An issue with a ready phase keeps the transport status but lights the red lamp,
+            // as the mini player's error dot does.
+            runOnIdle {
+                phase = null
+                issue = PlaybackIssue.NETWORK_LOST
+            }
+            onNodeWithText(getString(Res.string.radio_playing)).assertIsDisplayed()
+            // An issue during buffering keeps the BUFFERING status text; the lamp treats any
+            // issue as red regardless of the buffering branch order.
+            runOnIdle {
+                phase = PlayerPhase.BUFFERING
+                issue = PlaybackIssue.NETWORK_LOST
+            }
+            onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
+        }
+
+    @Test
+    fun arrowKeysMoveTheSelectionAndFocusThroughTheProgramme() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(selectedId = selected),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithTag("radio_episode_1").performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(2L, selected)
+            onNodeWithTag("radio_episode_2").assertIsFocused()
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(3L, selected)
+            onNodeWithTag("radio_episode_3").assertIsFocused()
+            onNodeWithTag("radio_episode_3").performKeyInput { pressKey(Key.DirectionUp) }
+            assertEquals(2L, selected)
+            onNodeWithTag("radio_episode_2").assertIsFocused()
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.DirectionUp) }
+            assertEquals(1L, selected)
+            onNodeWithTag("radio_episode_1").assertIsFocused()
+            // The top stops instead of wrapping.
+            onNodeWithTag("radio_episode_1").performKeyInput { pressKey(Key.DirectionUp) }
+            assertEquals(1L, selected)
+        }
+
+    @Test
+    fun arrowKeysScrollALongProgrammeToTheSelection() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            val episodes =
+                (1..40).map { RadioEpisode(it.toLong(), "Episode $it", "Podcast", 20 * 60_000L) }
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(
+                            playlists = listOf(RadioPlaylist(1, "Rotation", 1)),
+                            playlistId = 1,
+                            episodes = episodes,
+                            selectedId = selected,
+                        ),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            repeat(12) {
+                onNode(isFocused()).performKeyInput { pressKey(Key.DirectionDown) }
+            }
+            assertEquals(13L, selected)
+            onNodeWithTag("radio_episode_13").assertIsFocused().assertIsDisplayed()
+        }
+
+    @Test
+    fun arrowChordsPassThroughToTheRoot() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(selectedId = selected),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithTag("radio_episode_1").performKeyInput {
+                withKeyDown(Key.CtrlLeft) { pressKey(Key.DirectionDown) }
+                withKeyDown(Key.MetaLeft) { pressKey(Key.DirectionUp) }
+            }
+            assertEquals(1L, selected)
+            // A plain Shift+Arrow still tunes, as it did before the chord guard.
+            onNodeWithTag("radio_episode_1").performKeyInput {
+                withKeyDown(Key.ShiftLeft) { pressKey(Key.DirectionDown) }
+            }
+            assertEquals(2L, selected)
+        }
+
+    @Test
+    fun arrowKeysSurviveTheListShiftingUnderTheFocusedSlip() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var episodes by
+                mutableStateOf(
+                    (1..6).map { RadioEpisode(it.toLong(), "Episode $it", "Podcast", 20 * 60_000L) },
+                )
+            var selected by mutableLongStateOf(3L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(
+                            playlists = listOf(RadioPlaylist(1, "Rotation", 1)),
+                            playlistId = 1,
+                            episodes = episodes,
+                            selectedId = selected,
+                        ),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_3").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            // The row above the focused slip goes away, so the focused index no longer names it.
+            runOnIdle { episodes = episodes.filterNot { it.id == 1L } }
+            onNode(isFocused()).performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(4L, selected)
         }
 
     @Test fun openChooserSurvivesColumnSwitchAndRecreation() =
@@ -455,6 +615,25 @@ class RadioInteractionTest {
             runOnIdle { width = 320 }
             onNodeWithTag("radio_episode_1").performTouchInput { up() }
             assertEquals(0, discards)
+        }
+
+    // The deck and the cabinet are sized from the usable height; the transport must follow it,
+    // not the raw window. The test window is 844 dp tall, but the screen is pinned to 772 dp
+    // of content (844 dp with 72 dp of insets), which is the compact home.
+    @Test fun theTransportFollowsTheUsableHeightNotTheWindow() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val heading = getString(Res.string.radio_episodes).uppercase()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    Box(Modifier.height(772.dp)) {
+                        RadioScreen(radioFixture(), RadioActions())
+                    }
+                }
+            }
+            // The compact home is really on screen: its transport and programme are present.
+            onNodeWithTag("radio_play").assertIsDisplayed()
+            onNodeWithTag("radio_episodes").assertIsDisplayed()
+            onNodeWithText(heading).assertDoesNotExist()
         }
 
     @Test fun focusedDeleteAndChooserEscapeRestoreFocus() =
