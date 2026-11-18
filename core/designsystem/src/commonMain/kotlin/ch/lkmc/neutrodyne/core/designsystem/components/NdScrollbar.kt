@@ -63,7 +63,7 @@ public fun Modifier.ndScrollbar(
         val first = info.visibleItemsInfo.firstOrNull() ?: return@drawWithContent
         val itemProgress = first.index + if (first.size > 0) -first.offset / first.size.toFloat() else 0f
         val track = size.height
-        val thumb = (track * visible / total).coerceAtLeast(style.minThumb.toPx())
+        val thumb = (track * visible / total).coerceAtLeast(style.minThumb.toPx()).coerceAtMost(track)
         val travel = track - thumb
         val offset = (itemProgress / (total - visible).coerceAtLeast(1)) * travel
         drawThumb(thumbColor, style, viewport, thumb, offset.coerceIn(0f, travel))
@@ -83,7 +83,7 @@ public fun Modifier.ndScrollbar(
         val visible = info.visibleItemsInfo.size
         if (total <= visible || total == 0) return@drawWithContent
         val track = size.height
-        val thumb = (track * visible / total).coerceAtLeast(style.minThumb.toPx())
+        val thumb = (track * visible / total).coerceAtLeast(style.minThumb.toPx()).coerceAtMost(track)
         val travel = track - thumb
         val first = info.visibleItemsInfo.firstOrNull() ?: return@drawWithContent
         val itemProgress =
@@ -104,7 +104,7 @@ public fun Modifier.ndScrollbar(
         val contentSize = (state.maxValue + size.height).coerceAtLeast(1f)
         if (state.maxValue <= 0 || state.maxValue == Int.MAX_VALUE) return@drawWithContent
         val track = size.height
-        val thumb = (track * size.height / contentSize).coerceAtLeast(style.minThumb.toPx())
+        val thumb = (track * size.height / contentSize).coerceAtLeast(style.minThumb.toPx()).coerceAtMost(track)
         val travel = track - thumb
         val offset = (state.value / state.maxValue.toFloat()) * travel
         drawThumb(thumbColor, style, track, thumb, offset.coerceIn(0f, travel))
