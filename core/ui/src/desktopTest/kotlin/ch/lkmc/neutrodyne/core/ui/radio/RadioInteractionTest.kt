@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -52,7 +53,6 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
-import ch.lkmc.neutrodyne.core.ui.resources.chapter_seek
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
@@ -450,8 +450,12 @@ class RadioInteractionTest {
                 moveBy(Offset(width * 0.3f, 0f))
                 assertEquals(0, seeks.size)
             }
-            // The drag only moves the needle locally; the screen reader follows the preview.
-            onNodeWithTag("radio_seek").assertContentDescriptionEquals(getString(Res.string.chapter_seek, "19:00"))
+            needle.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ProgressBarRangeInfo,
+                    ProgressBarRangeInfo(0.5f, 0f..1f),
+                ),
+            )
             assertEquals(0, seeks.size)
             needle.performTouchInput { up() }
             assertEquals(listOf(1_140_000L), seeks)
