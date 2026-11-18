@@ -219,8 +219,14 @@ class RadioInteractionTest {
             onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             onNodeWithTag("radio_episode_1").performKeyInput {
                 withKeyDown(Key.CtrlLeft) { pressKey(Key.DirectionDown) }
+                withKeyDown(Key.MetaLeft) { pressKey(Key.DirectionUp) }
             }
             assertEquals(1L, selected)
+            // A plain Shift+Arrow still tunes, as it did before the chord guard.
+            onNodeWithTag("radio_episode_1").performKeyInput {
+                withKeyDown(Key.ShiftLeft) { pressKey(Key.DirectionDown) }
+            }
+            assertEquals(2L, selected)
         }
 
     @Test

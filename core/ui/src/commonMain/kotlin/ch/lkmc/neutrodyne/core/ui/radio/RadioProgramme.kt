@@ -63,7 +63,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
-import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
@@ -207,8 +206,9 @@ internal fun RadioProgramme(
     }
     // Arrow keys tune the programme like a station dial: the selection follows and focus travels
     // with it. Only a focused slip starts it, so the list never takes arrows from a field or a
-    // sheet. Chords pass through untouched for the root's own shortcuts (its volume chords are
-    // Ctrl/Cmd+Up/Down), and the handler bubbles so a descendant that learns arrows later wins.
+    // sheet. Ctrl/Cmd/Alt chords pass through untouched for the root's own shortcuts (its
+    // volume chords are Ctrl/Cmd+Up/Down); a plain Shift+Arrow still tunes, as it did before.
+    // The handler bubbles, so a descendant that learns arrows later wins.
     val scope = rememberCoroutineScope()
     var focusedId by remember { mutableStateOf<Long?>(null) }
     val slipFocus = remember(state.playlistId) { mutableMapOf<Long, FocusRequester>() }
@@ -268,9 +268,7 @@ internal fun RadioProgramme(
                                 .testTag("radio_episodes")
                                 .onKeyEvent { event ->
                                     if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-                                    if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed ||
-                                        event.isShiftPressed
-                                    ) {
+                                    if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed) {
                                         return@onKeyEvent false
                                     }
                                     val delta =
@@ -286,7 +284,12 @@ internal fun RadioProgramme(
                                         focusedId
                                             ?.let { id -> state.episodes.indexOfFirst { it.id == id } }
                                             ?.takeIf { it >= 0 }
-                                            ?: state.episodes.indexOfFirst { it.id == state.selectedId }
+                                            ?: state.episodes
+                                                .indexOfFirst { it.id == state.selectedId }
+                                                .takeIf { it >= 0 }
+                                            // Neither the focused nor the selected episode is in
+                                            // the list: ignore the press, don't jump to an end.
+                                            ?: return@onKeyEvent false
                                     val target = current + delta
                                     if (target !in state.episodes.indices) return@onKeyEvent false
                                     actions.selectEpisode(state.episodes[target].id)
