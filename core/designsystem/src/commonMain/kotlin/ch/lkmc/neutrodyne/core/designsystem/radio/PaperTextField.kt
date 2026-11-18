@@ -105,11 +105,15 @@ public fun PaperTextField(
         decorationBox = { field ->
             Column {
                 // Inside the field, so its text merges into the field's name, as a Material label's
-                // does; spelled as written for screen readers, which spell some all-caps words.
+                // does; spelled as written for screen readers, which spell some all-caps words. It
+                // wraps rather than cuts off: a name such as "Type DELETE to confirm" is the only
+                // place some dialogs say what to type.
                 if (label != null) {
                     Text(
                         label.uppercase(),
-                        Modifier.padding(start = 2.dp, bottom = 4.dp).clearAndSetSemantics {
+                        // A tight line, so a wrapped name reads as one; the padding keeps a
+                        // one-line name where the theme's 24 sp line put it.
+                        Modifier.padding(start = 2.dp, top = 4.5.dp, bottom = 8.5.dp).clearAndSetSemantics {
                             text = AnnotatedString(label)
                         },
                         color = Ink,
@@ -117,8 +121,7 @@ public fun PaperTextField(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = LABEL_TEXT,
                         letterSpacing = LABEL_SPACING,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = LABEL_LINE_HEIGHT,
                     )
                 }
                 PaperStrip(value, placeholder, rim, leadingIcon, trailingText, trailing, field)
@@ -218,6 +221,7 @@ private val FIELD_HEIGHT = 52.dp
 private val FIELD_TEXT = 16.sp
 private val LABEL_TEXT = 11.sp
 private val LABEL_SPACING = 1.5.sp
+private val LABEL_LINE_HEIGHT = 15.sp
 private val FACEPLATE_KEY = 36.dp
 private const val PLACEHOLDER_ALPHA = 0.6f
 private const val DISABLED_ALPHA = 0.5f

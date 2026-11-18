@@ -1930,9 +1930,10 @@ symbol, the title in Courier and the actions as a bank of momentary keys, ordere
 optional alternative answer (the metered prompt's Always), then the confirm. A destructive
 confirm prints its label in the error red, and an unavailable action is a dimmed key. No
 screen calls Material's `AlertDialog` directly. Fields in dialogs are paper strips
-(`PaperTextField`), each with its name printed above it in spaced capitals. The name stays
-when the field is filled and is the field's name for screen readers, so two masked keys stay
-distinguishable. That includes the credential pair, whose password stays masked behind a
+(`PaperTextField`), each with its name printed above it in spaced capitals. A long name
+wraps rather than being cut off, since "Type DELETE to confirm" is the only place the sync
+delete dialog says what to type. The name stays when the field is filled and is the field's
+name for screen readers, so two masked keys stay distinguishable. That includes the credential pair, whose password stays masked behind a
 show-password key at the strip's end. A lone search strip names itself with its placeholder.
 
 ### String mappers
