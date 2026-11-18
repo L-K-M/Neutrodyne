@@ -35,8 +35,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -51,6 +53,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -60,6 +63,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
@@ -111,6 +115,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_release
 import ch.lkmc.neutrodyne.core.ui.resources.radio_removed
 import ch.lkmc.neutrodyne.core.ui.resources.settings_update_available
 import ch.lkmc.neutrodyne.core.ui.root.LocalSettingsBadge
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -198,6 +203,14 @@ internal fun RadioProgramme(
             undoFocus.requestFocus()
         }
     }
+    // Arrow keys tune the programme like a station dial: the selection follows and focus travels
+    // with it. Only a focused slip starts it, so the list never takes arrows from a field or a
+    // sheet; the root's volume chords are Ctrl/Cmd+Up/Down and are untouched.
+    val scope = rememberCoroutineScope()
+    var focusedIndex by remember { mutableIntStateOf(-1) }
+    val slipFocus = remember { mutableMapOf<Long, FocusRequester>() }
+
+    fun focusFor(id: Long): FocusRequester = slipFocus.getOrPut(id) { FocusRequester() }
     Faceplate(
         modifier
             .onGloballyPositioned {
@@ -246,7 +259,37 @@ internal fun RadioProgramme(
                             }
                         }
                     } else {
-                        LazyColumn(Modifier.weight(1f).testTag("radio_episodes"), state = scroll) {
+                        LazyColumn(
+                            Modifier
+                                .weight(1f)
+                                .testTag("radio_episodes")
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    val delta =
+                                        when (event.key) {
+                                            Key.DirectionDown -> 1
+                                            Key.DirectionUp -> -1
+                                            else -> 0
+                                        }
+                                    if (delta == 0) return@onPreviewKeyEvent false
+                                    val current =
+                                        focusedIndex.takeIf { it in state.episodes.indices }
+                                            ?: state.episodes.indexOfFirst { it.id == state.selectedId }
+                                    val target = current + delta
+                                    if (target !in state.episodes.indices) return@onPreviewKeyEvent false
+                                    actions.selectEpisode(state.episodes[target].id)
+                                    focusedIndex = target
+                                    scope.launch {
+                                        scroll.animateScrollToItem(target)
+                                        withFrameNanos { }
+                                        if (scroll.layoutInfo.visibleItemsInfo.any { it.index == target }) {
+                                            focusFor(state.episodes[target].id).requestFocus()
+                                        }
+                                    }
+                                    true
+                                },
+                            state = scroll,
+                        ) {
                             itemsIndexed(state.episodes, key = { _, episode -> episode.id }) { index, episode ->
                                 LaunchedEffect(index) { actions.loadEpisode(index) }
                                 RadioSlip(
@@ -256,6 +299,8 @@ internal fun RadioProgramme(
                                     rows,
                                     actions,
                                     restoreRowFocus,
+                                    focusFor(episode.id),
+                                    { focusedIndex = index },
                                 ) {
                                     restoreRowFocus = null
                                 }
@@ -310,16 +355,17 @@ private fun RadioSlip(
     rows: RadioRows,
     actions: RadioActions,
     restoreRowFocus: Long?,
+    focusRequester: FocusRequester,
+    onFocus: () -> Unit,
     onFocusRestore: () -> Unit,
 ) {
-    val focus = remember { FocusRequester() }
     val focusRestored by rememberUpdatedState(onFocusRestore)
     val inputMode = LocalInputModeManager.current
     LaunchedEffect(restoreRowFocus, inputMode) {
         if (restoreRowFocus == episode.id) {
             inputMode.requestInputMode(InputMode.Keyboard)
             withFrameNanos { }
-            focus.requestFocus()
+            focusRequester.requestFocus()
             focusRestored()
         }
     }
@@ -345,7 +391,8 @@ private fun RadioSlip(
             Modifier
                 .fillMaxWidth()
                 .testTag("radio_episode_${episode.id}")
-                .focusRequester(focus)
+                .onFocusChanged { if (it.isFocused) onFocus() }
+                .focusRequester(focusRequester)
                 .focusProperties { canFocus = true }
                 .onKeyEvent {
                     if (it.type == KeyEventType.KeyDown && it.key == Key.Delete) {
