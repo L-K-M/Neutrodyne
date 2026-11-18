@@ -55,6 +55,12 @@ class RadioRulesTest {
         assertFalse(tablet.compact)
         assertFalse(tablet.short)
         assertEquals(RadioRows.WIDE, tablet.rows)
+
+        // The thresholds are half-open: at the boundary the roomier mode wins.
+        assertFalse(radioLayout(370.dp, 900.dp, 1f).narrow)
+        assertTrue(radioLayout(600.dp, 900.dp, 1f).wide)
+        assertFalse(radioLayout(700.dp, 800.dp, 1f).compact)
+        assertFalse(radioLayout(700.dp, 660.dp, 1f).short)
     }
 
     @Test fun cabinetMinimumGrowsWithTextAndFollowsTheMode() {

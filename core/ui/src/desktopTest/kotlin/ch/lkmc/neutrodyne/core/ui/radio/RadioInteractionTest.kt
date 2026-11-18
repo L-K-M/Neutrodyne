@@ -19,8 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -49,7 +47,6 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -68,11 +65,6 @@ import kotlin.test.assertEquals
 
 @OptIn(ExperimentalTestApi::class)
 class RadioInteractionTest {
-    private class FixedWindowInfo(
-        override val containerSize: IntSize,
-        override val isWindowFocused: Boolean = true,
-    ) : WindowInfo
-
     @Test
     fun swipeCommitsOnlyOnReleaseAtExactThresholdAndUndoRestores() =
         runDesktopComposeUiTest(width = 390, height = 844) {
@@ -445,21 +437,21 @@ class RadioInteractionTest {
         }
 
     // The deck and the cabinet are sized from the usable height; the transport must follow it,
-    // not the raw window. 844 dp of window with 72 dp of insets is the compact home.
+    // not the raw window. The test window is 844 dp tall, but the screen is pinned to 772 dp
+    // of content (844 dp with 72 dp of insets), which is the compact home.
     @Test fun theTransportFollowsTheUsableHeightNotTheWindow() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             val heading = getString(Res.string.radio_episodes).uppercase()
             setContent {
-                CompositionLocalProvider(
-                    LocalWindowInfo provides FixedWindowInfo(IntSize(390, 844)),
-                ) {
-                    NeutrodyneTheme(SystemUiState.DEFAULT) {
-                        Box(Modifier.height(772.dp)) {
-                            RadioScreen(radioFixture(), RadioActions())
-                        }
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    Box(Modifier.height(772.dp)) {
+                        RadioScreen(radioFixture(), RadioActions())
                     }
                 }
             }
+            // The compact home is really on screen: its transport and programme are present.
+            onNodeWithTag("radio_play").assertIsDisplayed()
+            onNodeWithTag("radio_episodes").assertIsDisplayed()
             onNodeWithText(heading).assertDoesNotExist()
         }
 
