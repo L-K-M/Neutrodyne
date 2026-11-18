@@ -222,7 +222,6 @@ internal fun DownloadsScreen(
                                     endLabel = stringResource(Res.string.downloads_gauge_full),
                                     modifier =
                                         Modifier
-                                            .align(Alignment.CenterHorizontally)
                                             .widthIn(max = GAUGE_MAX_WIDTH)
                                             .fillMaxWidth()
                                             .padding(vertical = 8.dp),

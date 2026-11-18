@@ -33,5 +33,9 @@ public fun PageColumnInset(
     modifier: Modifier = Modifier,
     content: @Composable (inset: Dp) -> Unit,
 ) {
-    BoxWithConstraints(modifier) { content(((maxWidth - PAGE_COLUMN_MAX_WIDTH) / 2).coerceAtLeast(0.dp)) }
+    BoxWithConstraints(modifier) {
+        // Without a bounded width there is no page to centre in.
+        val inset = if (constraints.hasBoundedWidth) (maxWidth - PAGE_COLUMN_MAX_WIDTH) / 2 else 0.dp
+        content(inset.coerceAtLeast(0.dp))
+    }
 }
