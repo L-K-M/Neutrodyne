@@ -37,7 +37,7 @@ class NdScrollbarShortTrackTest {
                 val scrollState = rememberScrollState()
                 val listState = rememberLazyListState()
                 val gridState = rememberLazyGridState()
-                val style = DesktopScrollbars.style
+                val style = NdScrollbarStyle(enabled = true, minThumb = 24.dp)
                 val color = ndScrollbarColor(style)
                 Column(Modifier.fillMaxSize()) {
                     LazyColumn(
@@ -78,5 +78,4 @@ class NdScrollbarShortTrackTest {
     }
 }
 
-/** Shorter than the 24 dp [NdScrollbarStyle.minThumb] default. */
 private val ShortTrack = 12.dp
