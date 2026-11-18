@@ -69,6 +69,10 @@ class RadioRulesTest {
         assertEquals(280.dp, radioLayout(700.dp, 900.dp, 1f).minimumHeight)
         assertEquals(660.dp, radioLayout(390.dp, 772.dp, 1.5f).minimumHeight)
         assertEquals(420.dp, radioLayout(700.dp, 900.dp, 1.5f).minimumHeight)
+
+        // Both compact and wide hold: rows follow compact, minimumHeight follows wide.
+        assertEquals(RadioRows.COMPACT, radioLayout(700.dp, 700.dp, 1f).rows)
+        assertEquals(280.dp, radioLayout(700.dp, 700.dp, 1f).minimumHeight)
     }
 
     @Test fun removalSelectsNextThenPreviousAndLeavesOtherSelectionsAlone() {
