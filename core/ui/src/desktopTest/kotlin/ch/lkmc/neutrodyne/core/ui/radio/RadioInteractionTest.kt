@@ -32,6 +32,8 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -53,6 +55,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
+import ch.lkmc.neutrodyne.core.ui.resources.radio_no_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
@@ -291,6 +294,22 @@ class RadioInteractionTest {
             onNodeWithTag("radio_skip_forward").assertDoesNotExist()
         }
 
+    @Test fun anUntunedRadioExplainsWhereToCreateAPlaylist() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var state by mutableStateOf(RadioState())
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(state, RadioActions()) }
+            }
+            val untuned = onNodeWithText(getString(Res.string.radio_no_playlists))
+            val allPlayed = onNodeWithText(getString(Res.string.radio_no_episodes))
+            untuned.assertIsDisplayed()
+            allPlayed.assertDoesNotExist()
+
+            runOnIdle { state = radioFixture().copy(episodes = emptyList(), selectedId = null) }
+            untuned.assertDoesNotExist()
+            allPlayed.assertIsDisplayed()
+        }
+
     @Test fun emptyChooserExplainsWhereToCreatePlaylists() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             setContent {
@@ -299,7 +318,9 @@ class RadioInteractionTest {
                 }
             }
             onNodeWithTag("radio_playlist").performClick()
-            onNodeWithText(getString(Res.string.radio_no_playlists)).assertIsDisplayed()
+            onNode(
+                hasText(getString(Res.string.radio_no_playlists)) and hasAnyAncestor(hasTestTag("radio_insert")),
+            ).assertIsDisplayed()
         }
 
     @Test fun pagingFailureOffersRetryAndRetainsTheProgramme() =

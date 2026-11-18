@@ -106,6 +106,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_discard
 import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_episodes
+import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_release
 import ch.lkmc.neutrodyne.core.ui.resources.radio_removed
@@ -238,11 +239,25 @@ internal fun RadioProgramme(
                             Arrangement.Center,
                             Alignment.CenterHorizontally,
                         ) {
-                            if (state.loading) {
-                                CircularProgressIndicator(color = Brass, modifier = Modifier.size(24.dp))
-                            } else if (!state.loadError) {
-                                RadioText(stringResource(Res.string.radio_all_clear), 19, bold = true)
-                                RadioText(stringResource(Res.string.radio_no_episodes), 12, mono = false)
+                            when {
+                                state.loading -> {
+                                    CircularProgressIndicator(color = Brass, modifier = Modifier.size(24.dp))
+                                }
+
+                                state.loadError -> {
+                                    Unit
+                                }
+
+                                // The retry row below explains the failure.
+
+                                state.playlistId == null && state.playlists.isEmpty() -> {
+                                    RadioText(stringResource(Res.string.radio_no_playlists), 13, mono = false)
+                                }
+
+                                else -> {
+                                    RadioText(stringResource(Res.string.radio_all_clear), 19, bold = true)
+                                    RadioText(stringResource(Res.string.radio_no_episodes), 12, mono = false)
+                                }
                             }
                         }
                     } else {
