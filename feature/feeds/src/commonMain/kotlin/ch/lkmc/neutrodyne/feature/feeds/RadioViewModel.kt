@@ -292,6 +292,9 @@ public class RadioViewModel(
                         active?.position?.positionMs ?: position(selected)
                     },
                 playing = active?.isPlaying ?: (current.playing && selected != null),
+                // Keep the transport status with the loaded item the playing flag describes.
+                phase = engine?.phase,
+                issue = engine?.issue,
             )
         val revision = ++rowsRevision
         if (!complete) {

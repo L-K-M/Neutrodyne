@@ -161,8 +161,8 @@ internal fun RadioPlayer(
                     ) {
                         val lamp =
                             when {
-                                state.phase == PlayerPhase.BUFFERING -> Brush.radialGradient(LampAmber)
                                 state.phase == PlayerPhase.ERROR || state.issue != null -> Brush.radialGradient(LampRed)
+                                state.phase == PlayerPhase.BUFFERING -> Brush.radialGradient(LampAmber)
                                 state.playing -> Brush.radialGradient(LampLit)
                                 else -> Brush.radialGradient(LampDim)
                             }

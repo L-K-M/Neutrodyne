@@ -197,6 +197,22 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun aPagingSnapshotDoesNotKeepAStaleTransportPhase() =
+        runTest {
+            withRadio { model, id ->
+                controller.state.nowPlaying.value =
+                    testNowPlaying(1).copy(phase = PlayerPhase.ERROR, issue = PlaybackIssue.PLAYER_ERROR)
+                runCurrent()
+                assertEquals(PlayerPhase.ERROR, model.state.value.phase)
+                controller.state.nowPlaying.value = null
+                runCurrent()
+                model.onRows(id, rows)
+                runCurrent()
+                assertNull(model.state.value.phase)
+                assertNull(model.state.value.issue)
+            }
+        }
+
     @Test fun discardSelectedAdvancesWhileOtherRemovalLeavesPlayerAloneAndUndoDoesNotRewind() =
         runTest {
             withRadio { model, _ ->

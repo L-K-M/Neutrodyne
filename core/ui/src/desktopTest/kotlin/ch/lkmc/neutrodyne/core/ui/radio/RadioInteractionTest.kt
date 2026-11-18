@@ -180,6 +180,13 @@ class RadioInteractionTest {
                 issue = PlaybackIssue.NETWORK_LOST
             }
             onNodeWithText(getString(Res.string.radio_playing)).assertIsDisplayed()
+            // An issue during buffering keeps the BUFFERING status text; the lamp treats any
+            // issue as red regardless of the buffering branch order.
+            runOnIdle {
+                phase = PlayerPhase.BUFFERING
+                issue = PlaybackIssue.NETWORK_LOST
+            }
+            onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
         }
 
     @Test fun openChooserSurvivesColumnSwitchAndRecreation() =
