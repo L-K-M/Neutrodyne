@@ -56,12 +56,14 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
+import ch.lkmc.neutrodyne.core.ui.resources.radio_all_clear
 import ch.lkmc.neutrodyne.core.ui.resources.radio_buffering
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_ended
 import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_error
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
+import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists_empty
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playing
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
@@ -460,6 +462,67 @@ class RadioInteractionTest {
             }
             onNodeWithTag("radio_playlist").performClick()
             onNodeWithText(getString(Res.string.radio_no_playlists)).assertIsDisplayed()
+        }
+
+    @Test fun anEmptyRadioOffersDiscoverAndTheGroupWorkflow() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var discover = 0
+            var library = 0
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(),
+                        RadioActions(openDiscover = { discover++ }, openLibrary = { library++ }),
+                    )
+                }
+            }
+            onNodeWithText(getString(Res.string.radio_no_playlists_empty)).assertIsDisplayed()
+            onNodeWithText(getString(Res.string.radio_all_clear)).assertDoesNotExist()
+            onNodeWithTag("radio_empty_discover").performClick()
+            onNodeWithTag("radio_empty_library").performClick()
+            assertEquals(1, discover)
+            assertEquals(1, library)
+        }
+
+    @Test fun anEmptyRadioHidesRouteKeysWhileLoading() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(RadioState(loading = true), RadioActions())
+                }
+            }
+            onNodeWithTag("radio_empty_discover").assertDoesNotExist()
+            onNodeWithTag("radio_empty_library").assertDoesNotExist()
+        }
+
+    @Test fun anEmptyRadioHidesRouteKeysWhenLoadFails() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(RadioState(loadError = true), RadioActions())
+                }
+            }
+            onNodeWithTag("radio_empty_discover").assertDoesNotExist()
+            onNodeWithTag("radio_empty_library").assertDoesNotExist()
+        }
+
+    @Test fun aClearedPlaylistKeepsItsAllClearSignWithoutRouteKeys() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(
+                            playlists = listOf(RadioPlaylist(1, "Tech", 0)),
+                            playlistId = 1,
+                        ),
+                        RadioActions(),
+                    )
+                }
+            }
+            onNodeWithText(getString(Res.string.radio_all_clear)).assertIsDisplayed()
+            onNodeWithText(getString(Res.string.radio_no_playlists_empty)).assertDoesNotExist()
+            onNodeWithTag("radio_empty_discover").assertDoesNotExist()
+            onNodeWithTag("radio_empty_library").assertDoesNotExist()
         }
 
     @Test fun pagingFailureOffersRetryAndRetainsTheProgramme() =

@@ -15,6 +15,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
+import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
+import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
@@ -85,6 +87,8 @@ internal fun RadioRoute(model: RadioViewModel = metroViewModel()) {
             skipBack = model::skipBack,
             skipForward = model::skipForward,
             selectPlaylist = model::selectPlaylist,
+            openDiscover = { navigator.selectTab(DiscoverKey) },
+            openLibrary = { navigator.selectTab(LibraryKey) },
             menu = { menu = true },
             loadEpisode = { index ->
                 state.episodes.getOrNull(index)?.id?.let { id ->

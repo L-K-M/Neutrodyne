@@ -91,7 +91,9 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.Cream
 import ch.lkmc.neutrodyne.core.designsystem.radio.EnamelSelector
 import ch.lkmc.neutrodyne.core.designsystem.radio.Faceplate
 import ch.lkmc.neutrodyne.core.designsystem.radio.Ink
+import ch.lkmc.neutrodyne.core.designsystem.radio.KeyBank
 import ch.lkmc.neutrodyne.core.designsystem.radio.MaterialPlate
+import ch.lkmc.neutrodyne.core.designsystem.radio.PianoKey
 import ch.lkmc.neutrodyne.core.designsystem.radio.RadioMaterial
 import ch.lkmc.neutrodyne.core.designsystem.radio.SlipKeyCap
 import ch.lkmc.neutrodyne.core.designsystem.radio.barlow
@@ -106,11 +108,14 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_undo
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_minutes
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
+import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
+import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.radio_all_clear
 import ch.lkmc.neutrodyne.core.ui.resources.radio_discard
 import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_episodes
+import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists_empty
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_release
 import ch.lkmc.neutrodyne.core.ui.resources.radio_removed
@@ -257,8 +262,36 @@ internal fun RadioProgramme(
                             if (state.loading) {
                                 CircularProgressIndicator(color = Brass, modifier = Modifier.size(24.dp))
                             } else if (!state.loadError) {
-                                RadioText(stringResource(Res.string.radio_all_clear), 19, bold = true)
-                                RadioText(stringResource(Res.string.radio_no_episodes), 12, mono = false)
+                                if (state.playlists.isEmpty()) {
+                                    RadioText(
+                                        stringResource(Res.string.radio_no_playlists_empty),
+                                        19,
+                                        bold = true,
+                                        maxLines = 2,
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    // A first listener has no station to tune yet: offer the two
+                                    // journeys that fill one instead of an empty paper tray.
+                                    KeyBank {
+                                        PianoKey(
+                                            stringResource(Res.string.nav_discover),
+                                            pressed = false,
+                                            onClick = actions.openDiscover,
+                                            modifier = Modifier.testTag("radio_empty_discover"),
+                                            role = Role.Button,
+                                        )
+                                        PianoKey(
+                                            stringResource(Res.string.nav_library),
+                                            pressed = false,
+                                            onClick = actions.openLibrary,
+                                            modifier = Modifier.testTag("radio_empty_library"),
+                                            role = Role.Button,
+                                        )
+                                    }
+                                } else {
+                                    RadioText(stringResource(Res.string.radio_all_clear), 19, bold = true)
+                                    RadioText(stringResource(Res.string.radio_no_episodes), 12, mono = false)
+                                }
                             }
                         }
                     } else {

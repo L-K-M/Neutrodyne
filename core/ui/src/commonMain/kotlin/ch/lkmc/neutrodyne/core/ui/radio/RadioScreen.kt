@@ -60,6 +60,8 @@ public data class RadioActions(
     val skipBack: () -> Unit = {},
     val skipForward: () -> Unit = {},
     val selectPlaylist: (Long) -> Unit = {},
+    val openDiscover: () -> Unit = {},
+    val openLibrary: () -> Unit = {},
     val menu: () -> Unit = {},
     val loadEpisode: (Int) -> Unit = {},
     val visibleEpisodes: (Set<Long>) -> Unit = {},
