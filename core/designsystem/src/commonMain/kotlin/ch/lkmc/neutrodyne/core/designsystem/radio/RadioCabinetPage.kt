@@ -31,6 +31,7 @@ import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -67,7 +68,7 @@ public enum class CabinetSpan {
 
 /** Whether a page's cabinet carries the valve deck on its roof. */
 public enum class CabinetDeck {
-    /** The page stands alone or leads a pane row: its cabinet carries the deck. */
+    /** The page stands alone or is the list pane: its cabinet carries the deck. */
     SHOWN,
 
     /**
@@ -101,16 +102,17 @@ public fun RadioCabinetPage(
         modifier
             .fillMaxSize()
             // A pane row stands on the root's stage, whose light falls across the whole window; a
-            // stage per pane would show a seam where each pane's own light pool ends.
-            .let { if (span == CabinetSpan.ALONE) it.radioStage() else it }
+            // stage per pane would show a seam where each pane's own light pool ends. A pane of a
+            // row draws the whole row's deck and shows only its slice, so it clips itself: Material
+            // stops clipping a pane while it animates the pane's bounds.
+            .let { if (span == CabinetSpan.ALONE) it.radioStage() else it.clipToBounds() }
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
     ) {
         // The deck is the cabinet's lid, as on the home: as wide as the cabinet with a little
         // overhang, its height following the width up to a share of the window's height (beyond
         // that its chassis grows longer instead). A pane row is one cabinet across the window with
-        // one lid: each pane draws its own slice of it (a pane clips what it draws), and the row's
-        // roof line cannot depend on any one pane's width, so there the deck takes the share of
-        // the height.
+        // one lid: each pane draws its own slice of it, and the row's roof line cannot depend on
+        // any one pane's width, so there the deck takes the share of the height.
         val inRow = span != CabinetSpan.ALONE
         val row = rememberRowPlacement()
         val deckWidth = (if (inRow) row.width() else maxWidth) - CABINET_SIDE_GAP * 2 + DECK_OVERHANG
@@ -119,12 +121,7 @@ public fun RadioCabinetPage(
         val roomForDeck = maxHeight >= DECK_MIN_HEIGHT
         val showDeck = roomForDeck && (deck == CabinetDeck.SHOWN || inRow)
         // Every pane of a row keeps the deck's roof line, so the row reads as one cabinet.
-        val roof =
-            if (roomForDeck && (showDeck || span != CabinetSpan.ALONE)) {
-                deckHeight * (1f - DECK_OVERLAP_SHARE)
-            } else {
-                CABINET_TOP_GAP
-            }
+        val roof = if (showDeck) deckHeight * (1f - DECK_OVERLAP_SHARE) else CABINET_TOP_GAP
         if (inRow) Box(Modifier.matchParentSize().onPlaced(row::place))
         val startWall = span == CabinetSpan.ALONE || span == CabinetSpan.LEADING
         val endWall = span == CabinetSpan.ALONE || span == CabinetSpan.TRAILING
@@ -170,8 +167,9 @@ public fun RadioCabinetPage(
                 } else {
                     Modifier.align(Alignment.TopCenter).requiredWidth(deckWidth)
                 }
-            // The row's single deck is tagged on the pane that carries it.
-            val tagged = if (deck == CabinetDeck.SHOWN) placed.testTag(CABINET_DECK_TAG) else placed
+            // The row's single deck is tagged once, on the pane that leads the row.
+            val carrier = if (inRow) span == CabinetSpan.LEADING else deck == CabinetDeck.SHOWN
+            val tagged = if (carrier) placed.testTag(CABINET_DECK_TAG) else placed
             ValveDeck(tagged.height(deckHeight))
         }
     }
