@@ -188,14 +188,18 @@ public class RadioViewModel(
                                 elapsedMs = 0,
                                 playing = false,
                                 hasPlayed = false,
+                                phase = null,
+                                issue = null,
                             )
                         } else {
-                            current.copy(playing = false)
+                            current.copy(playing = false, phase = null, issue = null)
                         }
                 } else if (now.episodeId == current.selectedId) {
                     mutableState.value =
                         current.copy(
                             playing = now.isPlaying,
+                            phase = now.phase,
+                            issue = now.issue,
                             nowPlayingEpisode =
                                 RadioEpisode(
                                     now.episodeId,
@@ -211,6 +215,8 @@ public class RadioViewModel(
                     mutableState.value =
                         current.copy(
                             selectedId = now.episodeId,
+                            phase = now.phase,
+                            issue = now.issue,
                             nowPlayingEpisode =
                                 RadioEpisode(
                                     now.episodeId,
@@ -378,6 +384,8 @@ public class RadioViewModel(
         mutableState.value =
             state.value.copy(
                 selectedId = active.episodeId,
+                phase = active.phase,
+                issue = active.issue,
                 nowPlayingEpisode =
                     RadioEpisode(
                         active.episodeId,
@@ -468,6 +476,9 @@ public class RadioViewModel(
                 elapsedMs = loaded?.position?.positionMs ?: 0,
                 playing = loaded != null,
                 hasPlayed = loaded != null,
+                // A paused switch keeps the loaded transport's phase; a fresh browse has none.
+                phase = loaded?.phase,
+                issue = loaded?.issue,
                 removed =
                     undo
                         ?.takeIf {

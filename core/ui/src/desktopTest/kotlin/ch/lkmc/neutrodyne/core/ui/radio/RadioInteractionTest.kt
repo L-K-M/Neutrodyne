@@ -52,11 +52,17 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
+import ch.lkmc.neutrodyne.core.ui.resources.radio_buffering
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
+import ch.lkmc.neutrodyne.core.ui.resources.radio_ended
+import ch.lkmc.neutrodyne.core.ui.resources.radio_error
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
+import ch.lkmc.neutrodyne.core.ui.resources.radio_playing
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
+import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -142,6 +148,38 @@ class RadioInteractionTest {
             onNodeWithText(getString(Res.string.radio_paused)).assertIsDisplayed()
             onNodeWithContentDescription(getString(Res.string.radio_elapsed_full, 12L, 0L, 0L)).assertIsDisplayed()
             onAllNodes(hasText("900:00")).assertCountEquals(2)
+        }
+
+    @Test
+    fun transportStatusFollowsTheLoadedPhase() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var phase by mutableStateOf<PlayerPhase?>(null)
+            var issue by mutableStateOf<PlaybackIssue?>(null)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(playing = true, phase = phase, issue = issue),
+                        RadioActions(),
+                    )
+                }
+            }
+            onNodeWithText(getString(Res.string.radio_playing)).assertIsDisplayed()
+            runOnIdle { phase = PlayerPhase.BUFFERING }
+            onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
+            runOnIdle { phase = PlayerPhase.ENDED }
+            onNodeWithText(getString(Res.string.radio_ended)).assertIsDisplayed()
+            runOnIdle {
+                phase = PlayerPhase.ERROR
+                issue = null
+            }
+            onNodeWithText(getString(Res.string.radio_error)).assertIsDisplayed()
+            // An issue with a ready phase keeps the transport status but lights the red lamp,
+            // as the mini player's error dot does.
+            runOnIdle {
+                phase = null
+                issue = PlaybackIssue.NETWORK_LOST
+            }
+            onNodeWithText(getString(Res.string.radio_playing)).assertIsDisplayed()
         }
 
     @Test fun openChooserSurvivesColumnSwitchAndRecreation() =
