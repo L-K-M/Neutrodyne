@@ -387,6 +387,7 @@ private fun Needle(
                 }.pointerInput(episodeId, durationMs, enabled) {
                     if (!enabled) return@pointerInput
                     detectTapGestures {
+                        if (size.width == 0) return@detectTapGestures
                         seek(
                             (it.x / size.width * durationMs).toLong().coerceIn(
                                 0,
@@ -399,11 +400,13 @@ private fun Needle(
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, _ ->
                             change.consume()
-                            preview = (change.position.x / size.width).coerceIn(0f, 1f)
+                            preview = if (size.width > 0) (change.position.x / size.width).coerceIn(0f, 1f) else null
                         },
                         onDragEnd = {
-                            preview?.let { position ->
-                                seek((position * durationMs).toLong())
+                            if (size.width >
+                                0
+                            ) {
+                                preview?.let { seek((it * durationMs).toLong().coerceIn(0, durationMs)) }
                             }
                             preview = null
                         },
