@@ -36,8 +36,9 @@ public val LocalSettingsBadge: androidx.compose.runtime.ProvidableCompositionLoc
 
 /**
  * The height content must reserve at its bottom edge so a docked mini player does not cover it
- * (08 Insets and edge-to-edge: lists pad `navigationBars` + `LocalMiniPlayerInset`). Zero while the
- * side panel is shown or nothing plays.
+ * (08 Insets and edge-to-edge: lists pad `navigationBars` + `LocalMiniPlayerInset`). Zero on the
+ * radio home and while nothing plays. Pages in the radio's cabinet also read zero: the cabinet's
+ * base holds the bar and reserves this height below the tray.
  */
 public val LocalMiniPlayerInset: androidx.compose.runtime.ProvidableCompositionLocal<Dp> =
     staticCompositionLocalOf { 0.dp }

@@ -90,12 +90,17 @@ public enum class CabinetDeck {
  * readable. [span] places the page in a row of panes that share one cabinet: they keep one roof
  * line at the deck's height, and only the row's outer walls have gaps, rounded corners and lit or
  * shaded edges.
+ *
+ * [dock] is the height the app reserves at the bottom of the content for the docked mini radio,
+ * which is set into the cabinet's base: the tray's bottom wall grows to that height, so nothing on
+ * the page hides under the bar and the page itself has nothing left to reserve.
  */
 @Composable
 public fun RadioCabinetPage(
     deck: CabinetDeck,
     modifier: Modifier = Modifier,
     span: CabinetSpan = CabinetSpan.ALONE,
+    dock: Dp = 0.dp,
     content: @Composable () -> Unit,
 ) {
     BoxWithConstraints(
@@ -144,8 +149,12 @@ public fun RadioCabinetPage(
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(CABINET_WALL)
-                    .recess(TrayShape)
+                    .padding(
+                        start = CABINET_WALL,
+                        top = CABINET_WALL,
+                        end = CABINET_WALL,
+                        bottom = maxOf(CABINET_WALL, dock),
+                    ).recess(TrayShape)
                     .testTag(CABINET_TRAY_TAG),
             ) {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {

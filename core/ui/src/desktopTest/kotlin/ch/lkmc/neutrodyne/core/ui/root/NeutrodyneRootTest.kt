@@ -277,6 +277,67 @@ class NeutrodyneRootTest {
             onAllNodesWithTag(CABINET_DECK_TAG).assertCountEquals(1)
         }
 
+    /**
+     * 08 The docked bar: the mini radio is set into the cabinet's base. While it shows, every
+     * tray (a lone page, both panes of a row, a detail placeholder) ends above the root's
+     * reservation, so nothing on a page hides under the bar. The cabinet consumes the reservation,
+     * so the page inside does not pad for it a second time.
+     */
+    @Test
+    fun theMiniPlayerSitsBelowEveryCabinetTray() {
+        val playing = RootUiState.READY.copy(hasNowPlaying = true)
+        val single: ComposeUiTest.() -> Unit = {
+            setContent { TestRoot(state = playing, initialTab = LibraryKey) }
+            onNodeWithText("count:0", useUnmergedTree = true).assertIsDisplayed()
+        }
+        val row: ComposeUiTest.() -> Unit = {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
+            setContent { TestRoot(routes = pending.receiveAsFlow(), state = playing, initialTab = LibraryKey) }
+            onNodeWithText("import-7").assertIsDisplayed()
+        }
+        val placeholder: ComposeUiTest.() -> Unit = {
+            setContent { TestRoot(state = playing) }
+            onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            onNodeWithText("settings-placeholder").assertIsDisplayed()
+        }
+        for ((name, size, open) in listOf(
+            Triple("single", 400 to 600, single),
+            Triple("row", 1200 to 800, row),
+            Triple("placeholder", 1200 to 800, placeholder),
+        )) {
+            runDesktopComposeUiTest(width = size.first, height = size.second) {
+                open()
+                waitForIdle()
+                val window = onNodeWithTag("root-box").fetchSemanticsNode().boundsInRoot
+                val trays = onAllNodesWithTag(CABINET_TRAY_TAG).fetchSemanticsNodes().map { it.boundsInRoot }
+                kotlin.test.assertTrue(trays.isNotEmpty(), name)
+                for (tray in trays) {
+                    val clearance = with(density) { (window.bottom - tray.bottom).toDp() }
+                    kotlin.test.assertTrue(
+                        clearance >= MINI_PLAYER_RESERVE,
+                        "$name: the tray ends $clearance above the bottom",
+                    )
+                }
+                // The cabinet consumed the reservation: the page or placeholder inside has none left.
+                val inset = if (name == "placeholder") "placeholder-inset:0" else "mini-inset:0"
+                onNodeWithText(inset, useUnmergedTree = true).assertExists()
+            }
+        }
+    }
+
+    /** Without a mini player the tray reaches down to the cabinet's bottom wall. */
+    @Test
+    fun aTrayReachesTheCabinetBottomWithoutAMiniPlayer() =
+        runDesktopComposeUiTest(width = 400, height = 600) {
+            setContent { TestRoot(initialTab = LibraryKey) }
+            onNodeWithText("count:0", useUnmergedTree = true).assertIsDisplayed()
+            val window = onNodeWithTag("root-box").fetchSemanticsNode().boundsInRoot
+            val tray = onAllNodesWithTag(CABINET_TRAY_TAG).fetchSemanticsNodes().single().boundsInRoot
+            val clearance = with(density) { (window.bottom - tray.bottom).toDp() }
+            kotlin.test.assertTrue(clearance <= 12.dp, "the tray ends $clearance above the bottom")
+        }
+
     @Test
     fun playerDeepLinkOpensTheRadioHomeWithoutASidePanel() =
         runDesktopComposeUiTest(width = 1200, height = 800) {
@@ -1168,7 +1229,15 @@ private val TestInstallers: Set<EntryProviderInstaller> =
         }
         add {
             entry<SettingsHomeKey>(
-                metadata = NdSceneMetadata.paneList(detailPlaceholder = { Text("settings-placeholder") }),
+                metadata =
+                    NdSceneMetadata.paneList(
+                        detailPlaceholder = {
+                            Column {
+                                Text("settings-placeholder")
+                                Text("placeholder-inset:${LocalMiniPlayerInset.current.value.toInt()}")
+                            }
+                        },
+                    ),
             ) { Text("settings-home") }
         }
         add {
@@ -1208,6 +1277,7 @@ private fun LibraryStub() {
     Column(Modifier.fillMaxSize()) {
         TestTopBar(Res.string.nav_library)
         Text("count:$count")
+        Text("mini-inset:${LocalMiniPlayerInset.current.value.toInt()}")
         NdButton(label = "inc", onClick = { count++ })
     }
 }
@@ -1263,3 +1333,6 @@ private const val STAGE_MAX_LUMINANCE = 0.1f
 
 // A lone cabinet keeps only its side gaps and walls off the window's width.
 private const val LONE_TRAY_MIN_SHARE = 0.9f
+
+// 08 Mini player: the root reserves 80 dp at the content's bottom edge while the bar shows.
+private val MINI_PLAYER_RESERVE = 80.dp

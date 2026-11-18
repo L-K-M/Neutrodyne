@@ -539,7 +539,7 @@ Serves R1.1–R1.9 (screens), R2.1–R2.8, R3.1, R3.7, R3.9 (display), R4.6, R5.
 - Top-level screens: `NdTopAppBar` (pinned, small) with the destination title, screen actions and `(gear)` last (`SettingsGearButton`, which carries the update dot from M11a, [Settings gear badge](#updates-settings)). Pushed screens: back arrow, title, actions. The bar's container switches to `surfaceContainer` when the content is scrolled (`elevated = listState.canScrollBackward`).
 - State shape follows 01 ([ViewModels and UI state](01-foundation.md#viewmodels-and-ui-state)): `Loading` (skeleton rows in `surfaceContainer`, no shimmer), `Ready`, `Failed(error, retryable)` (an [`EmptyState`](#banners-snackbars-and-undo) with the message and "Try again"). Paged lists show `LoadState.Error` as a footer row with "Retry".
 - **Offline** ([N6](../PLAN.md#22-non-functional-requirements)): `NetworkMonitor.status.isConnected == false` → Feeds, Library and Up next show the offline banner; rows that are not downloaded dim their play button to `cloud_off` (tap → "You're offline — downloaded episodes still play"); nothing blocks on the network.
-- Lists reserve bottom padding `LocalMiniPlayerInset.current` (80 dp while the mini player is shown) plus navigation insets.
+- Lists reserve bottom padding `LocalMiniPlayerInset.current` (80 dp while the mini player is shown) plus navigation insets. In the radio's cabinet the frame reserves both: the tray ends above the bar, and the page reads an inset of 0 (2026-11-18).
 - All strings are Compose resources (`Res.string`, [D83](../PLAN.md#3-key-decisions)); numbers and dates use the app's locale — Android's per-app language, the desktop's `desktop.language` ([09 Localisation](09-quality-and-release.md#localisation)).
 - **Desktop conventions** (from M0b, completed in MD4): every row, tile and chip that has a long-press, swipe or overflow action also has a context menu ([Keyboard and mouse](#keyboard-and-mouse)); every scrolling list shows an `NdScrollbar`; actions that need a share sheet show "Copy link" instead, and "Share file" becomes "Show in Explorer / Finder / Files" (`RevealInFolder`); Android-only rows (metered network, charging, Android backup, notification permission, battery settings) are hidden, with 11's one-line explanation where users may look for them ([11 Desktop settings](11-desktop.md#desktop-settings)).
 
@@ -2026,7 +2026,8 @@ the desktop part of the M4 boundary below and adds no home/navigation design.
 ### The docked bar
 
 **Mini radio (PO-55, 2026-11-17).** The bar is a mini radio set into the cabinet's
-base: a metal plate with a brass edge, lined up with the paper tray (15 dp side
+base (the tray's bottom wall grows to the 80 dp reservation while the bar shows,
+so the bar never covers a page or pane; 2026-11-18): a metal plate with a brass edge, lined up with the paper tray (15 dp side
 insets), holding the recessed cover, the episode typed on a paper label with
 the podcast below and a small needle window (`NeedleWindow`) showing progress,
 and the radio's ON/OFF bat-handle switch (`BatToggle`, shared with the radio home)
@@ -2394,7 +2395,10 @@ charcoal stage `NeutrodyneRoot` draws behind every page. A list with nothing bes
 row: it fills the window as a single page, and a detail placeholder joins the row as its
 detail pane ([Pane roles and detail placeholders](#pane-roles-and-detail-placeholders)). The frame
 consumes the status bar, cutout and navigation bar insets, so the status bar keeps light
-icons on every page and page headers no longer lease it. `NdTopAppBar` is a metal faceplate
+icons on every page and page headers no longer lease it. While the mini player shows, the frame
+also takes the root's `LocalMiniPlayerInset`: each tray, in a row every pane's and a detail
+placeholder's, ends above the bar set into the cabinet's base, and the page inside reads an
+inset of 0, so nothing hides under the bar and nothing pads for it twice (2026-11-18). `NdTopAppBar` is a metal faceplate
 with the title on an enamel sign; `NdIconButton` and `NdTooltipIconButton` on a
 faceplate draw ivory key caps, and a page without its own navigation key gets the
 cabinet's Back key, which returns to the radio from a destination's root. Mockups:
@@ -2969,7 +2973,7 @@ screenshot matrix (MD4 AC2) captures the episode-row states in light and dark at
 
 ### Insets and edge-to-edge
 
-**Android.** `enableEdgeToEdge()` in `MainActivity` (01). Screens use `Scaffold` insets or `WindowInsets.safeDrawing`; list content pads `navigationBars` + `LocalMiniPlayerInset`; the radio home pads `safeDrawing` itself; the IME pads text-field sheets (`imePadding()`; `adjustResize` is set by 01). Display cutouts are respected in landscape (`displayCutout` in `safeDrawing`). **Desktop:** the window has OS decorations and no insets (`WindowInsets` are zero), so the same code pads nothing; the IME is the OS's.
+**Android.** `enableEdgeToEdge()` in `MainActivity` (01). Screens use `Scaffold` insets or `WindowInsets.safeDrawing`; list content pads `navigationBars` + `LocalMiniPlayerInset` (in the radio's cabinet the frame applies both, [Theming and colour](#theming-and-colour)); the radio home pads `safeDrawing` itself; the IME pads text-field sheets (`imePadding()`; `adjustResize` is set by 01). Display cutouts are respected in landscape (`displayCutout` in `safeDrawing`). **Desktop:** the window has OS decorations and no insets (`WindowInsets` are zero), so the same code pads nothing; the IME is the OS's.
 
 ---
 

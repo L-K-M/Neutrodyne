@@ -18,6 +18,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavEntryDecorator
@@ -43,6 +44,7 @@ import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
+import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 
 /**
  * How the host frames each page. The app root builds every page except the radio home into the
@@ -354,7 +356,10 @@ private fun CabinetPlaceholder(placeholder: @Composable () -> Unit) {
     RadioCabinetPage(
         CabinetDeck.HIDDEN,
         span = cabinetSpan(NdSceneMetadata.PANE_DETAIL, LocalPaneRow.current),
-    ) { placeholder() }
+        dock = LocalMiniPlayerInset.current,
+    ) {
+        CompositionLocalProvider(LocalMiniPlayerInset provides 0.dp) { placeholder() }
+    }
 }
 
 @Composable
@@ -379,7 +384,9 @@ private fun rememberHeaderBarDecorator(
  * Builds every page except the radio home into the radio's cabinet (owner decision 2026-11-17).
  * Sheets and dialogs keep their own containers. Panes shown side by side share one cabinet: each
  * takes its [CabinetSpan] from its place in the scene's pane row, and one valve deck lies across
- * the whole row, as on one radio; the list pane, which leads the row, carries it.
+ * the whole row, as on one radio; the list pane, which leads the row, carries it. The docked mini
+ * radio spans the window below every pane, so each cabinet's base holds the root's
+ * [LocalMiniPlayerInset] and the page inside sees none left to reserve.
  */
 @Composable
 private fun rememberCabinetDecorator(
@@ -396,8 +403,15 @@ private fun rememberCabinetDecorator(
                     } else {
                         CabinetDeck.HIDDEN
                     }
-                RadioCabinetPage(deck, span = cabinetSpan(role, LocalPaneRow.current)) {
-                    CompositionLocalProvider(LocalCabinetBackKey provides CabinetBackKey) { entry.Content() }
+                RadioCabinetPage(
+                    deck,
+                    span = cabinetSpan(role, LocalPaneRow.current),
+                    dock = LocalMiniPlayerInset.current,
+                ) {
+                    CompositionLocalProvider(
+                        LocalCabinetBackKey provides CabinetBackKey,
+                        LocalMiniPlayerInset provides 0.dp,
+                    ) { entry.Content() }
                 }
             } else {
                 entry.Content()
