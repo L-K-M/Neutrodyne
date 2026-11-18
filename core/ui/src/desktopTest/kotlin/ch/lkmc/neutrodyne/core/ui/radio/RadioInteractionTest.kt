@@ -83,6 +83,7 @@ class RadioInteractionTest {
             assertEquals(emptyList(), selected)
             row.performClick()
             assertEquals(listOf(2L), selected)
+            assertEquals(listOf(2L), discarded)
         }
 
     @Test
