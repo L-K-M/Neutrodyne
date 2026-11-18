@@ -9,7 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +33,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -200,7 +203,13 @@ internal fun RadioPlayer(
                     mono = false,
                     maxLines = 1,
                 )
-                Needle(state.elapsedMs, duration, selected != null && duration > 0, actions.seek)
+                Needle(
+                    selected?.id,
+                    state.elapsedMs,
+                    duration,
+                    selected != null && duration > 0,
+                    actions.seek,
+                )
                 if (!compact) RadioText(radioTimeline(duration), 11, modifier = Modifier.align(Alignment.End))
             }
         }
@@ -345,13 +354,20 @@ private fun PlaySwitch(
 
 @Composable
 private fun Needle(
+    episodeId: Long?,
     elapsedMs: Long,
     durationMs: Long,
     enabled: Boolean,
     onSeek: (Long) -> Unit,
 ) {
     val progress = if (durationMs > 0) (elapsedMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    val seekLabel = stringResource(Res.string.chapter_seek, radioTimeline(elapsedMs))
+    // A horizontal drag only scrubs the needle; the release commits one seek. Replacing the
+    // episode or its duration restarts this state, so an in-flight drag is dropped, not committed.
+    var preview by remember(episodeId, durationMs, enabled) { mutableStateOf<Float?>(null) }
+    val seek by rememberUpdatedState(onSeek)
+    val shown = preview ?: progress
+    val shownMs = preview?.let { (it * durationMs).toLong() } ?: elapsedMs
+    val seekLabel = stringResource(Res.string.chapter_seek, radioTimeline(shownMs))
     Column(Modifier.padding(top = 8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             for (index in 0..4) RadioText(radioTimeline(durationMs * index / 4), 10)
@@ -363,29 +379,36 @@ private fun Needle(
                 .testTag("radio_seek")
                 .semantics {
                     contentDescription = seekLabel
-                    progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f)
+                    progressBarRangeInfo = ProgressBarRangeInfo(shown, 0f..1f)
                     setProgress {
                         if (enabled) onSeek((it.coerceIn(0f, 1f) * durationMs).toLong())
                         enabled
                     }
-                }.pointerInput(durationMs, enabled) {
+                }.pointerInput(episodeId, durationMs, enabled) {
+                    if (!enabled) return@pointerInput
                     detectTapGestures {
-                        if (enabled) {
-                            onSeek(
-                                (it.x / size.width * durationMs).toLong().coerceIn(
-                                    0,
-                                    durationMs,
-                                ),
-                            )
-                        }
+                        seek(
+                            (it.x / size.width * durationMs).toLong().coerceIn(
+                                0,
+                                durationMs,
+                            ),
+                        )
                     }
-                }.pointerInput(durationMs, enabled) {
-                    detectDragGestures { change, _ ->
-                        if (enabled) {
+                }.pointerInput(episodeId, durationMs, enabled) {
+                    if (!enabled) return@pointerInput
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, _ ->
                             change.consume()
-                            onSeek((change.position.x / size.width * durationMs).toLong().coerceIn(0, durationMs))
-                        }
-                    }
+                            preview = (change.position.x / size.width).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            preview?.let { position ->
+                                seek((position * durationMs).toLong())
+                            }
+                            preview = null
+                        },
+                        onDragCancel = { preview = null },
+                    )
                 },
         ) {
             val baseline = size.height - 3.dp.toPx()
@@ -408,11 +431,11 @@ private fun Needle(
             drawLine(
                 Color(0xFFAA3D28),
                 Offset(
-                    size.width * progress,
+                    size.width * shown,
                     0f,
                 ),
                 Offset(
-                    size.width * progress,
+                    size.width * shown,
                     baseline,
                 ),
                 3.dp.toPx(),

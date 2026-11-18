@@ -52,6 +52,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
+import ch.lkmc.neutrodyne.core.ui.resources.chapter_seek
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
@@ -60,6 +61,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
 import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 
 @OptIn(ExperimentalTestApi::class)
 class RadioInteractionTest {
@@ -432,6 +434,134 @@ class RadioInteractionTest {
             runOnIdle { width = 320 }
             onNodeWithTag("radio_episode_1").performTouchInput { up() }
             assertEquals(0, discards)
+        }
+
+    @Test fun needleDragPreviewsLocallyAndCommitsOneSeekOnRelease() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val seeks = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions(seek = { seeks += it }))
+                }
+            }
+            val needle = onNodeWithTag("radio_seek")
+            needle.performTouchInput {
+                down(Offset(width * 0.2f, height / 2f))
+                moveBy(Offset(width * 0.3f, 0f))
+                assertEquals(0, seeks.size)
+            }
+            // The drag only moves the needle locally; the screen reader follows the preview.
+            onNodeWithTag("radio_seek").assertContentDescriptionEquals(getString(Res.string.chapter_seek, "19:00"))
+            assertEquals(0, seeks.size)
+            needle.performTouchInput { up() }
+            assertEquals(listOf(1_140_000L), seeks)
+        }
+
+    @Test fun needleDragCancellationSeeksNothing() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val seeks = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions(seek = { seeks += it }))
+                }
+            }
+            onNodeWithTag("radio_seek").performTouchInput {
+                down(Offset(width * 0.2f, height / 2f))
+                moveBy(Offset(width * 0.3f, 0f))
+                cancel()
+            }
+            assertEquals(0, seeks.size)
+        }
+
+    @Test fun needleDragCancelsWhenTheEpisodeChangesMidDrag() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var state by mutableStateOf(radioFixture())
+            val seeks = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(state, RadioActions(seek = { seeks += it }))
+                }
+            }
+            val needle = onNodeWithTag("radio_seek")
+            needle.performTouchInput {
+                down(Offset(width * 0.2f, height / 2f))
+                moveBy(Offset(width * 0.3f, 0f))
+            }
+            runOnIdle { state = state.copy(selectedId = 2L) }
+            assertEquals(0, seeks.size)
+            needle.performTouchInput { up() }
+            assertEquals(0, seeks.size)
+        }
+
+    @Test fun needleDragCancelsWhenTheDurationChangesMidDrag() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var state by mutableStateOf(radioFixture())
+            val seeks = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(state, RadioActions(seek = { seeks += it }))
+                }
+            }
+            val needle = onNodeWithTag("radio_seek")
+            needle.performTouchInput {
+                down(Offset(width * 0.2f, height / 2f))
+                moveBy(Offset(width * 0.3f, 0f))
+            }
+            runOnIdle {
+                state =
+                    state.copy(
+                        episodes =
+                            state.episodes.map {
+                                if (it.id == 1L) it.copy(durationMs = 10 * 60_000L) else it
+                            },
+                    )
+            }
+            assertEquals(0, seeks.size)
+            needle.performTouchInput { up() }
+            assertEquals(0, seeks.size)
+        }
+
+    @Test fun needleVerticalSwipeScrollsWithoutSeeking() =
+        runDesktopComposeUiTest(width = 320, height = 568) {
+            val seeks = mutableListOf<Long>()
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 1.3f)) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
+                        RadioScreen(radioFixture(), RadioActions(seek = { seeks += it }))
+                    }
+                }
+            }
+            val needle = onNodeWithTag("radio_seek").performScrollTo()
+            val before = needle.fetchSemanticsNode().positionInRoot.y
+            needle.performTouchInput { swipeUp() }
+            assertEquals(0, seeks.size)
+            assertNotEquals(before, needle.fetchSemanticsNode().positionInRoot.y)
+        }
+
+    @Test fun needleTapSeeksOnce() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val seeks = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions(seek = { seeks += it }))
+                }
+            }
+            onNodeWithTag("radio_seek").performTouchInput {
+                click(Offset(width * 0.5f, height / 2f))
+            }
+            assertEquals(listOf(1_140_000L), seeks)
+        }
+
+    @Test fun needleAccessibilitySetProgressSeeksOnce() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val seeks = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions(seek = { seeks += it }))
+                }
+            }
+            onNodeWithTag("radio_seek").performSemanticsAction(SemanticsActions.SetProgress) { it(0.5f) }
+            assertEquals(listOf(1_140_000L), seeks)
         }
 
     @Test fun focusedDeleteAndChooserEscapeRestoreFocus() =
