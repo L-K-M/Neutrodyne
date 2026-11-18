@@ -35,7 +35,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,9 +60,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
@@ -205,10 +207,11 @@ internal fun RadioProgramme(
     }
     // Arrow keys tune the programme like a station dial: the selection follows and focus travels
     // with it. Only a focused slip starts it, so the list never takes arrows from a field or a
-    // sheet; the root's volume chords are Ctrl/Cmd+Up/Down and are untouched.
+    // sheet. Chords pass through untouched for the root's own shortcuts (its volume chords are
+    // Ctrl/Cmd+Up/Down), and the handler bubbles so a descendant that learns arrows later wins.
     val scope = rememberCoroutineScope()
-    var focusedIndex by remember { mutableIntStateOf(-1) }
-    val slipFocus = remember { mutableMapOf<Long, FocusRequester>() }
+    var focusedId by remember { mutableStateOf<Long?>(null) }
+    val slipFocus = remember(state.playlistId) { mutableMapOf<Long, FocusRequester>() }
 
     fun focusFor(id: Long): FocusRequester = slipFocus.getOrPut(id) { FocusRequester() }
     Faceplate(
@@ -263,22 +266,31 @@ internal fun RadioProgramme(
                             Modifier
                                 .weight(1f)
                                 .testTag("radio_episodes")
-                                .onPreviewKeyEvent { event ->
-                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                .onKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                    if (event.isCtrlPressed || event.isMetaPressed || event.isAltPressed ||
+                                        event.isShiftPressed
+                                    ) {
+                                        return@onKeyEvent false
+                                    }
                                     val delta =
                                         when (event.key) {
                                             Key.DirectionDown -> 1
                                             Key.DirectionUp -> -1
                                             else -> 0
                                         }
-                                    if (delta == 0) return@onPreviewKeyEvent false
+                                    if (delta == 0) return@onKeyEvent false
+                                    // Anchor on the focused episode's identity, not its index: the
+                                    // list shifts under a focused slip when rows are removed.
                                     val current =
-                                        focusedIndex.takeIf { it in state.episodes.indices }
+                                        focusedId
+                                            ?.let { id -> state.episodes.indexOfFirst { it.id == id } }
+                                            ?.takeIf { it >= 0 }
                                             ?: state.episodes.indexOfFirst { it.id == state.selectedId }
                                     val target = current + delta
-                                    if (target !in state.episodes.indices) return@onPreviewKeyEvent false
+                                    if (target !in state.episodes.indices) return@onKeyEvent false
                                     actions.selectEpisode(state.episodes[target].id)
-                                    focusedIndex = target
+                                    focusedId = state.episodes[target].id
                                     scope.launch {
                                         scroll.animateScrollToItem(target)
                                         withFrameNanos { }
@@ -300,7 +312,7 @@ internal fun RadioProgramme(
                                     actions,
                                     restoreRowFocus,
                                     focusFor(episode.id),
-                                    { focusedIndex = index },
+                                    { focusedId = episode.id },
                                 ) {
                                     restoreRowFocus = null
                                 }
