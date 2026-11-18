@@ -315,6 +315,18 @@ class RadioInteractionTest {
             assertEquals(1, retries)
         }
 
+    @Test fun theHomeMenuKeyIsAButtonOnAnIvoryCap() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions())
+                }
+            }
+            onNodeWithTag("radio_menu").assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button),
+            )
+        }
+
     @Test fun doubleTextScaleKeepsHeaderAndTransportReachable() =
         runDesktopComposeUiTest(width = 320, height = 568) {
             var menuClicks = 0

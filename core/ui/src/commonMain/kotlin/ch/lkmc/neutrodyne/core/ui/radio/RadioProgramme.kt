@@ -464,7 +464,7 @@ internal fun SmallRadioKey(
             .width(radioKeyWidth())
             .heightIn(min = 48.dp)
             .focusProperties { canFocus = true }
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .testTag(tag)
             .padding(vertical = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
