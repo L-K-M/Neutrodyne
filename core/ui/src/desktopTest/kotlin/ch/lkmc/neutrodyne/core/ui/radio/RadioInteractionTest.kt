@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
@@ -33,6 +34,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -45,6 +47,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -187,6 +190,116 @@ class RadioInteractionTest {
                 issue = PlaybackIssue.NETWORK_LOST
             }
             onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
+        }
+
+    @Test
+    fun arrowKeysMoveTheSelectionAndFocusThroughTheProgramme() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(selectedId = selected),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithTag("radio_episode_1").performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(2L, selected)
+            onNodeWithTag("radio_episode_2").assertIsFocused()
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(3L, selected)
+            onNodeWithTag("radio_episode_3").assertIsFocused()
+            onNodeWithTag("radio_episode_3").performKeyInput { pressKey(Key.DirectionUp) }
+            assertEquals(2L, selected)
+            onNodeWithTag("radio_episode_2").assertIsFocused()
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.DirectionUp) }
+            assertEquals(1L, selected)
+            onNodeWithTag("radio_episode_1").assertIsFocused()
+            // The top stops instead of wrapping.
+            onNodeWithTag("radio_episode_1").performKeyInput { pressKey(Key.DirectionUp) }
+            assertEquals(1L, selected)
+        }
+
+    @Test
+    fun arrowKeysScrollALongProgrammeToTheSelection() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            val episodes =
+                (1..40).map { RadioEpisode(it.toLong(), "Episode $it", "Podcast", 20 * 60_000L) }
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(
+                            playlists = listOf(RadioPlaylist(1, "Rotation", 1)),
+                            playlistId = 1,
+                            episodes = episodes,
+                            selectedId = selected,
+                        ),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            repeat(12) {
+                onNode(isFocused()).performKeyInput { pressKey(Key.DirectionDown) }
+            }
+            assertEquals(13L, selected)
+            onNodeWithTag("radio_episode_13").assertIsFocused().assertIsDisplayed()
+        }
+
+    @Test
+    fun arrowChordsPassThroughToTheRoot() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(selectedId = selected),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithTag("radio_episode_1").performKeyInput {
+                withKeyDown(Key.CtrlLeft) { pressKey(Key.DirectionDown) }
+                withKeyDown(Key.MetaLeft) { pressKey(Key.DirectionUp) }
+            }
+            assertEquals(1L, selected)
+            // A plain Shift+Arrow still tunes, as it did before the chord guard.
+            onNodeWithTag("radio_episode_1").performKeyInput {
+                withKeyDown(Key.ShiftLeft) { pressKey(Key.DirectionDown) }
+            }
+            assertEquals(2L, selected)
+        }
+
+    @Test
+    fun arrowKeysSurviveTheListShiftingUnderTheFocusedSlip() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var episodes by
+                mutableStateOf(
+                    (1..6).map { RadioEpisode(it.toLong(), "Episode $it", "Podcast", 20 * 60_000L) },
+                )
+            var selected by mutableLongStateOf(3L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(
+                            playlists = listOf(RadioPlaylist(1, "Rotation", 1)),
+                            playlistId = 1,
+                            episodes = episodes,
+                            selectedId = selected,
+                        ),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_3").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            // The row above the focused slip goes away, so the focused index no longer names it.
+            runOnIdle { episodes = episodes.filterNot { it.id == 1L } }
+            onNode(isFocused()).performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(4L, selected)
         }
 
     @Test fun openChooserSurvivesColumnSwitchAndRecreation() =

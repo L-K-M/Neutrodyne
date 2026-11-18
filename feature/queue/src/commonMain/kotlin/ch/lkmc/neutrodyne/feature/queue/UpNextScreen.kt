@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.OfflineBanner
+import ch.lkmc.neutrodyne.core.ui.PageColumnInset
 import ch.lkmc.neutrodyne.core.ui.UpNextList
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
@@ -82,59 +83,63 @@ internal fun UpNextScreen(
             }
 
             else -> {
-                UpNextList(
-                    current = state.current,
-                    upNext = state.upNext,
-                    context = state.context,
-                    live = state.live,
-                    caps = state.caps,
-                    onAction = onAction,
-                    onMove = onMove,
-                    onRemove = onRemove,
-                    onStopAfter = onStopAfter,
-                    modifier =
-                        Modifier.weight(1f).then(
-                            if (surface == UpNextSurface.DESTINATION) Modifier.navigationBarsPadding() else Modifier,
-                        ),
-                    contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current + 16.dp),
-                    onVisibleIds = onVisibleIds,
-                    emptyContent = {
-                        Column(
-                            Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            EmptyState(
-                                icon = NdIcons.QueueMusic,
-                                title = stringResource(Res.string.up_next_empty_title),
-                                body = stringResource(Res.string.up_next_empty_body),
-                                actionLabel =
-                                    if (state.current == null &&
-                                        state.groups.isEmpty()
-                                    ) {
-                                        stringResource(Res.string.nav_discover)
-                                    } else {
-                                        null
-                                    },
-                                onAction = onDiscover,
-                                footer = {
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.padding(horizontal = 16.dp),
-                                    ) {
-                                        state.groups.take(3).forEach { group ->
-                                            AssistChip(
-                                                onClick = { onPlayGroup(group.id) },
-                                                label = {
-                                                    Text(stringResource(Res.string.queue_play_group, group.name))
-                                                },
-                                            )
+                PageColumnInset(
+                    Modifier.weight(1f).then(
+                        if (surface == UpNextSurface.DESTINATION) Modifier.navigationBarsPadding() else Modifier,
+                    ),
+                ) { inset ->
+                    UpNextList(
+                        current = state.current,
+                        upNext = state.upNext,
+                        context = state.context,
+                        live = state.live,
+                        caps = state.caps,
+                        onAction = onAction,
+                        onMove = onMove,
+                        onRemove = onRemove,
+                        onStopAfter = onStopAfter,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding =
+                            PaddingValues(start = inset, end = inset, bottom = LocalMiniPlayerInset.current + 16.dp),
+                        onVisibleIds = onVisibleIds,
+                        emptyContent = {
+                            Column(
+                                Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                EmptyState(
+                                    icon = NdIcons.QueueMusic,
+                                    title = stringResource(Res.string.up_next_empty_title),
+                                    body = stringResource(Res.string.up_next_empty_body),
+                                    actionLabel =
+                                        if (state.current == null &&
+                                            state.groups.isEmpty()
+                                        ) {
+                                            stringResource(Res.string.nav_discover)
+                                        } else {
+                                            null
+                                        },
+                                    onAction = onDiscover,
+                                    footer = {
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                        ) {
+                                            state.groups.take(3).forEach { group ->
+                                                AssistChip(
+                                                    onClick = { onPlayGroup(group.id) },
+                                                    label = {
+                                                        Text(stringResource(Res.string.queue_play_group, group.name))
+                                                    },
+                                                )
+                                            }
                                         }
-                                    }
-                                },
-                            )
-                        }
-                    },
-                )
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
             }
         }
     }

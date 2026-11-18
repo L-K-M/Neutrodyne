@@ -1,16 +1,32 @@
 # Neutrodyne design backlog
 
 This backlog records open design and engineering work for the radio home and
-macOS experience. The review began on `f9bd91021` and used code inspection,
+macOS experience. The first review began on `f9bd91021` with code inspection,
 fresh desktop fixture renders, and desktop journeys for discovery, group
-management, and the mini player. Playback latency and frame pacing require
-measurements on the Mac. [Product plan](docs/PLAN.md)
+management, and the mini player; a second polish pass ran on `a9b0e114f` over
+the shared radio parts, the feeds adapter and every text field. Playback
+latency and frame pacing still require measurements on the Mac.
+[Product plan](docs/PLAN.md)
 [Radio design](docs/design/08-ui-ux.md#radio-home)
 
 Keep the material and control vocabulary from PO-55. The walnut cabinet,
 enamel signs, paper, and tactile controls should help users distinguish
 navigation, programme, and transport. Native window and menu behavior matters
 alongside the shared cabinet.
+
+## Done since the last consolidation
+
+- **Global shortcuts stood down in sync fields (PR #577, awaiting merge).** The linking
+  flow's address, invite, username and password fields, the approve sheet's
+  code field, the Settings › Sync server-address field, and the device-rename
+  and delete-confirmation strips now report through
+  `Modifier.ndTextFieldFocus()` like every other field. Typing in them no
+  longer toggles playback or skips, and the desktop menu accelerators clear
+  again. Regression cover: `SyncApproveSheetTest`'s focus-tracker tests.
+- **An empty radio offers its two filling routes (PR #580, awaiting merge).** With no groups,
+  the programme said "All clear" as if a station had been emptied. It now
+  says "No playlists yet." and offers momentary keys to Discover and Library;
+  a genuinely cleared playlist keeps its All clear sign without route keys.
 
 ## Playback and programme correctness
 
@@ -73,6 +89,17 @@ paging generation or can be shared across append events. A failed count should
 leave the total unknown. The existing failure path reports a write error for
 this read. Test successive append, invalidation, count failure, discard and
 Undo, and a playing episode outside the selected group.
+
+### Replace the last Material buttons on the radio home
+
+`RadioProgramme` renders the paging Retry action and the discard Undo action
+with Material `TextButton`, painted with `RadioText`. Their ripple, touch
+metrics and font metrics are foreign to the paper tray, while every other
+action on the radio is an ivory key or a bat switch. Restyle both as momentary
+piano keys (or another radio part) without changing the test tags
+(`radio_retry`, `radio_undo`), the focus hand-off after a discard, or the
+single-line error/removal rows. Check the row height at compact sizes and at
+1.3× text before choosing between `MomentaryKey` and `ActionKey`.
 
 ## Cabinet, layout, and accessibility
 
@@ -149,14 +176,17 @@ selection and focus.
 ### Measure switch hit areas in dense panels
 
 `RadioSwitch` requests 30 × 40 dp for the painted plate and passes the same
-modifier to the interactive `BatToggle`. Android can expand input beyond a
-node’s layout bounds.
+modifier to the interactive `BatToggle`. A probe on this Compose version found
+that `Modifier.minimumInteractiveComponentSize()` does not widen the pointer
+region here (a click at (46, 46) inside a 30 dp node did not fire), so meeting
+the target needs a real layout change rather than the stock modifier.
 
 Measure actual hit regions between adjacent controls in Import, Groups and
 Playback speed before sizing the surrounding panel. For standalone switches,
-reserve a distinct 48 × 48 dp area around the current plate. Verify corner taps,
-lever flicks, disabled controls and vertical scrolling at 2× text. For rows that
-own their switch action, retain one accessible target.
+reserve a distinct 48 × 48 dp area around the current plate — a centred plate
+in a 48 dp box, not a larger plate, unless the mockups say otherwise. Verify
+corner taps, lever flicks, disabled controls and vertical scrolling at 2× text.
+For rows that own their switch action, retain one accessible target.
 
 ### Place the Mac window in the display’s usable coordinates
 
@@ -224,6 +254,13 @@ The feed pages by 40 with a maximum loaded size of 400. Time
 `loadedIds.indexOf` against that window before adding a lookup table. Retain
 leading placeholder offsets and ignore IDs missing from the latest snapshot.
 
+`RadioRoute` rebuilds the entire `RadioEpisode` presentation list on every
+paging emission and copies it into `RadioState`, so one append recomposes the
+whole cabinet even though `LazyColumn` keys isolate unchanged rows. Map only
+the diff or keep the mapping behind the snapshot identity. `Speaker` redraws
+its fixed grille pattern on every invalidation; a cached draw is safe because
+only the size is an input.
+
 ### Make desktop screenshot failures reproducible
 
 On this Mac the focused Roborazzi verification of `RadioScreenshotTest.presets`
@@ -269,7 +306,9 @@ Discover when there are no subscriptions. On macOS, exercise a clean launch,
 adding a feed by paste, creating a playlist, and returning to play the first
 episode. Repeat with an OPML import, a present but empty playlist, and a
 feed whose refresh failed. Keep separate empty and error explanations so a
-failed refresh never looks like an empty schedule.
+failed refresh never looks like an empty schedule. The empty-state route keys
+from PR #580 cover the no-subscription case; the remaining journey work is the
+clean-launch exercise, OPML import and the failed-refresh wording.
 
 ### Make editing and finding work naturally with a Mac keyboard
 
@@ -286,17 +325,26 @@ unrelated window commands once the focus bridge is proven.
 Exercise read-only selections and password fields as well as normal editing.
 Verify the menu's enabled states after focus leaves the window.
 
-### Trace native shortcuts through sync text fields
+### Centralize text-field focus reporting
 
-The root relies on `ndTextFieldFocus` to suspend shortcuts and clear AWT
-accelerators. Address, invite and password fields in `SyncSetupScreen` and the
-paper fields for device naming and confirmation currently omit it.
+`.ndTextFieldFocus()` is hand-applied at every call site. Moving it inside
+`PaperTextField` would stop the next dialog or search field from silently
+reintroducing the shortcut conflict, but the wrapper lives in
+`:core:designsystem`, which cannot see the tracker in `:core:ui` without a
+circular dependency; raw `OutlinedTextField`s elsewhere would still need
+explicit treatment. Do this as its own pass over every text field rather than
+halfway, or move the tracker down to the design system first.
 
-Reproduce with a playing episode and the native menu visible. Type a space and
-use a navigation chord in each field, then close the focused form. Confirm the
-current screen and playback stay put while editing and the shortcuts resume on
-exit. Use the existing focus tracker where the failing event originates. Check
-modal focus handoff before changing the shared field primitive.
+### Mark the tuned playlist in the chooser
+
+`RadioInsertDialog` lists groups as plain clickable text rows: nothing marks
+the playlist the radio is tuned to, and focus starts on row 0 even when the
+active group is elsewhere. Give the active row the selected treatment (a lit
+key or lamp beside its name), start keyboard focus on it, and let the screen
+reader announce it as selected. This is also the acceptance check recorded
+under "Native verification" below ([Tuned playlist indicator](#native-verification-on-proposed-fixes)).
+Compare a long group name, a non-first active group, Escape, and returning to
+the chooser.
 
 ### Identify retained results during a new search
 
@@ -304,11 +352,50 @@ DiscoverViewModel deliberately retains previous hits during the 600 ms
 debounce and while the next provider response is pending. DiscoverRoute
 leaves those rows actionable. Prototype a compact, accessible pending
 indicator alongside the old results, retaining the existing anti-flicker
-behavior. With a fake slow provider, enter two unrelated queries and try to
-open a result with both keyboard and pointer. Check whether listeners can
-correctly identify which query produced the visible list and whether the
-final list retains a sensible focus target.
+behavior. The current signal is a Material `LinearProgressIndicator` at the
+top of the results and carries no accessible live-region announcement, so a
+screen reader user cannot tell that the old hits are stale. With a fake slow
+provider, enter two unrelated queries and try to open a result with both
+keyboard and pointer. Check whether listeners can correctly identify which
+query produced the visible list and whether the final list retains a sensible
+focus target.
 [DiscoverViewModel.kt](feature/discover/src/commonMain/kotlin/ch/lkmc/neutrodyne/feature/discover/DiscoverViewModel.kt)
+
+## More ideas from the polish pass
+
+### Offer an index for long programmes
+
+The programme is a lazy pager with no way to jump. A radio-appropriate band of
+A–Z or date keys along the tray edge, or a tuning-dial style jump strip that
+scrolls the `LazyColumn` to the nearest matching sort date, would make
+500-episode groups usable. Prototype first: it needs stable item keys and an
+ordinal lookup that survives paging windows and station switches.
+
+### Print the queue position as a counter window
+
+`RadioPlayer` prints `NN / NN` as plain mono text beside the status. A small
+brass-framed counter window like `StepCounter`'s glass, without the step keys,
+would match the dial/Nixie assembly. Purely presentational; keep the complete
+count semantics from "Give long playlists a reliable count".
+
+### Show the running sleep timer on its Menu key
+
+The Menu dialog's Sleep key never reflects state. When a timer runs, a small
+counter on or beside the key (remaining minutes) would save opening the sheet.
+Keep it quiet when off and honour the existing timer controls.
+
+### Small finish notes for the radio face
+
+- The printed needle scale always uses `MM:SS`; above 99 minutes the rightmost
+  quarter label ("900:00") is wider than the others and nudges the row. Either
+  accept it deliberately or use a compact hours form there too.
+- `Nixie` draws a ghost `8` behind every digit; check on Retina whether it greys
+  the tubes enough to cost legibility.
+- `SkipKey`'s painted cap fills its whole 52 dp target while `SlipPlayKey` keeps
+  a 36 dp cap inside 48 dp. A little air between ring and target would match.
+- The programme header reserves a full key's width to centre the enamel sign;
+  at large font scales that spacer can be what pushes the sign into ellipsis
+  (see "Give the playlist sign room").
 
 ## Prototypes
 
@@ -360,6 +447,21 @@ and avoid extra permanent controls. Decide from a full-size and a compact render
 whether this earns space. Prototype slightly longer brass ticks, cluster marks
 too close for a pointer to resolve, and test late-arriving chapter data with
 four and eighty chapters. [PlayerViewModel.kt](feature/player/src/commonMain/kotlin/ch/lkmc/neutrodyne/feature/player/PlayerViewModel.kt)
+
+## Checked and cleared
+
+- **Elapsed time after a seek.** A suspected freeze (position ticks suppressed
+  for an episode present in `RadioViewModel.seeks`) does not exist: `seek()`
+  populates `seeks` only in the not-loaded branch, so a loaded needle seek or
+  skip keeps receiving ticks. Two exploratory regression tests (tick after
+  seek; resume after a paused seek) passed on clean `origin/main`.
+- **Update-dot announcement.** The radio Menu key's badge description merges
+  with its label (`mergeDescendants=true`), so it does not double-announce.
+- **Focused-field disposal.** `TextFieldFocusTest` already proves a focused
+  field leaving composition releases the shortcut stand-down.
+- **Stock touch-target expansion.** `Modifier.minimumInteractiveComponentSize()`
+  did not widen the pointer region in a desktop probe (see "Measure switch hit
+  areas"), so do not assume it satisfies the 48 dp rule here.
 
 ## Native verification on proposed fixes
 

@@ -54,6 +54,8 @@ import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.PageColumnInset
+import ch.lkmc.neutrodyne.core.ui.pageColumn
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.discover_add_url
@@ -142,7 +144,7 @@ internal fun DiscoverScreen(
     ) {
         NdTopAppBar(stringResource(Res.string.nav_discover))
         Column(
-            Modifier.padding(horizontal = 16.dp).padding(top = 12.dp),
+            Modifier.pageColumn().padding(horizontal = 16.dp).padding(top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SearchStrip(state.input, onInput, ::submit, stringResource(Res.string.discovery_search), focus)
@@ -153,31 +155,33 @@ internal fun DiscoverScreen(
                 MomentaryKey(stringResource(Res.string.discovery_import), { navigator.push(ImportFileKey) })
             }
         }
-        LazyColumn(
-            state = list,
-            modifier = Modifier.weight(1f).ndScrollbar(list, bars, barColor),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
-        ) {
-            if (state.input.isNotBlank() && !linkInput) {
-                state.results?.let { results ->
-                    item { SearchStatus(results, retry, settings) }
-                    val inline = results.hits.take(INLINE_LIMIT)
-                    val keys = hitKeys(inline)
-                    itemsIndexed(inline, key = { index, _ -> keys[index] }) { _, hit ->
-                        DirectoryRow(hit) { navigator.openHit(hit) }
-                    }
-                    if (results.hits.size > INLINE_LIMIT) {
-                        item {
-                            KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                                MomentaryKey(stringResource(Res.string.discovery_more), ::submit)
+        PageColumnInset(Modifier.weight(1f)) { inset ->
+            LazyColumn(
+                state = list,
+                modifier = Modifier.fillMaxSize().ndScrollbar(list, bars, barColor),
+                contentPadding = PaddingValues(start = inset, top = 8.dp, end = inset, bottom = 16.dp),
+            ) {
+                if (state.input.isNotBlank() && !linkInput) {
+                    state.results?.let { results ->
+                        item { SearchStatus(results, retry, settings) }
+                        val inline = results.hits.take(INLINE_LIMIT)
+                        val keys = hitKeys(inline)
+                        itemsIndexed(inline, key = { index, _ -> keys[index] }) { _, hit ->
+                            DirectoryRow(hit) { navigator.openHit(hit) }
+                        }
+                        if (results.hits.size > INLINE_LIMIT) {
+                            item {
+                                KeyBank(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                    MomentaryKey(stringResource(Res.string.discovery_more), ::submit)
+                                }
                             }
                         }
                     }
+                } else if (state.input.isBlank() && state.chartsAvailable()) {
+                    charts(state, navigator, onChartVisible, onTune, onChartRetry)
+                } else if (state.input.isBlank()) {
+                    item(key = "charts-off") { ChartsOff(settings) }
                 }
-            } else if (state.input.isBlank() && state.chartsAvailable()) {
-                charts(state, navigator, onChartVisible, onTune, onChartRetry)
-            } else if (state.input.isBlank()) {
-                item(key = "charts-off") { ChartsOff(settings) }
             }
         }
     }
