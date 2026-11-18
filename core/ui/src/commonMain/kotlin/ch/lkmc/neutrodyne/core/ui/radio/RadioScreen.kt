@@ -37,7 +37,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
@@ -105,22 +104,14 @@ private fun RadioCabinet(
     ) {
         val width = maxWidth
         val height = maxHeight
-        val narrow = width < 370.dp
-        val wide = width >= 600.dp
-        val viewportHeight =
-            with(LocalDensity.current) {
-                LocalWindowInfo.current.containerSize.height
-                    .toDp()
-            }
-        val compact = viewportHeight < 800.dp
-        val short = viewportHeight < 660.dp
-        val rows =
-            when {
-                compact -> RadioRows.COMPACT
-                wide -> RadioRows.WIDE
-                else -> RadioRows.STANDARD
-            }
-        val scale = LocalDensity.current.fontScale
+        // The transport and the slips follow the same usable height as the deck and the cabinet;
+        // the raw window would keep the tall layout under large system bars.
+        val layout = radioLayout(width, height, LocalDensity.current.fontScale)
+        val narrow = layout.narrow
+        val wide = layout.wide
+        val compact = layout.compact
+        val short = layout.short
+        val rows = layout.rows
         // The deck spans the cabinet, its height following the width up to a share of the window's
         // height; beyond that its chassis grows longer instead. It shows whenever the window is tall
         // enough for it at all (the tubes stay on every screen, owner decision 2026-11-17): the
@@ -129,12 +120,7 @@ private fun RadioCabinet(
         val deckWidth = width - (if (narrow) 20.dp else 24.dp) + 18.dp
         val deckHeight = minOf(deckWidth / VALVE_DECK_ASPECT, height * DECK_HEIGHT_SHARE)
         val deckVisible = height >= DECK_MIN_HEIGHT
-        val minimumHeight =
-            when {
-                wide -> 280.dp
-                compact -> 440.dp
-                else -> 500.dp
-            } * scale
+        val minimumHeight = layout.minimumHeight
         val contentHeight = maxOf(height, minimumHeight + if (deckVisible) deckHeight else 0.dp)
         val needsScroll = contentHeight > height
         Column(if (needsScroll) Modifier.verticalScroll(rememberScrollState()) else Modifier) {

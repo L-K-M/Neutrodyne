@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.ui.radio
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
@@ -18,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -46,6 +49,7 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -53,6 +57,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
+import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
@@ -63,6 +68,11 @@ import kotlin.test.assertEquals
 
 @OptIn(ExperimentalTestApi::class)
 class RadioInteractionTest {
+    private class FixedWindowInfo(
+        override val containerSize: IntSize,
+        override val isWindowFocused: Boolean = true,
+    ) : WindowInfo
+
     @Test
     fun swipeCommitsOnlyOnReleaseAtExactThresholdAndUndoRestores() =
         runDesktopComposeUiTest(width = 390, height = 844) {
@@ -432,6 +442,25 @@ class RadioInteractionTest {
             runOnIdle { width = 320 }
             onNodeWithTag("radio_episode_1").performTouchInput { up() }
             assertEquals(0, discards)
+        }
+
+    // The deck and the cabinet are sized from the usable height; the transport must follow it,
+    // not the raw window. 844 dp of window with 72 dp of insets is the compact home.
+    @Test fun theTransportFollowsTheUsableHeightNotTheWindow() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val heading = getString(Res.string.radio_episodes).uppercase()
+            setContent {
+                CompositionLocalProvider(
+                    LocalWindowInfo provides FixedWindowInfo(IntSize(390, 844)),
+                ) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
+                        Box(Modifier.height(772.dp)) {
+                            RadioScreen(radioFixture(), RadioActions())
+                        }
+                    }
+                }
+            }
+            onNodeWithText(heading).assertDoesNotExist()
         }
 
     @Test fun focusedDeleteAndChooserEscapeRestoreFocus() =

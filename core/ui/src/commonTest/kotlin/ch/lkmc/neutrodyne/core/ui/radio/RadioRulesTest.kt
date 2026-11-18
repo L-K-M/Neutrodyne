@@ -2,9 +2,12 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
+import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class RadioRulesTest {
     @Test fun elapsedUsesFourTubesAcrossBoundary() {
@@ -19,6 +22,47 @@ class RadioRulesTest {
         assertEquals(48f, radioDiscardThreshold(100f))
         assertEquals(70f, radioDiscardThreshold(250f))
         assertEquals(80f, radioDiscardThreshold(500f))
+    }
+
+    @Test fun compactHeightFollowsTheUsableViewportNotTheRawWindow() {
+        // An 844 dp window with 72 dp of system bars has 772 dp of content: the compact home.
+        val tall = radioLayout(390.dp, 844.dp, 1f)
+        assertFalse(tall.compact)
+        assertFalse(tall.short)
+        assertEquals(RadioRows.STANDARD, tall.rows)
+        val withBars = radioLayout(390.dp, 772.dp, 1f)
+        assertTrue(withBars.compact)
+        assertFalse(withBars.short)
+        assertEquals(RadioRows.COMPACT, withBars.rows)
+    }
+
+    @Test fun layoutMatrixCoversWidthAndUsableHeight() {
+        val phone = radioLayout(320.dp, 568.dp, 1f)
+        assertTrue(phone.narrow)
+        assertFalse(phone.wide)
+        assertTrue(phone.compact)
+        assertTrue(phone.short)
+
+        val landscape = radioLayout(700.dp, 360.dp, 1f)
+        assertFalse(landscape.narrow)
+        assertTrue(landscape.wide)
+        assertTrue(landscape.compact)
+        assertTrue(landscape.short)
+        assertEquals(RadioRows.COMPACT, landscape.rows)
+
+        val tablet = radioLayout(700.dp, 900.dp, 1f)
+        assertTrue(tablet.wide)
+        assertFalse(tablet.compact)
+        assertFalse(tablet.short)
+        assertEquals(RadioRows.WIDE, tablet.rows)
+    }
+
+    @Test fun cabinetMinimumGrowsWithTextAndFollowsTheMode() {
+        assertEquals(500.dp, radioLayout(390.dp, 844.dp, 1f).minimumHeight)
+        assertEquals(440.dp, radioLayout(390.dp, 772.dp, 1f).minimumHeight)
+        assertEquals(280.dp, radioLayout(700.dp, 900.dp, 1f).minimumHeight)
+        assertEquals(660.dp, radioLayout(390.dp, 772.dp, 1.5f).minimumHeight)
+        assertEquals(420.dp, radioLayout(700.dp, 900.dp, 1.5f).minimumHeight)
     }
 
     @Test fun removalSelectsNextThenPreviousAndLeavesOtherSelectionsAlone() {
