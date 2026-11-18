@@ -508,7 +508,7 @@ private fun RenameDialog(
             PaperTextField(
                 value = name,
                 onValueChange = { name = it },
-                placeholder = stringResource(Res.string.sync_device_name_label),
+                label = stringResource(Res.string.sync_device_name_label),
                 errorText = if (!valid) stringResource(Res.string.sync_device_name_hint) else null,
                 modifier = Modifier.fillMaxWidth(),
             )

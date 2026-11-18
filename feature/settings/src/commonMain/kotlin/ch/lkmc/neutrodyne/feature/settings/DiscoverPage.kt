@@ -223,7 +223,7 @@ private fun KeyEditor(
             PaperTextField(
                 value = key,
                 onValueChange = { key = it },
-                placeholder = stringResource(Res.string.discover_key),
+                label = stringResource(Res.string.discover_key),
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 modifier = Modifier.testTag("pi-key").ndTextFieldFocus(),
@@ -231,7 +231,7 @@ private fun KeyEditor(
             PaperTextField(
                 value = secret,
                 onValueChange = { secret = it },
-                placeholder = stringResource(Res.string.discover_secret),
+                label = stringResource(Res.string.discover_secret),
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 modifier = Modifier.testTag("pi-secret").ndTextFieldFocus(),

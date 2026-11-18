@@ -49,13 +49,13 @@ public fun CredentialFields(
         PaperTextField(
             value = username,
             onValueChange = onUsernameChange,
-            placeholder = stringResource(Res.string.add_auth_username),
+            label = stringResource(Res.string.add_auth_username),
             modifier = Modifier.contentType(ContentType.Username).ndTextFieldFocus(),
         )
         PaperTextField(
             value = password,
             onValueChange = onPasswordChange,
-            placeholder = stringResource(Res.string.add_auth_password),
+            label = stringResource(Res.string.add_auth_password),
             modifier = Modifier.contentType(ContentType.Password).ndTextFieldFocus(),
             visualTransformation =
                 if (showPassword) {

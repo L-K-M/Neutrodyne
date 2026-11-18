@@ -209,7 +209,7 @@ private fun DeleteServerDataDialog(
             PaperTextField(
                 value = typed,
                 onValueChange = { typed = it },
-                placeholder = stringResource(Res.string.sync_delete_field),
+                label = stringResource(Res.string.sync_delete_field),
                 modifier = Modifier.fillMaxWidth(),
             )
         }

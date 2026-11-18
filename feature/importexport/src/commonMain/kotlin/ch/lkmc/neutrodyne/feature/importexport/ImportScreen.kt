@@ -1290,7 +1290,7 @@ private fun NameDialog(
                     name = it
                     error = null
                 },
-                placeholder = stringResource(Res.string.import_target_name),
+                label = stringResource(Res.string.import_target_name),
                 enabled = !submitting,
                 errorText = error?.let { groupErrorText(it) },
                 modifier = Modifier.testTag("import-name-input").ndTextFieldFocus(),

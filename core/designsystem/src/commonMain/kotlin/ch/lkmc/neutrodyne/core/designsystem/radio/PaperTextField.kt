@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +36,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
@@ -48,7 +51,10 @@ import androidx.compose.ui.unit.sp
  * optional [trailingText] at the end (such as a character count). The rim turns amber while the
  * field has focus and red while there is an [errorText], which screen readers hear as the field's
  * error. Like a hint, [placeholder] names the empty field for screen readers; typed text then
- * speaks for itself. Callers add focus requesters and key handling through [modifier]. A
+ * speaks for itself. A field among others in a form takes a [label] instead, printed above the
+ * strip like a form's caption, which names it whether empty or filled (two filled password
+ * strips would otherwise be indistinguishable); a labelled field's placeholder is only a visible
+ * hint. Callers add focus requesters and key handling through [modifier]. A
  * [visualTransformation] masks secrets (`PasswordVisualTransformation` also marks the field as a
  * password for screen readers), and [trailing] holds a small control such as a show-password key.
  */
@@ -56,8 +62,9 @@ import androidx.compose.ui.unit.sp
 public fun PaperTextField(
     value: String,
     onValueChange: (String) -> Unit,
-    placeholder: String,
     modifier: Modifier = Modifier,
+    placeholder: String? = null,
+    label: String? = null,
     enabled: Boolean = true,
     errorText: String? = null,
     leadingIcon: ImageVector? = null,
@@ -67,6 +74,7 @@ public fun PaperTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    require(label != null || placeholder != null) { "A paper strip needs a label or a placeholder to name it" }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val rim =
@@ -83,7 +91,7 @@ public fun PaperTextField(
                 .fillMaxWidth()
                 .alpha(if (enabled) 1f else DISABLED_ALPHA)
                 .semantics {
-                    if (value.isEmpty()) contentDescription = placeholder
+                    if (label == null && value.isEmpty() && placeholder != null) contentDescription = placeholder
                     if (errorText != null) error(errorText)
                 },
         enabled = enabled,
@@ -95,47 +103,79 @@ public fun PaperTextField(
         interactionSource = interaction,
         cursorBrush = SolidColor(Ink),
         decorationBox = { field ->
-            MaterialPlate(
-                RadioMaterial.PAPER,
-                Modifier
-                    .fillMaxWidth()
-                    .recess(FieldShape)
-                    .then(if (rim != null) Modifier.border(2.dp, rim, FieldShape) else Modifier),
-            ) {
-                Row(
-                    Modifier.heightIn(min = FIELD_HEIGHT).padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (leadingIcon != null) {
-                        Icon(leadingIcon, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(10.dp))
-                    }
-                    Box(Modifier.weight(1f)) {
-                        if (value.isEmpty()) {
-                            Text(
-                                placeholder,
-                                Modifier.clearAndSetSemantics {},
-                                color = Ink.copy(alpha = PLACEHOLDER_ALPHA),
-                                fontFamily = courier(),
-                                fontSize = FIELD_TEXT,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        field()
-                    }
-                    if (trailingText != null) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(trailingText, color = Ink, fontFamily = courier(), fontSize = 12.sp, maxLines = 1)
-                    }
-                    if (trailing != null) {
-                        Spacer(Modifier.width(4.dp))
-                        trailing()
-                    }
+            Column {
+                // Inside the field, so its text merges into the field's name, as a Material label's
+                // does; spelled as written for screen readers, which spell some all-caps words.
+                if (label != null) {
+                    Text(
+                        label.uppercase(),
+                        Modifier.padding(start = 2.dp, bottom = 4.dp).clearAndSetSemantics {
+                            text = AnnotatedString(label)
+                        },
+                        color = Ink,
+                        fontFamily = barlow(),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = LABEL_TEXT,
+                        letterSpacing = LABEL_SPACING,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+                PaperStrip(value, placeholder, rim, leadingIcon, trailingText, trailing, field)
             }
         },
     )
+}
+
+@Composable
+private fun PaperStrip(
+    value: String,
+    placeholder: String?,
+    rim: Color?,
+    leadingIcon: ImageVector?,
+    trailingText: String?,
+    trailing: (@Composable () -> Unit)?,
+    field: @Composable () -> Unit,
+) {
+    MaterialPlate(
+        RadioMaterial.PAPER,
+        Modifier
+            .fillMaxWidth()
+            .recess(FieldShape)
+            .then(if (rim != null) Modifier.border(2.dp, rim, FieldShape) else Modifier),
+    ) {
+        Row(
+            Modifier.heightIn(min = FIELD_HEIGHT).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leadingIcon != null) {
+                Icon(leadingIcon, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+            }
+            Box(Modifier.weight(1f)) {
+                if (value.isEmpty() && placeholder != null) {
+                    Text(
+                        placeholder,
+                        Modifier.clearAndSetSemantics {},
+                        color = Ink.copy(alpha = PLACEHOLDER_ALPHA),
+                        fontFamily = courier(),
+                        fontSize = FIELD_TEXT,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                field()
+            }
+            if (trailingText != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(trailingText, color = Ink, fontFamily = courier(), fontSize = 12.sp, maxLines = 1)
+            }
+            if (trailing != null) {
+                Spacer(Modifier.width(4.dp))
+                trailing()
+            }
+        }
+    }
 }
 
 /**
@@ -176,6 +216,8 @@ private val FocusAmber = Color(0xFFF3B35E)
 private val ErrorRed = Color(0xFFB3261E)
 private val FIELD_HEIGHT = 52.dp
 private val FIELD_TEXT = 16.sp
+private val LABEL_TEXT = 11.sp
+private val LABEL_SPACING = 1.5.sp
 private val FACEPLATE_KEY = 36.dp
 private const val PLACEHOLDER_ALPHA = 0.6f
 private const val DISABLED_ALPHA = 0.5f

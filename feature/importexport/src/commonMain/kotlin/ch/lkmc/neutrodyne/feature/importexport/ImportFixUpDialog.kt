@@ -83,7 +83,7 @@ internal fun ImportFixUpDialog(
                         url = it
                         error = null
                     },
-                    placeholder = title,
+                    label = title,
                     enabled = !submitting,
                     errorText = error?.asString(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
