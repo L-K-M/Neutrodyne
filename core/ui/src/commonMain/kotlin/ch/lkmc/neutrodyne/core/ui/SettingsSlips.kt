@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
@@ -32,9 +31,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.radio.BatToggleFace
 import ch.lkmc.neutrodyne.core.designsystem.radio.Brass
@@ -84,16 +86,10 @@ public fun SettingsRow(
                     Icon(icon, contentDescription = null, tint = Ink, modifier = Modifier.size(ICON_SIZE))
                 }
             }
-            SlipText(title, summary, Modifier.weight(1f))
-            if (value != null) {
-                Text(
-                    value,
-                    Modifier.widthIn(max = VALUE_MAX_WIDTH),
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.End,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (value == null) {
+                SlipText(title, summary, Modifier.weight(1f))
+            } else {
+                SlipTextAndValue(title, summary, value, Modifier.weight(1f))
             }
             trailing?.invoke()
         }
@@ -237,6 +233,53 @@ private fun SlipText(
     Column(modifier) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         if (summary != null) Text(summary, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/**
+ * The title and summary with the current value at the slip's end. The value yields to the
+ * title's longest word, so a narrow pane never breaks the title inside a word; where even the
+ * value's longest word then has no room beside it, the value moves to its own line below.
+ */
+@Composable
+private fun SlipTextAndValue(
+    title: String,
+    summary: String?,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Layout(
+        content = {
+            SlipText(title, summary)
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.End,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        modifier = modifier,
+    ) { (text, current), constraints ->
+        val width = constraints.maxWidth
+        val gap = SLIP_GAP.roundToPx()
+        val room = minOf(VALUE_MAX_WIDTH.roundToPx(), width - gap - text.minIntrinsicWidth(Constraints.Infinity))
+        if (room > 0 && current.minIntrinsicWidth(Constraints.Infinity) <= room) {
+            val v = current.measure(Constraints(maxWidth = room))
+            val t = text.measure(Constraints.fixedWidth((width - gap - v.width).coerceAtLeast(0)))
+            val height = constraints.constrainHeight(maxOf(t.height, v.height))
+            layout(width, height) {
+                t.placeRelative(0, (height - t.height) / 2)
+                v.placeRelative(width - v.width, (height - v.height) / 2)
+            }
+        } else {
+            val t = text.measure(Constraints.fixedWidth(width))
+            val v = current.measure(Constraints(maxWidth = width))
+            layout(width, constraints.constrainHeight(t.height + v.height)) {
+                t.placeRelative(0, 0)
+                v.placeRelative(width - v.width, t.height)
+            }
+        }
     }
 }
 

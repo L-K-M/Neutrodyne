@@ -467,7 +467,7 @@ On the desktop a click on the selected rail item and Ctrl/Cmd+1 … 5 on the sel
 
 ### Pane roles and detail placeholders
 
-Metadata (01's `ListDetailSceneStrategy.listPane()/detailPane()/extraPane()`) per key is the "Pane role" column of the [Screen inventory](#screen-inventory). Detail placeholders when a list key is alone on ≥ 2 partitions: Feeds — the selected group's mosaic at 240 dp with "Select an episode"; Library — "Select a podcast" with the four most recently updated covers; Settings home — the Appearance page's content rendered as the placeholder (not a back-stack entry, so back never re-opens it in a loop; tapping a page row then uses `pushDetail(SettingsKey(page))`); other lists — none (the list takes the full width). `EpisodeKey` is an extra pane so that Library → Podcast → Episode shows three panes on ≥ 1,200 dp of content. Unverified (spike S5): that `ListDetailSceneStrategy` in `adaptive-navigation3` 1.3.0 places an extra-pane entry directly after a list entry (Feeds → Episode) beside the list; fallback: register `EpisodeKey` as `detailPane()`, accepting Podcast → Episode replacing the podcast in the detail pane.
+Metadata (01's `ListDetailSceneStrategy.listPane()/detailPane()/extraPane()`) per key is the "Pane role" column of the [Screen inventory](#screen-inventory). Detail placeholders when a list key is alone on ≥ 2 partitions: Feeds — the selected group's mosaic at 240 dp with "Select an episode"; Library — none (amended 2026-11-18: the planned "Select a podcast" placeholder was never built, and the Library left the panes beside it empty; it now takes the full width like the other lists, and its grid gains columns); Settings home — the Appearance page's content rendered as the placeholder (not a back-stack entry, so back never re-opens it in a loop; tapping a page row then uses `pushDetail(SettingsKey(page))`); other lists — none (the list takes the full width). A list takes the full width because the pane strategy lays a scene of list entries without a placeholder out on one partition; that scene keeps the row's scene identity, so opening a detail splits the window inside one scaffold, as a window resize does. In the radio's cabinet a placeholder stands in the detail pane's place in the row, beside its list (2026-11-18). `EpisodeKey` is an extra pane so that Library → Podcast → Episode shows three panes on ≥ 1,200 dp of content. Unverified (spike S5): that `ListDetailSceneStrategy` in `adaptive-navigation3` 1.3.0 places an extra-pane entry directly after a list entry (Feeds → Episode) beside the list; fallback: register `EpisodeKey` as `detailPane()`, accepting Podcast → Episode replacing the podcast in the detail pane.
 
 ### Sheets and dialogs
 
@@ -2390,7 +2390,9 @@ whole row at 22 % of the window's height and stows below 560 dp like a single pa
 pane draws the deck and clips it to its own slice), every pane keeps its roof line, the walls
 between trays meet as one partition, and only the row's outer walls have gaps, rounded corners
 and lit or shaded edges. The panes of a row draw no stage of their own; they stand on the
-charcoal stage `NeutrodyneRoot` draws behind every page. The frame
+charcoal stage `NeutrodyneRoot` draws behind every page. A list with nothing beside it is no
+row: it fills the window as a single page, and a detail placeholder joins the row as its
+detail pane ([Pane roles and detail placeholders](#pane-roles-and-detail-placeholders)). The frame
 consumes the status bar, cutout and navigation bar insets, so the status bar keeps light
 icons on every page and page headers no longer lease it. `NdTopAppBar` is a metal faceplate
 with the title on an enamel sign; `NdIconButton` and `NdTooltipIconButton` on a
