@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.ui.radio
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
@@ -58,6 +59,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.radio_buffering
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_ended
+import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_error
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
@@ -590,6 +592,25 @@ class RadioInteractionTest {
             runOnIdle { width = 320 }
             onNodeWithTag("radio_episode_1").performTouchInput { up() }
             assertEquals(0, discards)
+        }
+
+    // The deck and the cabinet are sized from the usable height; the transport must follow it,
+    // not the raw window. The test window is 844 dp tall, but the screen is pinned to 772 dp
+    // of content (844 dp with 72 dp of insets), which is the compact home.
+    @Test fun theTransportFollowsTheUsableHeightNotTheWindow() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val heading = getString(Res.string.radio_episodes).uppercase()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    Box(Modifier.height(772.dp)) {
+                        RadioScreen(radioFixture(), RadioActions())
+                    }
+                }
+            }
+            // The compact home is really on screen: its transport and programme are present.
+            onNodeWithTag("radio_play").assertIsDisplayed()
+            onNodeWithTag("radio_episodes").assertIsDisplayed()
+            onNodeWithText(heading).assertDoesNotExist()
         }
 
     @Test fun focusedDeleteAndChooserEscapeRestoreFocus() =
