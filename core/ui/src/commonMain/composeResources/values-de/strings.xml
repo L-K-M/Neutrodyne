@@ -702,6 +702,7 @@
     <string name="radio_nothing">Nichts vorgemerkt</string>
     <string name="radio_choose_other">Wähle zum Hören eine andere Playlist.</string>
     <string name="radio_release">Loslassen</string>
+    <string name="radio_discard_episode">Folge verwerfen</string>
     <string name="radio_discard">zum Verwerfen</string>
     <string name="radio_elapsed_full">Verstrichen: %1$d Stunden, %2$d Minuten, %3$d Sekunden</string>
     <string name="radio_meta">%1$d Podcasts · %2$d Folgen</string>

@@ -724,6 +724,7 @@
     <string name="radio_nothing">Nothing queued</string>
     <string name="radio_choose_other">Choose another playlist to listen.</string>
     <string name="radio_release">Release</string>
+    <string name="radio_discard_episode">Discard episode</string>
     <string name="radio_discard">to discard</string>
     <string name="radio_elapsed_full">Elapsed: %1$d hours, %2$d minutes, %3$d seconds</string>
     <string name="radio_meta">%1$d podcasts · %2$d episodes</string>

@@ -37,6 +37,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
@@ -52,6 +53,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
+import ch.lkmc.neutrodyne.core.ui.resources.radio_discard_episode
 import ch.lkmc.neutrodyne.core.ui.resources.radio_elapsed_full
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
@@ -63,6 +65,26 @@ import kotlin.test.assertEquals
 
 @OptIn(ExperimentalTestApi::class)
 class RadioInteractionTest {
+    @Test fun programmeSlipOffersDiscardAlongsideSelection() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val discarded = mutableListOf<Long>()
+            val selected = mutableListOf<Long>()
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture(),
+                        RadioActions(discard = { discarded += it }, selectEpisode = { selected += it }),
+                    )
+                }
+            }
+            val row = onNodeWithTag("radio_episode_2")
+            row.performCustomAccessibilityActionWithLabel(getString(Res.string.radio_discard_episode))
+            assertEquals(listOf(2L), discarded)
+            assertEquals(emptyList(), selected)
+            row.performClick()
+            assertEquals(listOf(2L), selected)
+        }
+
     @Test
     fun swipeCommitsOnlyOnReleaseAtExactThresholdAndUndoRestores() =
         runDesktopComposeUiTest(width = 390, height = 844) {

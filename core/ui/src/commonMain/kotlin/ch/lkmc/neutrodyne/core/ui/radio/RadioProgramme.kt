@@ -68,9 +68,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -103,6 +105,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.date_duration_minutes
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.radio_all_clear
 import ch.lkmc.neutrodyne.core.ui.resources.radio_discard
+import ch.lkmc.neutrodyne.core.ui.resources.radio_discard_episode
 import ch.lkmc.neutrodyne.core.ui.resources.radio_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.radio_menu
 import ch.lkmc.neutrodyne.core.ui.resources.radio_no_episodes
@@ -323,6 +326,7 @@ private fun RadioSlip(
             focusRestored()
         }
     }
+    val discardLabel = stringResource(Res.string.radio_discard_episode)
     val monogram = rememberMonogram(episode.podcast)
     BoxWithConstraints(Modifier.fillMaxWidth().clipToBounds().background(Color(0xFF38291B))) {
         val density = LocalDensity.current
@@ -347,7 +351,15 @@ private fun RadioSlip(
                 .testTag("radio_episode_${episode.id}")
                 .focusRequester(focus)
                 .focusProperties { canFocus = true }
-                .onKeyEvent {
+                .semantics {
+                    customActions =
+                        listOf(
+                            CustomAccessibilityAction(discardLabel) {
+                                actions.discard(episode.id)
+                                true
+                            },
+                        )
+                }.onKeyEvent {
                     if (it.type == KeyEventType.KeyDown && it.key == Key.Delete) {
                         actions.discard(episode.id)
                         true
