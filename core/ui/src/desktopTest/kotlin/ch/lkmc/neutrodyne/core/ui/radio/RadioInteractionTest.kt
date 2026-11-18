@@ -17,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
@@ -461,19 +463,48 @@ class RadioInteractionTest {
             assertEquals(listOf(1_140_000L), seeks)
         }
 
-    @Test fun needleDragCancellationSeeksNothing() =
+    @Test fun interceptedDragRestoresTheNeedleWithoutSeeking() =
         runDesktopComposeUiTest(width = 390, height = 844) {
+            var intercept = false
             val seeks = mutableListOf<Long>()
             setContent {
                 NeutrodyneTheme(SystemUiState.DEFAULT) {
-                    RadioScreen(radioFixture(), RadioActions(seek = { seeks += it }))
+                    RadioScreen(
+                        radioFixture(),
+                        RadioActions(seek = { seeks += it }),
+                        Modifier.pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (intercept) event.changes.forEach { it.consume() }
+                                }
+                            }
+                        },
+                    )
                 }
             }
-            onNodeWithTag("radio_seek").performTouchInput {
+            val needle = onNodeWithTag("radio_seek")
+            needle.performTouchInput {
                 down(Offset(width * 0.2f, height / 2f))
                 moveBy(Offset(width * 0.3f, 0f))
-                cancel()
             }
+            needle.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ProgressBarRangeInfo,
+                    ProgressBarRangeInfo(0.5f, 0f..1f),
+                ),
+            )
+            runOnIdle { intercept = true }
+            needle.performTouchInput {
+                moveBy(Offset(10f, 0f))
+                up()
+            }
+            needle.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ProgressBarRangeInfo,
+                    ProgressBarRangeInfo(0f, 0f..1f),
+                ),
+            )
             assertEquals(0, seeks.size)
         }
 
@@ -494,6 +525,12 @@ class RadioInteractionTest {
             runOnIdle { state = state.copy(selectedId = 2L) }
             assertEquals(0, seeks.size)
             needle.performTouchInput { up() }
+            onNodeWithTag("radio_seek").assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ProgressBarRangeInfo,
+                    ProgressBarRangeInfo(0f, 0f..1f),
+                ),
+            )
             assertEquals(0, seeks.size)
         }
 
@@ -522,6 +559,12 @@ class RadioInteractionTest {
             }
             assertEquals(0, seeks.size)
             needle.performTouchInput { up() }
+            onNodeWithTag("radio_seek").assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ProgressBarRangeInfo,
+                    ProgressBarRangeInfo(0f, 0f..1f),
+                ),
+            )
             assertEquals(0, seeks.size)
         }
 
