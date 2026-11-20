@@ -21,6 +21,15 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdSheetExpansion
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
 
+@Composable
+private fun OverlayEntryContent(entry: NavEntry<*>) {
+    // A redirected overlay can outlive the outgoing pane. Tie its updates to the host for
+    // the lifetime of this window, including while the host backgrounds and resumes.
+    val parent = LocalNavigationHostLifecycleOwner.current ?: LocalLifecycleOwner.current
+    val owner = rememberLifecycleOwner(parent = parent)
+    CompositionLocalProvider(LocalLifecycleOwner provides owner) { entry.Content() }
+}
+
 /**
  * An [OverlayScene] rendering [entry] inside [NdModalBottomSheet] (01 overlay scene strategies).
  * On the desktop the sheet is window-backed, so it draws above the expanded player; Nav3 ships no
@@ -37,7 +46,6 @@ private class NdSheetScene<T : Any>(
     override val entries: List<NavEntry<T>> = listOf(entry)
 
     override val content: @Composable (() -> Unit) = {
-        val lifecycleOwner = rememberLifecycleOwner()
         // The underlying pane can leave while an overlay enters. Its dispatcher is disposed
         // with that pane, so the window must register with the navigation host's stable owner.
         OverlayBackOwner {
@@ -54,9 +62,7 @@ private class NdSheetScene<T : Any>(
                         NdSheetExpansion.EXPANDED
                     },
             ) {
-                CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
-                    entry.Content()
-                }
+                OverlayEntryContent(entry)
             }
         }
     }
@@ -120,12 +126,9 @@ private class NdDialogScene<T : Any>(
     override val entries: List<NavEntry<T>> = listOf(entry)
 
     override val content: @Composable (() -> Unit) = {
-        val lifecycleOwner = rememberLifecycleOwner()
         OverlayBackOwner {
             androidx.compose.ui.window.Dialog(onDismissRequest = onBack) {
-                CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
-                    entry.Content()
-                }
+                OverlayEntryContent(entry)
             }
         }
     }

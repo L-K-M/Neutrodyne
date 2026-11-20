@@ -57,6 +57,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventDispatcher
@@ -100,6 +101,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -775,7 +777,8 @@ class NeutrodyneRootTest {
             waitUntil(timeoutMillis = 10_000) {
                 onAllNodesWithText("add-podcast-sheet").fetchSemanticsNodes().isNotEmpty()
             }
-            onNodeWithText("add-podcast-sheet").assertIsDisplayed()
+            onNodeWithText("add-podcast-sheet").assertIsDisplayed().performClick()
+            onNodeWithText("Result ready").assertIsDisplayed()
             onAllNodesWithContentDescription("Close sheet").onFirst().performTouchInput { click(Offset(4f, 4f)) }
             waitForIdle()
             onNodeWithText("add-podcast-sheet").assertDoesNotExist()
@@ -795,7 +798,8 @@ class NeutrodyneRootTest {
             waitUntil(timeoutMillis = 10_000) {
                 onAllNodesWithText("export-dialog").fetchSemanticsNodes().isNotEmpty()
             }
-            onNodeWithText("export-dialog").assertIsDisplayed()
+            onNodeWithText("export-dialog").assertIsDisplayed().performClick()
+            onNodeWithText("Result ready").assertIsDisplayed()
             onNodeWithText("export-dialog").performTouchInput { click(Offset(-20f, -20f)) }
             waitForIdle()
             onNodeWithText("export-dialog").assertDoesNotExist()
@@ -1246,7 +1250,7 @@ private val TestInstallers: Set<EntryProviderInstaller> =
             }
         }
         add { entry<SpeedKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("speed-sheet") } }
-        add { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("add-podcast-sheet") } }
+        add { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { OverlayResult("add-podcast-sheet") } }
         add { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { ExportDialogStub(it) } }
         add {
             entry<ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey>(metadata = NdSceneMetadata.dialog()) { key ->
@@ -1282,6 +1286,14 @@ private fun LibraryStub() {
     }
 }
 
+@Composable
+private fun OverlayResult(label: String) {
+    val result = remember { MutableStateFlow(false) }
+    val ready by result.collectAsStateWithLifecycle()
+    Text(label, Modifier.clickable { result.value = true })
+    if (ready) Text("Result ready")
+}
+
 /**
  * The last `LocalRootScope` seen by [ExportDialogStub] — the assertion that the root-owned job
  * ends when the root leaves composition needs the scope itself, not the dismissed snackbar.
@@ -1299,7 +1311,7 @@ private fun ExportDialogStub(key: ExportKey) {
     val rootScope = LocalRootScope.current
     capturedRootScope = rootScope
     Column {
-        Text("export-dialog")
+        OverlayResult("export-dialog")
         NdButton(
             label = "export-done",
             onClick = {

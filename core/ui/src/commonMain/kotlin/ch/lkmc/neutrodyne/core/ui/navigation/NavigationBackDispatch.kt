@@ -9,6 +9,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigationevent.DirectNavigationEventInput
@@ -20,6 +22,8 @@ import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
+
+internal val LocalNavigationHostLifecycleOwner = compositionLocalOf<LifecycleOwner?> { null }
 
 private val LocalEntryBackDispatch = compositionLocalOf<EntryBackOwner?> { null }
 
@@ -55,6 +59,7 @@ internal fun NavigationBackDispatch(
 
     CompositionLocalProvider(
         LocalNavigationEventDispatcherOwner provides events,
+        LocalNavigationHostLifecycleOwner provides LocalLifecycleOwner.current,
         LocalEntryBackDispatch provides entries,
         LocalSharedTransitionScope provides sharedScope,
     ) { content() }
