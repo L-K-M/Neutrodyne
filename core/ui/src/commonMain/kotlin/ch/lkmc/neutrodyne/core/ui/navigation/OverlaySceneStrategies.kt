@@ -3,13 +3,10 @@
 package ch.lkmc.neutrodyne.core.ui.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.rememberLifecycleOwner
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.scene.DialogSceneStrategy
 import androidx.navigation3.scene.OverlayScene
@@ -20,15 +17,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdModalBottomSheet
 import ch.lkmc.neutrodyne.core.designsystem.components.NdSheetExpansion
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
-
-@Composable
-private fun OverlayEntryContent(entry: NavEntry<*>) {
-    // A redirected overlay can outlive the outgoing pane. Tie its updates to the host for
-    // the lifetime of this window, including while the host backgrounds and resumes.
-    val parent = LocalNavigationHostLifecycleOwner.current ?: LocalLifecycleOwner.current
-    val owner = rememberLifecycleOwner(parent = parent)
-    CompositionLocalProvider(LocalLifecycleOwner provides owner) { entry.Content() }
-}
 
 /**
  * An [OverlayScene] rendering [entry] inside [NdModalBottomSheet] (01 overlay scene strategies).

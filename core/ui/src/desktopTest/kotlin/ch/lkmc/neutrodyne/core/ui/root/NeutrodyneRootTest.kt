@@ -1290,8 +1290,10 @@ private fun LibraryStub() {
 private fun OverlayResult(label: String) {
     val result = remember { MutableStateFlow(false) }
     val ready by result.collectAsStateWithLifecycle()
-    Text(label, Modifier.clickable { result.value = true })
-    if (ready) Text("Result ready")
+    Column {
+        Text(label, Modifier.clickable { result.value = true })
+        if (ready) Text("Result ready")
+    }
 }
 
 /**
