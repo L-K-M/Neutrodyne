@@ -41,9 +41,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
-import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -388,7 +388,11 @@ public class RadioViewModel(
         }
     }
 
-    private fun play(id: Long, context: UiText?, attempt: suspend () -> PlayResult) {
+    private fun play(
+        id: Long,
+        context: UiText?,
+        attempt: suspend () -> PlayResult,
+    ) {
         playback.play(context) {
             // A superseded coroutine can finish after another attempt starts, even for the same episode.
             val token = Any()
@@ -691,7 +695,6 @@ public class RadioViewModel(
         val FILTERS = FeedFilters(unplayedOnly = true)
     }
 }
-
 
 private val NowPlaying.transportActive: Boolean
     get() = isPlaying || (playWhenReady && phase != PlayerPhase.ERROR && phase != PlayerPhase.ENDED)

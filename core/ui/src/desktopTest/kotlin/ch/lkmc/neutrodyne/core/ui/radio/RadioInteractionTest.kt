@@ -424,7 +424,13 @@ class RadioInteractionTest {
             onNodeWithText(getString(Res.string.radio_starting)).assertIsDisplayed()
             runOnIdle { state = initial }
             onNodeWithTag("radio_play").assertIsOff()
-            runOnIdle { state = initial.copy(phase = PlayerPhase.BUFFERING, playWhenReadyEpisodeId = initial.selectedId) }
+            runOnIdle {
+                state =
+                    initial.copy(
+                        phase = PlayerPhase.BUFFERING,
+                        playWhenReadyEpisodeId = initial.selectedId,
+                    )
+            }
             onNodeWithTag("radio_play").assertIsOn()
             onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
         }

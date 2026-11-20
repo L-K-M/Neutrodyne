@@ -278,13 +278,18 @@ class RadioHomeDeviceTest {
         try {
             playSwitch.performClick()
             compose.waitUntil(15_000) {
-                graph.playbackStateSource.nowPlaying.value?.playWhenReady == true
+                graph.playbackStateSource.nowPlaying.value
+                    ?.playWhenReady == true
             }
             playSwitch.assertIsOn()
-            assertFalse(graph.playbackStateSource.nowPlaying.value!!.isPlaying)
+            assertFalse(
+                graph.playbackStateSource.nowPlaying.value!!
+                    .isPlaying,
+            )
             playSwitch.performClick()
             compose.waitUntil(10_000) {
-                graph.playbackStateSource.nowPlaying.value?.playWhenReady == false
+                graph.playbackStateSource.nowPlaying.value
+                    ?.playWhenReady == false
             }
             playSwitch.assertIsOff()
         } finally {

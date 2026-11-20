@@ -125,8 +125,14 @@ class DesktopPlaybackSyncPortTest {
 
                 // The user's pause is published immediately, but the Paused boundary still
                 // follows the save rather than the publish.
-                assertFalse(fixture.controller.nowPlaying.value!!.isPlaying)
-                assertFalse(fixture.controller.nowPlaying.value!!.playWhenReady)
+                assertFalse(
+                    fixture.controller.nowPlaying.value!!
+                        .isPlaying,
+                )
+                assertFalse(
+                    fixture.controller.nowPlaying.value!!
+                        .playWhenReady,
+                )
                 assertTrue(fixture.timeline.none { it == "event:Paused" })
 
                 gate.complete(Unit)
