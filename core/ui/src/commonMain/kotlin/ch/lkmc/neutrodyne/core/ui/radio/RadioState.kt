@@ -54,7 +54,15 @@ public data class RadioState(
     /** The listener's skip intervals (Playback settings), printed on the keys beside the counter. */
     val skipBackMs: Long = PlaybackSettingKeys.SKIP_BACK_MS.default,
     val skipForwardMs: Long = PlaybackSettingKeys.SKIP_FORWARD_MS.default,
+    /** The local start runs before a player snapshot is available, including during pre-play sync. */
+    val startingEpisodeId: Long? = null,
+    val playWhenReadyEpisodeId: Long? = null,
 ) {
+    public val starting: Boolean get() = selectedId != null && startingEpisodeId == selectedId
+    public val switchOn: Boolean get() =
+        playing || starting ||
+            (selectedId != null && playWhenReadyEpisodeId == selectedId)
+
     public val playlist: RadioPlaylist? get() = playlists.find { it.id == playlistId }
 
     /** The listener has no playlist yet: a first run, or every group deleted. */

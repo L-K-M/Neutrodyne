@@ -39,7 +39,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.ContributesIntoMap
@@ -86,8 +88,8 @@ public class RadioViewModel(
     /** Needle positions chosen for episodes that are not loaded; the radio's own start applies them. */
     private val seeks = mutableMapOf<Long, Long>()
 
-    /** The episode the radio is starting itself, whose pending seek [start] applies. */
-    private var starting: Long? = null
+    /** Identifies the attempt that owns the pending switch indication. */
+    private var startAttempt: Any? = null
     private val messages = UserMessages()
     private val credentials = MutableStateFlow<Long?>(null)
     public val pendingCredentials = credentials.asStateFlow()
@@ -177,12 +179,12 @@ public class RadioViewModel(
             playbackStates.nowPlaying.collect { now ->
                 // Loaded from elsewhere (Up next, a notification, auto-advance): that start chose its
                 // own position, and a parked needle seek would hold the dial and resurface later.
-                if (now != null && now.episodeId != starting) seeks.remove(now.episodeId)
-                val current = state.value
+                if (now != null && now.episodeId != state.value.startingEpisodeId) seeks.remove(now.episodeId)
                 if (selectionOrigin == SelectionOrigin.SWITCHING_PLAYLIST) {
-                    if (now?.isPlaying == true) return@collect
+                    if (now?.transportActive == true) return@collect
                     selectionOrigin = SelectionOrigin.BROWSE
                 }
+                val current = state.value.copy(playWhenReadyEpisodeId = now?.takeIf { it.transportActive }?.episodeId)
                 val followingPlayback = selectionOrigin == SelectionOrigin.PLAYBACK
                 if (now?.isPlaying == true) {
                     selectionOrigin = SelectionOrigin.PLAYBACK
@@ -239,6 +241,8 @@ public class RadioViewModel(
                             playing = true,
                             hasPlayed = true,
                         )
+                } else {
+                    mutableState.value = current
                 }
             }
         }
@@ -326,7 +330,7 @@ public class RadioViewModel(
 
     public fun selectEpisode(id: Long) {
         if (id == state.value.selectedId || state.value.episodes.none { it.id == id }) return
-        val playing = state.value.playing
+        val playing = state.value.switchOn
         selectionOrigin = SelectionOrigin.BROWSE
         mutableState.value =
             state.value.copy(
@@ -348,7 +352,7 @@ public class RadioViewModel(
             togglePlay()
             return
         }
-        val wasPlaying = state.value.playing
+        val wasPlaying = state.value.switchOn
         selectEpisode(id)
         if (!wasPlaying) togglePlay()
     }
@@ -356,8 +360,8 @@ public class RadioViewModel(
     public fun togglePlay() {
         val current = state.value
         val id = current.selectedId ?: return
-        if (current.playing) {
-            controller.pause()
+        if (current.switchOn) {
+            playback.pause()
             return
         }
         val now = playbackStates.nowPlaying.value
@@ -366,7 +370,7 @@ public class RadioViewModel(
                     (now.context?.type == ContextType.GROUP && now.context?.id == current.playlistId)
             ) && id !in seeks
         ) {
-            playback.play(current.playlist?.let { UiText.Raw(it.name) }) { controller.play() }
+            play(id, current.playlist?.let { UiText.Raw(it.name) }) { controller.play() }
         } else {
             start(id)
         }
@@ -374,22 +378,32 @@ public class RadioViewModel(
 
     private fun start(id: Long) {
         val group = knownGroups.find { it.id == state.value.playlistId } ?: return
-        playback.play(UiText.Raw(group.name)) {
-            // The guard also spans the parked seek's use, so a load seen in between cannot drop it.
-            starting = id
-            val result =
-                try {
-                    controller.playFeed(FeedSource.Group(group.id), FILTERS, group.playOrder, id).also {
-                        if (it == PlayResult.Started) {
-                            seeks.remove(id)?.let(controller::seekTo)
-                            if (state.value.selectedId == id) mutableState.value = state.value.copy(hasPlayed = true)
-                        }
-                    }
-                } finally {
-                    starting = null
+        play(id, UiText.Raw(group.name)) {
+            controller.playFeed(FeedSource.Group(group.id), FILTERS, group.playOrder, id).also {
+                if (it == PlayResult.Started) {
+                    seeks.remove(id)?.let(controller::seekTo)
+                    if (state.value.selectedId == id) mutableState.value = state.value.copy(hasPlayed = true)
                 }
-            if (result != PlayResult.Started && state.value.selectedId == id) recoverTransportAfterFailedStart()
-            result
+            }
+        }
+    }
+
+    private fun play(id: Long, context: UiText?, attempt: suspend () -> PlayResult) {
+        playback.play(context) {
+            // A superseded coroutine can finish after another attempt starts, even for the same episode.
+            val token = Any()
+            startAttempt = token
+            mutableState.value = state.value.copy(startingEpisodeId = id)
+            try {
+                attempt().also {
+                    if (it != PlayResult.Started && state.value.selectedId == id) recoverTransportAfterFailedStart()
+                }
+            } finally {
+                if (startAttempt === token) {
+                    startAttempt = null
+                    mutableState.value = state.value.copy(startingEpisodeId = null)
+                }
+            }
         }
     }
 
@@ -473,10 +487,10 @@ public class RadioViewModel(
         selectionOrigin =
             when {
                 loaded != null -> SelectionOrigin.PLAYBACK
-                pauseRequested && engine?.isPlaying == true -> SelectionOrigin.SWITCHING_PLAYLIST
+                pauseRequested && engine?.transportActive == true -> SelectionOrigin.SWITCHING_PLAYLIST
                 else -> SelectionOrigin.BROWSE
             }
-        if (change == PlaylistChange.SWITCH) controller.pause()
+        if (change == PlaylistChange.SWITCH) playback.pause()
         initialSelectionPending = loaded == null
         mutableState.value =
             state.value.copy(
@@ -496,6 +510,7 @@ public class RadioViewModel(
                     },
                 elapsedMs = loaded?.position?.positionMs ?: 0,
                 playing = loaded != null,
+                playWhenReadyEpisodeId = loaded?.episodeId,
                 hasPlayed = loaded != null,
                 // A paused switch keeps the loaded transport's phase; a fresh browse has none.
                 phase = loaded?.phase,
@@ -558,7 +573,7 @@ public class RadioViewModel(
             // A paused or followed session can belong to another screen.
             val loadedId = playbackStates.nowPlaying.value?.episodeId
             if (loadedId == null || loadedId == row.id) controller.dismiss()
-        } else if (current.playing) {
+        } else if (current.switchOn) {
             start(selected)
         } else {
             controller.pause()
@@ -676,3 +691,7 @@ public class RadioViewModel(
         val FILTERS = FeedFilters(unplayedOnly = true)
     }
 }
+
+
+private val NowPlaying.transportActive: Boolean
+    get() = isPlaying || (playWhenReady && phase != PlayerPhase.ERROR && phase != PlayerPhase.ENDED)

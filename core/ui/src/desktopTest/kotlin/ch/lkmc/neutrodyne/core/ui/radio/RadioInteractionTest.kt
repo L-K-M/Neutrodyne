@@ -79,6 +79,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_paused
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playing
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
+import ch.lkmc.neutrodyne.core.ui.resources.radio_starting
 import ch.lkmc.neutrodyne.core.ui.resources.radio_untuned
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
@@ -385,6 +386,47 @@ class RadioInteractionTest {
             onNodeWithText(getString(Res.string.radio_paused)).assertIsDisplayed()
             onNodeWithContentDescription("Elapsed: 12 hours").assertIsDisplayed()
             onAllNodes(hasText("900:00")).assertCountEquals(2)
+        }
+
+    @Test
+    fun elapsedTicksDoNotRescanTheProgramme() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val episodes = List(200) { RadioEpisode(it.toLong(), "Episode $it", "Podcast") }
+            var reads = 0
+            val counted =
+                object : AbstractList<RadioEpisode>() {
+                    override val size = episodes.size
+
+                    override fun get(index: Int): RadioEpisode = episodes[index].also { reads++ }
+                }
+            val baseline = radioFixture().copy(episodes = counted, selectedId = episodes.last().id)
+            var elapsed by mutableLongStateOf(0L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioPlayer(baseline.copy(elapsedMs = elapsed), RadioActions(), compact = true, short = false)
+                }
+            }
+            runOnIdle { reads = 0 }
+            repeat(5) { runOnIdle { elapsed += 1_000 } }
+            runOnIdle { assertEquals(0, reads, "unchanged programme entries read across five ticks") }
+        }
+
+    @Test
+    fun theSwitchEngagesBeforePlaybackAndResetsAfterRefusal() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            val initial = radioFixture()
+            var state by mutableStateOf(initial)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) { RadioScreen(state, RadioActions()) }
+            }
+            runOnIdle { state = initial.copy(startingEpisodeId = initial.selectedId) }
+            onNodeWithTag("radio_play").assertIsOn()
+            onNodeWithText(getString(Res.string.radio_starting)).assertIsDisplayed()
+            runOnIdle { state = initial }
+            onNodeWithTag("radio_play").assertIsOff()
+            runOnIdle { state = initial.copy(phase = PlayerPhase.BUFFERING, playWhenReadyEpisodeId = initial.selectedId) }
+            onNodeWithTag("radio_play").assertIsOn()
+            onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
         }
 
     @Test

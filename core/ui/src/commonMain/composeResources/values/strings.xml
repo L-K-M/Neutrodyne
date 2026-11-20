@@ -707,6 +707,7 @@
     <string name="radio_playing">NOW PLAYING</string>
     <string name="radio_paused">PAUSED</string>
     <string name="radio_cleared">PLAYLIST CLEARED</string>
+    <string name="radio_starting">STARTING</string>
     <string name="radio_buffering">BUFFERING</string>
     <string name="radio_ended">ENDED</string>
     <string name="radio_error">PLAYBACK ERROR</string>

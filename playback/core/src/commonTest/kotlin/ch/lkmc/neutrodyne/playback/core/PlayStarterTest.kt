@@ -140,6 +140,16 @@ class PlayStarterTest {
         contexts.startResult = 4
     }
 
+    @Test fun explicitStartsSkipTheOldContextTailAndReturnTheCommittedWindow() =
+        runTest {
+            sessions.queue = queue(current = null, context = listOf(6, 7))
+            for (request in listOf(StartRequest.Episode(1), feed.copy(startEpisodeId = 2), StartRequest.Downloads(3))) {
+                val outcome = committed(request)
+                assertEquals(0, queues.requestedWindows.last())
+                assertEquals(sessions.queue.contextTail, outcome.queue.contextTail)
+            }
+        }
+
     @Test fun downloadsStartUsesContextAndLocalFilesOffline() =
         runTest {
             network.setStatus(FakeNetworkMonitor.OFFLINE)

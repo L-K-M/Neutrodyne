@@ -107,6 +107,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_back_value
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward
 import ch.lkmc.neutrodyne.core.ui.resources.radio_skip_forward_value
+import ch.lkmc.neutrodyne.core.ui.resources.radio_starting
 import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_off
 import ch.lkmc.neutrodyne.core.ui.resources.radio_switch_on
 import ch.lkmc.neutrodyne.core.ui.resources.radio_untuned
@@ -125,7 +126,7 @@ internal fun RadioPlayer(
     short: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val selected = state.selected
+    val selected = remember(state.selectedId, state.nowPlayingEpisode, state.episodes) { state.selected }
     // Retain the reference cap through 1.3x text; larger type needs a larger physical key.
     val capScale = (LocalDensity.current.fontScale / FIXED_CAP_FONT_SCALE).coerceAtLeast(1f)
     val duration = remember(state.selectedId, state.nowPlayingEpisode, state.episodes) { state.selectedDurationMs }
@@ -139,6 +140,8 @@ internal fun RadioPlayer(
             selected == null && (state.untuned || !state.playlistsLoaded) -> Res.string.radio_untuned
 
             selected == null -> Res.string.radio_cleared
+
+            state.starting && !state.playing -> Res.string.radio_starting
 
             state.phase == PlayerPhase.BUFFERING -> Res.string.radio_buffering
 
@@ -183,20 +186,23 @@ internal fun RadioPlayer(
                     ) {
                         val lamp =
                             when {
-                                state.phase == PlayerPhase.ERROR || state.issue != null -> Brush.radialGradient(LampRed)
-                                state.phase == PlayerPhase.BUFFERING -> Brush.radialGradient(LampAmber)
-                                state.playing -> Brush.radialGradient(LampLit)
-                                else -> Brush.radialGradient(LampDim)
+                                state.phase == PlayerPhase.ERROR || state.issue != null -> LampRed
+                                state.starting || state.phase == PlayerPhase.BUFFERING -> LampAmber
+                                state.playing -> LampLit
+                                else -> LampDim
                             }
                         Box(
                             Modifier
                                 .size(7.dp)
-                                .background(lamp, CircleShape)
+                                .background(Brush.radialGradient(lamp), CircleShape)
                                 .border(0.5.dp, Color(0xFF654A24), CircleShape),
                         )
                         RadioText(statusText, 11, mono = false, modifier = Modifier.weight(1f))
-                        val index = state.episodes.indexOfFirst { it.id == state.selectedId }
-                        if (state.complete && index >= 0) {
+                        val index =
+                            remember(state.episodes, state.selectedId, state.complete) {
+                                if (state.complete) state.episodes.indexOfFirst { it.id == state.selectedId } else -1
+                            }
+                        if (index >= 0) {
                             val queuePosition = "${(index + 1).toString().padStart(
                                 2,
                                 '0',
@@ -323,7 +329,7 @@ internal fun RadioPlayer(
                         }
                     }
                     PlaySwitch(
-                        on = state.playing,
+                        on = state.switchOn,
                         enabled = selected != null,
                         description = "${stringResource(Res.string.radio_play)} ${selected?.title.orEmpty()}".trim(),
                         status = statusText,
@@ -367,7 +373,7 @@ private fun SkipKey(
 
 /**
  * Play/pause is a panel toggle switch: a chrome bat lever through a hex nut on a plate
- * printed ON (red) and OFF (black). Lever up means playing. Tap, or flick the lever toward
+ * printed ON (red) and OFF (black). The lever engages as soon as playback is requested. Tap, or flick the lever toward
  * the other label.
  */
 @Composable

@@ -385,7 +385,7 @@ internal fun RadioProgramme(
                                 RadioSlip(
                                     episode,
                                     state.selectedId == episode.id,
-                                    state.selectedId.takeIf { state.playing },
+                                    state.selectedId.takeIf { state.switchOn },
                                     rows,
                                     actions,
                                     restoreRowFocus,

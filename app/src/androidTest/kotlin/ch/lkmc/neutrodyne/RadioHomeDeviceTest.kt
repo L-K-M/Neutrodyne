@@ -7,6 +7,8 @@ import android.os.Build
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -49,6 +51,8 @@ import java.io.File
 import java.net.HttpURLConnection.HTTP_OK
 import java.net.HttpURLConnection.HTTP_PARTIAL
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Real production graph with offline rows; every seeded row is removed by its own ID. */
 @RunWith(AndroidJUnit4::class)
@@ -82,6 +86,7 @@ class RadioHomeDeviceTest {
         }
 
     @Test fun homeReadsGroupsAndSwipeUndoUsesPlayedState() {
+        val releaseAudio = CountDownLatch(1)
         val ids =
             runBlocking(Dispatchers.IO) {
                 graph.databaseOpener.awaitOpen()
@@ -149,6 +154,7 @@ class RadioHomeDeviceTest {
                 server.dispatcher =
                     object : Dispatcher() {
                         override fun dispatch(request: RecordedRequest): MockResponse {
+                            if (!releaseAudio.await(30, TimeUnit.SECONDS)) return MockResponse(code = 503)
                             val offset =
                                 request.headers["Range"]
                                     ?.substringAfter("bytes=")
@@ -267,6 +273,22 @@ class RadioHomeDeviceTest {
                     InstrumentationRegistry.getInstrumentation().targetContext.packageName,
                     Manifest.permission.POST_NOTIFICATIONS,
                 )
+        }
+        val playSwitch = compose.onNodeWithTag("radio_play")
+        try {
+            playSwitch.performClick()
+            compose.waitUntil(15_000) {
+                graph.playbackStateSource.nowPlaying.value?.playWhenReady == true
+            }
+            playSwitch.assertIsOn()
+            assertFalse(graph.playbackStateSource.nowPlaying.value!!.isPlaying)
+            playSwitch.performClick()
+            compose.waitUntil(10_000) {
+                graph.playbackStateSource.nowPlaying.value?.playWhenReady == false
+            }
+            playSwitch.assertIsOff()
+        } finally {
+            releaseAudio.countDown()
         }
         compose.onNodeWithTag("radio_play").performClick()
         compose.waitUntil(30_000) {

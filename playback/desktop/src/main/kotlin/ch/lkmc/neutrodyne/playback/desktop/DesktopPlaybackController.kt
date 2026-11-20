@@ -702,9 +702,12 @@ class DesktopPlaybackController(
         runtime?.engine?.pause()
         sampleSleep()
         applySleep(sleepTimerCore.paused())
+        // Publish the user's pause before the durable flush: the UI must not keep showing
+        // playback while the save waits on storage. The Paused boundary still follows the
+        // save, so a sync round never starts without the final position.
+        publish()
         flushPause()
         pausedBoundary()
-        publish()
     }
 
     override fun togglePlayPause(origin: PlayOrigin) {

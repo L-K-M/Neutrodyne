@@ -146,13 +146,18 @@ public class PlaybackActions(
             return
         }
         if (now.playWhenReady || now.isPlaying) {
-            ++startGeneration
-            startJob?.cancel()
-            consentDismiss()
-            controller.pause()
+            pause()
         } else {
             play(context) { controller.play() }
         }
+    }
+
+    /** Pause also supersedes a start that is still checking sync or awaiting the controller. */
+    public fun pause() {
+        ++startGeneration
+        startJob?.cancel()
+        consentDismiss()
+        controller.pause()
     }
 
     /**

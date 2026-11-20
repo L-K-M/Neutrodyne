@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.feature.feeds
 import androidx.lifecycle.ViewModelStore
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
+import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.RowLive
@@ -22,6 +24,7 @@ import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.radio.RadioEpisode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
@@ -51,6 +54,7 @@ class RadioViewModelTest : MainDispatcherTest() {
     private suspend fun TestScope.withRadio(
         repository: ch.lkmc.neutrodyne.core.domain.GroupRepository = groups,
         episodeRepository: EpisodeRepository = episodes,
+        playbackController: PlaybackController = controller,
         block: suspend (RadioViewModel, Long) -> Unit,
     ) {
         val id = (groups.create(GroupDraft("First"), setOf(1)) as Outcome.Success).value
@@ -62,7 +66,7 @@ class RadioViewModelTest : MainDispatcherTest() {
                 podcasts,
                 episodeRepository,
                 live,
-                controller,
+                playbackController,
                 controller.state,
                 settings,
                 testPlatformInfo,
@@ -272,6 +276,53 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun radioShowsAndCancelsAStartBeforeTheEngineLoads() =
+        runTest {
+            val release = CompletableDeferred<Unit>()
+            val slow =
+                object : PlaybackController by controller {
+                    override suspend fun playFeed(
+                        source: FeedSource,
+                        filters: FeedFilters,
+                        order: FeedOrder,
+                        startEpisodeId: Long?,
+                    ): PlayResult {
+                        release.await()
+                        return controller.playFeed(source, filters, order, startEpisodeId)
+                    }
+                }
+            withRadio(playbackController = slow) { model, _ ->
+                model.togglePlay()
+                runCurrent()
+                assertTrue(model.state.value.switchOn)
+                assertTrue(model.state.value.starting)
+                assertFalse(model.state.value.playing)
+                model.togglePlay()
+                release.complete(Unit)
+                runCurrent()
+                assertFalse(model.state.value.switchOn)
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.single(),
+                )
+            }
+        }
+
+    @Test fun secondTapDuringBufferingPausesInsteadOfStartingAgain() =
+        runTest {
+            withRadio { model, _ ->
+                controller.state.nowPlaying.value =
+                    testNowPlaying(1).copy(isPlaying = false, playWhenReady = true, phase = PlayerPhase.BUFFERING)
+                runCurrent()
+                model.togglePlay()
+                runCurrent()
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.last(),
+                )
+            }
+        }
+
     @Test fun transportPhaseAndIssueReachTheRadioState() =
         runTest {
             withRadio { model, _ ->
@@ -446,7 +497,7 @@ class RadioViewModelTest : MainDispatcherTest() {
                     FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
                     controller.calls.last(),
                 )
-                controller.state.nowPlaying.value = external.copy(isPlaying = false)
+                controller.state.nowPlaying.value = external.copy(isPlaying = false, playWhenReady = false)
                 runCurrent()
                 model.togglePlay()
                 runCurrent()
@@ -530,7 +581,8 @@ class RadioViewModelTest : MainDispatcherTest() {
                         .encode(),
                 )
                 runCurrent()
-                controller.state.nowPlaying.value = testNowPlaying(1).copy(isPlaying = false, context = null)
+                controller.state.nowPlaying.value =
+                    testNowPlaying(1).copy(isPlaying = false, playWhenReady = false, context = null)
                 runCurrent()
                 model.onRows(second, listOf(RadioEpisode(20, "Other programme", "Podcast")))
                 assertEquals(20L, model.state.value.selectedId)

@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.playback.core.WindowDiff
 import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.Gapless
 import ch.lkmc.neutrodyne.playback.engine.SpanCache
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -99,6 +100,47 @@ class DesktopPlaybackSyncPortTest {
                     "the Paused boundary must follow the pause save: ${fixture.timeline}",
                 )
             } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun userPauseReachesNowPlayingBeforeThePauseSaveCommits() =
+        runTest {
+            val fixture = SyncPortFixture(this)
+            var releaseSave: CompletableDeferred<Unit>? = null
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 15_000
+
+                // Park the durable pause save, so the state published while it waits is observable.
+                val gate = CompletableDeferred<Unit>()
+                releaseSave = gate
+                fixture.store.saveGate = gate
+                fixture.controller.pause()
+                runCurrent()
+                assertTrue(fixture.store.saveEntered.isCompleted)
+
+                // The user's pause is published immediately, but the Paused boundary still
+                // follows the save rather than the publish.
+                assertFalse(fixture.controller.nowPlaying.value!!.isPlaying)
+                assertFalse(fixture.controller.nowPlaying.value!!.playWhenReady)
+                assertTrue(fixture.timeline.none { it == "event:Paused" })
+
+                gate.complete(Unit)
+                runCurrent()
+                assertTrue(
+                    fixture.timeline.indexOf("save:1:15000") < fixture.timeline.indexOf("event:Paused"),
+                    "the Paused boundary must follow the pause save: ${fixture.timeline}",
+                )
+                assertEquals(PlaybackSyncActive(false, 1), fixture.port.active.value)
+            } finally {
+                // A failure while the save is parked must not deadlock the controller's shutdown.
+                releaseSave?.complete(Unit)
+                runCurrent()
+                fixture.store.saveGate = null
                 fixture.close()
             }
         }
@@ -316,6 +358,10 @@ private class TimelinePositionStore : PositionStore {
     val delegate = FakePositionStore()
     val timeline = mutableListOf<String>()
 
+    /** Parks the next durable save until completed, so publication during the wait is testable. */
+    var saveGate: CompletableDeferred<Unit>? = null
+    val saveEntered = CompletableDeferred<Unit>()
+
     val positions get() = delegate.positions
 
     fun saves() = delegate.calls.filter { it.operation == FakePositionStore.Operation.SAVE }
@@ -338,6 +384,11 @@ private class TimelinePositionStore : PositionStore {
         pinStartedAt: Long,
         allowed: () -> Boolean,
     ): Boolean {
+        val gate = saveGate
+        if (gate != null) {
+            saveEntered.complete(Unit)
+            gate.await()
+        }
         val saved = delegate.save(episodeId, positionMs, durationMs, source, now, pinStartedAt, allowed)
         if (saved) timeline += "save:$episodeId:$positionMs"
         return saved

@@ -122,7 +122,16 @@ class PlayStarter(
         resumePolicy: SmartResumePolicy,
         captureDeparture: () -> Departure?,
     ): StartOutcome {
-        val queue = queues.observeVirtualQueue(QueueWindowPlanner.CONTEXT_SIZE).first()
+        // Only automatic selection can consult the outgoing context tail. The adapter still
+        // receives the full, generation-checked window after the start is accepted.
+        val needsContextTail =
+            when (request) {
+                is StartRequest.Episode -> false
+                is StartRequest.Feed -> request.startEpisodeId == null
+                is StartRequest.Downloads -> request.startEpisodeId == null
+                StartRequest.Resume -> true
+            }
+        val queue = queues.observeVirtualQueue(if (needsContextTail) QueueWindowPlanner.CONTEXT_SIZE else 0).first()
         val selected =
             when (request) {
                 is StartRequest.Episode -> {
