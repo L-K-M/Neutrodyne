@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 
@@ -18,7 +20,13 @@ internal fun Speaker(
     modifier: Modifier = Modifier,
     large: Boolean = false,
 ) {
-    Box(modifier.background(Color(0xFF4E4030)).recess()) {
+    Box(
+        modifier
+            .graphicsLayer {
+                compositingStrategy = CompositingStrategy.Offscreen
+            }.background(Color(0xFF4E4030))
+            .recess(),
+    ) {
         Canvas(Modifier.matchParentSize()) {
             drawRect(
                 Brush.radialGradient(

@@ -70,6 +70,9 @@ public data class RadioActions(
     val retry: () -> Unit = {},
 )
 
+private val CabinetColorScheme =
+    lightColorScheme(primary = Ink, onPrimary = Cream, surface = Cream, onSurface = Ink, outline = Brass)
+
 /** The physical home is shared by Android and desktop; system bars belong to the host. */
 @Composable
 public fun RadioScreen(
@@ -77,16 +80,7 @@ public fun RadioScreen(
     actions: RadioActions,
     modifier: Modifier = Modifier,
 ) {
-    MaterialTheme(
-        colorScheme =
-            lightColorScheme(
-                primary = Ink,
-                onPrimary = Cream,
-                surface = Cream,
-                onSurface = Ink,
-                outline = Brass,
-            ),
-    ) {
+    MaterialTheme(colorScheme = CabinetColorScheme) {
         RadioCabinet(state, actions, modifier)
     }
 }

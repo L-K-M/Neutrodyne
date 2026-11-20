@@ -382,10 +382,11 @@ internal fun RadioProgramme(
                         ) {
                             itemsIndexed(state.episodes, key = { _, episode -> episode.id }) { index, episode ->
                                 LaunchedEffect(index) { actions.loadEpisode(index) }
+                                val selected = state.selectedId == episode.id
                                 RadioSlip(
                                     episode,
-                                    state.selectedId == episode.id,
-                                    state.selectedId.takeIf { state.switchOn },
+                                    selected,
+                                    selected && state.switchOn,
                                     rows,
                                     actions,
                                     restoreRowFocus,
@@ -441,7 +442,7 @@ internal fun RadioProgramme(
 private fun RadioSlip(
     episode: RadioEpisode,
     selected: Boolean,
-    playingEpisodeId: Long?,
+    playing: Boolean,
     rows: RadioRows,
     actions: RadioActions,
     restoreRowFocus: Long?,
@@ -579,7 +580,7 @@ private fun RadioSlip(
                     RadioText(episode.title, rows.titleSize, bold = true, maxLines = 2)
                 }
                 SlipPlayKey(
-                    playing = playingEpisodeId == episode.id,
+                    playing = playing,
                     onClick = { actions.playEpisode(episode.id) },
                     modifier = Modifier.testTag("radio_slip_play_${episode.id}"),
                 )

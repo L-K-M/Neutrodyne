@@ -38,6 +38,8 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.layer.CompositingStrategy
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -353,11 +355,16 @@ public fun ValveDeck(
     }
     Box(
         modifier.drawWithCache {
-            val fit = deckFit(art, size)
-            val glows = fit?.let { filamentGlows(it) }.orEmpty()
+            val fit = deckFit(art, size) ?: return@drawWithCache onDrawBehind {}
+            val glows = filamentGlows(fit)
+            // The chassis is fixed at this size. Only its filament glow changes between frames.
+            val deck =
+                obtainGraphicsLayer().apply {
+                    compositingStrategy = CompositingStrategy.Offscreen
+                    record { drawValveDeck(art, fit) }
+                }
             onDrawBehind {
-                if (fit == null) return@onDrawBehind
-                drawValveDeck(art, fit)
+                drawLayer(deck)
                 // Read in the draw phase only: warming up redraws the deck, never recomposes it.
                 val level = warmth.value
                 if (level > 0f) glows.forEach { it.draw(this, level) }
