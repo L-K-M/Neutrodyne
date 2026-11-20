@@ -10,6 +10,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -17,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
+import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -26,11 +28,13 @@ import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -47,6 +51,30 @@ import java.io.IOException
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
 class QueueProjectorTest {
+    @Test fun explicitStartLoadsWindowMetadataWithoutOneLookupPerEpisode() =
+        runTest {
+            val start = CoroutineName("radio start")
+            val reads = mutableListOf<Long>()
+            val f =
+                AdapterFixture(this, mediaLookup = { real ->
+                    object : PlaybackMediaLookup by real {
+                        override suspend fun get(episodeId: Long): PlaybackMediaInfo? {
+                            if (currentCoroutineContext()[CoroutineName] == start) reads += episodeId
+                            return real.get(episodeId)
+                        }
+                    }
+                })
+            try {
+                val ids = f.seed(21)
+                f.attach()
+                withContext(start) { f.start(ids) }
+                assertEquals(ids, f.player.ids())
+                assertTrue("individual lookups of queued episodes: $reads", reads.none { it in ids.drop(1) })
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun projectionPrewarmsOnOwnStartAndRenewedNextEligibility() =
         runTest {
             val f = AdapterFixture(this)

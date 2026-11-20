@@ -40,6 +40,9 @@ internal class PlaybackMediaLookupImpl(
             .singleOrNull()
             ?.toInfo()
 
+    override suspend fun getAll(episodeIds: Set<Long>): Map<Long, PlaybackMediaInfo> =
+        db.episodeDao().mediaInfo(episodeIds.toList()).associate { it.id to it.toInfo() }
+
     override fun observe(episodeIds: Set<Long>): Flow<Map<Long, PlaybackMediaInfo>> =
         db
             .episodeDao()

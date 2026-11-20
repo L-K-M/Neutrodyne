@@ -398,11 +398,16 @@
   public androidx.compose.ui.semantics.SemanticsPropertyKey getSelected();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getTestTag();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getText();
+  public androidx.compose.ui.semantics.SemanticsPropertyKey getToggleableState();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getVerticalScrollAxisRange();
   androidx.compose.ui.semantics.SemanticsProperties INSTANCE;
 }
 -keep class androidx.compose.ui.semantics.SemanticsPropertyKey {
   public java.lang.String getName();
+}
+-keep enum androidx.compose.ui.state.ToggleableState {
+  androidx.compose.ui.state.ToggleableState Off;
+  androidx.compose.ui.state.ToggleableState On;
 }
 -keep class androidx.compose.ui.text.AnnotatedString$Range {
 }

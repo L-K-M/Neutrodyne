@@ -85,8 +85,7 @@ class RadioHomeDeviceTest {
             podcastIds.forEach { db.podcastDao().deleteCascade(it, 1_800_000_000_000L) }
         }
 
-    @Test fun homeReadsGroupsAndSwipeUndoUsesPlayedState() {
-        val releaseAudio = CountDownLatch(1)
+    private fun seedRadio(releaseAudio: CountDownLatch? = null): List<Long> {
         val ids =
             runBlocking(Dispatchers.IO) {
                 graph.databaseOpener.awaitOpen()
@@ -154,7 +153,7 @@ class RadioHomeDeviceTest {
                 server.dispatcher =
                     object : Dispatcher() {
                         override fun dispatch(request: RecordedRequest): MockResponse {
-                            if (!releaseAudio.await(30, TimeUnit.SECONDS)) return MockResponse(code = 503)
+                            if (releaseAudio?.await(30, TimeUnit.SECONDS) == false) return MockResponse(code = 503)
                             val offset =
                                 request.headers["Range"]
                                     ?.substringAfter("bytes=")
@@ -217,6 +216,55 @@ class RadioHomeDeviceTest {
         }
         compose.onNodeWithTag("radio_episode_${ids.first()}").assertIsDisplayed().assertIsSelected()
         compose.onNodeWithTag("nav_feeds").assertDoesNotExist()
+        return ids
+    }
+
+    private fun allowPlaybackNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            InstrumentationRegistry
+                .getInstrumentation()
+                .uiAutomation
+                .grantRuntimePermission(
+                    InstrumentationRegistry.getInstrumentation().targetContext.packageName,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                )
+        }
+    }
+
+    @Test fun bufferingSwitchCanPauseBeforeTheFirstAudioByte() {
+        val releaseAudio = CountDownLatch(1)
+        seedRadio(releaseAudio)
+        allowPlaybackNotification()
+        val playSwitch = compose.onNodeWithTag("radio_play")
+        try {
+            playSwitch.performClick()
+            compose.waitUntil(15_000) {
+                graph.playbackStateSource.nowPlaying.value
+                    ?.playWhenReady == true
+            }
+            playSwitch.assertIsOn()
+            assertFalse(
+                graph.playbackStateSource.nowPlaying.value!!
+                    .isPlaying,
+            )
+            playSwitch.performClick()
+            compose.waitUntil(10_000) {
+                graph.playbackStateSource.nowPlaying.value
+                    ?.playWhenReady == false
+            }
+            playSwitch.assertIsOff()
+        } finally {
+            releaseAudio.countDown()
+        }
+        playSwitch.performClick()
+        compose.waitUntil(30_000) {
+            graph.playbackStateSource.nowPlaying.value
+                ?.isPlaying == true
+        }
+    }
+
+    @Test fun homeReadsGroupsAndSwipeUndoUsesPlayedState() {
+        val ids = seedRadio()
         compose.runOnUiThread {
             assertFalse(
                 "The fixed dark cabinet needs light system-bar icons even in Light appearance",
@@ -265,36 +313,7 @@ class RadioHomeDeviceTest {
         }
         // The radio is the player on this screen: Play must reach the real controller and
         // engine, not a fixture flag. Playback is paused again before the interaction checks.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            InstrumentationRegistry
-                .getInstrumentation()
-                .uiAutomation
-                .grantRuntimePermission(
-                    InstrumentationRegistry.getInstrumentation().targetContext.packageName,
-                    Manifest.permission.POST_NOTIFICATIONS,
-                )
-        }
-        val playSwitch = compose.onNodeWithTag("radio_play")
-        try {
-            playSwitch.performClick()
-            compose.waitUntil(15_000) {
-                graph.playbackStateSource.nowPlaying.value
-                    ?.playWhenReady == true
-            }
-            playSwitch.assertIsOn()
-            assertFalse(
-                graph.playbackStateSource.nowPlaying.value!!
-                    .isPlaying,
-            )
-            playSwitch.performClick()
-            compose.waitUntil(10_000) {
-                graph.playbackStateSource.nowPlaying.value
-                    ?.playWhenReady == false
-            }
-            playSwitch.assertIsOff()
-        } finally {
-            releaseAudio.countDown()
-        }
+        allowPlaybackNotification()
         compose.onNodeWithTag("radio_play").performClick()
         compose.waitUntil(30_000) {
             graph.playbackStateSource.nowPlaying.value

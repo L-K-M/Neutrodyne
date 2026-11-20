@@ -8,6 +8,10 @@ import kotlinx.coroutines.flow.Flow
 interface PlaybackMediaLookup {
     suspend fun get(episodeId: Long): PlaybackMediaInfo?
 
+    /** One-shot metadata for a player window. Database-backed implementations batch the reads. */
+    suspend fun getAll(episodeIds: Set<Long>): Map<Long, PlaybackMediaInfo> =
+        episodeIds.mapNotNull { get(it) }.associateBy { it.episodeId }
+
     /** Low-churn metadata/state only, never position ticks. Implementations batch large ID sets. */
     fun observe(episodeIds: Set<Long>): Flow<Map<Long, PlaybackMediaInfo>>
 }

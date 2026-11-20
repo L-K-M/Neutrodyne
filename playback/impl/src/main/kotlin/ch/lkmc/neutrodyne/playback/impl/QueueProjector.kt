@@ -342,7 +342,7 @@ internal class QueueProjector(
                     snapshot.current,
                 ) + snapshot.upNext + snapshot.contextTail
             ).map { it.episodeId }.toSet()
-        val media = withContext(io) { ids.mapNotNull { lookup.get(it) }.associateBy { it.episodeId } }
+        val media = withContext(io) { lookup.getAll(ids) }
         val session = queue.observeSession().first()
         return Input(snapshot, media, session?.context?.takeIf { it.type == ContextType.GROUP }?.id)
     }
