@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.work.testing.WorkManagerTestInitHelper
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.core.ui.root.ReconnectProfile
@@ -61,6 +62,7 @@ class MainActivitySyncHandoffTest {
         Locale.setDefault(previousLocale)
         app.productionGraph.appScope.coroutineContext[kotlinx.coroutines.Job]
             ?.cancel()
+        WorkManagerTestInitHelper.closeWorkDatabase()
     }
 
     @Test
