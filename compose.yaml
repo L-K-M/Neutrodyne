@@ -2,6 +2,7 @@
 services:
   neutrodyne-server:
     image: neutrodyne-server:local
+    pull_policy: never
     build:
       context: .
       dockerfile: sync/server/deploy/Dockerfile

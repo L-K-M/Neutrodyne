@@ -53,10 +53,10 @@ if git show-ref --verify --quiet "$ref"; then
         echo "Local branch $branch has commits outside origin/$branch. Resolve those before updating." >&2
         exit 1
     fi
-    git switch -- "$branch"
-    git merge --ff-only "$revision"
+    git switch --no-overwrite-ignore -- "$branch"
+    git merge --ff-only --no-overwrite-ignore "$revision"
 else
-    git switch --create "$branch" "$revision"
+    git switch --no-overwrite-ignore --create "$branch" "$revision"
 fi
 
 echo "==> Building the server image"
