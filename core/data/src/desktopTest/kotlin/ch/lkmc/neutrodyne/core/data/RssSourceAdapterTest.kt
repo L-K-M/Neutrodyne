@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.test.runTest
@@ -155,6 +156,26 @@ class RssSourceAdapterTest {
             } finally {
                 bundle.close()
             }
+        }
+
+    @Test
+    fun serverDocumentAndMatchingDigestNeedNoPublisherRequests() =
+        runTest {
+            setUpRoot()
+            val body = rssBody(items = arrayOf(rssItem("server-episode")))
+            val url = server.url("/feed?token=test").toString()
+            val hash = body.encodeUtf8().sha256().hex()
+            val id = seedPodcast(db, url)
+            val snapshot = ServerFeedSnapshot(url, hash, NOW, body.encodeToByteArray())
+            newRssAdapter(root, clock).use { bundle ->
+                val feed = dueFeedOf(db, id)
+                val parsed = bundle.adapter.fetchAndParse(feed, FetchMode.REFRESH, mapOf(url to snapshot))
+                assertEquals(1, assertIs<AdapterResult.Parsed>(parsed).feed.items.size)
+                val current = feed.copy(contentSha256 = hash, parserVersion = FeedParser.VERSION, lastParseOk = true, lastFullFetchAt = NOW)
+                val unchanged = bundle.adapter.fetchAndParse(current, FetchMode.REFRESH, mapOf(url to snapshot.copy(body = null)))
+                assertIs<AdapterResult.NotModified>(unchanged)
+            }
+            assertEquals(0, server.requestCount)
         }
 
     @Test

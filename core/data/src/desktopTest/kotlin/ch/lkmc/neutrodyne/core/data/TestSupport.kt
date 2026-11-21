@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
+import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -220,6 +222,9 @@ internal fun newRefresher(
     youTubeMonitor: YouTubeFeedOutageMonitor =
         ch.lkmc.neutrodyne.core.testing
             .FakeYouTubeFeedOutageMonitor(),
+    serverFeedCache: ServerFeedCache =
+        ch.lkmc.neutrodyne.core.domain
+            .ServerFeedCache { _ -> emptyMap() },
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -240,6 +245,7 @@ internal fun newRefresher(
         coordinator,
         notifier,
         youTubeMonitor,
+        serverFeedCache,
     )
 
 internal fun fetchMeta(
@@ -466,6 +472,9 @@ internal class StubSourceAdapter(
     /** `(podcastId, inserted, newIds)` of every `afterIngest`, in call order. */
     val afterIngestCalls = mutableListOf<Triple<Long, List<Long>, List<Long>>>()
 
+    /** `(podcastId, cached)` of every refresh that carried server snapshots, in call order. */
+    val cachedCalls = mutableListOf<Pair<Long, Map<String, ServerFeedSnapshot>>>()
+
     /** Keys `fetchAndParse` looked up with no scripted result — assert this stays empty. */
     val unscriptedKeys = mutableListOf<String?>()
 
@@ -483,8 +492,12 @@ internal class StubSourceAdapter(
     override suspend fun fetchAndParse(
         feed: DueFeed,
         mode: FetchMode,
+        cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
         calls += feed.id to mode
+        if (mode == FetchMode.REFRESH && cached.isNotEmpty()) {
+            cachedCalls += feed.id to cached
+        }
         onFetch(feed, mode)?.let { return it }
         val key = if (mode == FetchMode.OLDER_PAGE) feed.pagingNextUrl else feed.feedUrl
         val scripted = results[key]
@@ -517,7 +530,7 @@ internal fun stubAdapter(
     results: MutableMap<String, AdapterResult> = mutableMapOf(),
     onFetch: suspend (DueFeed, FetchMode) -> AdapterResult? = { _, _ -> null },
     announce: suspend (Long, List<Long>, List<Long>) -> List<Long> = { _, _, newIds -> newIds },
-) = StubSourceAdapter(results, onFetch, announce)
+) = StubSourceAdapter(results = results, onFetch = onFetch, announce = announce)
 
 /** A parsed-document adapter result (03 `AdapterResult.Parsed`). */
 internal fun adapterParsed(

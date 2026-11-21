@@ -86,6 +86,7 @@ internal class RequestLogger(
                 "/api/v1/devices",
                 "/api/v1/sync",
                 "/api/v1/changes",
+                "/api/v1/feed-cache",
                 "/api/v1/events",
                 "/api/v1/account",
                 "/api/v1/account/reset",

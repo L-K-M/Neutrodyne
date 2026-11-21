@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.dto.AccountResetRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangesPage
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceRenameRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.FeedCacheRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LibraryCountsDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import io.ktor.http.ContentType
@@ -104,6 +105,18 @@ internal class ChangesRoutes(
                         ),
                     )
                 }
+            }
+        }
+    }
+}
+
+internal class FeedCacheRoutes(
+    private val feedCache: FeedCacheService,
+) {
+    fun install(route: Route) {
+        route.rateLimit(RateLimits.FEED_CACHE) {
+            post("/api/v1/feed-cache") {
+                call.respond(feedCache.batch(call.principal(), call.receive<FeedCacheRequest>()))
             }
         }
     }

@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
+import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
 import android.content.Context
 import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.driver.AndroidSQLiteDriver
@@ -91,6 +93,9 @@ internal fun newRefresher(
     youTubeMonitor: ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor =
         ch.lkmc.neutrodyne.core.testing
             .FakeYouTubeFeedOutageMonitor(),
+    serverFeedCache: ServerFeedCache =
+        ch.lkmc.neutrodyne.core.domain
+            .ServerFeedCache { _ -> emptyMap() },
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -117,6 +122,7 @@ internal fun newRefresher(
         coordinator,
         notifier,
         youTubeMonitor,
+        serverFeedCache,
     )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
@@ -210,6 +216,7 @@ internal class StubSourceAdapter(
     override suspend fun fetchAndParse(
         feed: DueFeed,
         mode: FetchMode,
+        cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
         calls += feed.id to mode
         onFetch(feed, mode)?.let { return it }

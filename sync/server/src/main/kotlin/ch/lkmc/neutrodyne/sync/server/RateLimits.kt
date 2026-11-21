@@ -60,6 +60,10 @@ internal class RateLimits(
                 rateLimiter(6, 1.hours)
                 requestKey { account(it) }
             }
+            register(FEED_CACHE) {
+                rateLimiter(60, 1.minutes)
+                requestKey { account(it) }
+            }
         }
     }
 
@@ -89,5 +93,6 @@ internal class RateLimits(
         val SYNC_ACCOUNT = RateLimitName("sync-account")
         val ACCOUNT = RateLimitName("account")
         val EXPORT = RateLimitName("export")
+        val FEED_CACHE = RateLimitName("feed-cache")
     }
 }

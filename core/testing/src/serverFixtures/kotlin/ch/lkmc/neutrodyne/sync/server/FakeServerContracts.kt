@@ -47,6 +47,7 @@ internal class FakeSyncTransaction : SyncWrite {
     val ledger = mutableMapOf<RecordKey, RecordKey>()
     val events = mutableListOf<ServerEvent>()
     val acknowledgements = mutableMapOf<String, Pair<String?, Long>>()
+    val feedCacheEntries = mutableMapOf<String, StoredFeedCache>()
 
     /** Token hashes the transaction re-check must reject, as a revoked credential would. */
     val invalidCredentials = mutableSetOf<String>()
@@ -94,6 +95,8 @@ internal class FakeSyncTransaction : SyncWrite {
 
     override fun redirects(): Map<RecordKey, RecordKey> = ledger.toMap()
 
+    override fun feedCache(urls: Collection<String>): List<StoredFeedCache> = urls.mapNotNull { feedCacheEntries[it] }
+
     override fun nextSequence(): Long {
         state = account.copy(cursor = account.cursor.copy(seq = account.cursor.seq + 1))
         return account.cursor.seq
@@ -133,6 +136,10 @@ internal class FakeSyncTransaction : SyncWrite {
         require(from != to && from.collection == to.collection)
         check(ledger[from] == null || ledger[from] == to)
         ledger[from] = to
+    }
+
+    override fun putFeedCache(entry: StoredFeedCache) {
+        feedCacheEntries[entry.url] = entry
     }
 
     override fun emit(event: ServerEvent) {

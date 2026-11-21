@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
@@ -29,8 +30,14 @@ internal class SqliteSyncStore(
     dataDir: Path,
     private val publish: (ServerEvent) -> Unit = {},
     migrator: Migrator = Migrator(),
+    private val feedCacheMaxEntryBytes: Int = FEED_CACHE_MAX_ENTRY_BYTES,
+    private val feedCacheMaxAccountBytes: Long = FEED_CACHE_MAX_ACCOUNT_BYTES,
 ) : SyncStore,
     AuthStore {
+    init {
+        require(feedCacheMaxEntryBytes > 0)
+        require(feedCacheMaxAccountBytes >= feedCacheMaxEntryBytes)
+    }
     private val writerDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val readerDispatcher = Executors.newFixedThreadPool(READ_CONNECTIONS).asCoroutineDispatcher()
     private val lifetime = ReentrantReadWriteLock(true)
@@ -89,7 +96,8 @@ internal class SqliteSyncStore(
         withContext(writerDispatcher) {
             lifetime.read {
                 check(!closed) { "Store is closed" }
-                val tx = JdbcWrite(writer, accountId)
+                val tx =
+                    JdbcWrite(writer, accountId, feedCacheMaxEntryBytes, feedCacheMaxAccountBytes)
                 val result =
                     transaction(writer) {
                         try {
@@ -291,6 +299,12 @@ internal class SqliteSyncStore(
         const val READ_CONNECTIONS = 4
         const val BUSY_TIMEOUT_MS = 5_000
 
+        /** Hard per-entry body bound; larger upstream responses are never cached. */
+        const val FEED_CACHE_MAX_ENTRY_BYTES = ProtocolLimits.MAX_FEED_BYTES
+
+        /** Hard per-account body bound; the oldest entries are evicted once it is exceeded. */
+        const val FEED_CACHE_MAX_ACCOUNT_BYTES = 512L shl 20
+
         private fun connect(database: Path): Connection =
             DriverManager.getConnection("jdbc:sqlite:${database.toAbsolutePath()}").apply {
                 try {
@@ -378,6 +392,12 @@ private open class JdbcRead(
             ) { it.storedRecord() }
             .asSequence()
 
+    override fun livePodcasts(): List<StoredRecord> =
+        connection.query(
+            "SELECT * FROM record WHERE account_id = ? AND coll = 'podcast' AND dead = 0 AND merged_into IS NULL",
+            accountId,
+        ) { it.storedRecord() }
+
     override fun maximumClock(): Hlc? =
         connection
             .query(
@@ -426,11 +446,45 @@ private open class JdbcRead(
                 val collection = SyncCollection.fromWire(it.getString(1))
                 key(collection, it.getString(2)) to key(collection, it.getString(3))
             }.toMap()
+
+    override fun feedCacheHead(url: String): FeedCacheHead? =
+        connection.query(
+            "SELECT final_url, sha256, checked_at, body_bytes, etag, last_modified, permanent_url, http_charset " +
+                "FROM feed_cache WHERE account_id=? AND url=?",
+            accountId, url,
+        ) {
+            FeedCacheHead(it.getString(1), it.getString(2), it.getLong(3), it.getInt(4), it.getString(5), it.getString(6), it.getString(7), it.getString(8))
+        }.singleOrNull()
+
+    override fun feedCache(urls: Collection<String>): List<StoredFeedCache> {
+        if (urls.isEmpty()) return emptyList()
+        val values = listOf<Any?>(accountId) + urls
+        val placeholders = urls.joinToString(",") { "?" }
+        return connection.query(
+            "SELECT url, final_url, sha256, etag, last_modified, body, checked_at, podcast_rid, " +
+                "permanent_url, http_charset " +
+                "FROM feed_cache WHERE account_id = ? AND url IN ($placeholders)",
+            *values.toTypedArray(),
+        ) { row ->
+            StoredFeedCache(
+                row.getString(1),
+                row.getString(2),
+                row.getString(3),
+                row.getString(4),
+                row.getString(5),
+                row.getBytes(6),
+                row.getLong(7),
+                row.getString(8), row.getString(9), row.getString(10),
+            )
+        }
+    }
 }
 
 private class JdbcWrite(
     connection: Connection,
     accountId: Long,
+    private val feedCacheMaxEntryBytes: Int,
+    private val feedCacheMaxAccountBytes: Long,
 ) : JdbcRead(connection, accountId),
     SyncWrite {
     val events = mutableListOf<ServerEvent>()
@@ -442,6 +496,9 @@ private class JdbcWrite(
 
     override fun put(record: StoredRecord) {
         require(record.raw.coll == record.key.collection)
+        if (record.key.collection == SyncCollection.PODCAST) {
+            connection.update("DELETE FROM feed_cache WHERE account_id=? AND podcast_rid=?", accountId, record.key.id.rid)
+        }
         connection.update(
             """INSERT INTO record(account_id,coll,rid,seq,data,max_hlc,dead,dead_at,merged_into,by_device,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,coll,rid) DO UPDATE SET
@@ -531,6 +588,66 @@ private class JdbcWrite(
             to.id.rid,
         )
         check(redirects()[from] == to) { "Redirect authority is immutable" }
+    }
+
+    override fun putFeedCache(entry: StoredFeedCache) {
+        require(entry.body.size <= feedCacheMaxEntryBytes) { "Cached feed body exceeds the entry bound" }
+        connection.update(
+            """INSERT INTO feed_cache(account_id,url,final_url,sha256,etag,last_modified,body,body_bytes,checked_at,podcast_rid,permanent_url,http_charset)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,url) DO UPDATE SET
+               final_url=excluded.final_url, sha256=excluded.sha256, etag=excluded.etag,
+               last_modified=excluded.last_modified, body=excluded.body,
+               body_bytes=excluded.body_bytes, checked_at=excluded.checked_at, podcast_rid=excluded.podcast_rid,
+               permanent_url=excluded.permanent_url, http_charset=excluded.http_charset""",
+            accountId,
+            entry.url,
+            entry.finalUrl,
+            entry.sha256,
+            entry.etag,
+            entry.lastModified,
+            entry.body,
+            entry.body.size,
+            entry.checkedAtMs,
+            entry.podcastRid, entry.permanentUrl, entry.httpCharset,
+        )
+        evictFeedCacheOverflow()
+    }
+
+    override fun touchFeedCache(url: String, checkedAt: Long) {
+        connection.update("UPDATE feed_cache SET checked_at=? WHERE account_id=? AND url=?", checkedAt, accountId, url)
+    }
+
+    private fun deleteFeedCache(urls: Collection<String>) {
+        val values = listOf<Any?>(accountId) + urls
+        val placeholders = urls.joinToString(",") { "?" }
+        connection.update(
+            "DELETE FROM feed_cache WHERE account_id = ? AND url IN ($placeholders)",
+            *values.toTypedArray(),
+        )
+    }
+
+    /** Oldest entries go first; the just-written row is newest, so it survives a normal refresh. */
+    private fun evictFeedCacheOverflow() {
+        val total =
+            connection.query(
+                "SELECT COALESCE(SUM(body_bytes), 0) FROM feed_cache WHERE account_id = ?",
+                accountId,
+            ) { it.getLong(1) }.single()
+        if (total <= feedCacheMaxAccountBytes) return
+        val ordered =
+            connection.query(
+                "SELECT url, body_bytes FROM feed_cache WHERE account_id = ? " +
+                    "ORDER BY checked_at ASC, url ASC",
+                accountId,
+            ) { it.getString(1) to it.getLong(2) }
+        var remaining = total
+        val evict = mutableListOf<String>()
+        for ((url, bytes) in ordered) {
+            if (remaining <= feedCacheMaxAccountBytes) break
+            evict += url
+            remaining -= bytes
+        }
+        if (evict.isNotEmpty()) deleteFeedCache(evict)
     }
 
     override fun emit(event: ServerEvent) {

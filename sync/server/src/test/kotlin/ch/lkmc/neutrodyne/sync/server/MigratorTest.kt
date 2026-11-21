@@ -11,7 +11,8 @@ import kotlin.test.assertTrue
 class MigratorTest {
     @Test fun `populated supported old schema is backed up before atomic upgrade`() {
         val dir = tempDataDir()
-        SqliteSyncStore(dir).close()
+        // Build the v1 schema only, so the custom two-step migrator below has a step to run.
+        SqliteSyncStore(dir, migrator = Migrator(listOf(initialSql()))).close()
         accountFixture(dir)
         dbFixture(dir) { connection ->
             Migrator(
@@ -47,7 +48,7 @@ class MigratorTest {
 
     @Test fun `failed upgrade preserves old schema data version and readable backup`() {
         val dir = tempDataDir()
-        SqliteSyncStore(dir).close()
+        SqliteSyncStore(dir, migrator = Migrator(listOf(initialSql()))).close()
         accountFixture(dir)
         dbFixture(dir) { connection ->
             assertFailsWith<java.sql.SQLException> {
@@ -69,7 +70,7 @@ class MigratorTest {
                 )
             }
         }
-        SqliteSyncStore(dir).close()
+        SqliteSyncStore(dir, migrator = Migrator(listOf(initialSql()))).close()
         val backup = Files.list(dir.resolve("backups")).use { it.toList().single() }
         assertTrue(backup.fileName.toString().startsWith("neutrodyne-server-pre-migration-v1-"))
         DriverManager.getConnection("jdbc:sqlite:$backup").use { connection ->
@@ -92,9 +93,9 @@ class MigratorTest {
         SqliteSyncStore(dir).close()
         accountFixture(dir)
         dbFixture(dir) { connection ->
-            assertEquals(1, Migrator.version(connection))
+            assertEquals(Migrator.SCHEMA_VERSION, Migrator.version(connection))
             Migrator().migrate(connection, dir)
-            assertEquals(1, Migrator.version(connection))
+            assertEquals(Migrator.SCHEMA_VERSION, Migrator.version(connection))
         }
         // Nothing to migrate means nothing to back up: the nightly job owns routine copies.
         assertTrue(!Files.exists(dir.resolve("backups")))

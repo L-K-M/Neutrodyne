@@ -29,12 +29,16 @@ internal class DesktopRefreshLane
         private val queue: DesktopRefreshScheduler,
         private val clock: Clock,
     ) : JobLane {
+        private var firstConnectedRun = true
+
         override val name: String = NAME
 
         override suspend fun run(now: Instant) {
             // Offline costs nothing: 11's runner pokes the lane again when the network returns.
             if (!network.status.value.isConnected) return
 
+            val onOpen = firstConnectedRun && refresher.canCatchUpOnOpen(network.status.value.isMetered)
+            firstConnectedRun = false
             queue.drain { request ->
                 // Desktop runs carry no deadline, so the mutex never times out; the re-queue
                 // is wired anyway so a request that did report `reenqueued` keeps its intent.
@@ -50,13 +54,13 @@ internal class DesktopRefreshLane
             val idle =
                 db.podcastDao().dueForRefresh(dueBefore, scopeAll = true).isEmpty() &&
                     db.podcastDao().pagingPending(scopeAll = true).isEmpty()
-            if (idle) return
+            if (idle && !onOpen) return
             refresher.run(
                 RefreshRequest(
                     scope = RefreshScope.All,
                     force = false,
                     pagesOnly = false,
-                    origin = RefreshOrigin.PERIODIC,
+                    origin = if (onOpen) RefreshOrigin.FOREGROUND else RefreshOrigin.PERIODIC,
                 ).withDesktopBudgets(),
             )
         }

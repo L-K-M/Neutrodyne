@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.refresh
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.RowHint
 import ch.lkmc.neutrodyne.core.database.DueFeed
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
@@ -30,10 +31,20 @@ internal interface SourceAdapter {
         requestUrl: String,
     ): String
 
-    /** Fetches and parses one feed; [mode] `OLDER_PAGE` fetches `pagingNextUrl` unconditionally. */
+    /** A digest may stand in for bytes when the device can reuse its last successful parse. */
+    fun knownServerHash(feed: DueFeed): String? = null
+
+    /**
+     * Fetches and parses one feed; [mode] `OLDER_PAGE` fetches `pagingNextUrl` unconditionally.
+     *
+     * [cached] holds this run's fresh server snapshots keyed by their requested URL, empty when the
+     * run had no usable entry. An adapter that can serve a document from the cache returns that
+     * result without an upstream request; the default ignores it and fetches locally.
+     */
     suspend fun fetchAndParse(
         feed: DueFeed,
         mode: FetchMode,
+        cached: Map<String, ServerFeedSnapshot> = emptyMap(),
     ): AdapterResult
 
     /** May raise [base]; only YouTube's bounded gap rule may lower a normal success interval.

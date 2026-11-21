@@ -367,6 +367,7 @@ Serves R7.2, R7.4, N9, N13. Delivered in M0b (discovery, health), MS1 (everythin
 | `PATCH /api/v1/devices/{id}` | device token | `DeviceRenameRequest` → `DeviceDto` | `account` |
 | `DELETE /api/v1/devices/{id}` | device token | → `204` (revokes that device's tokens, closes its SSE streams) | `account` |
 | `GET /api/v1/account` | device token | → `AccountSummary` | `account` |
+| `POST /api/v1/feed-cache` | device token | `FeedCacheRequest` → `FeedCacheResponse` | `feed-cache` |
 | `POST /api/v1/sync` | device token | `SyncRequest` → `SyncResponse` | `sync` |
 | `GET /api/v1/changes?since=&limit=` | device token | → `ChangesPage` | `sync` |
 | `GET /api/v1/events?hb=` | device token | SSE stream | at most 10 concurrent per account, 2 per device |
@@ -462,6 +463,12 @@ Server rules for one call (one write transaction, [Write path](#write-path)):
 2. Merge every accepted change into its stored record with `RecordMerger` (`:sync:protocol`), assign a new `seq` to every record that changed, update the dedupe indexes and run merges.
 3. After the push, read the **page**: the records with `seq > since` in `seq` order, at most 1,000 and at most 8 MiB of uncompressed JSON. Add the current record of every change whose result is `stale` or `merged` that is not already in the page (so the client learns the winning values even when its cursor is already past them); these **extras** are always included, whatever their size (a client whose push was `stale` has no other way to learn the winning value), and never move the cursor. Real records are a few hundred bytes, so page plus extras stay far below the client's 32-MiB response cap; only records filled to every field cap by a misbehaving device of the same account could exceed it, and that round then fails visibly ([Error handling and backoff](#error-handling-and-backoff)). `cursor` is the `seq` of the page's last record (or `since` when the page is empty); `hasMore` is true when records with a larger `seq` exist.
 4. The caller's own changes come back in `records`; clients apply every record idempotently and do not skip their own echoes, because a record whose last writer is this device can still contain other devices' newer fields.
+
+### Batched feed refresh
+
+A linked client posts `FeedCacheRequest` to `/api/v1/feed-cache` with the feed URLs it wants to refresh and, when available, the SHA-256 hashes of documents it successfully ingested. The server looks up fresh snapshots for subscriptions belonging to the authenticated account. Looking up a URL does not schedule a fetch. The scheduler starts a pass on startup and waits 15 minutes between passes. Regular background polling follows the account’s subscriptions even while all devices are closed.
+
+Each returned entry contains the requested URL, the document’s final URL, its hash and the time the server last checked it (Unix milliseconds). Changed documents include their bytes encoded as Base64. Matching hashes need no body unless a permanent redirect needs confirmation. A snapshot expires 30 minutes after its last successful check. The server accepts up to 1,000 URLs per request, returns up to 8 MiB of feed document bytes per response and keeps up to 512 MiB per account. Larger libraries use multiple batches. On opening, the app checks automatically refreshed subscriptions together, even before their next local refresh is due. A client can refresh a missing entry directly, including when its server predates this endpoint. Each device parses and ingests documents locally so its episode identities, listening state and download settings still apply.
 
 ### Pull only
 

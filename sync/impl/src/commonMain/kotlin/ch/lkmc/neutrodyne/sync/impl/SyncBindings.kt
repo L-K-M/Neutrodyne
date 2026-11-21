@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.domain.SyncActivity
@@ -113,6 +114,43 @@ object SyncBindings {
             // token. A null result stays null; there is no second, decoupled lookup.
             tokenForBase = { url -> tokens.load(hostOf(url)) },
         )
+
+    /**
+     * 10 Batched feed refresh: the authenticated cache client uses the same durable-link
+     * predicate the scheduler uses, so an unlinked or forgotten server never produces a request.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun serverFeedCache(
+        db: NeutrodyneDatabase,
+        client: SyncClient,
+        address: SyncServerAddress,
+        clock: Clock,
+        tokens: SyncTokenStore,
+        identity: SyncIdentityLock,
+        gate: LocalNetworkGate,
+    ): ServerFeedCache = KtorServerFeedCache(clock, linked = {
+        db.syncStateDao().get()?.let { it.enabled && it.linkedAt != null && it.lastError != SYNC_ERROR_REVOKED } == true
+    }) {
+        identity.withLock {
+            val profile = db.syncStateDao().get() ?: return@withLock null
+            if (!profile.enabled || profile.linkedAt == null || profile.lastError == SYNC_ERROR_REVOKED) return@withLock null
+            val url = profile.serverUrl ?: return@withLock null
+            if (address.serverUrl() != url) return@withLock null
+            val granted = gate.hasPermission()
+            gate.onPermissionResult(granted)
+            if (!granted && gate.needsPermission(hostOf(url))) return@withLock null
+            val token = tokens.load(hostOf(url)) ?: return@withLock null
+            val bound = client.withCredentials(url, token) ?: return@withLock null
+            FeedCacheSession(bound) {
+                val current = db.syncStateDao().get()
+                current != null && current.enabled && current.serverUrl == url &&
+                    current.accountId == profile.accountId &&
+                    current.deviceId == profile.deviceId && current.linkedAt == profile.linkedAt &&
+                    current.lastError != SYNC_ERROR_REVOKED
+            }
+        }
+    }
 
     /** The shared sync-activity flag: `:core:data`'s maintenance lane reads [SyncActivity]. */
     @Provides

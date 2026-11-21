@@ -14,7 +14,7 @@ import java.util.UUID
 
 /** Numbered, atomic server migrations. Fixtures can exercise a real supported-old upgrade. */
 internal class Migrator(
-    private val migrations: List<String> = listOf(initialSql()),
+    private val migrations: List<String> = listOf(initialSql(), feedCacheSql()),
 ) {
     fun migrate(
         connection: Connection,
@@ -62,7 +62,7 @@ internal class Migrator(
     }
 
     internal companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
 
         fun version(connection: Connection): Int {
             val exists = connection.metaData.getTables(null, null, "schema_version", null).use { it.next() }
@@ -80,6 +80,11 @@ internal class Migrator(
         private fun initialSql(): String =
             checkNotNull(
                 Migrator::class.java.getResourceAsStream("/db/001-initial.sql"),
+            ).bufferedReader().use { it.readText() }
+
+        private fun feedCacheSql(): String =
+            checkNotNull(
+                Migrator::class.java.getResourceAsStream("/db/002-feed-cache.sql"),
             ).bufferedReader().use { it.readText() }
     }
 }

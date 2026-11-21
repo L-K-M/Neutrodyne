@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.sync.protocol
 object ProtocolLimits {
     const val MAX_CHANGES = 1_000
     const val MAX_RECORDS = 1_000
+    const val MAX_FEED_BYTES = 8 shl 20
+    const val MAX_FEED_BATCH = 1_000
     const val MAX_REQUEST_BYTES = 2L shl 20
     const val MAX_DECOMPRESSED_BYTES = 16L shl 20
     const val MAX_RESPONSE_DECOMPRESSED_BYTES = 32L shl 20

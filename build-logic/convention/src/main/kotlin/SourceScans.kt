@@ -263,7 +263,7 @@ abstract class CheckBannedApisTask : DefaultTask() {
         val problems = mutableListOf<String>()
         // Server polling uses a dedicated client whose resolver pins public DNS answers.
         val serverFeedTransport =
-            relative == "sync/server/src/main/kotlin/ch/lkmc/neutrodyne/sync/server/ServerFeedFetcher.kt" ||
+            relative == "sync/server/src/main/kotlin/ch/lkmc/neutrodyne/sync/server/HttpServerFeedFetcher.kt" ||
                 relative == "sync/server/src/test/kotlin/ch/lkmc/neutrodyne/sync/server/ServerFeedFetcherTest.kt"
         if (!relative.startsWith("core/network/okhttp/") && !serverFeedTransport) {
             for (regex in OKHTTP_TOKENS) {

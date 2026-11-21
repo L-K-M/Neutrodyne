@@ -27,4 +27,6 @@ data class CachedFeed(
     val sha256: String,
     val checkedAt: Long,
     val bodyBase64: String? = null,
+    val permanentUrl: String? = null,
+    val httpCharset: String? = null,
 )

@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import dev.zacsweers.metro.Inject
@@ -32,6 +33,7 @@ internal class RefreshForegroundObserver
         private val scheduler: RefreshScheduler,
         private val settings: SettingsRepository,
         private val network: NetworkMonitor,
+        private val serverFeedCache: ServerFeedCache,
         private val clock: Clock,
         @param:ApplicationScope private val appScope: CoroutineScope,
     ) : DefaultLifecycleObserver {
@@ -40,7 +42,7 @@ internal class RefreshForegroundObserver
         override fun onStart(owner: LifecycleOwner) {
             val nowElapsed = clock.elapsedRealtime()
             appScope.launch {
-                if (!suspendRunCatching { gatesOpen(nowElapsed) }.getOrDefault(false)) return@launch
+                if (!suspendRunCatching { gatesOpen() }.getOrDefault(false)) return@launch
                 // The cooldown is claimed atomically after the gates pass: two concurrent
                 // ON_START coroutines cannot both enqueue (03 Triggers), and a closed gate —
                 // a metered network, a recent run — never consumes the window.
@@ -67,13 +69,13 @@ internal class RefreshForegroundObserver
             }
         }
 
-        private suspend fun gatesOpen(nowElapsed: Long): Boolean {
+        private suspend fun gatesOpen(): Boolean {
             if (!settings.get(FeedsSettingKeys.REFRESH_ON_APP_OPEN)) return false
             val tickMs =
                 settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES).coerceAtLeast(MIN_TICK_MINUTES) * 60_000L
-            if (clock.now() - settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT) in 0 until tickMs) return false
             if (settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY) && network.status.value.isMetered) return false
-            return true
+            val age = clock.now() - settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT)
+            return age !in 0 until tickMs || serverFeedCache.isLinked()
         }
 
         private companion object {

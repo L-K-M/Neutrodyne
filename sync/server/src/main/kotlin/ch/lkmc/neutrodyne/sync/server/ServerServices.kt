@@ -7,6 +7,7 @@ internal class ServerServices(
     config: ServerConfig,
     val events: EventBus,
     val inputs: ServerInputs = productionInputs(),
+    feedFetcher: ServerFeedFetcher = HttpServerFeedFetcher(),
 ) {
     private val passwords = PasswordHasher(inputs)
     val tokens = TokenService(store, inputs)
@@ -25,6 +26,7 @@ internal class ServerServices(
         ServerUpdateNotice(if (config.updateCheck) UpdateCheckMode.ENABLED else UpdateCheckMode.DISABLED, inputs)
     val backupJob = BackupJob(store, config, backups, metrics, inputs)
     val gcJob = GcJob(store, config, inputs, metrics)
+    val feedCache = FeedCacheService(store, store, inputs, feedFetcher)
     val records = StoredRecordWriter(store, inputs, config.retentionUnsubscribedDays)
 
     suspend fun features(): List<String> =

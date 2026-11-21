@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.AccountResetRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.AccountSummary
@@ -15,6 +16,9 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceRenameRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
+import ch.lkmc.neutrodyne.sync.protocol.dto.FeedCacheQuery
+import ch.lkmc.neutrodyne.sync.protocol.dto.FeedCacheRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.FeedCacheResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.InviteRedeemRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LinkApproveRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LinkApproveResponse
@@ -38,15 +42,19 @@ import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import okio.Buffer
 
 /** The transport the engine and link flow use; `KtorSyncClient` is the production implementation. */
 interface SyncClient {
@@ -125,6 +133,14 @@ interface SyncClient {
         mode: String,
         beforeCursor: String?,
     ): AccountSummary
+
+    /**
+     * 10 Batched feed refresh: one authenticated `POST /api/v1/feed-cache` asking for the cached
+     * bodies of [queries]. The default keeps transports and test doubles that predate the
+     * endpoint source-compatible; [KtorSyncClient] is the production implementation.
+     */
+    suspend fun feedCache(queries: List<FeedCacheQuery>): FeedCacheResponse =
+        throw UnsupportedOperationException("feed cache is not supported by this transport")
 }
 
 /** A [SyncClient] failure with the server's status and problem code (10 Errors). */
@@ -271,6 +287,38 @@ class KtorSyncClient(
             AccountResetRequest(confirm, mode, beforeCursor),
             ctx.token,
         )
+    }
+
+    override suspend fun feedCache(queries: List<FeedCacheQuery>): FeedCacheResponse {
+        val ctx = authContext()
+        val token = requireNotNull(ctx.token)
+        return client
+            .preparePost(ctx.baseUrl.trimEnd('/') + "/api/v1/feed-cache") {
+                contentType(ContentType.Application.Json)
+                header("Neutrodyne-Sync-Protocol", PROTOCOL_VERSION.toString())
+                header("Authorization", "Bearer $token")
+                setBody(SyncJson.encodeToString(FeedCacheRequest(queries)))
+            }.execute { response ->
+                if (!response.status.isSuccess()) {
+                    throw SyncTransportException(
+                        response.status.value,
+                        null,
+                        "Feed cache unavailable",
+                    )
+                }
+                val channel = response.bodyAsChannel()
+                val chunk = ByteArray(8192)
+                val buffer = Buffer()
+                while (true) {
+                    val count = channel.readAvailable(chunk, 0, chunk.size)
+                    if (count < 0) break
+                    require(
+                        buffer.size + count <= ProtocolLimits.MAX_RESPONSE_DECOMPRESSED_BYTES,
+                    ) { "Feed response too large" }
+                    buffer.write(chunk, 0, count)
+                }
+                SyncJson.decodeFromString<FeedCacheResponse>(buffer.readUtf8())
+            }
     }
 
     /**

@@ -63,6 +63,33 @@ internal data class AccountSyncState(
     val clockPacked: Long,
 )
 
+/** One publisher document cached for the account. URLs and contents can contain private tokens. */
+internal data class StoredFeedCache(
+    val url: String,
+    val finalUrl: String,
+    val sha256: String,
+    val etag: String?,
+    val lastModified: String?,
+    val body: ByteArray,
+    val checkedAtMs: Long,
+    val podcastRid: String,
+    val permanentUrl: String? = null,
+    val httpCharset: String? = null,
+) {
+    override fun toString(): String = "StoredFeedCache(bodyBytes=${body.size}, checkedAtMs=$checkedAtMs)"
+}
+
+internal data class FeedCacheHead(
+    val finalUrl: String,
+    val sha256: String,
+    val checkedAt: Long,
+    val bodyBytes: Int,
+    val etag: String?,
+    val lastModified: String?,
+    val permanentUrl: String? = null,
+    val httpCharset: String? = null,
+)
+
 /** Extras never advance cursor or count toward the page's 1,000-record/8-MiB budget. */
 internal data class RecordPage(
     val records: List<StoredRecord>,
@@ -119,6 +146,12 @@ internal interface SyncRead {
 
     fun records(): Sequence<StoredRecord>
 
+    fun livePodcasts(): List<StoredRecord> =
+        records()
+            .filter {
+                it.key.collection == SyncCollection.PODCAST && it.live()
+            }.toList()
+
     fun maximumClock(): Hlc?
 
     fun page(
@@ -131,6 +164,23 @@ internal interface SyncRead {
     fun groupOwner(nameKey: String): RecordKey?
 
     fun redirects(): Map<RecordKey, RecordKey>
+
+    /** Cached feed bodies for [urls]; the caller's account scopes every row. */
+    fun feedCacheHead(url: String): FeedCacheHead? =
+        feedCache(listOf(url)).singleOrNull()?.let {
+            FeedCacheHead(
+                it.finalUrl,
+                it.sha256,
+                it.checkedAtMs,
+                it.body.size,
+                it.etag,
+                it.lastModified,
+                it.permanentUrl,
+                it.httpCharset,
+            )
+        }
+
+    fun feedCache(urls: Collection<String>): List<StoredFeedCache>
 }
 
 internal interface SyncWrite : SyncRead {
@@ -158,6 +208,16 @@ internal interface SyncWrite : SyncRead {
         from: RecordKey,
         to: RecordKey,
     )
+
+    /** Upsert one cached body, evicting the account's oldest entries when the account bound is exceeded. */
+    fun putFeedCache(entry: StoredFeedCache)
+
+    fun touchFeedCache(
+        url: String,
+        checkedAt: Long,
+    ) {
+        feedCache(listOf(url)).singleOrNull()?.let { putFeedCache(it.copy(checkedAtMs = checkedAt)) }
+    }
 
     /** Delivered only after successful commit, in commit order. */
     fun emit(event: ServerEvent)

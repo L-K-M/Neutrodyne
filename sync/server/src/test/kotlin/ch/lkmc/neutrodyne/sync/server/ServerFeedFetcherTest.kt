@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.server
 
+import ch.lkmc.neutrodyne.sync.server.ServerFeedFetcher.ServerFeedFetch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Dns
 import okhttp3.OkHttpClient
@@ -37,10 +38,27 @@ class ServerFeedFetcherTest {
             assertEquals("https://host.example/rss", changed.finalUrl)
             assertEquals("<rss/>", changed.body.decodeToString())
             assertNull(changed.etag)
+            assertNull(changed.permanentUrl)
             assertEquals("Basic example", requests.first().header("Authorization"))
             assertEquals("original", requests.first().header("If-None-Match"))
             assertNull(requests.last().header("Authorization"))
             assertNull(requests.last().header("If-None-Match"))
+        }
+
+    @Test
+    fun onlyLeadingPermanentRedirectsMoveTheSubscription() =
+        runBlocking {
+            val publisher =
+                fetcher { request ->
+                    when (request.url.encodedPath) {
+                        "/feed.xml" -> response(request, 301).header("Location", "/new").build()
+                        "/new" -> response(request, 302).header("Location", "/regional").build()
+                        else -> response(request, 200, "<rss/>").build()
+                    }
+                }
+            val result = assertIs<ServerFeedFetch.Changed>(publisher.fetch(URL, null, null, null))
+            assertEquals("https://podcast.example/new", result.permanentUrl)
+            assertEquals("https://podcast.example/regional", result.finalUrl)
         }
 
     @Test
@@ -81,7 +99,7 @@ class ServerFeedFetcherTest {
     }
 
     private fun fetcher(handler: (Request) -> Response) =
-        ServerFeedFetcher(OkHttpClient.Builder().addInterceptor { handler(it.request()) }.build())
+        HttpServerFeedFetcher(OkHttpClient.Builder().addInterceptor { handler(it.request()) }.build())
 
     private fun response(
         request: Request,

@@ -9,6 +9,8 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkStatus
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -77,6 +79,21 @@ class RefreshForegroundObserverTest {
             advanceUntilIdle()
 
             assertThat(deps.scheduler.nowRequests).isEmpty()
+        }
+
+    @Test
+    fun `a linked app checks the server even after a recent local refresh`() =
+        runTest {
+            val deps = deps()
+            deps.settings.set(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT, deps.clock.nowMs)
+            val linked = object : ServerFeedCache {
+                override suspend fun isLinked() = true
+
+                override suspend fun lookup(feeds: Map<String, String?>) = emptyMap<String, ServerFeedSnapshot>()
+            }
+            deps.observer(linked).onStart(owner)
+            advanceUntilIdle()
+            assertThat(deps.scheduler.nowRequests.single().origin).isEqualTo(RefreshOrigin.FOREGROUND)
         }
 
     @Test
@@ -199,7 +216,8 @@ class RefreshForegroundObserverTest {
         val clock: TestClock,
         val scope: TestScope,
     ) {
-        fun observer() = RefreshForegroundObserver(scheduler, settings, network, clock, scope)
+        fun observer(cache: ServerFeedCache = ServerFeedCache { emptyMap() }) =
+            RefreshForegroundObserver(scheduler, settings, network, cache, clock, scope)
     }
 
     private fun TestScope.deps(): Deps =

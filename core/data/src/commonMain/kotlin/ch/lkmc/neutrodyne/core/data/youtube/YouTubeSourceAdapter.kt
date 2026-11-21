@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.ExistingEpisodeKey
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.ChannelMetadataReason
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.domain.YouTubeChannelMetadata
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NetError
@@ -56,6 +57,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import okio.Buffer
 import okio.FileSystem
 import okio.IOException
 import okio.buffer
@@ -93,13 +95,14 @@ internal class YouTubeSourceAdapter(
     override suspend fun fetchAndParse(
         feed: DueFeed,
         mode: FetchMode,
+        cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
         require(mode != FetchMode.OLDER_PAGE) { "YouTube has no Atom paging cursor" }
         val gate = monitor.gate(feed.id, clock.now())
         if (gate is FeedGate.Deferred) return AdapterResult.Deferred(gate.untilMs)
         var report = FeedOutcome.INCONCLUSIVE
         try {
-            val result = fetchChannel(feed)
+            val result = fetchChannel(feed, cached)
             report =
                 when (result) {
                     is AdapterResult.Parsed, is AdapterResult.Unchanged -> {
@@ -136,7 +139,10 @@ internal class YouTubeSourceAdapter(
         }
     }
 
-    private suspend fun fetchChannel(feed: DueFeed): AdapterResult {
+    private suspend fun fetchChannel(
+        feed: DueFeed,
+        cached: Map<String, ServerFeedSnapshot>,
+    ): AdapterResult {
         val channelId = requireNotNull(feed.youtubeChannelId)
         val known =
             db
@@ -152,10 +158,11 @@ internal class YouTubeSourceAdapter(
         var primaryServerDateMs: Long? = null
         val now = clock.now()
         for ((index, variant) in urls.withIndex()) {
-            var polled = poll(variant.url)
+            var polled = poll(variant.url, cached[variant.url])
             var fallback = false
             if (index == 0 && polled is Poll.Failed && polled.failure.http in MISSING_STATUSES) {
-                polled = poll(YouTubeFeedUrls.canonical(channelId))
+                val canonical = YouTubeFeedUrls.canonical(channelId)
+                polled = poll(canonical, cached[canonical])
                 fallback = true
             }
             when (polled) {
@@ -249,7 +256,33 @@ internal class YouTubeSourceAdapter(
         )
     }
 
-    private suspend fun poll(url: String): Poll =
+    /**
+     * One variant's Atom document. A fresh server snapshot with a body replaces the upstream poll;
+     * a bodyless or unparseable snapshot is ignored so the live fetch decides, as on the wire.
+     */
+    private suspend fun poll(
+        url: String,
+        cached: ServerFeedSnapshot?,
+    ): Poll {
+        val body = cached?.body
+        if (body != null) {
+            val parsed =
+                withContext(parseDispatcher) {
+                    parser.parse(
+                        { Buffer().write(body) },
+                        cached.httpCharset,
+                        cached.finalUrl,
+                        ParseLimits(maxDocumentBytes = MAX_BYTES),
+                    )
+                }
+            if (parsed is ParseResult.Ok && parsed.feed.format == FeedFormat.ATOM) {
+                return Poll.Ok(parsed.feed, maxAgeSec = null, serverDateMs = null)
+            }
+        }
+        return pollLive(url)
+    }
+
+    private suspend fun pollLive(url: String): Poll =
         when (
             val result =
                 fetcher.fetch(

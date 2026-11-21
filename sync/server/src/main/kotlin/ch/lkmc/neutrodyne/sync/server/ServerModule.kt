@@ -135,6 +135,7 @@ internal class ServerModule(
                     SyncRoutes(services.records, services.metrics).install(this)
                     ChangesRoutes(services.records, services.inputs, services.metrics).install(this)
                     AccountRoutes(services.accounts, services.records, services.backups).install(this)
+                    FeedCacheRoutes(services.feedCache).install(this)
                     EventsRoutes(services.events, services.metrics, services.tokens::valid).install(this)
                     AdminWeb(services, config, serverVersion).install(this)
                 }

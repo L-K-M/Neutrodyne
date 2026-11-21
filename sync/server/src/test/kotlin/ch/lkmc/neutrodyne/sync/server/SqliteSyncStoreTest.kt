@@ -154,7 +154,7 @@ class SqliteSyncStoreTest {
                     store.write(1) { put(fixtureRecord("b", nextSequence())) }
                     assertEquals(listOf("a"), snapshot.records.map { it.key.id.rid }.toList())
                     assertTrue(snapshot.installationId.isNotBlank())
-                    assertEquals(1, snapshot.schemaVersion)
+                    assertEquals(Migrator.SCHEMA_VERSION, snapshot.schemaVersion)
                 }
             }
         }

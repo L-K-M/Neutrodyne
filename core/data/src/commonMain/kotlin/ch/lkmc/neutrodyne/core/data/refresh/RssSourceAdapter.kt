@@ -9,11 +9,13 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedRequest
+import ch.lkmc.neutrodyne.core.data.fetch.FeedSniffer
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.fetch.FetchOutcome
 import ch.lkmc.neutrodyne.core.data.fetch.Sniff
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.database.DueFeed
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -29,6 +31,8 @@ import dev.zacsweers.metro.binding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import okio.Buffer
+import okio.BufferedSource
 import okio.FileSystem
 import okio.IOException
 import okio.buffer
@@ -90,10 +94,18 @@ internal class RssSourceAdapter(
         return host.lowercase()
     }
 
+    override fun knownServerHash(feed: DueFeed): String? = feed.contentSha256.takeUnless { needsFullFetch(feed) }
+
     override suspend fun fetchAndParse(
         feed: DueFeed,
         mode: FetchMode,
+        cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
+        if (mode == FetchMode.REFRESH) {
+            cached[feed.feedUrl]?.let { snapshot ->
+                cachedOutcome(feed, snapshot)?.let { return it }
+            }
+        }
         var unconditional =
             when (mode) {
                 FetchMode.OLDER_PAGE -> true
@@ -195,6 +207,49 @@ internal class RssSourceAdapter(
         }
     }
 
+    /**
+     * Serves the feed from a server snapshot, or null when the snapshot cannot: an unusable final
+     * URL, a changed document with no body, or a redirect with no body to confirm it. A matching
+     * hash with no redirect is a `NotModified`: the device already holds that exact document, so
+     * the adapter neither parses nor requests it.
+     */
+    private suspend fun cachedOutcome(
+        feed: DueFeed,
+        snapshot: ServerFeedSnapshot,
+    ): AdapterResult? {
+        val bytes = snapshot.body
+        if (bytes == null) {
+            if (knownServerHash(feed) != snapshot.sha256 || snapshot.permanentUrl != null) return null
+            return AdapterResult.NotModified(
+                FetchMeta(
+                    finalUrl = snapshot.finalUrl,
+                    requestedUrl = feed.feedUrl,
+                    permanentUrl = null,
+                    etag = feed.etag,
+                    lastModified = feed.lastModified,
+                    sha256Hex = snapshot.sha256,
+                    serverDateMs = null,
+                    maxAgeSec = null,
+                ),
+            )
+        }
+        if (FeedSniffer.sniff(bytes) !in FEED_SNIFFS) return null
+        val meta =
+            FetchMeta(
+                finalUrl = snapshot.finalUrl,
+                requestedUrl = feed.feedUrl,
+                permanentUrl = snapshot.permanentUrl,
+                // A publisher validator for the device's previous document cannot validate these bytes.
+                etag = null,
+                lastModified = null,
+                sha256Hex = snapshot.sha256,
+                serverDateMs = null,
+                maxAgeSec = null,
+                unconditional = needsFullFetch(feed),
+            )
+        return parseDocument(meta, snapshot.httpCharset) { Buffer().write(bytes) }.takeUnless { it is AdapterResult.Failed }
+    }
+
     /** `NetError.Cancelled` produces no outcome: it propagates so the feed counts as unattempted. */
     private fun networkOutcome(error: NetError): AdapterResult =
         when (error) {
@@ -269,14 +324,18 @@ internal class RssSourceAdapter(
         meta: FetchMeta,
     ): AdapterResult =
         try {
-            val result =
-                withContext(parseDispatcher) {
-                    parser.parse(
-                        open = { fileSystem.source(body.file).buffer() },
-                        httpCharset = body.charset,
-                        baseUrl = body.finalUrl,
-                    )
-                }
+            parseDocument(meta, body.charset) { fileSystem.source(body.file).buffer() }
+        } finally {
+            tempFiles.delete(body.file)
+        }
+
+    private suspend fun parseDocument(
+        meta: FetchMeta,
+        charset: String?,
+        open: () -> BufferedSource,
+    ): AdapterResult =
+        try {
+            val result = withContext(parseDispatcher) { parser.parse(open, charset, meta.finalUrl) }
             when (result) {
                 is ParseResult.Ok -> {
                     AdapterResult.Parsed(
@@ -314,9 +373,6 @@ internal class RssSourceAdapter(
                 transient = true,
                 detail = e.message ?: e::class.simpleName,
             )
-        } finally {
-            // `tempFile` is deleted when handled, cancelled or superseded.
-            tempFiles.delete(body.file)
         }
 
     /**
@@ -402,5 +458,8 @@ internal class RssSourceAdapter(
 
         /** The `limitedParallelism` cap of 03's threading table ("Parse from temp file"). */
         const val PARSE_PARALLELISM = 2
+
+        /** Root elements the server's cache may hold (03 Body, hashing and sniffing). */
+        val FEED_SNIFFS = setOf(Sniff.RSS, Sniff.ATOM, Sniff.RDF)
     }
 }

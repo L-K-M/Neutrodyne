@@ -101,7 +101,7 @@ GitHub's release-asset host. Turn it off with
 `NEUTRODYNE_SERVER_UPDATE_CHECK=false`. Feed polling continues. Your TLS proxy may separately contact certificate authorities.
 No analytics or Neutrodyne-operated endpoint is involved.
 
-Database backups retain authentication hashes, audit history and any shared
+Database backups retain cached feed documents, authentication hashes, audit history and any shared
 feed passwords. Per-account ZIP exports omit authentication state and feed
 passwords, but contain private feed URLs and listening history. Both stay on
 the operator's disk unless copied elsewhere. Account purge removes live library
