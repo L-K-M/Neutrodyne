@@ -1796,7 +1796,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter {
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory {
   ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory$Companion Companion;
@@ -1845,7 +1845,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshControllerImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshForegroundObserver$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.refresh.RefreshForegroundObserver$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.refresh.RefreshForegroundObserver$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshForegroundObserver$MetroFactory {
   ch.lkmc.neutrodyne.core.data.refresh.RefreshForegroundObserver$MetroFactory$Companion Companion;
@@ -4654,6 +4654,12 @@
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$PasswordNoticesMetroFactory {
   ch.lkmc.neutrodyne.sync.impl.SyncBindings$PasswordNoticesMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$ServerFeedCacheMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$ServerFeedCacheMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$ServerFeedCacheMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncBindings$ServerFeedCacheMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SessionAdopterMetroFactory$Companion {
   public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SessionAdopterMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
