@@ -28,7 +28,7 @@
     <string name="privacy_app_updates_title">App updates</string>
     <string name="privacy_app_updates_body">When enabled, github.com and release-assets.githubusercontent.com receive update-manifest requests with the app User-Agent. Tapping a release or download opens your browser.</string>
     <string name="privacy_sync_server_title">Your sync server</string>
-    <string name="privacy_sync_server_body">Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. It receives no audio or feed contents. The server operator can read stored data.</string>
+    <string name="privacy_sync_server_body">Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. The server operator can read stored data.</string>
     <string name="privacy_links_title">Links you open</string>
     <string name="privacy_links_body">Your browser or chosen app receives a link you tap, including release/download links. Its own privacy settings apply.</string>
     <string name="privacy_issue_tracker_title">Issue tracker</string>

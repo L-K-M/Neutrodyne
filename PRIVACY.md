@@ -62,7 +62,7 @@ Searches, charts and previews remain in memory until eviction or app exit.
 | `youtube-streams` | **YouTube playback and channel search.** With the engine, www.youtube.com receives video/channel IDs, explicit channel searches, locale, client headers and an in-memory consent cookie. googlevideo.com hosts receive media requests. Podcast search text is not sent to YouTube. |
 | `youtube-engine` | **YouTube engine updates.** When enabled, api.github.com receives one release-by-tag index request per update round; github.com and release-assets.githubusercontent.com receive engine download paths. |
 | `app-updates` | **App updates.** When enabled, github.com and release-assets.githubusercontent.com receive update-manifest requests with the app User-Agent. Tapping a release or download opens your browser. |
-| `sync-server` | **Your sync server.** Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. It receives no audio or feed contents. The server operator can read stored data. |
+| `sync-server` | **Your sync server.** Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. The server operator can read stored data. |
 | `links` | **Links you open.** Your browser or chosen app receives a link you tap, including release/download links. Its own privacy settings apply. |
 | `issue-tracker` | **Issue tracker.** Reporting a problem opens github.com in your browser. Review any report before sending it. |
 | `server-updates` | **Sync server updates.** The optional sync server, rather than this app, checks github.com and release-assets.githubusercontent.com for updates when its operator enables the check. |
@@ -82,11 +82,10 @@ inventory](docs/design/09-quality-and-release.md#network-inventory).
 A linked server stores your subscriptions (including private, tokenised feed
 URLs), groups, played state, positions, favourites, Up next, the now-playing
 episode and synced settings — Basic-auth feed passwords only while "Share feed
-passwords" is on. It never receives audio, downloads, feed contents, artwork,
+passwords" is on. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. It never receives audio, downloads, artwork,
 crash data or device-local settings. **There is no end-to-end encryption:**
 whoever runs the server can read what it stores, and TLS comes from the
-server's reverse proxy. The server makes no outbound request except its
-optional daily update check, and logs no tokens, passwords, feed URLs or
+server's reverse proxy. The server contacts feed publishers and can check GitHub daily for updates. It logs no tokens, passwords, feed URLs or
 payloads. You can unlink a device, revoke it from another device, and use
 "Delete my data on the server". A server on your home network needs Android's
 local-network permission (API 33+) / macOS's Local Network prompt.
@@ -99,8 +98,7 @@ can inspect the database and any feed passwords you chose to share.
 
 The daily update check contacts this repository's GitHub release manifest and
 GitHub's release-asset host. Turn it off with
-`NEUTRODYNE_SERVER_UPDATE_CHECK=false`; the server then makes no outbound
-requests. Your TLS proxy may separately contact certificate authorities.
+`NEUTRODYNE_SERVER_UPDATE_CHECK=false`. Feed polling continues. Your TLS proxy may separately contact certificate authorities.
 No analytics or Neutrodyne-operated endpoint is involved.
 
 Database backups retain authentication hashes, audit history and any shared
@@ -145,7 +143,7 @@ The following stable IDs match Settings › Privacy:
 The desktop app uses the same network destinations and switches as Android. It follows OS light/dark by default, has no Auto Backup, uses `AppDirs` for data, and routes links/mail through the OS. No analytics or tracking.
 
 ## Sync server details
-The optional self-hosted Neutrodyne Sync server stores subscriptions (including private/tokenised feed URLs if shared), groups/memberships, podcast user fields, per-episode played/position/favourite, Up next and synced settings. It never stores audio files, downloads, feed contents, artwork, crash data or device-local settings. Feed passwords are shared only if the pushing device opts in. The server makes no outbound request except its optional update check (can be turned off by the operator). TLS comes from the reverse proxy; there is no end-to-end encryption — the server operator can read stored data. Devices can be unlinked/revoked and data deleted from the server.
+The optional self-hosted Neutrodyne Sync server stores subscriptions (including private/tokenised feed URLs if shared), groups/memberships, podcast user fields, per-episode played/position/favourite, Up next and synced settings. It never stores audio files, downloads, artwork, crash data or device-local settings. Feed passwords are shared only if the pushing device opts in. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. The operator can turn off the separate update check. TLS comes from the reverse proxy; there is no end-to-end encryption — the server operator can read stored data. Devices can be unlinked/revoked and data deleted from the server.
 
 ## Diagnostics export redaction
 Diagnostics exports are redacted: tokens, passwords, private feed URLs, sync tokens and paths under the user's home are redacted; only allow-listed fields are included. Crash reports follow the same redaction rules.

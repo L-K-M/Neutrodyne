@@ -32,7 +32,7 @@
   <string name="sync_setup_try_again">Erneut versuchen</string>
   <string name="sync_setup_done">Fertig</string>
   <string name="sync_setup_disclosure_title">Was %1$s speichert</string>
-  <string name="sync_setup_disclosure_body">Deine Abos%1$s, deine Gruppen, Warteschlange, Wiedergabeverlauf und synchronisierte Einstellungen. Wer den Server betreibt, kann sie lesen: Neutrodyne Sync verschlüsselt sie nicht Ende-zu-Ende. Feed-Passwörter werden nur gespeichert, wenn du „Feed-Passwörter teilen“ einschaltest. Audio, Downloads und Bilder werden nie gesendet.</string>
+  <string name="sync_setup_disclosure_body">Deine Abos%1$s, deine Gruppen, Warteschlange, Wiedergabeverlauf und synchronisierte Einstellungen. Wer den Server betreibt, kann sie lesen: Neutrodyne Sync verschlüsselt sie nicht Ende-zu-Ende. Feed-Passwörter werden nur gespeichert, wenn du „Feed-Passwörter teilen“ einschaltest. Audio, Downloads und Bilder werden nie gesendet. Dein Server ruft deine abonnierten Feeds einschließlich privater Feed-Links regelmäßig ab und speichert ihren Inhalt für deine Geräte zwischen.</string>
   <string name="sync_setup_private_feeds">, darunter %1$d private Feed-Links</string>
   <string name="sync_setup_encrypted">Die Verbindung ist verschlüsselt (HTTPS).</string>
   <string name="sync_setup_not_encrypted">Die Verbindung ist nicht verschlüsselt (http).</string>

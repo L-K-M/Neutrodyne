@@ -28,7 +28,7 @@
     <string name="privacy_app_updates_title">App-Updates</string>
     <string name="privacy_app_updates_body">Wenn aktiviert, erhalten github.com und release-assets.githubusercontent.com Update-Manifest-Anfragen mit dem User-Agent der App. Das Antippen eines Releases oder Downloads öffnet deinen Browser.</string>
     <string name="privacy_sync_server_title">Dein Sync-Server</string>
-    <string name="privacy_sync_server_body">Erst nach der Verknüpfung: Dein Server erhält sein Geräte-Token, Gerätenamen, Plattform/Version und den synchronisierten Bibliotheksstand, einschließlich privater Feed-URLs. Feed-Passwörter werden nur geteilt, wenn aktiviert. Er erhält keine Audio- oder Feed-Inhalte. Der Serverbetreiber kann gespeicherte Daten lesen.</string>
+    <string name="privacy_sync_server_body">Erst nach der Verknüpfung: Dein Server erhält sein Geräte-Token, Gerätenamen, Plattform/Version und den synchronisierten Bibliotheksstand, einschließlich privater Feed-URLs. Feed-Passwörter werden nur geteilt, wenn aktiviert. Dein Server ruft deine abonnierten Feeds einschließlich privater Feed-Links regelmäßig ab und speichert ihren Inhalt für deine Geräte zwischen. Der Serverbetreiber kann gespeicherte Daten lesen.</string>
     <string name="privacy_links_title">Von dir geöffnete Links</string>
     <string name="privacy_links_body">Dein Browser oder die gewählte App erhält einen Link, den du antippst, einschließlich Release-/Download-Links. Es gelten deren eigene Datenschutzeinstellungen.</string>
     <string name="privacy_issue_tracker_title">Issue-Tracker</string>

@@ -32,7 +32,7 @@
   <string name="sync_setup_try_again">Try again</string>
   <string name="sync_setup_done">Done</string>
   <string name="sync_setup_disclosure_title">What %1$s will store</string>
-  <string name="sync_setup_disclosure_body">Your subscriptions%1$s, your groups, Up next, listening history and synced settings. Whoever runs the server can read them: Neutrodyne Sync doesn\'t encrypt them end to end. Feed passwords are stored only if you turn on Share feed passwords. Audio, downloads and artwork are never sent.</string>
+  <string name="sync_setup_disclosure_body">Your subscriptions%1$s, your groups, Up next, listening history and synced settings. Whoever runs the server can read them: Neutrodyne Sync doesn\'t encrypt them end to end. Feed passwords are stored only if you turn on Share feed passwords. Audio, downloads and artwork are never sent. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices.</string>
   <string name="sync_setup_private_feeds">, including %1$d private feed links</string>
   <string name="sync_setup_encrypted">The connection is encrypted (HTTPS).</string>
   <string name="sync_setup_not_encrypted">The connection isn\'t encrypted (http).</string>

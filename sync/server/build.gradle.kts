@@ -45,6 +45,8 @@ dependencies {
     implementation(platform(libs.ktor.bom))
     implementation(libs.bundles.server.ktor)
     implementation(libs.kotlinx.serialization.json)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp)
     implementation(libs.sqlite.jdbc)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.slf4j.api)

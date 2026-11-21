@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:okhttp-public-suffix-list",
+  "name": "Public Suffix List (bundled in OkHttp)",
+  "description": "Mozilla's Public Suffix List, compiled unmodified into OkHttp as data: assets/PublicSuffixDatabase.list in okhttp-android 5.5.0, okhttp3/internal/publicsuffix/PublicSuffixDatabase.list in okhttp-jvm 5.5.0. Source data: https://publicsuffix.org/list/public_suffix_list.dat. Upstream NOTICE (okhttp, tag parent-5.5.0): https://github.com/lysine-dev/okhttp/blob/parent-5.5.0/okhttp/src/jvmTest/resources/okhttp3/internal/publicsuffix/NOTICE",
+  "website": "https://publicsuffix.org",
+  "developers": [],
+  "licenses": [
+    "MPL-2.0"
+  ],
+  "artifactVersion": "5.5.0",
+  "tag": "bundled"
+}

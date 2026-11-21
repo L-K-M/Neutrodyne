@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
 
-Neutrodyne is an open-source podcast player for Android and the desktop (Windows, macOS, Linux), with an optional self-hosted sync server. It is organised around groups: a group such as "tech", "news" or "fiction" is a user-defined set of podcasts and YouTube channels, and every group is its own newest-first episode feed. Each app polls its feeds itself — there is no Neutrodyne-operated backend, no account at a third party and no tracking. Whoever wants their phones and computers in step runs Neutrodyne Sync on a machine of their own; it keeps subscriptions, groups and listening state, never audio or feed contents, and the apps work fully without it.
+Neutrodyne is an open-source podcast player for Android and the desktop (Windows, macOS, Linux), with an optional self-hosted sync server. It is organised around groups: a group such as "tech", "news" or "fiction" is a user-defined set of podcasts and YouTube channels, and every group is its own newest-first episode feed. Standalone apps poll their feeds directly. Whoever wants their phones and computers in step runs Neutrodyne Sync on a machine of their own; it keeps subscriptions, groups and listening state and refreshes feeds while the apps are closed.
 
 **Status: implementation in progress; nothing released yet.** The master plan and eleven design documents guide the work milestone by milestone ([roadmap](docs/PLAN.md#7-roadmap)); [HANDOFF.md](HANDOFF.md) tracks what is merged. Android tester builds come from M0a, desktop tester builds from M0b and the sync server from MS1. Android, desktop and server ship together as v1.0.
 
@@ -79,9 +79,9 @@ Quit the desktop app before updating. For a ZIP or tar.gz, replace the old folde
 ### Run the server
 
 Neutrodyne Sync is optional and self-hosted. It stores library and listening
-state, including private feed links, without end-to-end encryption. It never
-fetches feeds or audio. Its only outbound request is the optional daily GitHub
-update notice. See [Privacy](PRIVACY.md).
+state, including private feed links, without end-to-end encryption. It regularly fetches your subscribed feeds, including private feed links,
+and caches the feed documents so your devices can refresh them together. Publishers
+see the server’s IP address. Devices download audio and artwork directly. See [Privacy](PRIVACY.md).
 
 With Docker on Linux x86-64 or arm64, copy
 [compose.yaml](sync/server/deploy/compose.yaml) and

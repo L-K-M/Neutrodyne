@@ -34,8 +34,8 @@ the machine or connected device. Release artifacts come from
 
 - **Scope of v1.0:** the Android app, the desktop app (Windows, macOS on
   Apple Silicon, Linux) and an optional self-hosted sync server, all shipped
-  together in v1.0. The server syncs subscriptions and listening state,
-  never audio or feed contents.
+  together in v1.0. The server syncs subscriptions and listening state and polls subscribed feeds
+  for linked devices. Audio stays on the devices.
 - **Stack:** Kotlin Multiplatform with Compose Multiplatform (targets
   `android` and `jvm("desktop")`; no iOS), and a Kotlin + Ktor sync server
   that shares code with the clients. Keep `commonMain` free of `java.*` and
