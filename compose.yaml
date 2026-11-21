@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Unlicense
+services:
+  neutrodyne-server:
+    image: neutrodyne-server:local
+    build:
+      context: .
+      dockerfile: sync/server/deploy/Dockerfile
+      target: checkout
+      args:
+        SERVER_SOURCE: checkout-files
+    command: serve ${NEUTRODYNE_SERVER_TRANSPORT---insecure-lan}
+    environment:
+      NEUTRODYNE_SERVER_PUBLIC_URL: ${NEUTRODYNE_SERVER_PUBLIC_URL:-}
+      NEUTRODYNE_SERVER_TRUSTED_PROXIES: ${NEUTRODYNE_SERVER_TRUSTED_PROXIES:-127.0.0.1/32,::1/128}
+      NEUTRODYNE_SERVER_UPDATE_CHECK: ${NEUTRODYNE_SERVER_UPDATE_CHECK:-true}
+    ports:
+      - "${NEUTRODYNE_BIND_ADDRESS:-127.0.0.1}:${NEUTRODYNE_PORT:-8787}:8787"
+    volumes:
+      - neutrodyne-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=16m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 320m
+volumes:
+  neutrodyne-data: {}

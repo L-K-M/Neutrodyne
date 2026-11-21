@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Unlicense
+# Only the server build inputs enter the Docker context. In particular this
+# keeps the deployment's .env, data, and local Gradle files out of the build.
+**
+!gradlew
+!gradle.properties
+!settings.gradle.kts
+!**/build.gradle.kts
+!gradle/**
+!build-logic/**
+!app/config/licenses/**
+!feeds/src/commonMain/**
+!feeds/src/desktopMain/**
+!sync/protocol/src/commonMain/**
+!sync/protocol/src/desktopMain/**
+!sync/server/config/**
+!sync/server/src/main/**
+!sync/server/deploy/data/.keep
+!sync/server/deploy/image-sources.lock.json
+!third_party/**
+**/build/
+**/.gradle/
+**/.kotlin/

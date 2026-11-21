@@ -2246,6 +2246,27 @@ WantedBy=multi-user.target
 - A web server (Caddy or nginx) on the same host terminates TLS and proxies to `127.0.0.1:8787` ([Reverse proxy with Caddy](#reverse-proxy-with-caddy), [nginx](#nginx)).
 - Account administration normally happens in the web UI. CLI commands must run as the service's user; with `DynamicUser` that is `sudo systemd-run --pty --wait -p DynamicUser=yes -p User=neutrodyne-server -p StateDirectory=neutrodyne-server -E NEUTRODYNE_SERVER_DATA=/var/lib/neutrodyne-server /usr/bin/java -jar /opt/neutrodyne-server/neutrodyne-server.jar user list`. systemd keeps one dynamic user per name, shared by every unit that names it while any of them runs ([`dynamic-user.c`](https://github.com/systemd/systemd/blob/main/src/core/dynamic-user.c)), and derives its UID from a hash of the name, so the transient unit gets the service's UID and the state directory's ownership does not change; MS1 still runs the command against a live service. A static user created by a `sysusers.d` snippet also works (systemd then uses it, [systemd.exec](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)), with `sudo -u neutrodyne-server` for the CLI.
 
+### Docker Compose from a checkout
+
+The [root Compose file](../../compose.yaml) builds the checked-out server
+with the Gradle wrapper inside Docker. BuildKit compiles the JVM server with
+JDK 21 and uses the same pinned distroless runtime and health check as the
+published image. Compose mounts a named volume at `/data` and publishes port
+8787 on loopback by default.
+
+Run `docker compose up -d --build --wait` from the repository root. The optional
+[.env.example](../../.env.example) lists the host bind address and port and the
+settings for an existing HTTPS reverse proxy. The first-start token is in the
+volume at `/data/setup-token`. See [Run the server](../../README.md#run-the-server)
+for setup and device linking.
+
+Run `./update.sh [branch]` in a deployment checkout with Git and Docker Compose
+v2.20 or later. The script fast-forwards the selected branch from `origin`,
+builds the image, and waits for Compose's health check. A failed build leaves
+the current container running. Checkout-local `.env` and `compose.override.yaml`
+are ignored by Git. Keep the same Compose project name to reuse the data
+volume across updates.
+
 ### Container image
 
 Built by `release.yml` from the release JAR, natively per architecture, pushed by digest and attested ([D95](../PLAN.md#3-key-decisions)); the same `Dockerfile` lets users build their own image from a downloaded and checksum-verified JAR.

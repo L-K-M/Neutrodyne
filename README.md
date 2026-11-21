@@ -83,6 +83,36 @@ state, including private feed links, without end-to-end encryption. It regularly
 and caches the feed documents so your devices can refresh them together. Publishers
 see the server’s IP address. Devices download audio and artwork directly. See [Privacy](PRIVACY.md).
 
+#### Docker Compose from a checkout
+
+With Docker and Compose v2.20 or later, run these from the repository root.
+The `.env` file is optional. Copy the example if you want to change the bind
+address, port or update check.
+
+```sh
+docker compose up -d --build --wait
+```
+
+On first startup, read the one-time setup token in your terminal.
+
+```sh
+docker compose cp neutrodyne-server:/data/setup-token - | tar -xO
+```
+
+Open <http://127.0.0.1:8787/setup> to create the admin account. In the app, go to
+**Settings → Sync**, enter `http://127.0.0.1:8787` and approve the app's device code
+in the server's web interface. To link a phone over trusted home Wi-Fi, change
+`NEUTRODYNE_BIND_ADDRESS` in `.env` to the server's LAN IP and use that IP in the
+app. This mode uses plain HTTP. For HTTPS, configure the reverse proxy settings
+in [`.env.example`](.env.example) or use the bundled Caddy stack below.
+
+Run `./update.sh` to fast-forward the current branch from `origin`, rebuild
+the server image and wait for the recreated service to become healthy. Use
+`./update.sh <branch>` to deploy a different branch. The named volume keeps the
+database and backups, and Git ignores local deployment settings.
+
+#### Published image with Caddy
+
 With Docker on Linux x86-64 or arm64, copy
 [compose.yaml](sync/server/deploy/compose.yaml) and
 [Caddyfile](sync/server/deploy/Caddyfile) from the release tag. Set `SYNC_HOST`
@@ -90,6 +120,8 @@ to your public domain and `NEUTRODYNE_SERVER_IMAGE` to
 `ghcr.io/l-k-m/neutrodyne-server:<version>`, then run `docker compose up -d`.
 Only Caddy publishes ports; it obtains the TLS certificate. The server runs as
 UID 65532 with a read-only root and a private writable `/data` volume.
+
+#### Standalone JAR
 
 Without Docker, install Java 21+, download `neutrodyne-server-<version>.jar`
 from [GitHub Releases](https://github.com/L-K-M/Neutrodyne/releases), verify
@@ -109,7 +141,6 @@ create the first administrator. Alternatively run
 `java -jar neutrodyne-server-<version>.jar admin create <username>` as that
 user. Passwords are prompted with `--password`, never passed in arguments.
 Create accounts and link devices with short codes from Settings > Sync.
-Client sync orchestration remains MS2 work.
 
 Upgrade by replacing the image version or JAR and restarting. Migrations make
 automatic pre-upgrade backups; a newer database refuses an older server.
