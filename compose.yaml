@@ -9,6 +9,7 @@ services:
       target: checkout
       args:
         SERVER_SOURCE: checkout-files
+    # An explicitly empty TRANSPORT drops the flag for an HTTPS reverse proxy.
     command: serve ${NEUTRODYNE_SERVER_TRANSPORT---insecure-lan}
     environment:
       NEUTRODYNE_SERVER_PUBLIC_URL: ${NEUTRODYNE_SERVER_PUBLIC_URL:-}

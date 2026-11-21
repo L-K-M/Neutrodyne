@@ -2274,7 +2274,12 @@ listener as configured in Compose.
 
 ### Container image
 
-Built by `release.yml` from the release JAR, natively per architecture, pushed by digest and attested ([D95](../PLAN.md#3-key-decisions)); the same `Dockerfile` lets users build their own image from a downloaded and checksum-verified JAR.
+The release workflow builds from the release JAR natively per architecture,
+pushes by digest and attests the image ([D95](../PLAN.md#3-key-decisions)).
+The same Dockerfile can build from a downloaded, checksum-verified JAR. Use
+the directory prepared by `scripts/ci/server-image.py prepare` as the Docker
+build context for this target. That directory contains the JAR, notices,
+source information and empty data directory.
 
 ```dockerfile
 # sync/server/deploy/Dockerfile

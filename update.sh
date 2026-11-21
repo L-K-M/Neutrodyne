@@ -8,6 +8,11 @@ usage() {
     echo "Fast-forward the current or named branch from origin and rebuild the Docker Compose server."
 }
 
+supports_health_wait() {
+    local up_help
+    up_help=$("$@" up --help 2>/dev/null) && [[ "$up_help" == *--wait-timeout* ]]
+}
+
 if [[ $# -eq 1 && ${1} == --help ]]; then
     usage
     exit 0
@@ -18,12 +23,12 @@ if [[ $# -gt 1 ]]; then
 fi
 
 cd -- "$(dirname -- "$0")"
-if docker compose version >/dev/null 2>&1; then
+if supports_health_wait docker compose; then
     compose=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
+elif supports_health_wait docker-compose; then
     compose=(docker-compose)
 else
-    echo "Docker Compose is required." >&2
+    echo "Docker Compose 2.20 or later with up --wait-timeout support is required." >&2
     exit 1
 fi
 
@@ -42,7 +47,7 @@ fi
 
 echo "==> Syncing $branch from origin"
 remote_ref="refs/remotes/origin/$branch"
-git fetch --no-tags origin "$ref:$remote_ref"
+git fetch --no-tags origin "+$ref:$remote_ref"
 revision=$(git rev-parse --verify "$remote_ref")
 if ! git cat-file -e "$revision:compose.yaml"; then
     echo "Branch $branch does not contain the Neutrodyne Compose deployment." >&2
