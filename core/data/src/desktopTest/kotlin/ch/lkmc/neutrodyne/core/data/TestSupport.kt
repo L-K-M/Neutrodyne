@@ -495,7 +495,7 @@ internal class StubSourceAdapter(
         cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
         calls += feed.id to mode
-        if (mode == FetchMode.REFRESH && cached.isNotEmpty()) {
+        if (cached.isNotEmpty()) {
             cachedCalls += feed.id to cached
         }
         onFetch(feed, mode)?.let { return it }

@@ -36,8 +36,9 @@ internal class DesktopRefreshLane
             if (!network.status.value.isConnected) return
 
             val onOpen =
-                queue.takeForegroundRequest(clock.elapsedRealtime()) &&
-                    refresher.canCatchUpOnOpen(network.status.value.isMetered)
+                queue.hasForegroundRequest() &&
+                    refresher.canCatchUpOnOpen(network.status.value.isMetered) &&
+                    queue.takeForegroundRequest(clock.elapsedRealtime())
             queue.drain { request ->
                 // Desktop runs carry no deadline, so the mutex never times out; the re-queue
                 // is wired anyway so a request that did report `reenqueued` keeps its intent.

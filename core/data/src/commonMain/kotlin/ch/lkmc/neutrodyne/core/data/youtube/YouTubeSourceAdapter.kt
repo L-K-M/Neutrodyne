@@ -102,7 +102,7 @@ internal class YouTubeSourceAdapter(
         if (gate is FeedGate.Deferred) return AdapterResult.Deferred(gate.untilMs)
         var report = FeedOutcome.INCONCLUSIVE
         try {
-            val result = fetchChannel(feed, cached)
+            val result = fetchChannel(feed, mode, cached)
             report =
                 when (result) {
                     is AdapterResult.Parsed, is AdapterResult.Unchanged -> {
@@ -110,9 +110,7 @@ internal class YouTubeSourceAdapter(
                     }
 
                     is AdapterResult.Failed -> {
-                        if (result.kind in
-                            OUTAGE_FAILURES
-                        ) {
+                        if (mode != FetchMode.CACHED_ONLY && result.kind in OUTAGE_FAILURES) {
                             FeedOutcome.FAILURE
                         } else {
                             FeedOutcome.INCONCLUSIVE
@@ -141,6 +139,7 @@ internal class YouTubeSourceAdapter(
 
     private suspend fun fetchChannel(
         feed: DueFeed,
+        mode: FetchMode,
         cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
         val channelId = requireNotNull(feed.youtubeChannelId)
@@ -158,11 +157,11 @@ internal class YouTubeSourceAdapter(
         var primaryServerDateMs: Long? = null
         val now = clock.now()
         for ((index, variant) in urls.withIndex()) {
-            var polled = poll(variant.url, cached[variant.url])
+            var polled = poll(variant.url, cached[variant.url], mode)
             var fallback = false
             if (index == 0 && polled is Poll.Failed && polled.failure.http in MISSING_STATUSES) {
                 val canonical = YouTubeFeedUrls.canonical(channelId)
-                polled = poll(canonical, cached[canonical])
+                polled = poll(canonical, cached[canonical], mode)
                 fallback = true
             }
             when (polled) {
@@ -198,7 +197,7 @@ internal class YouTubeSourceAdapter(
                                 ?: (now + maxOf(MIN_RATE_LIMIT_MS, failed.retryAfterMs ?: 0)),
                         )
                     }
-                    if (index == 0) return failed
+                    if (index == 0 || mode == FetchMode.CACHED_ONLY) return failed
                     results +=
                         if (failed.http in MISSING_STATUSES) {
                             VariantResult.Empty(variant.bit)
@@ -263,6 +262,7 @@ internal class YouTubeSourceAdapter(
     private suspend fun poll(
         url: String,
         cached: ServerFeedSnapshot?,
+        mode: FetchMode,
     ): Poll {
         val body = cached?.body
         if (body != null) {
@@ -279,6 +279,7 @@ internal class YouTubeSourceAdapter(
                 return Poll.Ok(parsed.feed, maxAgeSec = null, serverDateMs = null)
             }
         }
+        if (mode == FetchMode.CACHED_ONLY) return Poll.Failed(failure(FeedErrorKind.PARSE_ERROR))
         return pollLive(url)
     }
 

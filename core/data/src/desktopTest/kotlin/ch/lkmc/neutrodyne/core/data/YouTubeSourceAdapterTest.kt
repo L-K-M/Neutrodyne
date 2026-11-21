@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.domain.ChannelMetadataReason
 import ch.lkmc.neutrodyne.core.domain.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -135,6 +136,28 @@ class YouTubeSourceAdapterTest {
                         .second,
                 )
                 assertEquals(0, f.tempBodyCount())
+            }
+        }
+
+    @Test fun earlyCatchUpRequiresEveryAtomVariantToBeUsable() =
+        runTest {
+            fixture().use { f ->
+                val id = f.channel(bits = 3)
+                val feed = dueFeedOf(f.db, id)
+                val urls = YouTubeFeedUrls.pollUrls(requireNotNull(feed.youtubeChannelId), feed.youtubeVariants)
+                val primary = urls.first().url
+                val other = urls.last().url
+                val snapshot =
+                    ServerFeedSnapshot(primary, "a".repeat(64), NOW, atom(listOf(video(1))).encodeToByteArray())
+                for (body in listOf(null, "<rss/>".encodeToByteArray())) {
+                    val cached = mapOf(primary to snapshot, other to snapshot.copy(finalUrl = other, body = body))
+                    val result = f.adapter.fetchAndParse(feed, FetchMode.CACHED_ONLY, cached)
+                    assertEquals(FeedErrorKind.PARSE_ERROR, assertIs<AdapterResult.Failed>(result).kind)
+                }
+                assertEquals(0, server.requestCount)
+                assertTrue(
+                    f.monitor.reports.all { it.second == ch.lkmc.neutrodyne.youtube.api.FeedOutcome.INCONCLUSIVE },
+                )
             }
         }
 

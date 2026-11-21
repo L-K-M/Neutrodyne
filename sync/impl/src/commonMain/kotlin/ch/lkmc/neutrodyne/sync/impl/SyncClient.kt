@@ -139,8 +139,7 @@ interface SyncClient {
      * bodies of [queries]. The default keeps transports and test doubles that predate the
      * endpoint source-compatible; [KtorSyncClient] is the production implementation.
      */
-    suspend fun feedCache(queries: List<FeedCacheQuery>): FeedCacheResponse =
-        throw UnsupportedOperationException("feed cache is not supported by this transport")
+    suspend fun feedCache(queries: List<FeedCacheQuery>): FeedCacheResponse = FeedCacheResponse(emptyList())
 }
 
 /** A [SyncClient] failure with the server's status and problem code (10 Errors). */
@@ -312,9 +311,13 @@ class KtorSyncClient(
                 while (true) {
                     val count = channel.readAvailable(chunk, 0, chunk.size)
                     if (count < 0) break
-                    require(
-                        buffer.size + count <= ProtocolLimits.MAX_RESPONSE_DECOMPRESSED_BYTES,
-                    ) { "Feed response too large" }
+                    if (buffer.size + count > ProtocolLimits.MAX_RESPONSE_DECOMPRESSED_BYTES) {
+                        throw SyncTransportException(
+                            response.status.value,
+                            "response_too_large",
+                            "Feed response too large",
+                        )
+                    }
                     buffer.write(chunk, 0, count)
                 }
                 SyncJson.decodeFromString<FeedCacheResponse>(buffer.readUtf8())

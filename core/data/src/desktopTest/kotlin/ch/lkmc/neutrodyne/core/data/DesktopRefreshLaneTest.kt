@@ -166,6 +166,32 @@ class DesktopRefreshLaneTest {
         }
 
     @Test
+    fun openingOnMeteredWifiOnlyRetainsTheRequestUntilUnmetered() =
+        laneTest {
+            settings.set(FeedsSettingKeys.REFRESH_WIFI_ONLY, true)
+            val url = "https://publisher.example/show"
+            seedPodcast(db, url, nextRefreshAt = NOW + DAY)
+            val requests = mutableListOf<Set<String>>()
+            val cache =
+                object : ServerFeedCache {
+                    override suspend fun isLinked() = true
+
+                    override suspend fun lookup(feeds: Map<String, String?>): Map<String, ServerFeedSnapshot> {
+                        requests += feeds.keys
+                        return emptyMap()
+                    }
+                }
+            val lane = lane(stubAdapter(), queue(this), cache)
+            network.setStatus(FakeNetworkMonitor.ONLINE.copy(isMetered = true))
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+            assertTrue(requests.isEmpty())
+
+            network.setStatus(FakeNetworkMonitor.ONLINE)
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+            assertEquals(listOf(setOf(url)), requests)
+        }
+
+    @Test
     fun feedsDueInsideTheSlackTriggerAnAutomaticRun() =
         laneTest {
             val soon =

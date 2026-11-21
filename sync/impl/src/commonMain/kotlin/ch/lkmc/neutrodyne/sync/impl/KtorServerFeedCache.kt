@@ -26,9 +26,9 @@ import kotlin.io.encoding.Base64
  * hash legitimately carries no body; a changed hash without a body is rejected.
  *
  * The server accepts at most [MAX_QUERIES_PER_REQUEST] URLs per call, so a larger library is
- * asked in chunks. One failed chunk stops the remaining requests and keeps what already
- * validated; the alternative (a partial map) is still safe because the caller refreshes anything
- * the map omits.
+ * requested in chunks. The client retains at most 8 MiB of document bodies across the whole
+ * lookup. If a chunk fails, earlier validated entries remain usable. Missing entries fall back
+ * to the publisher when the subscription is due.
  */
 internal class KtorServerFeedCache(
     private val clock: Clock,
@@ -61,7 +61,7 @@ internal class KtorServerFeedCache(
                     Log.d(TAG) { "feed cache endpoint unavailable (${unavailable.status})" }
                     break
                 } catch (failure: Exception) {
-                    Log.d(TAG) { "feed cache lookup failed" }
+                    Log.d(TAG) { "feed cache lookup failed (${failure::class.simpleName})" }
                     break
                 }
             if (response.feeds.size > chunk.size) break

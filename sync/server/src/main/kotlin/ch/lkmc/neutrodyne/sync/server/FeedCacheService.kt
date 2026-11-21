@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import org.slf4j.LoggerFactory
 import java.security.MessageDigest
 import java.util.Base64
 import kotlin.coroutines.cancellation.CancellationException
@@ -67,6 +68,8 @@ internal class FeedCacheService(
     private val fetcher: ServerFeedFetcher,
     private val config: FeedCacheConfig = FeedCacheConfig(),
 ) {
+    private val log = LoggerFactory.getLogger("ch.lkmc.neutrodyne.sync.server.feed-cache")
+
     /**
      * Returns the account's fresh cached bodies for the requested URLs. A body is omitted only
      * when the caller already holds the same SHA-256; a miss (unknown URL or stale entry) is left
@@ -167,7 +170,7 @@ internal class FeedCacheService(
             ServerFeedFetcher.ServerFeedFetch.Unchanged -> {
                 if (prior == null) return
                 store.write(accountId) {
-                    if (record(subscription.key)?.seq == subscription.sequence) {
+                    if (currentSubscription(subscription)) {
                         touchFeedCache(subscription.url, checkedAtMs)
                     }
                 }
@@ -180,7 +183,7 @@ internal class FeedCacheService(
                 val etag = boundedHeader(result.etag)
                 val lastModified = boundedHeader(result.lastModified)
                 store.write(accountId) {
-                    if (record(subscription.key)?.seq != subscription.sequence) return@write
+                    if (!currentSubscription(subscription)) return@write
                     if (prior != null && prior.sha256 == digest && prior.etag == etag &&
                         prior.lastModified == lastModified && prior.finalUrl == finalUrl &&
                         prior.permanentUrl == result.permanentUrl && prior.httpCharset == result.httpCharset
@@ -207,11 +210,32 @@ internal class FeedCacheService(
         }
     }
 
+    /**
+     * The cache write is a compare-and-swap on the record version observed while enumerating: a
+     * late fetch may only touch the cache while its podcast is still live and unchanged. This
+     * keeps a fetch that outlived an unsubscribe, a feed-URL change or a merge from restoring
+     * withdrawn access.
+     */
+    private fun SyncWrite.currentSubscription(subscription: FeedSubscription): Boolean {
+        val current = record(subscription.key) ?: return false
+        return current.seq == subscription.sequence && current.live()
+    }
+
     /** One refresh pass over every enabled account. */
     suspend fun refreshAll() {
         val accounts =
             auth.readAuth { accounts().filter { it.disabledAt == null }.map { it.id } }
-        accounts.forEach { refreshAccount(it) }
+        accounts.forEach { accountId ->
+            try {
+                refreshAccount(accountId)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                // One unhealthy account must not starve the accounts refreshed after it. Log the
+                // failure class only: a message can carry feed URLs or credentials.
+                log.error("Feed cache refresh failed for one account: ${failure::class.simpleName}")
+            }
+        }
     }
 
     /** Runs a pass immediately, then every [FeedCacheConfig.refreshIntervalMs]; stops with the application. */
@@ -222,8 +246,10 @@ internal class FeedCacheService(
                     refreshAll()
                 } catch (failure: CancellationException) {
                     throw failure
-                } catch (_: Exception) {
-                    application.environment.log.error("Scheduled feed cache refresh failed")
+                } catch (failure: Exception) {
+                    application.environment.log.error(
+                        "Scheduled feed cache refresh failed: ${failure::class.simpleName}",
+                    )
                 }
                 delay(config.refreshIntervalMs)
             }

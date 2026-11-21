@@ -45,7 +45,7 @@ internal class RefreshForegroundObserver
                 if (!suspendRunCatching { gatesOpen() }.getOrDefault(false)) return@launch
                 // The cooldown is claimed atomically after the gates pass: two concurrent
                 // ON_START coroutines cannot both enqueue (03 Triggers), and a closed gate —
-                // a metered network, a recent run — never consumes the window.
+                // a metered network, or a recent All run while unlinked, leaves the window open.
                 if (!claimTrigger(nowElapsed)) return@launch
                 scheduler.enqueueNow(
                     RefreshScope.All,

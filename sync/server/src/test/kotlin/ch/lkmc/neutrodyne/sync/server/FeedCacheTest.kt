@@ -175,6 +175,7 @@ class FeedCacheTest {
             assertEquals(sha256Hex(BODY.toByteArray()), stored.sha256)
             assertEquals("$FEED?final=1", stored.finalUrl)
             assertEquals("etag-1", stored.etag)
+            assertEquals("Mon, 01 Jan 2026 00:00:00 GMT", stored.lastModified)
 
             // A 304 keeps the body, refreshes checkedAt and replays the stored validators.
             f.now += 60_000
@@ -182,6 +183,7 @@ class FeedCacheTest {
             service.refreshAccount(account.id)
             assertEquals(2, fetcher.calls.size)
             assertEquals("etag-1", fetcher.calls[1].etag)
+            assertEquals(stored.lastModified, fetcher.calls[1].lastModified)
             val refreshed = f.store.read(account.id) { feedCache(listOf(FEED)) }.single()
             assertEquals(f.now, refreshed.checkedAtMs)
             assertContentEquals(stored.body, refreshed.body)
@@ -272,6 +274,30 @@ class FeedCacheTest {
             assertTrue(f.store.read(account.id) { feedCache(listOf(FEED)) }.isEmpty())
         }
 
+    @Test fun `podcast metadata changes keep the cached body and validators`() =
+        authServices { f ->
+            val account = f.account()
+            val grant = f.grant(account)
+            val principal = f.principal(grant)
+            val writer = WriterFixture(store = f.store, principal = principal).apply { now = f.now }
+            writer.push(writer.podcast(url = FEED))
+            val body = "cached".toByteArray()
+            f.store.write(account.id) {
+                putFeedCache(
+                    entry(FEED, sha256 = sha256Hex(body), body = body, checkedAtMs = f.now, etag = "etag-1"),
+                )
+            }
+
+            // A metadata-only edit and an identical re-push change no polling input.
+            writer.push(writer.write(podcastA, "title", JsonPrimitive("Renamed"), writer.clock(1)))
+            writer.push(writer.write(podcastA, "title", JsonPrimitive("Renamed"), writer.clock(1)))
+
+            val stored = f.store.read(account.id) { feedCache(listOf(FEED)).single() }
+            assertContentEquals(body, stored.body)
+            assertEquals("etag-1", stored.etag)
+            assertEquals(f.now, stored.checkedAtMs)
+        }
+
     @Test fun `a poll finishing after unsubscribe cannot restore the cached feed`() =
         authServices { fixture ->
             val account = fixture.account()
@@ -285,6 +311,43 @@ class FeedCacheTest {
             FeedCacheService(fixture.store, fixture.store, fixture.inputs, publisher).refreshAccount(account.id)
             assertEquals(1, publisher.calls.size)
             assertTrue(fixture.store.read(account.id) { feedCache(listOf(FEED)).isEmpty() })
+        }
+
+    @Test fun `a poll finishing after the feed URL changes cannot restore the old cache`() =
+        authServices { fixture ->
+            val account = fixture.account()
+            val writer = WriterFixture(fixture.store, fixture.principal(fixture.grant(account)))
+            writer.push(writer.podcast(url = FEED))
+            val publisher =
+                RecordingFetcher {
+                    writer.push(
+                        writer.write(podcastA, "feedUrl", JsonPrimitive(FEED_REPLACEMENT), writer.clock(1)),
+                    )
+                    ServerFeedFetcher.ServerFeedFetch.Changed(BODY.encodeToByteArray(), FEED, null, null)
+                }
+            FeedCacheService(fixture.store, fixture.store, fixture.inputs, publisher).refreshAccount(account.id)
+            assertEquals(1, publisher.calls.size)
+            assertTrue(fixture.store.read(account.id) { feedCache(listOf(FEED)).isEmpty() })
+            assertTrue(fixture.store.read(account.id) { feedCache(listOf(FEED_REPLACEMENT)).isEmpty() })
+        }
+
+    @Test fun `one failing account does not stop later accounts from refreshing`() =
+        authServices { f ->
+            val failing = f.account("alice")
+            val healthy = f.account("bob")
+            assertTrue(failing.id < healthy.id)
+            val failingWriter = WriterFixture(f.store, f.principal(f.grant(failing))).apply { now = f.now }
+            failingWriter.push(failingWriter.podcast(url = FEED))
+            val healthyWriter = WriterFixture(f.store, f.principal(f.grant(healthy))).apply { now = f.now }
+            healthyWriter.push(healthyWriter.podcast(url = FEED_REPLACEMENT))
+            val fetcher =
+                RecordingFetcher {
+                    ServerFeedFetcher.ServerFeedFetch.Changed(BODY.toByteArray(), it, null, null)
+                }
+            val store = FailingAccountStore(f.store, failing.id)
+            FeedCacheService(store, f.store, f.inputs, fetcher).refreshAll()
+            assertEquals(setOf(FEED_REPLACEMENT), fetcher.calls.map { it.url }.toSet())
+            assertTrue(fetcher.calls.none { it.url == FEED })
         }
 
     @Test fun `library reset invalidates the account feed cache`() =
@@ -411,6 +474,19 @@ private class RecordingFetcher(
     ): ServerFeedFetcher.ServerFeedFetch? {
         calls += FetchCall(url, authorization, etag, lastModified)
         return result(url)
+    }
+}
+
+private class FailingAccountStore(
+    private val delegate: SyncStore,
+    private val failingAccountId: Long,
+) : SyncStore by delegate {
+    override suspend fun <T> read(
+        accountId: Long,
+        block: SyncRead.() -> T,
+    ): T {
+        if (accountId == failingAccountId) error("account store unavailable")
+        return delegate.read(accountId, block)
     }
 }
 

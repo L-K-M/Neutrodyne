@@ -98,6 +98,19 @@ class ServerFeedFetcherTest {
         assertFailsWith<UnknownHostException> { dns.lookup("publisher.example") }
     }
 
+    @Test
+    fun dnsRejectsScopedLinkLocalAnswers() {
+        val bytes = InetAddress.getByName("fe80::1").address
+        val scoped = java.net.Inet6Address.getByAddress(null, bytes, 4)
+        val dns =
+            FeedDns(
+                object : Dns {
+                    override fun lookup(hostname: String) = listOf(scoped)
+                },
+            )
+        assertFailsWith<UnknownHostException> { dns.lookup("publisher.example") }
+    }
+
     private fun fetcher(handler: (Request) -> Response) =
         HttpServerFeedFetcher(OkHttpClient.Builder().addInterceptor { handler(it.request()) }.build())
 

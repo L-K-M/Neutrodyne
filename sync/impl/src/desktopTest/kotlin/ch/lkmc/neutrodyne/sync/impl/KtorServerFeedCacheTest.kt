@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.dto.CachedFeed
 import ch.lkmc.neutrodyne.sync.protocol.dto.FeedCacheQuery
 import ch.lkmc.neutrodyne.sync.protocol.dto.FeedCacheResponse
@@ -131,7 +132,7 @@ class KtorServerFeedCacheTest {
     fun anOversizeBodyIsDroppedBeforeDecoding() =
         runTest {
             val client = FakeSyncClient()
-            val encoded = "A".repeat(MAX_BODY_BYTES * 4 / 3 + 9)
+            val encoded = "A".repeat(ProtocolLimits.MAX_FEED_BYTES * 4 / 3 + 9)
             client.handler = {
                 FeedCacheResponse(listOf(CachedFeed(URL, URL, sha, now, bodyBase64 = encoded)))
             }
@@ -286,7 +287,6 @@ class KtorServerFeedCacheTest {
     private companion object {
         const val URL = "https://feed.example/rss"
         const val SERVER_URL = "https://sync.example"
-        const val MAX_BODY_BYTES = 8 * 1024 * 1024
         const val MAX_FRESH_AGE_MS = 30 * 60_000L
         const val MAX_SKEW_MS = 300_000L
     }

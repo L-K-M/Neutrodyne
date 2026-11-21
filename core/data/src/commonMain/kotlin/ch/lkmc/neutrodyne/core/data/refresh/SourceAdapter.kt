@@ -39,7 +39,7 @@ internal interface SourceAdapter {
      *
      * [cached] holds this run's fresh server snapshots keyed by their requested URL, empty when the
      * run had no usable entry. An adapter that can serve a document from the cache returns that
-     * result without an upstream request; the default ignores it and fetches locally.
+     * result without an upstream request. CACHED_ONLY mode must never fetch a publisher document.
      */
     suspend fun fetchAndParse(
         feed: DueFeed,
@@ -67,7 +67,7 @@ internal interface SourceAdapter {
 }
 
 /** `FULL` = unconditional (parser bump, fortnightly full fetch, previews, probes). */
-internal enum class FetchMode { REFRESH, FULL, OLDER_PAGE }
+internal enum class FetchMode { REFRESH, CACHED_ONLY, FULL, OLDER_PAGE }
 
 /** The result of one `fetchAndParse` (03 Source adapters). */
 internal sealed interface AdapterResult {

@@ -170,7 +170,9 @@ internal class FeedDns(
             if (answers.any { address ->
                     val host = address.hostAddress
                     val literal = if (':' in host) "[$host]" else host
-                    address.isSiteLocalAddress || LocalDestination.isLocal("http://$literal/")
+                    address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+                        address.isSiteLocalAddress || address.isMulticastAddress ||
+                        LocalDestination.isLocal("http://$literal/")
                 }
             ) {
                 throw UnknownHostException("Feed resolves to a local network")

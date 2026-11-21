@@ -379,6 +379,7 @@ internal class FeedRefresher(
         val useServer = !request.pagesOnly && serverFeedCache.isLinked()
         val candidates =
             if (useServer && request.scope == RefreshScope.All && request.origin == RefreshOrigin.FOREGROUND) {
+                // The upper bound includes every finite local schedule and excludes Manual only.
                 db
                     .podcastDao()
                     .dueForRefresh(RefreshPolicy.NEVER - 1, scopeAll = true)
@@ -389,11 +390,17 @@ internal class FeedRefresher(
         val serverFeeds =
             if (!useServer) {
                 emptyMap()
-            } else if (request.deadlineElapsedMs == RefreshRequest.NO_DEADLINE) {
-                lookupServerFeeds(candidates)
             } else {
-                val remaining = request.deadlineElapsedMs - clock.elapsedRealtime() - DEADLINE_MARGIN_MS
-                withTimeoutOrNull(remaining.coerceAtLeast(0)) { lookupServerFeeds(candidates) }.orEmpty()
+                val budget =
+                    if (request.deadlineElapsedMs == RefreshRequest.NO_DEADLINE) {
+                        SERVER_LOOKUP_TIMEOUT_MS
+                    } else {
+                        minOf(
+                            SERVER_LOOKUP_TIMEOUT_MS,
+                            request.deadlineElapsedMs - clock.elapsedRealtime() - DEADLINE_MARGIN_MS,
+                        )
+                    }
+                withTimeoutOrNull(budget) { lookupServerFeeds(candidates) }.orEmpty()
             }
         val due =
             if (scheduled === candidates) {
@@ -404,8 +411,11 @@ internal class FeedRefresher(
                     candidates.filter { feed ->
                         val hits = serverFeeds[feed.id]
                         feed.id !in dueIds && feed.failureCount == 0 && intervals[feed.id] != null &&
-                            hits != null && cacheUrls(feed, includeFallback = false).all(hits::containsKey) &&
-                            hits.values.any { it.body != null && it.checkedAt > (feed.lastSuccessAt ?: 0L) }
+                            !hits.isNullOrEmpty() &&
+                            cacheUrls(feed, includeFallback = false).all { url ->
+                                val snapshot = hits[url]
+                                snapshot?.body != null && snapshot.checkedAt > (feed.lastSuccessAt ?: 0L)
+                            }
                     }
             }
         val slots = arrayOfNulls<FeedOutcome>(due.size)
@@ -463,6 +473,13 @@ internal class FeedRefresher(
                                                         adapter,
                                                         request,
                                                         hostPermits,
+                                                        if (index <
+                                                            scheduled.size
+                                                        ) {
+                                                            FetchMode.REFRESH
+                                                        } else {
+                                                            FetchMode.CACHED_ONLY
+                                                        },
                                                         serverFeeds[feed.id].orEmpty(),
                                                     ) { slots[index] = it }
                                                 }
@@ -601,16 +618,18 @@ internal class FeedRefresher(
         adapter: SourceAdapter,
         request: RefreshRequest,
         hostPermits: HostPermits,
+        mode: FetchMode,
         cached: Map<String, ServerFeedSnapshot>,
         committed: (FeedOutcome) -> Unit,
     ): FeedOutcome {
         val result =
             suspendRunCatching {
                 hostPermits.semaphore(adapter.hostKey(feed, feed.feedUrl)).withPermit {
-                    adapter.fetchAndParse(feed, FetchMode.REFRESH, cached)
+                    adapter.fetchAndParse(feed, mode, cached)
                 }
             }.getOrElse { e ->
                 if (e is CancellationException) throw e
+                if (mode == FetchMode.CACHED_ONLY) return FeedOutcome.Deferred(currentNextAt(feed.id))
                 Log.w(TAG, e) { "fetchAndParse threw for podcast ${feed.id}" }
                 // An eager batch flush can fault here too; isolate it just like an
                 // outcome-handling failure so siblings finish before finalisation retries.
@@ -619,6 +638,10 @@ internal class FeedRefresher(
                 }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
                 return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
             }
+        if (mode == FetchMode.CACHED_ONLY && (result is AdapterResult.Failed || result is AdapterResult.Deferred)) {
+            // An unusable early snapshot leaves the existing publisher schedule and backoff intact.
+            return FeedOutcome.Deferred(currentNextAt(feed.id))
+        }
         // Outcome handling (ingest, fetch-state rows, pending moves, hooks) is guarded per feed:
         // one feed's unexpected DAO fault records a STORAGE failure instead of cancelling the
         // run and every sibling feed with it (03's per-feed isolation).
@@ -640,7 +663,7 @@ internal class FeedRefresher(
                 }
             // Preserve the committed current-body outcome if cancellation interrupts a probe.
             committed(outcome)
-            if (feed.sourceType != SourceType.RSS || result !is AdapterResult.Parsed ||
+            if (mode == FetchMode.CACHED_ONLY || feed.sourceType != SourceType.RSS || result !is AdapterResult.Parsed ||
                 result.purpose == ParsePurpose.REDIRECT_CONFIRMATION ||
                 (outcome !is FeedOutcome.Ingested && outcome !is FeedOutcome.Merged)
             ) {
@@ -1777,6 +1800,7 @@ internal class FeedRefresher(
         const val EVENT_BUFFER_CAPACITY = 64
 
         /** Mirrors the server's feed-cache TTL; a snapshot older than this is stale. */
+        const val SERVER_LOOKUP_TIMEOUT_MS = 30_000L
         const val SERVER_FEED_MAX_AGE_MS = 30 * 60_000L
     }
 }

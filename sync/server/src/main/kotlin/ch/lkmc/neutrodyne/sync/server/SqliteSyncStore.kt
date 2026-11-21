@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.RecordMerger
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
@@ -494,6 +495,19 @@ private open class JdbcRead(
     }
 }
 
+/** Podcast fields the scheduler reads; a change to any of them can invalidate the cached body. */
+private val FEED_CACHE_POLLING_FIELDS =
+    setOf(
+        "feedUrl",
+        "sourceType",
+        "youtubeChannelId",
+        "youtubeVariants",
+        "needsCredentials",
+    )
+
+/** SQLite binds a bounded number of parameters per statement; eviction can select many rows. */
+private const val FEED_CACHE_DELETE_BATCH = 500
+
 private class JdbcWrite(
     connection: Connection,
     accountId: Long,
@@ -510,7 +524,9 @@ private class JdbcWrite(
 
     override fun put(record: StoredRecord) {
         require(record.raw.coll == record.key.collection)
-        if (record.key.collection == SyncCollection.PODCAST) {
+        if (record.key.collection == SyncCollection.PODCAST &&
+            feedCacheInvalidated(record.key, record.raw)
+        ) {
             connection.update(
                 "DELETE FROM feed_cache WHERE account_id=? AND podcast_rid=?",
                 accountId,
@@ -534,6 +550,30 @@ private class JdbcWrite(
             record.byDevice,
             record.updatedAtMs,
         )
+    }
+
+    /**
+     * A cached body belongs to the podcast's polling identity. Drop it only when that identity,
+     * its authorization, or its live/merged state changes; a metadata-only write keeps the body
+     * and its validators. The delete shares the write transaction, so a rollback restores both.
+     */
+    private fun feedCacheInvalidated(
+        key: RecordKey,
+        raw: RecordState,
+    ): Boolean {
+        val prior = record(key) ?: return true
+        if (prior.raw.mergedInto != raw.mergedInto ||
+            RecordMerger.isDead(prior.raw) != RecordMerger.isDead(raw)
+        ) {
+            return true
+        }
+        // The passwords are usable only when the credential and its origin carry the same clock.
+        if (prior.raw.fields["auth"] != raw.fields["auth"] ||
+            prior.raw.fields["credentialOrigin"] != raw.fields["credentialOrigin"]
+        ) {
+            return true
+        }
+        return FEED_CACHE_POLLING_FIELDS.any { field -> prior.raw.fields[field]?.v != raw.fields[field]?.v }
     }
 
     override fun remove(key: RecordKey) {
@@ -641,12 +681,14 @@ private class JdbcWrite(
     }
 
     private fun deleteFeedCache(urls: Collection<String>) {
-        val values = listOf<Any?>(accountId) + urls
-        val placeholders = urls.joinToString(",") { "?" }
-        connection.update(
-            "DELETE FROM feed_cache WHERE account_id = ? AND url IN ($placeholders)",
-            *values.toTypedArray(),
-        )
+        urls.chunked(FEED_CACHE_DELETE_BATCH).forEach { batch ->
+            val values = listOf<Any?>(accountId) + batch
+            val placeholders = batch.joinToString(",") { "?" }
+            connection.update(
+                "DELETE FROM feed_cache WHERE account_id = ? AND url IN ($placeholders)",
+                *values.toTypedArray(),
+            )
+        }
     }
 
     /** Oldest entries go first; the just-written row is newest, so it survives a normal refresh. */

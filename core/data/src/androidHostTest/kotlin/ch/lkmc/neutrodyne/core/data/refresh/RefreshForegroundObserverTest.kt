@@ -92,7 +92,15 @@ class RefreshForegroundObserverTest {
 
                     override suspend fun lookup(feeds: Map<String, String?>) = emptyMap<String, ServerFeedSnapshot>()
                 }
-            deps.observer(linked).onStart(owner)
+            val observer = deps.observer(linked)
+            deps.settings.set(FeedsSettingKeys.REFRESH_WIFI_ONLY, true)
+            deps.network.setStatus(METERED)
+            observer.onStart(owner)
+            advanceUntilIdle()
+            assertThat(deps.scheduler.nowRequests).isEmpty()
+
+            deps.network.setStatus(FakeNetworkMonitor.ONLINE)
+            observer.onStart(owner)
             advanceUntilIdle()
             assertThat(
                 deps.scheduler.nowRequests

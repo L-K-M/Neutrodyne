@@ -55,6 +55,9 @@ class DesktopRefreshScheduler
         }
 
         @Synchronized
+        internal fun hasForegroundRequest(): Boolean = foregroundPending
+
+        @Synchronized
         internal fun takeForegroundRequest(elapsedMs: Long): Boolean {
             if (!foregroundPending) return false
             foregroundPending = false

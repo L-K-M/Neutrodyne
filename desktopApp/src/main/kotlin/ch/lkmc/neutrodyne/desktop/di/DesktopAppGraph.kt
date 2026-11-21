@@ -249,14 +249,14 @@ interface DesktopAppGraph {
      */
     val syncHeldNotifier: ch.lkmc.neutrodyne.desktop.notifications.DesktopSyncHeldNotifier
 
+    val feedRefreshScheduler: ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
+
     /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
      * [provideDatabase], which blocks until the band-100 open finishes — held behind a lambda at
      * the call site so an early quit never pays it, and by then the runner is the started
      * singleton anyway.
      */
-    val feedRefreshScheduler: ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
-
     val jobRunner: DesktopJobRunner
 
     /**

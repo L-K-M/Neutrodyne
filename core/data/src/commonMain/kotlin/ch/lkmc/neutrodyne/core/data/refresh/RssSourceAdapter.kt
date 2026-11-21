@@ -101,17 +101,20 @@ internal class RssSourceAdapter(
         mode: FetchMode,
         cached: Map<String, ServerFeedSnapshot>,
     ): AdapterResult {
-        if (mode == FetchMode.REFRESH) {
+        if (mode == FetchMode.CACHED_ONLY || mode == FetchMode.REFRESH) {
             cached[feed.feedUrl]?.let { snapshot ->
                 cachedOutcome(feed, snapshot)?.let { return it }
             }
-        }
-        var unconditional =
-            when (mode) {
-                FetchMode.OLDER_PAGE -> true
-                FetchMode.FULL -> true
-                FetchMode.REFRESH -> needsFullFetch(feed)
+            if (mode == FetchMode.CACHED_ONLY) {
+                return AdapterResult.Failed(
+                    FeedErrorKind.PARSE_ERROR,
+                    http = null,
+                    retryAfterMs = null,
+                    transient = true,
+                )
             }
+        }
+        var unconditional = mode != FetchMode.REFRESH || needsFullFetch(feed)
         val url =
             when (mode) {
                 FetchMode.OLDER_PAGE -> {
