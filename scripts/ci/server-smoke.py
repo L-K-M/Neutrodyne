@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Unlicense
 """Packaged auth/sync/export/revocation smoke through a real TLS proxy. Never print secrets."""
 import argparse
+import base64
+import hashlib
 import io
 import json
 import os
@@ -56,10 +58,14 @@ if args.mode == 'exercise':
     podcast = str(uuid.uuid4())
     # Match the protocol's 64-bit packed hexadecimal HLC and 16-digit node.
     clock = f'{int(time.time() * 1000) << 16:016x}-1111111111111111'
+    feed_url = os.environ['SMOKE_FEED_URL']
     changes = [
         {'coll': 'podcast', 'id': podcast, 'fields': {
-            'feedUrl': {'v': 'https://example.org/smoke.xml', 'c': clock},
+            'feedUrl': {'v': feed_url, 'c': clock},
             'subscribed': {'v': True, 'c': clock}, 'title': {'v': 'Smoke library', 'c': clock}}},
+        {'coll': 'podcast', 'id': str(uuid.uuid4()), 'fields': {
+            'feedUrl': {'v': feed_url + '?feed_key=synthetic', 'c': clock},
+            'subscribed': {'v': True, 'c': clock}}},
         {'coll': 'episode', 'id': {'p': podcast, 'k': 'g:smoke'}, 'fields': {'fav': {'v': True, 'c': clock}}}]
     result = json.load(request('/api/v1/sync', {'since': None, 'changes': changes}, token))
     require(all(row['status'] == 'applied' for row in result['results']), result['results'])
@@ -86,11 +92,28 @@ elif args.mode == 'after-restore':
     grant = json.load(request('/api/v1/auth/invite/redeem', {'inviteCode': os.environ['SMOKE_INVITE'], 'device': device}))
     token = grant['token']
     summary = json.load(request('/api/v1/account', token=token))
-    require(summary['records'] == 2, 'Restore did not roll back the post-backup record')
+    require(summary['records'] == 3, 'Restore did not roll back the post-backup record')
     request('/api/v1/changes?since=' + state['cursor'], token=token, status=410).close()
     restored = json.load(request('/api/v1/changes', token=token))
     require(any(row['coll'] == 'episode' and row['fields'].get('fav', {}).get('v') is True
                 for row in restored['records']), 'Restored episode state is missing')
+    feed_url = os.environ['SMOKE_FEED_URL']
+    private_url = feed_url + '?feed_key=synthetic'
+    expected = pathlib.Path(os.environ['SMOKE_FEED_FILE']).read_bytes()
+    digest = hashlib.sha256(expected).hexdigest()
+    batch = {'feeds': [{'url': feed_url, 'sha256': digest}, {'url': private_url}]}
+    # Startup polling is asynchronous. Each lookup must answer both feeds in the same response.
+    deadline = time.monotonic() + 30
+    while True:
+        entries = {row['url']: row for row in json.load(request('/api/v1/feed-cache', batch, token))['feeds']}
+        if entries.keys() == {feed_url, private_url}:
+            break
+        require(time.monotonic() < deadline, 'Startup poll did not populate both subscribed feeds')
+        time.sleep(0.2)
+    require(entries[feed_url]['sha256'] == digest and entries[feed_url].get('bodyBase64') is None,
+            'Unchanged feed should need only its hash')
+    require(base64.b64decode(entries[private_url]['bodyBase64'], validate=True) == expected,
+            'Private feed document differs from its publisher')
 else:
     state = json.loads(args.state.read_text())
     started = time.monotonic()

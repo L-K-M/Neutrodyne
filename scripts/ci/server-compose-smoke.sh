@@ -5,6 +5,11 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 export NEUTRODYNE_SERVER_IMAGE="${1:?local image required}" SYNC_HOST=sync.local UPDATE_CHECK=false
+# The test-only subnet uses TEST-NET-1 so the normal feed destination policy applies.
+export SYNC_SUBNET=192.0.2.0/24
+publisher_ip=192.0.2.20
+export SMOKE_FEED_URL="http://$publisher_ip:8081/smoke.xml"
+export SMOKE_FEED_FILE="$root/feeds/src/test/resources/feeds/rss2-minimal.xml"
 work="$(mktemp -d)"
 export COMPOSE_PROJECT_NAME="nd-smoke-${GITHUB_RUN_ID:-$$}"
 compose=(docker compose -f sync/server/deploy/compose.yaml -f "$work/override.yaml")
@@ -15,8 +20,8 @@ cleanup() {
     rm -rf "$work"
 }
 trap cleanup EXIT
-# No DNS or Internet connection may originate from the server with update
-# checking disabled. Reverse-proxy responses originate from 8787 and are
+# With update checking disabled, only the subscribed fixture may receive an
+# outbound connection. Reverse-proxy responses originate from 8787 and are
 # excluded; Caddy has its own namespace. The capture runs inside the server
 # container's network namespace because Docker's embedded resolver would hide
 # DNS queries from a host-side capture.
@@ -39,7 +44,7 @@ start_capture() {
     }
     # shellcheck disable=SC2024 # the fds are opened by this shell into $work; tee would merge stderr into the capture
     sudo nsenter -t "$server_pid" -n tcpdump -nn -l -i any \
-        "(tcp or udp) and ((src host $server_ip and not src port 8787) or dst port 53)" \
+        "(tcp or udp) and ((src host $server_ip and not src port 8787) or dst port 53) and not (dst host $publisher_ip and tcp dst port 8081)" \
         > "$work/egress.$1.txt" 2> "$work/capture.$1.log" &
     capture=$!
     # tcpdump must attach before an empty file can count as proof of silence.
@@ -87,7 +92,10 @@ services:
     volumes:
       - $work/nginx.conf:/etc/nginx/nginx.conf:ro
       - $work/certs:/certs:ro
-    networks: [sync]
+      - $SMOKE_FEED_FILE:/fixture/smoke.xml:ro
+    networks:
+      sync:
+        ipv4_address: $publisher_ip
 YAML
 mkdir "$work/certs"
 # Initial file exists before compose parses all mounts; nginx starts only after certificates arrive.
@@ -129,7 +137,8 @@ openssl x509 -req -in "$work/certs/request.pem" -CA "$work/certs/ca.crt" -CAkey 
 # Keep the example's SSE settings, with only its upstream replaced for the compose network.
 {
     echo 'events {}'
-    echo 'http { server { listen 443 ssl; server_name sync.local; ssl_certificate /certs/cert.pem; ssl_certificate_key /certs/key.pem;'
+    echo 'http { server { listen 8081; location = /smoke.xml { alias /fixture/smoke.xml; } }'
+    echo 'server { listen 443 ssl; server_name sync.local; ssl_certificate /certs/cert.pem; ssl_certificate_key /certs/key.pem;'
     sed 's|http://127.0.0.1:8787|http://neutrodyne-server:8787|g' sync/server/deploy/nginx.conf.example
     echo '} }'
 } > "$work/nginx.conf"
@@ -176,4 +185,4 @@ invite_output="$(docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-serv
 export SMOKE_INVITE="${invite_output##*shown once): }"
 python3 scripts/ci/server-smoke.py after-restore --url https://sync.local:9443 --ca "$work/certs/ca.crt" --state "$work/state.json"
 stop_capture restart
-echo 'Reference compose, Caddy/nginx SSE, noexec native loading, backup/restore carried forward, and no server egress (DNS included) from startup through the post-restore run'
+echo 'Reference compose, Caddy/nginx SSE, noexec native loading, backup/restore carried forward, and batched publisher documents, and no unexpected server egress from startup through restore'
