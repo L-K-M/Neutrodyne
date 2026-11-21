@@ -376,10 +376,9 @@ internal class FeedRefresher(
         intervals = effectiveSettings.refreshIntervals().mapValues { it.value.value }
         // Opening a linked app can discover an episode before its local refresh interval expires.
         // A cache miss only makes a publisher request if that subscription was already due.
+        val useServer = !request.pagesOnly && serverFeedCache.isLinked()
         val candidates =
-            if (!request.pagesOnly && request.scope == RefreshScope.All &&
-                request.origin == RefreshOrigin.FOREGROUND && serverFeedCache.isLinked()
-            ) {
+            if (useServer && request.scope == RefreshScope.All && request.origin == RefreshOrigin.FOREGROUND) {
                 db
                     .podcastDao()
                     .dueForRefresh(RefreshPolicy.NEVER - 1, scopeAll = true)
@@ -388,7 +387,7 @@ internal class FeedRefresher(
                 scheduled
             }
         val serverFeeds =
-            if (request.pagesOnly) {
+            if (!useServer) {
                 emptyMap()
             } else if (request.deadlineElapsedMs == RefreshRequest.NO_DEADLINE) {
                 lookupServerFeeds(candidates)
