@@ -141,13 +141,28 @@ class DesktopRefreshLaneTest {
                     }
                 }
             val adapter = stubAdapter(onFetch = { _, _ -> AdapterResult.NotModified(null) })
-            val lane = lane(adapter, queue(this), cache)
+            val scheduler = queue(this)
+            val lane = lane(adapter, scheduler, cache)
 
             repeat(2) { lane.run(Instant.fromEpochMilliseconds(NOW)) }
 
             assertEquals(listOf(setOf(changed, missing)), requests)
-            assertEquals(setOf(changed), adapter.cachedCalls.single().second.keys)
+            assertEquals(
+                setOf(changed),
+                adapter.cachedCalls
+                    .single()
+                    .second.keys,
+            )
             assertEquals(listOf(id), adapter.calls.map { it.first })
+
+            scheduler.onWindowFocus(clock.elapsedRealtime())
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+            assertEquals(1, requests.size)
+
+            clock.elapsedMs += 10 * 60_000L
+            scheduler.onWindowFocus(clock.elapsedRealtime())
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+            assertEquals(2, requests.size)
         }
 
     @Test

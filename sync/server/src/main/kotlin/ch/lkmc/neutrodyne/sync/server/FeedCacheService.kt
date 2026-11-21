@@ -119,7 +119,8 @@ internal class FeedCacheService(
                     val authorization = basicAuthorization(row, url)
                     // A feed that still needs credentials cannot be fetched without them; the
                     // client resolves the challenge and syncs the credential later.
-                    if (authorization == null && (row.bool("needsCredentials") ?: false)) {
+                    val requiresAuth = row.text("credentialOrigin") != null || row.bool("needsCredentials") == true
+                    if (authorization == null && requiresAuth) {
                         return@flatMap emptyList()
                     }
                     val source = row.text("sourceType") ?: SOURCE_RSS
@@ -250,6 +251,7 @@ internal class FeedCacheService(
         row: StoredRecord,
         url: String,
     ): String? {
+        if (!url.startsWith("https://", ignoreCase = true)) return null
         val field = row.raw.fields["auth"] ?: return null
         val auth = field.v as? JsonObject ?: return null
         if (field.c == null || field.c != row.raw.fields["credentialOrigin"]?.c) return null

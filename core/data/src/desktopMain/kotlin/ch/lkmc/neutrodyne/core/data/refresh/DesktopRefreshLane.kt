@@ -29,16 +29,15 @@ internal class DesktopRefreshLane
         private val queue: DesktopRefreshScheduler,
         private val clock: Clock,
     ) : JobLane {
-        private var firstConnectedRun = true
-
         override val name: String = NAME
 
         override suspend fun run(now: Instant) {
             // Offline costs nothing: 11's runner pokes the lane again when the network returns.
             if (!network.status.value.isConnected) return
 
-            val onOpen = firstConnectedRun && refresher.canCatchUpOnOpen(network.status.value.isMetered)
-            firstConnectedRun = false
+            val onOpen =
+                queue.takeForegroundRequest(clock.elapsedRealtime()) &&
+                    refresher.canCatchUpOnOpen(network.status.value.isMetered)
             queue.drain { request ->
                 // Desktop runs carry no deadline, so the mutex never times out; the re-queue
                 // is wired anyway so a request that did report `reenqueued` keeps its intent.

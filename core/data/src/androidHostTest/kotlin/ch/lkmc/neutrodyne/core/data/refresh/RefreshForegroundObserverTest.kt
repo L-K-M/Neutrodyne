@@ -86,14 +86,19 @@ class RefreshForegroundObserverTest {
         runTest {
             val deps = deps()
             deps.settings.set(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT, deps.clock.nowMs)
-            val linked = object : ServerFeedCache {
-                override suspend fun isLinked() = true
+            val linked =
+                object : ServerFeedCache {
+                    override suspend fun isLinked() = true
 
-                override suspend fun lookup(feeds: Map<String, String?>) = emptyMap<String, ServerFeedSnapshot>()
-            }
+                    override suspend fun lookup(feeds: Map<String, String?>) = emptyMap<String, ServerFeedSnapshot>()
+                }
             deps.observer(linked).onStart(owner)
             advanceUntilIdle()
-            assertThat(deps.scheduler.nowRequests.single().origin).isEqualTo(RefreshOrigin.FOREGROUND)
+            assertThat(
+                deps.scheduler.nowRequests
+                    .single()
+                    .origin,
+            ).isEqualTo(RefreshOrigin.FOREGROUND)
         }
 
     @Test

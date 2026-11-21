@@ -372,7 +372,12 @@ internal object DesktopShell {
                 desktopPlaybackController = graph.desktopPlaybackController,
                 repoUrl = buildInfo.repoUrl,
                 onQuitRequest = ::exitApplication,
-                onWindowFocusGain = newEpisodeSeenClear,
+                onWindowFocusGain = {
+                    newEpisodeSeenClear()
+                    if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+                        graph.feedRefreshScheduler.onWindowFocus(DesktopClock.elapsedRealtime())
+                    }
+                },
             )
         }
         openEvents.close()

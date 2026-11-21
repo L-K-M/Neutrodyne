@@ -2,8 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.data
 
-import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
-import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
 import android.content.Context
 import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.driver.AndroidSQLiteDriver
@@ -31,6 +29,8 @@ import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.ServerFeedCache
+import ch.lkmc.neutrodyne.core.domain.ServerFeedSnapshot
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind

@@ -41,6 +41,27 @@ class DesktopRefreshScheduler
         private val mutex = Mutex()
         private val requests = ArrayDeque<RefreshRequest>()
 
+        private var foregroundPending = true
+        private var lastForegroundElapsed: Long? = null
+
+        /** Coalesce the initial window, tray restores and focus changes within ten minutes. */
+        @Synchronized
+        fun onWindowFocus(elapsedMs: Long) {
+            if (foregroundPending) return
+            val last = lastForegroundElapsed
+            if (last != null && elapsedMs - last in 0 until FOREGROUND_COOLDOWN_MS) return
+            foregroundPending = true
+            poker().poke(DesktopRefreshLane.NAME)
+        }
+
+        @Synchronized
+        internal fun takeForegroundRequest(elapsedMs: Long): Boolean {
+            if (!foregroundPending) return false
+            foregroundPending = false
+            lastForegroundElapsed = elapsedMs
+            return true
+        }
+
         override fun enqueueNow(
             scope: RefreshScope,
             force: Boolean,
@@ -79,5 +100,9 @@ class DesktopRefreshScheduler
                 val request = mutex.withLock { requests.removeFirstOrNull() } ?: return
                 block(request)
             }
+        }
+
+        private companion object {
+            const val FOREGROUND_COOLDOWN_MS = 10 * 60_000L
         }
     }

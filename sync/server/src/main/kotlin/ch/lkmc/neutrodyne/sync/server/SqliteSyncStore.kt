@@ -38,6 +38,7 @@ internal class SqliteSyncStore(
         require(feedCacheMaxEntryBytes > 0)
         require(feedCacheMaxAccountBytes >= feedCacheMaxEntryBytes)
     }
+
     private val writerDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val readerDispatcher = Executors.newFixedThreadPool(READ_CONNECTIONS).asCoroutineDispatcher()
     private val lifetime = ReentrantReadWriteLock(true)
@@ -448,13 +449,24 @@ private open class JdbcRead(
             }.toMap()
 
     override fun feedCacheHead(url: String): FeedCacheHead? =
-        connection.query(
-            "SELECT final_url, sha256, checked_at, body_bytes, etag, last_modified, permanent_url, http_charset " +
-                "FROM feed_cache WHERE account_id=? AND url=?",
-            accountId, url,
-        ) {
-            FeedCacheHead(it.getString(1), it.getString(2), it.getLong(3), it.getInt(4), it.getString(5), it.getString(6), it.getString(7), it.getString(8))
-        }.singleOrNull()
+        connection
+            .query(
+                "SELECT final_url, sha256, checked_at, body_bytes, etag, last_modified, permanent_url, http_charset " +
+                    "FROM feed_cache WHERE account_id=? AND url=?",
+                accountId,
+                url,
+            ) {
+                FeedCacheHead(
+                    it.getString(1),
+                    it.getString(2),
+                    it.getLong(3),
+                    it.getInt(4),
+                    it.getString(5),
+                    it.getString(6),
+                    it.getString(7),
+                    it.getString(8),
+                )
+            }.singleOrNull()
 
     override fun feedCache(urls: Collection<String>): List<StoredFeedCache> {
         if (urls.isEmpty()) return emptyList()
@@ -474,7 +486,9 @@ private open class JdbcRead(
                 row.getString(5),
                 row.getBytes(6),
                 row.getLong(7),
-                row.getString(8), row.getString(9), row.getString(10),
+                row.getString(8),
+                row.getString(9),
+                row.getString(10),
             )
         }
     }
@@ -497,7 +511,11 @@ private class JdbcWrite(
     override fun put(record: StoredRecord) {
         require(record.raw.coll == record.key.collection)
         if (record.key.collection == SyncCollection.PODCAST) {
-            connection.update("DELETE FROM feed_cache WHERE account_id=? AND podcast_rid=?", accountId, record.key.id.rid)
+            connection.update(
+                "DELETE FROM feed_cache WHERE account_id=? AND podcast_rid=?",
+                accountId,
+                record.key.id.rid,
+            )
         }
         connection.update(
             """INSERT INTO record(account_id,coll,rid,seq,data,max_hlc,dead,dead_at,merged_into,by_device,updated_at)
@@ -608,12 +626,17 @@ private class JdbcWrite(
             entry.body,
             entry.body.size,
             entry.checkedAtMs,
-            entry.podcastRid, entry.permanentUrl, entry.httpCharset,
+            entry.podcastRid,
+            entry.permanentUrl,
+            entry.httpCharset,
         )
         evictFeedCacheOverflow()
     }
 
-    override fun touchFeedCache(url: String, checkedAt: Long) {
+    override fun touchFeedCache(
+        url: String,
+        checkedAt: Long,
+    ) {
         connection.update("UPDATE feed_cache SET checked_at=? WHERE account_id=? AND url=?", checkedAt, accountId, url)
     }
 
@@ -629,10 +652,12 @@ private class JdbcWrite(
     /** Oldest entries go first; the just-written row is newest, so it survives a normal refresh. */
     private fun evictFeedCacheOverflow() {
         val total =
-            connection.query(
-                "SELECT COALESCE(SUM(body_bytes), 0) FROM feed_cache WHERE account_id = ?",
-                accountId,
-            ) { it.getLong(1) }.single()
+            connection
+                .query(
+                    "SELECT COALESCE(SUM(body_bytes), 0) FROM feed_cache WHERE account_id = ?",
+                    accountId,
+                ) { it.getLong(1) }
+                .single()
         if (total <= feedCacheMaxAccountBytes) return
         val ordered =
             connection.query(

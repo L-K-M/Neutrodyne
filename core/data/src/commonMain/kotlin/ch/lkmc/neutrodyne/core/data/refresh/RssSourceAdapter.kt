@@ -247,7 +247,10 @@ internal class RssSourceAdapter(
                 maxAgeSec = null,
                 unconditional = needsFullFetch(feed),
             )
-        return parseDocument(meta, snapshot.httpCharset) { Buffer().write(bytes) }.takeUnless { it is AdapterResult.Failed }
+        return parseDocument(
+            meta,
+            snapshot.httpCharset,
+        ) { Buffer().write(bytes) }.takeUnless { it is AdapterResult.Failed }
     }
 
     /** `NetError.Cancelled` produces no outcome: it propagates so the feed counts as unattempted. */

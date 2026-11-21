@@ -1526,7 +1526,10 @@ internal class FeedRefresher(
     }
 
     /** The URLs the server's cache can hold for [feed]; empty for a source it does not poll. */
-    private fun cacheUrls(feed: DueFeed, includeFallback: Boolean = true): List<String> =
+    private fun cacheUrls(
+        feed: DueFeed,
+        includeFallback: Boolean = true,
+    ): List<String> =
         when (feed.sourceType) {
             SourceType.RSS -> {
                 listOf(feed.feedUrl)

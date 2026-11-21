@@ -21,8 +21,8 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The app-foreground refresh trigger (03 Triggers): on `ON_START` it enqueues a due-selection run
- * when `feeds.refresh_on_app_open` is on, the last completed All run is older than the tick
- * interval, this observer's own last trigger is ≥ 10 min ago, and — under
+ * when `feeds.refresh_on_app_open` is on, a server is linked or the last All run is older than
+ * the tick interval, this observer's last trigger is ≥ 10 min ago, and — under
  * `feeds.refresh_wifi_only` — the network is unmetered. The order-220 initializer registers it on
  * `ProcessLifecycleOwner`; a late registration still sees the current `ON_START`.
  */

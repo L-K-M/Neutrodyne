@@ -255,6 +255,8 @@ interface DesktopAppGraph {
      * the call site so an early quit never pays it, and by then the runner is the started
      * singleton anyway.
      */
+    val feedRefreshScheduler: ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
+
     val jobRunner: DesktopJobRunner
 
     /**

@@ -240,6 +240,19 @@ class FeedCacheTest {
             )
         }
 
+    @Test fun `an unshared password never replaces a private document with a guest feed`() =
+        authServices { fixture ->
+            val account = fixture.account()
+            val writer = WriterFixture(fixture.store, fixture.principal(fixture.grant(account)))
+            writer.push(writer.podcast(url = FEED))
+            writer.push(
+                writer.write(podcastA, "credentialOrigin", JsonPrimitive("https://example.com"), writer.clock(1)),
+            )
+            val publisher = RecordingFetcher()
+            FeedCacheService(fixture.store, fixture.store, fixture.inputs, publisher).refreshAccount(account.id)
+            assertTrue(publisher.calls.isEmpty())
+        }
+
     @Test fun `podcast changes invalidate the cached body and unrelated changes do not`() =
         authServices { f ->
             val account = f.account()
@@ -264,10 +277,11 @@ class FeedCacheTest {
             val account = fixture.account()
             val writer = WriterFixture(fixture.store, fixture.principal(fixture.grant(account)))
             writer.push(writer.podcast(url = FEED))
-            val publisher = RecordingFetcher {
-                writer.push(writer.write(podcastA, "subscribed", JsonPrimitive(false), writer.clock(1)))
-                ServerFeedFetcher.ServerFeedFetch.Changed(BODY.encodeToByteArray(), FEED, null, null)
-            }
+            val publisher =
+                RecordingFetcher {
+                    writer.push(writer.write(podcastA, "subscribed", JsonPrimitive(false), writer.clock(1)))
+                    ServerFeedFetcher.ServerFeedFetch.Changed(BODY.encodeToByteArray(), FEED, null, null)
+                }
             FeedCacheService(fixture.store, fixture.store, fixture.inputs, publisher).refreshAccount(account.id)
             assertEquals(1, publisher.calls.size)
             assertTrue(fixture.store.read(account.id) { feedCache(listOf(FEED)).isEmpty() })

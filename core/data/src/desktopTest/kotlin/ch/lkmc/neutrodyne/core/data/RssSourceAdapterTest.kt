@@ -171,8 +171,19 @@ class RssSourceAdapterTest {
                 val feed = dueFeedOf(db, id)
                 val parsed = bundle.adapter.fetchAndParse(feed, FetchMode.REFRESH, mapOf(url to snapshot))
                 assertEquals(1, assertIs<AdapterResult.Parsed>(parsed).feed.items.size)
-                val current = feed.copy(contentSha256 = hash, parserVersion = FeedParser.VERSION, lastParseOk = true, lastFullFetchAt = NOW)
-                val unchanged = bundle.adapter.fetchAndParse(current, FetchMode.REFRESH, mapOf(url to snapshot.copy(body = null)))
+                val current =
+                    feed.copy(
+                        contentSha256 = hash,
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                val unchanged =
+                    bundle.adapter.fetchAndParse(
+                        current,
+                        FetchMode.REFRESH,
+                        mapOf(url to snapshot.copy(body = null)),
+                    )
                 assertIs<AdapterResult.NotModified>(unchanged)
             }
             assertEquals(0, server.requestCount)
