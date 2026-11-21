@@ -2267,6 +2267,11 @@ the current container running. Checkout-local `.env` and `compose.override.yaml`
 are ignored by Git. Keep the same Compose project name to reuse the data
 volume across updates.
 
+To run a database or account CLI command in the local HTTP stack, pass
+`-e NEUTRODYNE_SERVER_LISTEN=127.0.0.1:8787` to Compose's `exec` or `run` before
+the service name. This configures the CLI process and leaves the server
+listener as configured in Compose.
+
 ### Container image
 
 Built by `release.yml` from the release JAR, natively per architecture, pushed by digest and attested ([D95](../PLAN.md#3-key-decisions)); the same `Dockerfile` lets users build their own image from a downloaded and checksum-verified JAR.
