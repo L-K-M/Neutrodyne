@@ -81,8 +81,10 @@ inventory](docs/design/09-quality-and-release.md#network-inventory).
 
 A linked server stores your subscriptions (including private, tokenised feed
 URLs), groups, played state, positions, favourites, Up next, the now-playing
-episode and synced settings — Basic-auth feed passwords only while "Share feed
-passwords" is on. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. It never receives audio, downloads, artwork,
+episode and synced settings. When "Share feed passwords" is on, that device
+also sends its Basic-auth feed passwords. Turning it off stops future password
+sharing from that device. The server retains previously shared passwords and
+can continue to use them to poll those feeds. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. It never receives audio, downloads, artwork,
 crash data or device-local settings. **There is no end-to-end encryption:**
 whoever runs the server can read what it stores, and TLS comes from the
 server's reverse proxy. The server contacts feed publishers and can check GitHub daily for updates. It logs no tokens, passwords, feed URLs or
@@ -143,7 +145,7 @@ The following stable IDs match Settings › Privacy:
 The desktop app uses the same network destinations and switches as Android. It follows OS light/dark by default, has no Auto Backup, uses `AppDirs` for data, and routes links/mail through the OS. No analytics or tracking.
 
 ## Sync server details
-The optional self-hosted Neutrodyne Sync server stores subscriptions (including private/tokenised feed URLs if shared), groups/memberships, podcast user fields, per-episode played/position/favourite, Up next and synced settings. It never stores audio files, downloads, artwork, crash data or device-local settings. Feed passwords are shared only if the pushing device opts in. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. The operator can turn off the separate update check. TLS comes from the reverse proxy; there is no end-to-end encryption — the server operator can read stored data. Devices can be unlinked/revoked and data deleted from the server.
+The optional self-hosted Neutrodyne Sync server stores subscriptions (including private/tokenised feed URLs), groups/memberships, podcast user fields, per-episode played/position/favourite, Up next and synced settings. It never stores audio files, downloads, artwork, crash data or device-local settings. Feed passwords are shared only if the pushing device opts in. Your server regularly fetches your subscribed feeds, including private feed links, and caches their contents for your devices. The operator can turn off the separate update check. TLS comes from the reverse proxy; there is no end-to-end encryption — the server operator can read stored data. Devices can be unlinked/revoked and data deleted from the server.
 
 ## Diagnostics export redaction
 Diagnostics exports are redacted: tokens, passwords, private feed URLs, sync tokens and paths under the user's home are redacted; only allow-listed fields are included. Crash reports follow the same redaction rules.
