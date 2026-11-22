@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
@@ -26,6 +27,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.DesktopComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -38,6 +40,7 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -469,6 +472,33 @@ class RadioInteractionTest {
             }
             onNodeWithTag("radio_play").assertIsOn()
             onNodeWithText(getString(Res.string.radio_buffering)).assertIsDisplayed()
+        }
+
+    // The valves warm while the switch is ON, not only while playback runs: a pending start or a
+    // buffering stall keeps them lit (design 08). Reduced motion lights the deck at once, so the
+    // glow is already at its full level on the next frame.
+    @Test
+    fun theValvesStayLitWhileTheSwitchIsOnAndPlaybackIsNot() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var state by mutableStateOf(radioFixture())
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT.copy(reducedMotion = true)) {
+                    RadioScreen(state, RadioActions())
+                }
+            }
+            waitForIdle()
+            val dark = valveBrightness()
+
+            mainClock.autoAdvance = false
+            state = state.copy(startingEpisodeId = 1L)
+            mainClock.advanceTimeByFrame()
+            mainClock.advanceTimeByFrame()
+            val lit = valveBrightness()
+
+            assertTrue(
+                lit > dark + VALVE_MIN_GLOW,
+                "the valves warm while the switch is on, even before playback starts: dark $dark, lit $lit",
+            )
         }
 
     @Test
@@ -1078,6 +1108,34 @@ class RadioInteractionTest {
             onNodeWithTag("radio_playlist").assertIsFocused()
         }
 }
+
+/**
+ * Mean red plus green in the glass above the left filament, measured as ValveDeckGlowTest does,
+ * so the deck's warmth is readable from the radio home without exposing it through semantics.
+ */
+@OptIn(ExperimentalTestApi::class)
+private fun DesktopComposeUiTest.valveBrightness(): Float {
+    val pixels = onNodeWithTag("radio_valve_deck").captureToImage().toPixelMap()
+    val scale = pixels.width / VALVE_ART_WIDTH
+    var sum = 0f
+    var count = 0
+    for (x in (VALVE_GLASS_LEFT * scale).toInt()..(VALVE_GLASS_RIGHT * scale).toInt()) {
+        for (y in (VALVE_GLASS_TOP * scale).toInt()..(VALVE_GLASS_BOTTOM * scale).toInt()) {
+            val colour = pixels[x, y]
+            sum += (colour.red + colour.green) * 255f
+            count++
+        }
+    }
+    return sum / count
+}
+
+// The valve deck artwork is 1100 x 423; the glass just above its left filament, in art pixels.
+private const val VALVE_ART_WIDTH = 1100f
+private const val VALVE_GLASS_LEFT = 250f
+private const val VALVE_GLASS_RIGHT = 290f
+private const val VALVE_GLASS_TOP = 160f
+private const val VALVE_GLASS_BOTTOM = 190f
+private const val VALVE_MIN_GLOW = 15f
 
 /** A window for the empty radio: its size in dp, its text scale and the listener's locale. */
 private data class EmptyPaper(
