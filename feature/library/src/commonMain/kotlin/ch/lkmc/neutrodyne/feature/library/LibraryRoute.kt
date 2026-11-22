@@ -140,7 +140,7 @@ internal fun LibraryRoute(
         onExportGroup = { navigator.push(ExportKey(it)) },
         onExportSubscriptions = { navigator.push(ExportKey(null)) },
         onImportSubscriptions = { navigator.push(ImportFileKey) },
-        onBackupRestore = { navigator.push(BackupKey) },
+        onBackupRestore = { navigator.pushDetail(BackupKey) },
         onOpenGroup = { id ->
             scope.launch {
                 if (viewModel.selectGroup(id)) {

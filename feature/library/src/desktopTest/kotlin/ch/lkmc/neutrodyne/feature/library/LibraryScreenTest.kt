@@ -445,7 +445,10 @@ class LibraryScreenTest {
             onNodeWithText("Show titles").assertIsOn()
         }
 
-    /** 08 Library overflow lists Backup and restore after Export subscriptions and opens `BackupKey`. */
+    /**
+     * 08 Library overflow lists Backup and restore after Export subscriptions and opens `BackupKey`
+     * as a detail (08 rule 4), so a second open beside it replaces rather than stacks.
+     */
     @Test
     fun overflowBackupRestoreOpensBackupKey() =
         runComposeUiTest {
@@ -454,7 +457,7 @@ class LibraryScreenTest {
             onNodeWithText("Backup and restore").performClick()
             waitForIdle()
             assertEquals(
-                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(BackupKey)),
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PushDetail(BackupKey)),
                 navigator.calls,
             )
         }
