@@ -124,8 +124,10 @@ private fun RadioCabinet(
         Column(if (needsScroll) Modifier.verticalScroll(rememberScrollState()) else Modifier) {
             Column(Modifier.height(contentHeight).fillMaxWidth().padding(horizontal = if (narrow) 10.dp else 12.dp)) {
                 if (deckVisible) {
+                    // The deck warms while the switch is ON, not only while playback runs: buffering
+                    // and a pending start keep it lit (design 08).
                     ValveDeck(
-                        lit = state.playing,
+                        lit = state.switchOn,
                         modifier =
                             Modifier
                                 .testTag("radio_valve_deck")
