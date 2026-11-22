@@ -111,6 +111,15 @@ re-read or reproduce those first.
 - **The sign trailing-space fix is duplicated.** [#630](https://github.com/L-K-M/Neutrodyne/pull/630)
   already compares against the trimmed name; #634 was opened from the same pass
   and closed as a duplicate.
+- **The independent 2026-11-22 pass's fixes are merged:** #613 gates the
+  radio's All clear sign on finished paging (an empty first window with an
+  append pending no longer claims the station is cleared), and #616 gives the
+  home Menu key its `KEY_PRESS` sound per PO-56. In review from the same pass:
+  #617 remembers the desktop's `failedDownloads` flow, #620 reserves a 48 x 48
+  dp hit target around `RadioSwitch`'s unchanged plate, #621 letters a sign
+  whose name ends in a space at full size (a duplicate of #630 from another
+  pass), and #626 shows the localized unplayed count on the dial while paging
+  and leaves the total unchanged when the count query fails.
 
 - **Fixes from the Opus 5.5 pass are in review** (each test-first, red then
   green locally, reviewed by an independent model before the PR; links below).
@@ -198,7 +207,10 @@ changes, or delete it [R-04, REPORTED].
 ("%1$d podcasts - %2$d episodes") is defined in EN and DE, but neither is drawn.
 A failed count currently reports a write error for a read; a failed count should
 leave the total unknown. Test successive append, invalidation, count failure,
-discard and Undo, and a playing episode outside the selected group.
+discard and Undo, and a playing episode outside the selected group. In review:
+#626 prints the localized unplayed total (`group_unplayed_fmt`) on the dial
+while paging is incomplete and makes a failed count a silent keep-previous
+instead of a write error.
 
 ### Replace the last Material buttons on the radio home
 
@@ -437,7 +449,9 @@ before sizing the surrounding panel. For standalone switches, reserve a distinct
 48 x 48 dp area around the current plate (a centred plate in a 48 dp box, not a
 larger plate). Verify corner taps, lever flicks, disabled controls and vertical
 scrolling at 2x text. For rows that own their switch action, retain one
-accessible target.
+accessible target. In review: #620 implements exactly that (`BatToggle`/
+`BatToggleFace` take a `plateSize`; the modifier is the 48 x 48 dp hit box), with
+the affected desktop goldens re-recorded through the record-screenshots workflow.
 
 ### Place the Mac window in the display's usable coordinates
 
@@ -587,10 +601,10 @@ the Speed and Sleep sheets, because a pushed sheet counted as leaving home
   faceplate's `boundsInWindow` and a hand-computed dialog inset; re-check it on
   a wide pane row and with different dialog insets.
 - **The Menu key label can wrap and un-centre the sign**; #610 caps it at one
-  line.
-- **The home's Menu key click sound landed on main**; its hand-drawn radial cap
-  could become the shared `IvoryKeyCap`, but that is a visual change to the
-  golden-covered radio home, so record the goldens first.
+  line and plays the key press; #616 (merged) landed the same `KEY_PRESS`
+  sound on `SmallRadioKey`. Its hand-drawn radial cap could become the shared
+  `IvoryKeyCap`, but that is a visual change to the golden-covered radio
+  home, so record the goldens first.
 - **`ninePatch` could draw overlapping slices on a very narrow node**; the
   `ninePatchStops` clamp fixed it. `ValveDeck`'s tiling still has no unit test:
   extract the slice plan into a pure function and test the mirrored-tile, forced
@@ -621,6 +635,11 @@ the Speed and Sleep sheets, because a pushed sheet counted as leaving home
   `drawBehind` on the parent while `TuningDial`, `NeedleWindow` and
   `StepCounter` draw their needles afterwards, so the needle never sits under
   the reflection.
+- **The speaker grille redraws on every draw invalidation** (new, independent
+  pass 2026-11-22). `Speaker` (`RadioCabinet.kt`) draws `width/4 + height/4`
+  lines plus ribs in a `Canvas`; on a wide window during a resize that is
+  hundreds of `drawLine` calls per frame. Cache the grille in a `Picture` (or
+  `drawWithCache`) keyed on `IntSize`.
 - **`NdTopAppBar.FaceplateRow` falls back to the "between" position even when
   `betweenRoom < signWidth`**, so at very narrow widths the sign can run under a
   key.
@@ -633,8 +652,23 @@ the Speed and Sleep sheets, because a pushed sheet counted as leaving home
 - **`SignLettering` mishandles a trailing space** (`RadioParts.kt:160-175`):
   it compares `getLineEnd(0, visibleEnd = true)`, which excludes trailing
   whitespace, with the full length, so a name ending in a space always letters
-  at its minimum size. [#630](https://github.com/L-K-M/Neutrodyne/pull/630)
-  compares against the trimmed name.
+  at its minimum size. In review: [#630](https://github.com/L-K-M/Neutrodyne/pull/630)
+  and #621 (same fix from the independent 2026-11-22 pass) compare against the
+  trimmed name; the regression test fails before and passes after.
+- **The desktop's failed-downloads badge blips to zero on settings changes**
+  (new, independent pass 2026-11-22). `DesktopShell` built the `failedDownloads`
+  flow inline in the `application {}` block, so a settings-driven
+  recomposition produced an unequal `Flow` and restarted `NeutrodyneRoot`'s
+  `collectAsStateWithLifecycle`, resetting the badge to its initial 0 until the
+  database-gated re-subscribe emitted. `MainActivity` already wraps the
+  identical flow in `remember(graph)`. In review: #617.
+- **A multi-file drop persists an import session per file but opens only one**
+  (new, needs a product decision). `DesktopOpenHandler.open(batch)` routes every
+  input and `imports().create` persists a session for each, but only the first
+  routeable input navigates; the rest surface later only through the
+  import-resume banner, with no notice at drop time. Decide: queue additional
+  sessions explicitly, or validate them without creating sessions and post one
+  "skipped" notice.
 - **The programme's empty and error states are footnotes.** When a playlist is
   empty or fails to load, the tray shows only a small strip at its foot; give
   that state the paper's full height.
@@ -1176,6 +1210,16 @@ that lists what arrived; an inbox-pressure gauge for unplayed hours. The
 now-playing episode has no artwork on the only full player [G-07]: the tuned
 episode's cover could sit behind the grille cloth, barely visible through the
 louvres, and show fully on hover [Q-03].
+
+### Put unplayed counts on the station chooser rows
+
+`RadioInsert` rows print only the playlist name and the active check, while
+`RadioPlaylist.podcastCount` and the `radio_meta` string ("%1$d podcasts ·
+%2$d episodes") are defined but never drawn. `FeedRepository.observeGroupCounts`
+already streams per-group counts and `BrassCountBadge` exists; a badge per
+chooser row (and/or `radio_meta` under the enamel sign) would make the tuned
+station's size visible at a glance. Needs the same "new since" window the
+library tabs use.
 
 ## Prototypes
 
