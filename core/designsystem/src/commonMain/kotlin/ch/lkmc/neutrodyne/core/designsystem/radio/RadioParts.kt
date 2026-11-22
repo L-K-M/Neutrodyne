@@ -174,9 +174,13 @@ private data class SignLettering(
         text: AnnotatedString,
     ): TextUnit {
         var size = max.value
+        // visibleEnd drops trailing whitespace, so compare against the trimmed name: a group
+        // saved with a trailing space would otherwise always look cut short and letter at the
+        // minimum size.
+        val visibleLength = text.text.trimEnd().length
         while (size > min.value) {
             val layout = performLayout(constraints, text, size.sp)
-            if (layout.getLineEnd(0, visibleEnd = true) >= text.length) return size.sp
+            if (layout.getLineEnd(0, visibleEnd = true) >= visibleLength) return size.sp
             size -= SIGN_SIZE_STEP
         }
         return min
