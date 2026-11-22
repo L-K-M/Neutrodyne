@@ -43,6 +43,14 @@ object DesktopSettingKeys {
     val VOLUME: SettingKey.Float32 =
         SettingKey.Float32(name = "desktop.volume", default = 1.0f, file = SettingsFile.DEVICE)
 
+    /**
+     * The desktop window's last rectangle (11 Window state) as JSON, written one second after the
+     * last move or resize and at quit. Empty means "never stored"; the value is device-local like
+     * every `desktop.*` key.
+     */
+    val WINDOW_BOUNDS: SettingKey.Text =
+        SettingKey.Text("desktop.window_bounds", "", SettingsFile.DEVICE)
+
     val ALL: List<SettingKey<*>> =
         listOf(
             DOWNLOADS_DIR,
@@ -50,5 +58,6 @@ object DesktopSettingKeys {
             START_AT_LOGIN,
             TRAY_HINT_SHOWN,
             VOLUME,
+            WINDOW_BOUNDS,
         )
 }

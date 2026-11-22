@@ -18,6 +18,11 @@ internal data class Screen(
     val y: Int,
     val width: Int,
     val height: Int,
+    /** The screen's usable rectangle (system bars removed), in the same user-space units. */
+    val usableX: Int = x,
+    val usableY: Int = y,
+    val usableWidth: Int = width,
+    val usableHeight: Int = height,
 )
 
 /** The window's initial rectangle in dp (11 Window and tray behaviour: "Window state" row). */
@@ -26,6 +31,7 @@ internal data class WindowBounds(
     val y: Dp,
     val width: Dp,
     val height: Dp,
+    val maximised: Boolean = false,
 ) {
     companion object {
         /** 11 Window sizing: the first-start default. */
