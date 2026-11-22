@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.desktop.shell
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.desktop.log.RollingFileSink
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -29,12 +30,19 @@ internal class ShutdownCoordinator(
     private val fileSink: RollingFileSink,
     private val stopServices: () -> Unit,
     private val startedAtMs: Long,
+    private val saveState: suspend () -> Unit = {},
 ) {
     private val done = AtomicBoolean(false)
 
     fun shutdown(reason: String) {
         if (!done.compareAndSet(false, true)) return
         Log.i(TAG) { "clean shutdown ($reason)" }
+
+        // The window bounds are written here as well as on their move/resize debounce, so a quit
+        // right after the last movement still stores the final rectangle (11 Window state). This
+        // runs before the services stop so the settings write still has its scopes.
+        runCatching { runBlocking { saveState() } }
+            .onFailure { Log.w(TAG, it) { "state save failed; continuing the clean shutdown" } }
 
         try {
             stopServices()

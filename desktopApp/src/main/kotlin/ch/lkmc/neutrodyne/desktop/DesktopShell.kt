@@ -41,6 +41,8 @@ import ch.lkmc.neutrodyne.desktop.window.AppBusySignal
 import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindow
 import ch.lkmc.neutrodyne.desktop.window.WindowActivator
+import ch.lkmc.neutrodyne.desktop.window.WindowBoundsWriter
+import ch.lkmc.neutrodyne.desktop.window.restoreWindowBounds
 import coil3.SingletonImageLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -265,6 +267,7 @@ internal object DesktopShell {
         }
 
         // One clean-shutdown path for the window close and SIGTERM (11 Shutdown).
+        val windowBounds = WindowBoundsWriter(graph.settingsRepository, graph.appScope)
         val coordinator =
             ShutdownCoordinator(
                 dirs = dirs,
@@ -295,6 +298,7 @@ internal object DesktopShell {
                     )
                 },
                 startedAtMs = sessionStartedAtMs,
+                saveState = { windowBounds.saveNow() },
             )
         Runtime.getRuntime().addShutdownHook(
             Thread(
@@ -316,6 +320,9 @@ internal object DesktopShell {
                 openState = graph.databaseOpener.openState,
                 downloads = { graph.downloadController() },
             )
+        // The restored rectangle must be known before the window's first composition, so the
+        // window state is created with it rather than updated after the frame is realised.
+        val restoredWindowBounds = runBlocking { restoreWindowBounds(graph.settingsRepository) }
         application {
             // MPRIS Quit reaches the same clean-exit path as the tray's Quit item; Compose
             // ends the application on the event thread.
@@ -354,6 +361,8 @@ internal object DesktopShell {
                 syncHeldNotifier = { graph.syncHeldNotifier },
                 reconnectDismissals = { graph.reconnectDismissals },
                 busySignal = busySignal,
+                windowBounds = windowBounds,
+                restoredBounds = restoredWindowBounds,
                 clock = DesktopClock,
                 syncFocusPoke = graph.syncFocusPoke::poke,
                 updateChecker = graph.appUpdateChecker,

@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -167,8 +168,10 @@ internal fun ApplicationScope.NeutrodyneWindow(
     syncController: (() -> SyncController)? = null,
     syncHeldNotifier: (() -> DesktopSyncHeldNotifier)? = null,
     reconnectDismissals: () -> ReconnectDismissals = { ReconnectDismissals() },
+    windowBounds: WindowBoundsWriter? = null,
+    restoredBounds: WindowBounds? = null,
 ) {
-    val state = rememberNeutrodyneWindowState()
+    val state = rememberNeutrodyneWindowState(restoredBounds)
     val icon = remember { WindowIcons.windowIconPainter() }
     var hidden by remember { mutableStateOf(false) }
     val openState by databaseOpener.openState.collectAsState()
@@ -333,6 +336,8 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 onWindowFocusGain()
                 syncFocusPoke()
             },
+            windowBounds = windowBounds,
+            restored = restoredBounds,
         )
         // The menu's actions are attached here, where the window's own services and state are
         // in scope; the navigation and player-slot actions arrive from the content below.
@@ -474,18 +479,32 @@ internal fun gatedRefresh(
     }
 
 /**
- * The initial window state (11 Window state): the default bounds of [defaultWindowBounds] when
- * a screen is readable, else Compose's platform default placement. Also smoke mode's window
- * step, so the smoke first frame is the real window.
+ * The initial window state (11 Window state): the restored bounds when [restoreWindowBounds]
+ * accepts them, else the default bounds of [defaultWindowBounds] when a screen is readable, else
+ * Compose's platform default placement. Also smoke mode's window step, so the smoke first frame
+ * is the real window.
  */
 @Composable
-internal fun rememberNeutrodyneWindowState(): WindowState {
-    val bounds = remember { WindowIcons.primaryScreen()?.let(::defaultWindowBounds) }
+internal fun rememberNeutrodyneWindowState(restored: WindowBounds? = null): WindowState {
+    val defaultBounds = remember { WindowIcons.primaryScreen()?.let(::defaultWindowBounds) }
+    val bounds = restored ?: defaultBounds
     return rememberWindowState(
         width = bounds?.width ?: WindowBounds.DEFAULT_WIDTH,
         height = bounds?.height ?: WindowBounds.DEFAULT_HEIGHT,
         position = bounds?.let { WindowPosition(it.x, it.y) } ?: WindowPosition.PlatformDefault,
     )
+}
+
+/**
+ * The stored window rectangle, or null when it is absent, corrupt, or no longer overlaps its
+ * screen's usable bounds by at least half (11 Window state). A null result falls back to the
+ * primary screen's default placement.
+ */
+internal suspend fun restoreWindowBounds(settings: SettingsRepository?): WindowBounds? {
+    val repo = settings ?: return null
+    val text = runCatching { repo.get(DesktopSettingKeys.WINDOW_BOUNDS) }.getOrNull() ?: return null
+    val stored = WindowBoundsPreference.decode(text) ?: return null
+    return WindowBoundsPreference.restore(stored, WindowIcons.screens())
 }
 
 /** The window title rule (11's rules table): "{episode title} — Neutrodyne" while playing. */
@@ -587,18 +606,62 @@ private fun windowShortcut(
     }
 }
 
-/** The AWT-side window rules: minimum size (PO-19), iconified start, hand-off activation. */
+/**
+ * The AWT-side window rules: minimum size (PO-19), iconified start, hand-off activation, the
+ * restored maximised state, and the move/resize reports that feed [WindowBoundsWriter].
+ */
 @Composable
 private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
     activator: WindowActivator,
     background: Boolean,
     onFocusGain: () -> Unit,
+    windowBounds: WindowBoundsWriter? = null,
+    restored: WindowBounds? = null,
 ) {
     val density = LocalDensity.current
     // Referenced inside the effect below: a restarting effect must read the current
     // callback, not capture the composition-time lambda.
     val focusGain by androidx.compose.runtime.rememberUpdatedState(onFocusGain)
-    DisposableEffect(window, density) {
+    val boundsWriter by androidx.compose.runtime.rememberUpdatedState(windowBounds)
+    val currentRestored by androidx.compose.runtime.rememberUpdatedState(restored)
+    LaunchedEffect(currentRestored?.maximised) {
+        if (currentRestored?.maximised == true) runCatching { window.extendedState = Frame.MAXIMIZED_BOTH }
+    }
+
+    fun reportBounds() {
+        val bounds = window.bounds
+        if (bounds.width <= 0 || bounds.height <= 0) return
+        val maximised = window.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+        val screens = WindowIcons.screens()
+        val centreX = bounds.x + bounds.width / 2
+        val centreY = bounds.y + bounds.height / 2
+        val screenId =
+            screens
+                .firstOrNull { screen ->
+                    centreX >= screen.x && centreX < screen.x + screen.width &&
+                        centreY >= screen.y && centreY < screen.y + screen.height
+                }?.id
+                ?: screens.firstOrNull()?.id
+                ?: ""
+        boundsWriter?.onBounds(
+            StoredWindowBounds(
+                screen = screenId,
+                x = bounds.x,
+                y = bounds.y,
+                width = bounds.width,
+                height = bounds.height,
+                maximised = maximised,
+            ),
+        )
+    }
+    // The AWT frame is created before Compose applies the window state, so reporting during the
+    // effect would store the pre-layout minimum. Wait for the first frame, then report the
+    // realized rectangle; the component listener covers later moves and resizes.
+    LaunchedEffect(window) {
+        withFrameNanos { }
+        reportBounds()
+    }
+    DisposableEffect(window, density, windowBounds) {
         window.minimumSize = minimumWindowDimension(density)
 
         // 11's `--background` start: iconified until the user restores it.
@@ -612,7 +675,19 @@ private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
                 override fun windowLostFocus(event: java.awt.event.WindowEvent) = Unit
             }
         window.addWindowFocusListener(focusListener)
+
+        val boundsListener =
+            object : java.awt.event.ComponentAdapter() {
+                override fun componentMoved(event: java.awt.event.ComponentEvent) = reportBounds()
+
+                override fun componentResized(event: java.awt.event.ComponentEvent) = reportBounds()
+            }
+        val stateListener = java.awt.event.WindowStateListener { reportBounds() }
+        window.addComponentListener(boundsListener)
+        window.addWindowStateListener(stateListener)
         onDispose {
+            window.removeComponentListener(boundsListener)
+            window.removeWindowStateListener(stateListener)
             window.removeWindowFocusListener(focusListener)
             activator.unregister(window)
         }

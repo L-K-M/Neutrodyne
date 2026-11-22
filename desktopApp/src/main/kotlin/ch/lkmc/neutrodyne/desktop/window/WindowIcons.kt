@@ -11,6 +11,7 @@ import java.awt.SystemTray
 import java.awt.Toolkit
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * The committed brand PNGs of `desktopApp/icons/` (never regenerated; 08 Brand assets). A dev
@@ -51,23 +52,48 @@ internal object WindowIcons {
             ?.takeIf(File::isFile)
             ?.let { file -> Toolkit.getDefaultToolkit().createImage(file.readBytes()) }
 
-    /** The primary screen once per start; null under headless AWT (smoke without a display). */
-    fun primaryScreen(): Screen? =
+    /**
+     * Every screen once per call, in user-space units; empty under headless AWT (smoke without a
+     * display). `GraphicsConfiguration.bounds` is device space and the default transform maps
+     * user space to device space, so the inverse transform gives the rectangle Compose's
+     * density-independent window state expects. The physical DPI is deliberately not used: on
+     * macOS it is not the display scale and applying it double-counts the transform. The
+     * transform is assumed to carry the OS scale, which holds on Windows and macOS and on most
+     * modern Linux JDKs; a noninvertible transform yields an empty list rather than falling back
+     * to device pixels, which would size the window larger than the display.
+     */
+    fun screens(): List<Screen> =
         runCatching {
-            val bounds =
-                GraphicsEnvironment
-                    .getLocalGraphicsEnvironment()
-                    .defaultScreenDevice
-                    .defaultConfiguration
-                    .bounds
-            Screen(
-                x = bounds.x,
-                y = bounds.y,
-                width = bounds.width,
-                height = bounds.height,
-                dpi = Toolkit.getDefaultToolkit().screenResolution,
-            )
-        }.getOrNull()
+            val toolkit = Toolkit.getDefaultToolkit()
+            GraphicsEnvironment
+                .getLocalGraphicsEnvironment()
+                .screenDevices
+                .map { device ->
+                    val config = device.defaultConfiguration
+                    val userBounds =
+                        config.defaultTransform
+                            .createInverse()
+                            .createTransformedShape(config.bounds)
+                            .bounds
+                    val insets = toolkit.getScreenInsets(config)
+                    val scale = abs(config.defaultTransform.scaleX).takeIf { it > 0.0 } ?: 1.0
+                    Screen(
+                        id = device.getIDstring(),
+                        x = userBounds.x,
+                        y = userBounds.y,
+                        width = userBounds.width,
+                        height = userBounds.height,
+                        usableX = userBounds.x + (insets.left / scale).roundToInt(),
+                        usableY = userBounds.y + (insets.top / scale).roundToInt(),
+                        usableWidth = (userBounds.width - (insets.left + insets.right) / scale).roundToInt(),
+                        usableHeight = (userBounds.height - (insets.top + insets.bottom) / scale).roundToInt(),
+                    )
+                }
+        }.onFailure { Log.w(TAG, it) { "screen geometry read failed; using no screen info" } }
+            .getOrDefault(emptyList())
+
+    /** The primary screen once per start; null under headless AWT. */
+    fun primaryScreen(): Screen? = screens().firstOrNull()
 
     private fun trayIconName(): String {
         if (!SystemTray.isSupported()) return "$TRAY_PREFIX$FALLBACK_TRAY_SIZE_PX$TRAY_SUFFIX"
