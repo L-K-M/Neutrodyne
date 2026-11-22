@@ -518,7 +518,7 @@ private fun RadioSlip(
                                 true
                             },
                         )
-                }.selectable(selected, onClick = { actions.selectEpisode(episode.id) })
+                }.selectable(selected, role = Role.Button, onClick = { actions.selectEpisode(episode.id) })
                 .pointerInput(episode.id, width, windowSize) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
