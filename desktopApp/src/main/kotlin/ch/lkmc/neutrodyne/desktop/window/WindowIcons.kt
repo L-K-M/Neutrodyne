@@ -77,7 +77,8 @@ internal object WindowIcons {
                 width = userBounds.width,
                 height = userBounds.height,
             )
-        }.getOrNull()
+        }.onFailure { Log.w(TAG, it) { "screen geometry read failed; using no screen info" } }
+            .getOrNull()
 
     private fun trayIconName(): String {
         if (!SystemTray.isSupported()) return "$TRAY_PREFIX$FALLBACK_TRAY_SIZE_PX$TRAY_SUFFIX"
