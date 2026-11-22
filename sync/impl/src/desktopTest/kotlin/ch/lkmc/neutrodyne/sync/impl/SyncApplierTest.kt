@@ -1085,6 +1085,43 @@ class SyncApplierTest {
             }
         }
 
+    @Test
+    fun anUndoneLocalDeleteBeatsAnOlderRemoteDelete() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        db.groupDao().insert(groupEntity(uuid = groupUuid, orderKey = "a0"))
+                    }
+                }
+                // Delete at 5, Undo at 20: the remote delete at 10 sits between them.
+                for ((field, counter, value) in listOf(Triple("deleted", 5L, "true"), Triple("*", 20L, null))) {
+                    db.syncOutboxDao().upsert(
+                        SyncOutboxEntity(
+                            coll = "group",
+                            rid = groupUuid,
+                            field = field,
+                            hlc = clock(counter).packed,
+                            nodeId = node.value,
+                            value = value,
+                        ),
+                    )
+                }
+
+                val result =
+                    applier(db).applyPage(
+                        listOf(record("group", JsonPrimitive(groupUuid), null, "deleted" to bool(true))),
+                        roundId = now,
+                    )
+
+                assertEquals(0, result.held, "the Undo is newer than the remote delete")
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(
         db: NeutrodyneDatabase,
         playback: PlaybackSyncPort = NoPlaybackSync,

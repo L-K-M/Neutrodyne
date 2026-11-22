@@ -1168,7 +1168,7 @@ class SyncApplier(
         if (rows.isEmpty()) return null
         val fields = mutableMapOf<String, FieldState>()
         val growSets = mutableMapOf<String, Set<String>>()
-        for (row in rows) {
+        for (row in rows.sortedWith(OUTBOX_APPLY_ORDER)) {
             if (row.field == "~rekey") continue
             val clock = outboxClock(row) ?: continue
             if (row.field == "*") {

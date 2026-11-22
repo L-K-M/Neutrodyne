@@ -540,6 +540,16 @@ private fun ScopeOverrides.fields(): Map<String, JsonElement> {
 /** The wire clock of an outbox row; `null` when the row's clock is malformed. */
 fun outboxClock(row: SyncOutboxEntity): Hlc? = runCatching { Hlc(row.hlc, NodeId(row.nodeId)) }.getOrNull()
 
+/**
+ * The order in which one record's outbox rows are applied over each other: oldest clock first, so
+ * every field ends with the value of its newest row. Triggers coalesce per field only, so a `*`
+ * and named rows coexist: a group's `deleted = true` stays beside the newer `*` its Undo writes,
+ * and applying the named row last pushed the undone delete. A `*` goes first at an equal clock,
+ * because its named rows refine it.
+ */
+internal val OUTBOX_APPLY_ORDER: Comparator<SyncOutboxEntity> =
+    compareBy<SyncOutboxEntity>({ it.hlc }, { it.nodeId }, { it.field != "*" }, { it.field })
+
 /** The hints of an episode source, for `episode`, `upnext` and `session` changes. */
 fun episodeHints(source: EpisodeSource): MatchHints? =
     MatchHints(

@@ -370,7 +370,7 @@ class SessionAdopter
             if (rows.isEmpty()) return null
             val fields = mutableMapOf<String, FieldState>()
             val reader = SourceReader(db, secrets, sharePasswords)
-            for (row in rows) {
+            for (row in rows.sortedWith(OUTBOX_APPLY_ORDER)) {
                 if (row.field == "~rekey") continue
                 val rowClock = outboxClock(row) ?: continue
                 if (row.field == "*") {

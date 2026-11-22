@@ -54,11 +54,12 @@ class ChangeBuilder(
                 // or lend a different origin to the snapshot; that newer intent stays
                 // pending in the outbox under normal sent-clock acknowledgement instead.
                 var authCompanion: String? = null
-                for (row in recordRows.sortedBy { it.field }) {
+                for (row in recordRows.sortedWith(OUTBOX_APPLY_ORDER)) {
                     if (row.field == REKEY_FIELD) continue
                     val clock = outboxClock(row) ?: continue
                     if (row.field == "*") {
-                        authCompanion = addAllFields(source, collection, rid, clock, fields)
+                        val expansion = addAllFields(source, collection, rid, clock, fields)
+                        if (expansion.emittedAuth) authCompanion = expansion.credentialOrigin
                     } else {
                         addField(source, collection, rid, row, clock, fields)?.let {
                             authCompanion = it
@@ -176,16 +177,23 @@ class ChangeBuilder(
     }
 
     /**
-     * A `*` row expands to every field at its own clock; returns the `credentialOrigin`
-     * companion when the expansion carried an `auth`, for the post-group pairing stamp.
+     * What a `*` expansion did to the pairing stamp: whether it wrote `auth` itself and, if so,
+     * the `credentialOrigin` that proves it. An earlier row's `auth` that the expansion left alone
+     * keeps its own companion.
      */
+    private data class StarExpansion(
+        val emittedAuth: Boolean,
+        val credentialOrigin: String?,
+    )
+
+    /** A `*` row expands to every field at its own clock. */
     private suspend fun addAllFields(
         source: SourceReader,
         collection: SyncCollection,
         rid: String,
         clock: Hlc,
         fields: MutableMap<String, FieldValue>,
-    ): String? {
+    ): StarExpansion {
         val all = source.allFields(collection, rid)
         all.fields.forEach { (name, value) ->
             fields[name] = FieldValue(value.v, clock.toString())
@@ -193,10 +201,12 @@ class ChangeBuilder(
         all.growSets.forEach { (name, values) ->
             fields[name] = FieldValue(add = values.toList())
         }
-        if (!fields.containsKey("auth")) return null
-        return (all.fields["credentialOrigin"]?.v as? JsonPrimitive)
-            ?.takeIf { it.isString }
-            ?.contentOrNull
+        if (!all.fields.containsKey("auth")) return StarExpansion(emittedAuth = false, credentialOrigin = null)
+        val origin =
+            (all.fields["credentialOrigin"]?.v as? JsonPrimitive)
+                ?.takeIf { it.isString }
+                ?.contentOrNull
+        return StarExpansion(emittedAuth = true, credentialOrigin = origin)
     }
 
     private fun rekeyChange(
