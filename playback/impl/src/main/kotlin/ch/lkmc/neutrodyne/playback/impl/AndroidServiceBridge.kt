@@ -144,6 +144,11 @@ internal class AndroidServiceBridge(
     private var serviceIssue: PlaybackIssue? = null
     private var boundaryPaused = false
     private var pending: StartOutcome.Committed? = null
+
+    // The item whose position a start just settled, consumed by the first Play after it that
+    // goes ahead. A start whose Play never comes leaves it until the next Play, which then skips
+    // one pickup: the behaviour before beforePlay picked up at all, never a wrong seek.
+    private var settledStart: Long? = null
     private var pendingTimeout: Job? = null
     private var startReserved = false
     private var reservationTimeout: Job? = null
@@ -294,6 +299,7 @@ internal class AndroidServiceBridge(
                 }
 
                 is StartOutcome.AlreadyCurrent -> {
+                    settledStart = outcome.queue.current?.episodeId
                     if (application == StartApplication.MEDIA3) {
                         hold(
                             StartOutcome.Committed(
@@ -311,6 +317,7 @@ internal class AndroidServiceBridge(
 
                 is StartOutcome.Committed -> {
                     generation = outcome.queue.generation
+                    settledStart = outcome.queue.current?.episodeId
                     if (player.mediaItemCount == 0 || application == StartApplication.MEDIA3) {
                         // Only true resumption/onSetMediaItems may install an empty player's window.
                         hold(outcome)
@@ -377,6 +384,7 @@ internal class AndroidServiceBridge(
                 throw UnsupportedOperationException("Playback refused: $it")
             }
             val built = projector.prepareExternalStart(committed)
+            settledStart = id
             serviceIssue = null
             return MediaSession.MediaItemsWithStartPosition(built, 0, committed.startPositionMs)
         } catch (failure: Throwable) {
@@ -407,6 +415,17 @@ internal class AndroidServiceBridge(
                 reportRefusal(refusal)
                 return@withLock false
             }
+            // A headset button, the notification or Android Auto resumes here without
+            // startLocked, so take up a newer stored row (a sync pull or a restore) the same
+            // way the app's Play does before it reaches this point. The Play that follows a
+            // start or an advance finds a position that start just chose (a timestamp, a
+            // restart, a smart-resume rewind), which differs from the row without being an
+            // outside write, so it keeps that position.
+            // Only a Play that goes ahead consumes the mark: after a refused Play (metered,
+            // boundary) the next one still follows the same start.
+            val settled = settledStart
+            settledStart = null
+            if (advanced != PlayResult.Started && settled != id) applyPausedPickup(id)
             smartResume.resume()
             serviceIssue = null
             boundaryPaused = false

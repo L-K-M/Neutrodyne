@@ -10,6 +10,8 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import ch.lkmc.neutrodyne.core.domain.PrePlaySync
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
+import ch.lkmc.neutrodyne.core.model.QueueItem
+import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayOrigin
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.core.SeekOrigin
@@ -207,6 +209,68 @@ class PrePlayControllerTest {
         }
     }
 
+    /**
+     * A headset button, the media notification or Android Auto resumes through the session
+     * player (`SessionPlayer` to `beforePlay`), not through the app's controller, and must take
+     * up a newer stored row the same way.
+     */
+    @Test fun aSessionPlayerResumePicksUpTheObservedRow() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent(positionMs = 12_000)
+            val (service, connection, _) = bound(h)
+            try {
+                h.run { activate(service.get(), h).await() }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount == 1 && player.currentPosition == 12_000L }
+                player.pause()
+                pumpUntil { !player.isPlaying }
+
+                h.positions.positions.value += 1L to StoredPosition(1, 45_000, h.clock.now(), null)
+                player.play()
+
+                pumpUntil { player.currentPosition >= 45_000L }
+                assertTrue(player.currentPosition < 50_000L, "picked-up position ${player.currentPosition}")
+            } finally {
+                connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
+    /**
+     * The Play that follows a start reaches the session player's resume path too. A start that
+     * chose its own position (here a show-notes timestamp in another episode, whose stored row
+     * is older) must not be dragged back to that row: the start never writes it, so the row
+     * differs from the applied position without being an outside write.
+     */
+    @Test fun thePlayAfterATimestampStartOfAnotherEpisodeKeepsTheTimestamp() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent(positionMs = 12_000)
+            h.lookup.items.value += OTHER to media(id = OTHER)
+            h.positions.positions.value += OTHER to StoredPosition(OTHER, 20_000, h.clock.now(), null)
+            h.publish(h.store.queue.copy(upNext = listOf(QueueItem(OTHER, QueueOrigin.UP_NEXT))))
+            val (service, connection, controller) = bound(h)
+            try {
+                h.run { activate(service.get(), h).await() }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount > 0 && player.currentPosition == 12_000L }
+                player.pause()
+                pumpUntil { !player.isPlaying }
+
+                assertEquals(PlayResult.Started, h.run { controller.playEpisodeAt(OTHER, 40_000) })
+
+                // beforePlay finishes any pickup before it lets the player go, so once the player
+                // wants to play the position is settled. (The host player need not reach READY.)
+                pumpUntil { player.playWhenReady && player.episodeIdOrNull() == OTHER }
+                val position = player.currentPosition
+                assertTrue(position in 40_000L until 45_000L, "timestamp start played from $position")
+            } finally {
+                connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
     @Test fun aQueuedOwnFlushDuringTheReadNeverRewindsTheResume() {
         LifecycleHarness(app()).use { h ->
             h.seedCurrent(positionMs = 12_000)
@@ -304,5 +368,9 @@ class PrePlayControllerTest {
                 service.destroy()
             }
         }
+    }
+
+    private companion object {
+        const val OTHER = 2L
     }
 }
