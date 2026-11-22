@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.entryProvider
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventInput
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
@@ -90,6 +91,7 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
+import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
@@ -242,7 +244,13 @@ private fun ReadyRoot(
     val openRadio: () -> Unit = { navigation.open(FeedsKey, emptyList()) }
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
     var viewportBottomPx by remember { mutableFloatStateOf(0f) }
-    val radioHome = navigation.selectedTab == FeedsKey && navigation.stack(FeedsKey).lastOrNull() == FeedsKey
+    // The registrations the host renders, read here only for their overlay metadata. Built once
+    // for the same reason as the host's provider: the installer set's identity churns.
+    val registrations = remember { entryProvider<NavKey> { installers.forEach { install -> install() } } }
+    val radioHome =
+        radioHomeIsShowing(navigation.selectedTab, navigation.stack(FeedsKey).toList()) {
+            registrations(it).metadata.containsKey(NdSceneMetadata.KEY_OVERLAY)
+        }
     // Every page stands on the radio's charcoal stage, under the home deck or a cabinet's.
     PlatformSystemBarAppearance(StatusBarAppearance.LightIcons)
     val windowInfo = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
@@ -504,6 +512,23 @@ private fun ReadyRoot(
             )
         }
     }
+}
+
+/**
+ * Whether the radio home is the screen under the Feeds stack: the stack is at its root, or every
+ * entry above the last [FeedsKey] is an overlay (a sheet or dialog, by its registered
+ * [NdSceneMetadata.KEY_OVERLAY]). Overlays draw above the home, so the mini player stays hidden
+ * under them; a pushed full page leaves home and brings the mini player back.
+ */
+private fun radioHomeIsShowing(
+    selectedTab: TopLevelKey,
+    feedsStack: List<NavKey>,
+    isOverlay: (NavKey) -> Boolean,
+): Boolean {
+    if (selectedTab != FeedsKey) return false
+    val lastHome = feedsStack.indexOfLast { it == FeedsKey }
+    if (lastHome < 0) return false
+    return feedsStack.drop(lastHome + 1).all(isOverlay)
 }
 
 /**
