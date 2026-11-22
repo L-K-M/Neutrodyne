@@ -274,9 +274,16 @@ internal fun RadioProgramme(
                             Alignment.CenterHorizontally,
                         ) {
                             // A partial first page is still on its way: keep the spinner rather
-                            // than claiming the station is clear before the pager knows.
-                            if (state.loading || !state.complete) {
-                                CircularProgressIndicator(color = Brass, modifier = Modifier.size(24.dp))
+                            // than claiming the station is clear before the pager knows. A failed
+                            // load keeps its retry row, so it must not spin forever.
+                            if (state.loading || (!state.loadError && !state.complete)) {
+                                CircularProgressIndicator(
+                                    color = Brass,
+                                    modifier =
+                                        Modifier
+                                            .size(24.dp)
+                                            .testTag("radio_programme_spinner"),
+                                )
                             } else if (!state.loadError && state.playlistsLoaded) {
                                 // Until the groups are read, an empty paper is neither "none" nor "all clear".
                                 if (state.untuned) {

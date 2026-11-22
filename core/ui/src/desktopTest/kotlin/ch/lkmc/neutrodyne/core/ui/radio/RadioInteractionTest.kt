@@ -188,6 +188,22 @@ class RadioInteractionTest {
             }
             onNodeWithText(getString(Res.string.radio_all_clear)).assertDoesNotExist()
             onNodeWithText(getString(Res.string.radio_no_playlists_empty)).assertDoesNotExist()
+            onNodeWithTag("radio_programme_spinner").assertIsDisplayed()
+        }
+
+    @Test
+    fun aFailedPageKeepsItsRetryInsteadOfSpinningForever() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(playlistsLoaded = true, complete = false, loadError = true),
+                        RadioActions(),
+                    )
+                }
+            }
+            onNodeWithTag("radio_programme_spinner").assertDoesNotExist()
+            onNodeWithTag("radio_retry").assertIsDisplayed()
         }
 
     @Test
