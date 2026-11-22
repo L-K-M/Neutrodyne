@@ -3241,11 +3241,11 @@ internal class Harness(
     }
 }
 
-/** A [SyncClient] whose every call is scripted and recorded. */
 /** The scripted link code's lifetime and interval, so tests can expire it exactly. */
 private const val LINK_CODE_LIFETIME_SECONDS = 600
 private const val LINK_CODE_INTERVAL_SECONDS = 5
 
+/** A [SyncClient] whose every call is scripted and recorded. */
 internal class ScriptedSyncClient : SyncClient {
     val calls = mutableListOf<String>()
     val renames = mutableListOf<Pair<String, String>>()
