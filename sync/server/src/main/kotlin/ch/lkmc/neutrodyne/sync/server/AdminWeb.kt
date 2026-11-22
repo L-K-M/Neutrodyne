@@ -10,6 +10,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.html.respondHtml
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receiveParameters
+import io.ktor.server.response.header
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -474,6 +475,8 @@ internal class AdminWeb(
         refresh: Int? = null,
         content: FlowContent.() -> Unit,
     ) {
+        // With no-referrer, browsers send Origin: null even for same-origin form submissions.
+        call.response.header("Referrer-Policy", "same-origin")
         call.respondHtml(HttpStatusCode.OK) {
             attributes["lang"] = "en"
             head {

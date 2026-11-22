@@ -2146,7 +2146,7 @@ Tokens are stored only as SHA-256 (high-entropy secrets need no slow hash), look
 
 - Cookie `nds_session`: `HttpOnly; Secure; SameSite=Strict; Path=/`. In insecure LAN mode `Secure` is omitted (browsers would not store it over `http://`) and the red banner shows.
 - Every state-changing form carries a synchronizer token bound to the session (hidden field, compared in constant time) in addition to Ktor's CSRF plugin with `originMatchesHost()` and `allowOrigin(publicUrl)`.
-- Headers on every web response: `Content-Security-Policy: default-src 'self'; script-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`; HSTS is the reverse proxy's job (the reference `Caddyfile` and the nginx snippet both add it).
+- Every web response sends `Content-Security-Policy: default-src 'self'; script-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store`. HTML pages send `Referrer-Policy: same-origin` so browsers include `Origin` on same-origin form submissions. Other responses send `Referrer-Policy: no-referrer`. The reverse proxy handles HSTS (the reference `Caddyfile` and nginx snippet both add it).
 
 ### Authorisation scoping
 

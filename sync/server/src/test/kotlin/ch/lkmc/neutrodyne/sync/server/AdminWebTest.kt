@@ -48,7 +48,7 @@ class AdminWebTest {
                 val response = client.get(path) { header(HttpHeaders.Cookie, "nds_session=$adminWeb") }
                 response.expect(HttpStatusCode.OK)
                 assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
-                assertEquals("no-referrer", response.headers["Referrer-Policy"])
+                assertEquals(listOf("same-origin"), response.headers.getAll("Referrer-Policy"))
                 assertEquals("nosniff", response.headers["X-Content-Type-Options"])
                 assertTrue(response.headers["Content-Security-Policy"]!!.contains("script-src 'none'"))
                 val user = client.get(path) { header(HttpHeaders.Cookie, "nds_session=$userWeb") }
@@ -70,6 +70,7 @@ class AdminWebTest {
             val setup = Files.readString(f.services.setup.initialize()!!).trim()
             val browser = Browser(createClient { followRedirects = false })
             val page = browser.get("/setup")
+            assertEquals(listOf("same-origin"), page.headers.getAll("Referrer-Policy"))
             val token = page.csrf()
             val data = mapOf("csrf" to token, "code" to setup, "username" to "admin", "password" to "correct password")
             browser.post("/setup", data, origin = null).expect(HttpStatusCode.Forbidden)
@@ -82,6 +83,7 @@ class AdminWebTest {
             assertFalse(Files.exists(f.config.dataDir.resolve("setup-token")))
             val other = Browser(browser.client)
             val login = other.get("/")
+            assertEquals(listOf("same-origin"), login.headers.getAll("Referrer-Policy"))
             other
                 .post(
                     "/login",
