@@ -92,6 +92,13 @@ class RadioRulesTest {
         assertTrue(restored != null && restored.restoreFocus)
     }
 
+    @Test fun programmeStateSaverDefaultsFocusFlagForLegacyState() {
+        val restored = RadioProgrammeState.Saver.restore(listOf("true", "42"))
+        assertTrue(restored != null && restored.chooserOpen)
+        assertEquals(42L, restored?.playlistId)
+        assertEquals(false, restored?.restoreFocus)
+    }
+
     private object TestSaverScope : SaverScope {
         override fun canBeSaved(value: Any): Boolean = true
     }

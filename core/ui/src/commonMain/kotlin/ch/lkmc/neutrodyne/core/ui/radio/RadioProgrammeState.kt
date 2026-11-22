@@ -34,8 +34,8 @@ internal class RadioProgrammeState {
                 },
                 restore = { saved ->
                     RadioProgrammeState().apply {
-                        chooserOpen = saved[0].toBoolean()
-                        playlistId = saved[1].toLongOrNull()
+                        chooserOpen = saved.getOrNull(0)?.toBoolean() ?: false
+                        playlistId = saved.getOrNull(1)?.toLongOrNull()
                         restoreFocus = saved.getOrNull(2)?.toBoolean() ?: false
                     }
                 },
