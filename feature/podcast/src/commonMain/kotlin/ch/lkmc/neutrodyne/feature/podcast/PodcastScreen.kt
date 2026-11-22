@@ -117,6 +117,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
 import ch.lkmc.neutrodyne.core.ui.resources.download_all
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_clear_filters
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
@@ -435,8 +436,10 @@ internal fun PodcastScreen(
                                         ),
                                     body = "",
                                     actionLabel =
-                                        if (state.filters != FeedFilters()) {
+                                        if (state.filters == FeedFilters(unplayedOnly = true)) {
                                             stringResource(Res.string.feeds_show_played)
+                                        } else if (state.filters != FeedFilters()) {
+                                            stringResource(Res.string.feeds_clear_filters)
                                         } else if (detail.sourceType == SourceType.YOUTUBE_CHANNEL) {
                                             stringResource(Res.string.podcast_settings)
                                         } else {

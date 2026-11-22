@@ -22,6 +22,7 @@ import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -706,6 +707,29 @@ class PodcastScreenTest {
             )
             onNodeWithText("No episodes yet").assertIsDisplayed()
             onNodeWithText("Show played episodes").performClick()
+            assertEquals(FeedFilters(), filters)
+        }
+
+    @Test
+    fun filteredEmptyOffersClearFiltersForAnotherFilter() =
+        runComposeUiTest {
+            // Only the unplayed filter is accurately described by "Show played episodes"; a
+            // downloaded or in-progress filter hides other episodes too, so the action must not
+            // promise played episodes it does not specially restore.
+            var filters: FeedFilters? = null
+            setPodcast(
+                PodcastUiState(
+                    detail = testPodcastDetail(7, episodeCount = 3),
+                    loaded = true,
+                    filters = FeedFilters(downloadedOnly = true),
+                ),
+                source = PagedListSource(listOf(emptyList())),
+                onFiltersChange = { filters = it },
+            )
+            onNodeWithText("No episodes yet").assertIsDisplayed()
+            onNodeWithText("Show played episodes").assertDoesNotExist()
+            // The filter bank's own Clear key shares the label; the empty-state action is first.
+            onAllNodesWithText("Clear filters").onFirst().performClick()
             assertEquals(FeedFilters(), filters)
         }
 
