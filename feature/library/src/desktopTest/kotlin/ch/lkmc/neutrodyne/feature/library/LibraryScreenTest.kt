@@ -74,6 +74,7 @@ import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
+import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
@@ -442,6 +443,20 @@ class LibraryScreenTest {
             setLibrary(LibraryUiState(loaded = true, showTitles = true))
             onNodeWithContentDescription("More actions").performClick()
             onNodeWithText("Show titles").assertIsOn()
+        }
+
+    /** 08 Library overflow lists Backup and restore after Export subscriptions and opens `BackupKey`. */
+    @Test
+    fun overflowBackupRestoreOpensBackupKey() =
+        runComposeUiTest {
+            setLibraryRoute()
+            onNodeWithContentDescription("More actions").performClick()
+            onNodeWithText("Backup and restore").performClick()
+            waitForIdle()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(BackupKey)),
+                navigator.calls,
+            )
         }
 
     @Test

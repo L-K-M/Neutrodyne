@@ -20,6 +20,7 @@ import androidx.navigationevent.compose.rememberNavigationEventState
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
+import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
@@ -139,6 +140,7 @@ internal fun LibraryRoute(
         onExportGroup = { navigator.push(ExportKey(it)) },
         onExportSubscriptions = { navigator.push(ExportKey(null)) },
         onImportSubscriptions = { navigator.push(ImportFileKey) },
+        onBackupRestore = { navigator.push(BackupKey) },
         onOpenGroup = { id ->
             scope.launch {
                 if (viewModel.selectGroup(id)) {

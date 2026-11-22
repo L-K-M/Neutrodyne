@@ -99,6 +99,7 @@ import ch.lkmc.neutrodyne.feature.library.resources.grid_large
 import ch.lkmc.neutrodyne.feature.library.resources.grid_medium
 import ch.lkmc.neutrodyne.feature.library.resources.grid_size
 import ch.lkmc.neutrodyne.feature.library.resources.grid_small
+import ch.lkmc.neutrodyne.feature.library.resources.library_backup_restore
 import ch.lkmc.neutrodyne.feature.library.resources.manage_groups
 import ch.lkmc.neutrodyne.feature.library.resources.mark_many
 import ch.lkmc.neutrodyne.feature.library.resources.new_group
@@ -158,6 +159,7 @@ internal fun LibraryScreen(
     onExportGroup: (Long) -> Unit = {},
     onExportSubscriptions: () -> Unit = {},
     onImportSubscriptions: () -> Unit = {},
+    onBackupRestore: () -> Unit = {},
     onSelect: (Long, SelectionGesture) -> Unit = { _, _ -> },
     onExitSelection: () -> Unit = {},
     onSelectionAction: (SelectionAction) -> Unit = {},
@@ -220,6 +222,7 @@ internal fun LibraryScreen(
                         onManageGroups,
                         onExportSubscriptions,
                         onImportSubscriptions,
+                        onBackupRestore,
                     )
                 },
             )
@@ -484,6 +487,7 @@ private fun OverflowMenu(
     onManageGroups: () -> Unit,
     onExportSubscriptions: () -> Unit,
     onImportSubscriptions: () -> Unit,
+    onBackupRestore: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var choosingDensity by remember { mutableStateOf(false) }
@@ -569,6 +573,13 @@ private fun OverflowMenu(
                 open = false
                 onExportSubscriptions()
             })
+            DropdownMenuItem(
+                text = { Text(stringResource(LibraryRes.string.library_backup_restore)) },
+                onClick = {
+                    open = false
+                    onBackupRestore()
+                },
+            )
         }
     }
 }
