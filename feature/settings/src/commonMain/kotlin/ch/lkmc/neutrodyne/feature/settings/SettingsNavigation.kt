@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
 import ch.lkmc.neutrodyne.core.navigation.DiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
+import ch.lkmc.neutrodyne.core.navigation.KeyboardShortcutsKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
@@ -47,7 +48,8 @@ import kotlinx.coroutines.flow.map
  * Licences screen shows its empty state) and a [DesktopIntegration] (nullable: `DesktopAppGraph`
  * alone binds it, so the Start-at-login row reads the OS where it exists). `SettingsHomeKey` is
  * a list pane whose desktop detail placeholder is the Appearance page (08 Settings screens);
- * `SettingsKey` and `LicencesKey` are detail panes (08 Screen inventory).
+ * `SettingsKey` and `LicencesKey` are detail panes (08 Screen inventory). `KeyboardShortcutsKey`
+ * is the desktop Help menu's dialog (08 Keyboard and mouse).
  */
 @ContributesTo(AppScope::class)
 @BindingContainer
@@ -131,6 +133,9 @@ public object SettingsNavigation {
             }
             entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
                 LicencesRoute(licencesSource, buildInfo)
+            }
+            entry<KeyboardShortcutsKey>(metadata = NdSceneMetadata.dialog()) {
+                KeyboardShortcutsScreen(buildInfo.desktop?.os)
             }
             entry<DiagnosticsKey>(metadata = NdSceneMetadata.paneDetail()) {
                 DiagnosticsPage()

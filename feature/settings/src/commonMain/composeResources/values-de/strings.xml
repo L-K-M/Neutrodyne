@@ -163,4 +163,36 @@
     <string name="diagnostics_section_log">Protokoll</string>
     <string name="diagnostics_expanded">Erweitert</string>
     <string name="diagnostics_collapsed">Eingeklappt</string>
+
+    <!-- Hilfe › Tastaturkürzel (08 Tastatur und Maus, 11 Tastaturkürzel). -->
+    <string name="shortcuts_title">Tastaturkürzel</string>
+    <string name="shortcuts_close">Schließen</string>
+    <string name="shortcuts_group_playback">Wiedergabe</string>
+    <string name="shortcuts_group_navigation">Navigation</string>
+    <string name="shortcuts_group_library">Bibliothek</string>
+    <string name="shortcuts_group_window">Fenster</string>
+    <string name="shortcuts_play_pause">Wiedergabe / Pause</string>
+    <string name="shortcuts_skip_back">Zurückspulen</string>
+    <string name="shortcuts_skip_forward">Vorspulen</string>
+    <string name="shortcuts_previous_chapter">Vorheriges Kapitel</string>
+    <string name="shortcuts_next_chapter">Nächstes Kapitel</string>
+    <string name="shortcuts_previous_episode">Vorherige Episode</string>
+    <string name="shortcuts_next_episode">Nächste Episode</string>
+    <string name="shortcuts_volume_up">Lautstärke erhöhen</string>
+    <string name="shortcuts_volume_down">Lautstärke verringern</string>
+    <string name="shortcuts_find">Suchen</string>
+    <string name="shortcuts_feeds">Feeds</string>
+    <string name="shortcuts_library">Bibliothek</string>
+    <string name="shortcuts_up_next">Als Nächstes</string>
+    <string name="shortcuts_downloads">Downloads</string>
+    <string name="shortcuts_discover">Entdecken</string>
+    <string name="shortcuts_settings">Einstellungen</string>
+    <string name="shortcuts_next_feed_page">Nächste Feeds-Seite</string>
+    <string name="shortcuts_previous_feed_page">Vorherige Feeds-Seite</string>
+    <string name="shortcuts_back">Zurück</string>
+    <string name="shortcuts_add_podcast">Podcast hinzufügen</string>
+    <string name="shortcuts_import">OPML oder Sicherung importieren</string>
+    <string name="shortcuts_refresh">Aktualisieren</string>
+    <string name="shortcuts_close_window">Fenster schließen</string>
+    <string name="shortcuts_quit">Beenden</string>
 </resources>
