@@ -208,6 +208,7 @@ class DownloadRequestHandlerTest {
                     DownloadState.DOWNLOADING to Action.PAUSE,
                     DownloadState.PAUSED to Action.RESUME,
                     DownloadState.FAILED to Action.RETRY,
+                    DownloadState.VERIFYING to Action.CANCEL,
                     DownloadState.MISSING to Action.REQUEST,
                 )
             for (state in DownloadState.entries) {

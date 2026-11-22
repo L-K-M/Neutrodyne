@@ -156,7 +156,9 @@ public class DownloadRequestHandler(
                 }
 
                 DownloadState.VERIFYING -> {
-                    Unit
+                    // The row shows the same indeterminate ring as RESOLVING, so the tap must
+                    // cancel like RESOLVING instead of looking tappable and doing nothing.
+                    controller.cancel(listOf(id))
                 }
             }
         }
