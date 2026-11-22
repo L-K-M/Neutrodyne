@@ -593,35 +593,41 @@ public class RadioViewModel(
                 .onSuccess {
                     undo = null
                     if (state.value.playlistId == removal.playlistId) {
-                        val rows = state.value.episodes.toMutableList()
-                        if (rows.none { it.id == removal.episode.id }) {
-                            rows.add(
-                                removal.index.coerceAtMost(rows.size),
-                                removal.episode,
-                            )
-                        }
                         mutableState.value =
                             state.value.copy(
-                                episodes =
-                                    if (rows.any {
-                                            it.sortDate != 0L
-                                        }
-                                    ) {
-                                        rows.sortedWith(
-                                            compareByDescending<RadioEpisode> {
-                                                it.sortDate
-                                            }.thenByDescending { it.id },
-                                        )
-                                    } else {
-                                        rows
-                                    },
+                                episodes = restoreRow(state.value.episodes, removal),
                                 episodeCount = state.value.episodeCount?.plus(1),
                                 removed = null,
                             )
                     }
                 }.onFailure { writeFailed() }
             writing = false
+            deferredRows?.let { rows ->
+                // The page may have arrived while the write was pending; it wins for the slips
+                // it carries, but the restored episode is still unplayed and must stay in the feed.
+                if (undo == null && rows.playlistId == state.value.playlistId) {
+                    onRows(rows.playlistId, restoreRow(rows.items, removal), rows.complete)
+                }
+            }
             deferredRows = null
+        }
+    }
+
+    /** Puts the removed slip back at its old index and keeps the feed's newest-first order. */
+    private fun restoreRow(
+        episodes: List<RadioEpisode>,
+        removal: Removal,
+    ): List<RadioEpisode> {
+        val rows = episodes.toMutableList()
+        if (rows.none { it.id == removal.episode.id }) {
+            rows.add(removal.index.coerceAtMost(rows.size), removal.episode)
+        }
+        return if (rows.any { it.sortDate != 0L }) {
+            rows.sortedWith(
+                compareByDescending<RadioEpisode> { it.sortDate }.thenByDescending { it.id },
+            )
+        } else {
+            rows
         }
     }
 

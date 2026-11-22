@@ -646,6 +646,47 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun undoAppliesAPagingSnapshotThatArrivedDuringTheWrite() =
+        runTest {
+            val releaseUndo = CompletableDeferred<Unit>()
+            val delayedEpisodes =
+                object : EpisodeRepository by episodes {
+                    override suspend fun setPlayed(
+                        episodeIds: List<Long>,
+                        played: Boolean,
+                    ) {
+                        if (!played) releaseUndo.await()
+                        episodes.setPlayed(episodeIds, played)
+                    }
+                }
+            withRadio(episodeRepository = delayedEpisodes) { model, id ->
+                val dated = rows.map { it.copy(sortDate = 100 - it.id) }
+                model.onRows(id, dated)
+                runCurrent()
+                model.discard(2)
+                runCurrent()
+                assertEquals(
+                    listOf(1L, 3L),
+                    model.state.value.episodes
+                        .map { it.id },
+                )
+
+                model.undoDiscard()
+                runCurrent()
+                // A newer page lands while the un-play write is still pending; it must not be dropped.
+                val newest = RadioEpisode(4, "Episode 4", "Podcast", 60_000, sortDate = 200)
+                model.onRows(id, listOf(newest) + dated.filterNot { it.id == 2L })
+                releaseUndo.complete(Unit)
+                runCurrent()
+
+                assertEquals(
+                    listOf(4L, 1L, 2L, 3L),
+                    model.state.value.episodes
+                        .map { it.id },
+                )
+            }
+        }
+
     @Test fun pagingAccessUsesAbsoluteOffsetsAndIgnoresStaleRows() {
         assertEquals(401, radioPageIndex(42, 400, listOf(41, 42, 43)))
         assertEquals(1, radioPageIndex(42, 0, listOf(41, 42, 43)))
