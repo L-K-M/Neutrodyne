@@ -4,11 +4,14 @@ package ch.lkmc.neutrodyne.core.designsystem.radio
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -93,7 +96,8 @@ public enum class CabinetDeck {
  *
  * [dock] is the height the app reserves at the bottom of the content for the docked mini radio,
  * which is set into the cabinet's base: the tray's bottom wall grows to that height, so nothing on
- * the page hides under the bar and the page itself has nothing left to reserve.
+ * the page hides under the bar and the page itself has nothing left to reserve. While the
+ * keyboard is up the page ends at the keyboard instead, so a focused field can scroll above it.
  */
 @Composable
 public fun RadioCabinetPage(
@@ -144,6 +148,7 @@ public fun RadioCabinetPage(
                 .clip(shape)
                 .cabinetEdges(leftWall = if (ltr) startWall else endWall, rightWall = if (ltr) endWall else startWall),
         ) {
+            val bottomWall = maxOf(CABINET_WALL, dock)
             MaterialPlate(
                 RadioMaterial.PAPER,
                 Modifier
@@ -153,12 +158,14 @@ public fun RadioCabinetPage(
                         start = CABINET_WALL,
                         top = CABINET_WALL,
                         end = CABINET_WALL,
-                        bottom = maxOf(CABINET_WALL, dock),
+                        bottom = bottomWall,
                     ).recess(TrayShape)
                     .testTag(CABINET_TRAY_TAG),
             ) {
-                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                    content()
+                Box(Modifier.fillMaxSize().aboveKeyboard(bottomWall, WindowInsets.ime)) {
+                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                        content()
+                    }
                 }
             }
         }
@@ -183,6 +190,17 @@ public fun RadioCabinetPage(
         }
     }
 }
+
+/**
+ * Ends the page at the keyboard, which covers the window edge to edge. The navigation bar's inset
+ * is already consumed. [bottomWall] is plain padding, so it is consumed here to not count twice.
+ */
+internal fun Modifier.aboveKeyboard(
+    bottomWall: Dp,
+    keyboard: WindowInsets,
+): Modifier =
+    consumeWindowInsets(PaddingValues(bottom = bottomWall))
+        .windowInsetsPadding(keyboard.only(WindowInsetsSides.Bottom))
 
 /**
  * Where a pane sits in its row, which spans the window inside its safe-drawing insets: the
