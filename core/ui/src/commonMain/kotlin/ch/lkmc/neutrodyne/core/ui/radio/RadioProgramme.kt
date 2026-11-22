@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui.radio
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -378,8 +379,35 @@ internal fun RadioProgramme(
                                     actions.selectEpisode(state.episodes[target].id)
                                     focusedId = state.episodes[target].id
                                     scope.launch {
-                                        scroll.animateScrollToItem(target)
-                                        withFrameNanos { }
+                                        // Take the scroll mutex first so an in-flight press cannot
+                                        // carry the newly focused slip out of view.
+                                        scroll.scroll { }
+                                        val layoutInfo = scroll.layoutInfo
+                                        val targetInfo =
+                                            layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }
+                                        val fullyVisible =
+                                            targetInfo != null &&
+                                                targetInfo.offset >= layoutInfo.viewportStartOffset &&
+                                                targetInfo.offset + targetInfo.size <= layoutInfo.viewportEndOffset
+                                        if (!fullyVisible) {
+                                            val delta =
+                                                targetInfo?.let {
+                                                    revealScrollDelta(
+                                                        it.offset,
+                                                        it.size,
+                                                        layoutInfo.viewportStartOffset,
+                                                        layoutInfo.viewportEndOffset,
+                                                    )
+                                                }
+                                            if (delta != null) {
+                                                // Reveal the slip at the nearest edge rather than
+                                                // snapping it to the start of the viewport.
+                                                scroll.animateScrollBy(delta)
+                                            } else {
+                                                scroll.animateScrollToItem(target)
+                                            }
+                                            withFrameNanos { }
+                                        }
                                         if (scroll.layoutInfo.visibleItemsInfo.any { it.index == target }) {
                                             focusFor(state.episodes[target].id).requestFocus()
                                         }
@@ -701,6 +729,26 @@ internal fun SmallRadioKey(
 
 @Composable
 private fun radioKeyWidth(): Dp = (48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)).coerceAtMost(64.dp)
+
+/**
+ * The distance that reveals an item at the nearest viewport edge, or null when it is fully
+ * visible or too tall to fit (the caller then scrolls to the item). Negative scrolls up.
+ */
+internal fun revealScrollDelta(
+    itemOffset: Int,
+    itemSize: Int,
+    viewportStart: Int,
+    viewportEnd: Int,
+): Float? {
+    val fullyVisible = itemOffset >= viewportStart && itemOffset + itemSize <= viewportEnd
+    if (fullyVisible) return null
+    if (itemSize > viewportEnd - viewportStart) return null
+    return if (itemOffset < viewportStart) {
+        (itemOffset - viewportStart).toFloat()
+    } else {
+        (itemOffset + itemSize - viewportEnd).toFloat()
+    }
+}
 
 @Composable
 internal fun RadioText(

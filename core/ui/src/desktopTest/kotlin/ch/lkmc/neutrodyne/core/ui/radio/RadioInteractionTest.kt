@@ -541,6 +541,26 @@ class RadioInteractionTest {
         }
 
     @Test
+    fun arrowKeysDoNotScrollASlipThatIsAlreadyFullyVisible() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var selected by mutableLongStateOf(1L)
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture().copy(selectedId = selected),
+                        RadioActions(selectEpisode = { selected = it }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithTag("radio_episode_1").performKeyInput { pressKey(Key.DirectionDown) }
+            assertEquals(2L, selected)
+            onNodeWithTag("radio_episode_2").assertIsFocused()
+            // The first slip stays on screen: the press moved the selection, not the viewport.
+            onNodeWithTag("radio_episode_1").assertIsDisplayed()
+        }
+
+    @Test
     fun arrowKeysScrollALongProgrammeToTheSelection() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             var selected by mutableLongStateOf(1L)
