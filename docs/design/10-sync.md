@@ -2527,7 +2527,7 @@ The server's untrusted-input suite joins 09's fuzzing ([09 Untrusted-input robus
 
 - systemd: `DynamicUser`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, `NoNewPrivileges`, `RestrictAddressFamilies`, `MemoryMax=320M`, state directory `0700`.
 - Container: non-root UID 65532, read-only root, `cap_drop: [ALL]`, `no-new-privileges`, data volume owned by that user; no shell in the image.
-- Feed polling screens each destination's DNS answers (loopback, link-local, private and unique-local addresses refused) and uses those same answers for the connection, so there is no re-resolution between check and connect; every redirect hop is checked, chains are length-capped, and HTTPS-to-HTTP downgrades and URL userinfo are refused. Shared Basic credentials stay on their HTTPS origin and are dropped on a cross-origin redirect; tokens a publisher embeds in a redirect URL are not stripped. The update check has a fixed URL.
+- Feed polling screens each destination's DNS answers (loopback, link-local, private and unique-local addresses refused, also inside IPv4-mapped and NAT64 `64:ff9b::/96` addresses; implementation note 2026-11-22: the NAT64 form was missing, so on a DNS64 host a feed could reach a local IPv4 service) and uses those same answers for the connection, so there is no re-resolution between check and connect; every redirect hop is checked, chains are length-capped, and HTTPS-to-HTTP downgrades and URL userinfo are refused. Shared Basic credentials stay on their HTTPS origin and are dropped on a cross-origin redirect; tokens a publisher embeds in a redirect URL are not stripped. The update check has a fixed URL.
 
 ### Privacy and disclosure
 

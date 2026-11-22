@@ -85,6 +85,28 @@ class LocalDestinationTest {
         }
     }
 
+    /**
+     * A DNS64 resolver answers IPv4-only names with addresses in the well-known NAT64 prefix
+     * `64:ff9b::/96`, and the NAT64 gateway then connects to the embedded IPv4 address, so a
+     * synthesised loopback, private or link-local address must count as local too.
+     */
+    @Test
+    fun nat64AddressesUseTheEmbeddedIpv4Ranges() {
+        for (host in listOf(
+            "64:ff9b::127.0.0.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::10.0.0.1",
+            "64:ff9b::192.168.1.1",
+            "64:ff9b::169.254.169.254",
+            "64:ff9b:0:0:0:0:ac10:1",
+        )) {
+            assertTrue(isLocal("http://[$host]/feed"), host)
+        }
+        for (host in listOf("64:ff9b::8.8.8.8", "64:ff9b::808:808", "64:ff9b:0:0:1::7f00:1")) {
+            assertFalse(isLocal("http://[$host]/feed"), host)
+        }
+    }
+
     @Test
     fun scopedIpv6LiteralsAreLocalWithoutInterfaceLookup() {
         for (zone in listOf("25eth0", "eth0", "2542", "42", "25no-such-interface")) {

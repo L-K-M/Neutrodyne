@@ -130,6 +130,9 @@ private const val IPV4_BYTES = 4
 private const val IPV6_BYTES = 16
 private const val V4_MAPPED_PREFIX_BYTES = 10
 private const val V4_EMBEDDED_OFFSET = 12
+
+/** The first [V4_EMBEDDED_OFFSET] bytes of NAT64's well-known prefix `64:ff9b::/96`. */
+private val NAT64_PREFIX = intArrayOf(0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0)
 private const val MULTICAST_V4_FIRST_OCTET = 224
 private const val MULTICAST_V6_PREFIX = 0xFF
 
@@ -193,7 +196,10 @@ private fun isLocalPeerV6(b: ByteArray): Boolean {
             (b[V4_MAPPED_PREFIX_BYTES + 1].toInt() and 0xFF) == 0xFF
     // The deprecated ::/96 spelling also needs the embedded IPv4 classification.
     val v4Compatible = (0 until V4_EMBEDDED_OFFSET).all { b[it].toInt() == 0 }
-    if (v4Mapped || v4Compatible) return isLocalPeerV4(b, V4_EMBEDDED_OFFSET)
+    // A DNS64 resolver answers with NAT64's well-known prefix 64:ff9b::/96 (RFC 6052), and the
+    // gateway forwards to the embedded IPv4 address, which may be on the LAN.
+    val nat64 = NAT64_PREFIX.indices.all { (b[it].toInt() and 0xFF) == NAT64_PREFIX[it] }
+    if (v4Mapped || v4Compatible || nat64) return isLocalPeerV4(b, V4_EMBEDDED_OFFSET)
 
     val b0 = b[0].toInt() and 0xFF
     val b1 = b[1].toInt() and 0xFF

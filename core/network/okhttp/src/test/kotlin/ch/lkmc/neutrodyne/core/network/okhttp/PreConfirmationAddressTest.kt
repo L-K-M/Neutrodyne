@@ -28,6 +28,16 @@ class PreConfirmationAddressTest {
         }
     }
 
+    /** A DNS64 answer for a public name can carry a LAN address behind NAT64's prefix. */
+    @Test fun nat64AddressesUseTheEmbeddedIpv4Ranges() {
+        for (host in listOf("64:ff9b::c0a8:101", "64:ff9b::7f00:1", "64:ff9b::a01:203", "64:ff9b::a9fe:102")) {
+            assertTrue(isLocalPeerAddress(InetAddress.getByName(host)), host)
+        }
+        for (host in listOf("64:ff9b::808:808", "64:ff9b::101:101", "64:ff9c::c0a8:101")) {
+            assertFalse(isLocalPeerAddress(InetAddress.getByName(host)), host)
+        }
+    }
+
     @Test fun compatibleIpv6LiteralsAreRefusedBeforeConnect() {
         val destinations = PreConfirmationDestinations(Dns { error("literal must not use DNS") }, localPeer)
         for (host in LOCAL_COMPATIBLE) {

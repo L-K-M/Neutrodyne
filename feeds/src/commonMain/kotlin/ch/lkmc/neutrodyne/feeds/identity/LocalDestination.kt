@@ -16,6 +16,9 @@ public object LocalDestination {
     private const val IPV4_PARTS = 4
     private const val IPV4_MAPPED_PREFIX_GROUPS = 5
     private const val IPV4_MAPPED_MARKER = 0xFFFF
+    private const val NAT64_GROUP_0 = 0x0064
+    private const val NAT64_GROUP_1 = 0xFF9B
+    private const val NAT64_PREFIX_GROUPS = 6
     private const val MULTICAST_V4_FIRST_OCTET = 224
     private const val MULTICAST_V6_PREFIX = 0xFF00
     private const val BYTE_MASK = 0xFF
@@ -28,7 +31,8 @@ public object LocalDestination {
      * True when [url] is an absolute URL whose host names a local destination:
      * `localhost`, `*.localhost` and `*.local`; the IPv4 literals of 0/8, 10/8, 100.64/10, 127/8,
      * 169.254/16, 172.16/12 and 192.168/16; the IPv6 literals `::`, `::1`, fc00::/7 and fe80::/10
-     * including local IPv4-compatible (`::/96`) and IPv4-mapped (`::ffff:`) forms; multicast,
+     * including local IPv4-compatible (`::/96`), IPv4-mapped (`::ffff:`) and NAT64 (`64:ff9b::/96`)
+     * forms; multicast,
      * reserved IPv4 and limited broadcast; and ambiguous numeric hosts that cannot be
      * normalized safely. Valid decimal shorthands are classified after normalization.
      * Public hostnames and
@@ -125,6 +129,15 @@ public object LocalDestination {
             else -> false
         }
 
+    /** The IPv4 address in the last 32 bits of [groups], as four octets. */
+    private fun embeddedIpv4(groups: IntArray): List<Int> =
+        listOf(
+            groups[6] shr 8,
+            groups[6] and BYTE_MASK,
+            groups[7] shr 8,
+            groups[7] and BYTE_MASK,
+        )
+
     private fun isLocalIpv6(groups: IntArray): Boolean =
         when {
             // :: unspecified
@@ -155,14 +168,14 @@ public object LocalDestination {
             // Both ::a.b.c.d (compatible) and ::ffff:a.b.c.d (mapped) use the IPv4 ranges.
             groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } &&
                 (groups[5] == 0 || groups[5] == IPV4_MAPPED_MARKER) -> {
-                isLocalIpv4(
-                    listOf(
-                        groups[6] shr 8,
-                        groups[6] and BYTE_MASK,
-                        groups[7] shr 8,
-                        groups[7] and BYTE_MASK,
-                    ),
-                )
+                isLocalIpv4(embeddedIpv4(groups))
+            }
+
+            // 64:ff9b::/96, the well-known NAT64 prefix (RFC 6052): a DNS64 resolver synthesises
+            // these for IPv4-only names, and the NAT64 gateway connects to the embedded IPv4.
+            groups[0] == NAT64_GROUP_0 && groups[1] == NAT64_GROUP_1 &&
+                (2 until NAT64_PREFIX_GROUPS).all { groups[it] == 0 } -> {
+                isLocalIpv4(embeddedIpv4(groups))
             }
 
             else -> {
