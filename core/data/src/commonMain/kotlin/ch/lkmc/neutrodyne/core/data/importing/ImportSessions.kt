@@ -545,7 +545,9 @@ internal class ImportSessions(
         )
     }
 
-    /** `warningsJson`: the read's warnings, folding entry-level name truncation into the adapter's. */
+    /** `warningsJson`: the read's warnings, with `TRUNCATED_NAMES` recomputed as the distinct
+     * shortened names across the adapter's proposals and the classifier's entry names.
+     */
     private fun sessionWarnings(
         document: ImportDocument?,
         classified: ImportClassifier.Result?,
@@ -555,17 +557,24 @@ internal class ImportSessions(
             document.warnings
                 .map { ImportWarning(code = it.code, count = it.count) }
                 .toMutableList()
-        val proposalTruncations =
-            document.groups.count {
-                GroupNames.validate(it.name) is GroupNames.Validation.TooLong
+        // One shortened name across every source: the adapter's proposals, the classifier's
+        // entry names and a raw over-long group name all reduce to the same `GroupNames` key,
+        // so the warning counts the union rather than adding per-source counts (a folder shared
+        // by ten entries is one shortened name, not ten plus the adapter's one).
+        val shortened = HashSet<String>()
+        classified?.truncatedNameKeys?.let { shortened.addAll(it) }
+        shortened.addAll(document.truncatedNameKeys)
+        for (group in document.groups) {
+            if (GroupNames.validate(group.name) is GroupNames.Validation.TooLong) {
+                GroupNames.truncate(group.name)?.let { shortened += it.nameKey }
             }
-        val truncated = (classified?.truncatedNames ?: 0) + proposalTruncations
-        if (truncated > 0) {
+        }
+        if (shortened.isNotEmpty()) {
             val index = warnings.indexOfFirst { it.code == ImportDocumentWarning.TRUNCATED_NAMES }
             if (index >= 0) {
-                warnings[index] = warnings[index].copy(count = warnings[index].count + truncated)
+                warnings[index] = warnings[index].copy(count = shortened.size)
             } else {
-                warnings += ImportWarning(code = ImportDocumentWarning.TRUNCATED_NAMES, count = truncated)
+                warnings += ImportWarning(code = ImportDocumentWarning.TRUNCATED_NAMES, count = shortened.size)
             }
         }
         return warnings.ifEmpty { null }

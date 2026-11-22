@@ -223,7 +223,30 @@ class ImportClassifierTest {
             assertEquals(2, names.size, "empty drops, 'tech' dedupes by nameKey")
             assertEquals("Tech", names[0])
             assertEquals(GroupNames.MAX_CODE_POINTS, names[1].length)
-            assertEquals(1, result.truncatedNames)
+            assertEquals(setOf(requireNotNull(GroupNames.truncate(overlong)).nameKey), result.truncatedNameKeys)
+        }
+
+    @Test
+    fun overlongGroupNamesCountOncePerDistinctName() =
+        runTest {
+            val first = "a".repeat(GroupNames.MAX_CODE_POINTS + 5)
+            val second = "b".repeat(GroupNames.MAX_CODE_POINTS + 5)
+            val result =
+                classifier.classify(
+                    listOf(
+                        entry("https://a.example.com/rss", groups = listOf(first)),
+                        entry("https://b.example.com/rss", groups = listOf(first, second)),
+                        entry("https://c.example.com/rss", groups = listOf(first)),
+                    ),
+                )
+
+            assertEquals(
+                setOf(
+                    requireNotNull(GroupNames.truncate(first)).nameKey,
+                    requireNotNull(GroupNames.truncate(second)).nameKey,
+                ),
+                result.truncatedNameKeys,
+            )
         }
 
     private suspend fun classify(vararg entries: ImportEntry) = classifier.classify(entries.toList()).items
