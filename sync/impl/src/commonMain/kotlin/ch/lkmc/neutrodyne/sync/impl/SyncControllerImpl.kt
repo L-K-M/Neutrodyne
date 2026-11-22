@@ -889,7 +889,10 @@ class SyncControllerImpl(
         linkFlow.showCode(start.userCode, start.verificationUri, expiresAtMs)
         var intervalSeconds = start.interval.coerceAtLeast(MIN_LINK_INTERVAL_SECONDS)
         while (true) {
-            delay(intervalSeconds * 1_000L)
+            // Wake at the code's expiry even when the poll interval is longer, so the
+            // failure lands at the lifetime instead of a whole interval later.
+            val remainingMs = (expiresAtMs - clock.now()).coerceAtLeast(0L)
+            delay(minOf(intervalSeconds * 1_000L, remainingMs))
             // The server should answer `expired_token`, but the code's own lifetime is the
             // client's stop condition too: a publisher that keeps answering `authorization_pending`
             // (or a delayed poll that outran the lifetime) must not poll forever.
