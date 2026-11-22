@@ -23,7 +23,6 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
@@ -594,12 +593,11 @@ private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
     background: Boolean,
     onFocusGain: () -> Unit,
 ) {
-    val density = LocalDensity.current
     // Referenced inside the effect below: a restarting effect must read the current
     // callback, not capture the composition-time lambda.
     val focusGain by androidx.compose.runtime.rememberUpdatedState(onFocusGain)
-    DisposableEffect(window, density) {
-        window.minimumSize = minimumWindowDimension(density)
+    DisposableEffect(window) {
+        window.minimumSize = minimumWindowDimension()
 
         // 11's `--background` start: iconified until the user restores it.
         if (background) window.extendedState = window.extendedState or Frame.ICONIFIED

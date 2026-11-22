@@ -436,11 +436,19 @@ stateDiagram-v2
 | Tray icon | Shown only in `Hidden`. Menu: Show Neutrodyne · Play / Pause (label follows the state; disabled with nothing loaded) · Next · separator · Quit. Windows: left click shows the window. Tooltip "Neutrodyne — {episode title}", truncated to 60 characters. Icons: `tray/neutrodyne-tray-{16,22,32}.png`; on macOS the monochrome template image `tray/neutrodyne-template.png` ([08 Brand assets](08-ui-ux.md#brand-assets)). Compose `Tray` on AWT `SystemTray` ([tray docs](https://kotlinlang.org/docs/multiplatform/compose-desktop-tray.html)) |
 | macOS conventions | Cmd+Q quits; clicking the Dock icon while hidden shows the window (`AppReopenedListener`, [java.awt.Desktop](https://docs.oracle.com/en/java/javase/25/docs/api/java.desktop/java/awt/Desktop.html)); the Dock icon stays while the app runs |
 | Window state | `desktop.window_bounds` = `{"screen":"<GraphicsDevice id>","x":…,"y":…,"width":…,"height":…,"maximised":false}` in AWT user-space pixels, written 1 s after the last move or resize and at quit. Restore on the same screen when it exists and the rectangle overlaps its usable bounds by ≥ 50 %; otherwise 1200 × 800 dp clamped to 90 % of the primary screen, centred |
-| Minimum size | 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)), converted with the window's density; width classes follow [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) |
+| Minimum size | 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)), which is 600 × 480 AWT user-space units at every scale; width classes follow [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) |
 
-**Implementation note (2026-11-06, MD4).** The minimum is converted through
-`minimumWindowDimension(density)` (`WindowBounds.MIN_WIDTH/HEIGHT` in dp at the window's
-density), unit-tested at 100 % and 200 % scale.
+**Implementation note (2026-11-06, MD4; superseded by the 2026-11-22 note below).** The minimum
+was converted through `minimumWindowDimension(density)` (`WindowBounds.MIN_WIDTH/HEIGHT` in dp at
+the window's density), unit-tested at 100 % and 200 % scale.
+
+**Implementation note (2026-11-22).** That conversion was wrong. `Window.minimumSize` is in AWT
+user space, already scaled by the OS, and Compose Desktop sizes windows in dp one to one with it,
+so multiplying by the density made a Retina window refuse to be smaller than 1200 × 960, taller
+than a 13-inch MacBook's usable height. `minimumWindowDimension()` now returns 600 × 480.
+Verified live on a 1920 × 1080 Mac with `-Dsun.java2d.uiScale=2`: before, the first window
+opened at 1200 × 960 and refused a 700 × 560 resize; now it takes 700 × 560. Windows fractional
+scaling and Linux scaling are unverified.
 | Title | "Neutrodyne"; while playing "{episode title} — Neutrodyne" (the taskbar and window switchers show it) |
 
 #### Start at login
