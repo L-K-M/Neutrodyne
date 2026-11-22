@@ -197,12 +197,28 @@ class RadioInteractionTest {
             setContent {
                 NeutrodyneTheme(SystemUiState.DEFAULT) {
                     RadioScreen(
-                        RadioState(playlistsLoaded = true, complete = false, loadError = true),
+                        RadioState(loading = false, playlistsLoaded = true, complete = false, loadError = true),
                         RadioActions(),
                     )
                 }
             }
             onNodeWithTag("radio_programme_spinner").assertDoesNotExist()
+            onNodeWithTag("radio_retry").assertIsDisplayed()
+        }
+
+    @Test
+    fun aRetryInFlightAfterAnErrorShowsTheSpinnerNotARetryRow() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(loading = true, playlistsLoaded = true, complete = false, loadError = true),
+                        RadioActions(),
+                    )
+                }
+            }
+            onNodeWithTag("radio_programme_spinner").assertIsDisplayed()
+            // The retry row is owned by loadError alone, so a retry in flight keeps it.
             onNodeWithTag("radio_retry").assertIsDisplayed()
         }
 
