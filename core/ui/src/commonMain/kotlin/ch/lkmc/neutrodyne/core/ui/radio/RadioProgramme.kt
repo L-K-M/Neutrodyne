@@ -695,6 +695,9 @@ internal fun SmallRadioKey(
             fontWeight = FontWeight.Medium,
             lineHeight = 12.sp,
             textAlign = TextAlign.Center,
+            // One line: a long translation cannot grow the key and shift the sign.
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
