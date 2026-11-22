@@ -121,6 +121,26 @@ class RadioViewModelTest : MainDispatcherTest() {
         }
 
     /**
+     * After a relaunch the session is restored paused and not loaded. Its live row is skipped
+     * while it is the loaded item, so the dial must take the restored engine snapshot rather
+     * than read 00:00 when the rows arrive first.
+     */
+    @Test fun aRestoredSessionShowsItsSavedPosition() =
+        runTest {
+            controller.state.nowPlaying.value =
+                testNowPlaying(1).copy(
+                    isPlaying = false,
+                    playWhenReady = false,
+                    phase = PlayerPhase.NOT_LOADED,
+                    position = PositionSnapshot(1, 38_000, 0, 60_000, 1f, false, 0),
+                )
+            withRadio { model, _ ->
+                assertEquals(1L, model.state.value.selectedId)
+                assertEquals(38_000, model.state.value.elapsedMs)
+            }
+        }
+
+    /**
      * A needle seek parked for an episode that is not loaded belongs to the radio's own start.
      * When Up next or a notification loads that episode instead, the dial must follow its ticks,
      * and resuming must not jump back to the parked position.
