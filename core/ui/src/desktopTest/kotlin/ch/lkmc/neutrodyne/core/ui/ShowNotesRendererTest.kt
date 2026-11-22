@@ -12,6 +12,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertLeftPositionInRootIsEqualTo
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -80,6 +81,15 @@ class ShowNotesRendererTest {
         runComposeUiTest {
             setNotes(notesOf(ShowNoteBlock.Paragraph(listOf(ShowNoteSpan.Text("Hello notes")))))
             onNodeWithText("Hello notes").assertIsDisplayed()
+        }
+
+    @Test
+    fun paragraphStartsWithThePageContentInset() =
+        runComposeUiTest {
+            setNotes(notesOf(ShowNoteBlock.Paragraph(listOf(ShowNoteSpan.Text("Hello notes")))))
+            // 08 Episode detail: the page's title and header sit 16 dp in from the pane edge, and
+            // the note blocks must line up with them instead of touching it.
+            onNodeWithText("Hello notes").assertLeftPositionInRootIsEqualTo(CONTENT_PADDING)
         }
 
     @Test
@@ -564,6 +574,9 @@ class ShowNotesRendererTest {
     private companion object {
         /** 08's show-notes image height cap, converted to px through the node's density. */
         val IMAGE_MAX_HEIGHT_PX = 480.dp
+
+        /** The episode page's horizontal text inset (08 Episode detail). */
+        val CONTENT_PADDING = 16.dp
 
         const val TALL_IMAGE_URL = "https://example.com/tall.png"
 

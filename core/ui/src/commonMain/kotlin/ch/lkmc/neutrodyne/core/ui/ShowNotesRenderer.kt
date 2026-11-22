@@ -101,15 +101,26 @@ public fun LazyListScope.showNotes(
 ) {
     notes.blocks.forEachIndexed { index, block ->
         item(key = "note-$index", contentType = block.contentType()) {
-            ShowNoteBlockContent(
-                block = block,
-                imageMode = imageMode,
-                durationMs = durationMs,
-                onLink = onLink,
-                onTimestamp = onTimestamp,
-                onLoadImages = onLoadImages,
-                level = 0,
-            )
+            // The episode page's title and header sit 16 dp in from the pane edge (08 Episode
+            // detail); text blocks take the same inset so the notes line up with them. Images
+            // keep their full-bleed width, so only the other blocks are padded.
+            val inset =
+                if (block is ShowNoteBlock.Image) {
+                    Modifier
+                } else {
+                    Modifier.padding(horizontal = CONTENT_PADDING)
+                }
+            Box(inset) {
+                ShowNoteBlockContent(
+                    block = block,
+                    imageMode = imageMode,
+                    durationMs = durationMs,
+                    onLink = onLink,
+                    onTimestamp = onTimestamp,
+                    onLoadImages = onLoadImages,
+                    level = 0,
+                )
+            }
         }
     }
 }
@@ -458,6 +469,9 @@ private const val STYLE_CODE = 8
 
 private const val HEADING_LARGE_MAX_LEVEL = 2
 private const val MAX_LIST_LEVEL = 4
+
+/** The episode page's `H_PADDING` text inset (08 Episode detail), applied to note blocks. */
+private val CONTENT_PADDING = 16.dp
 
 private val PARAGRAPH_GAP = 12.dp
 private val HEADING_TOP_GAP = 16.dp
