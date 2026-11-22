@@ -3006,9 +3006,12 @@ as the fallback for menu-less compositions (the AC1 `runComposeUiTest` checklist
 as `Key.Backspace` (AWT `VK_BACK_SPACE`); `Key.Delete` is forward delete (fn+delete), which
 compact Mac keyboards lack. The four list handlers share `KeyEvent.isDeleteKey()` in `:core:ui`
 so a focused programme slip, Up next row, Library selection and completed download respond to
-the key a Mac labels "delete". Backspace stays with a text field: the radio, Up next and
-Downloads handlers sit on a row, and the Library composes no text field, so selection mode
-never takes the key from an editor.
+the key a Mac labels "delete". The mapping is not Mac-only: `isDeleteKey()` accepts Backspace
+and Delete on every desktop platform, so Windows and Linux get the same removal. All four
+paths stay reversible: the radio and Up next offer undo, while Library unsubscribe and
+completed-download deletion confirm first. Backspace stays with a text field: the radio,
+Up next and Downloads handlers sit on a row, and the Library composes no text field, so
+selection mode never takes the key from an editor.
 
 `KeyboardShortcutsKey` (MD4; Help › Keyboard shortcuts on the desktop) shows 11's list grouped as Playback, Navigation, Library and Window, with the platform's modifier names ("Ctrl", "⌘"). On Android `MainActivity` overrides `Activity.onProvideKeyboardShortcuts` (an Activity callback, independent of Compose) to list the root keys in the system shortcut helper (Meta+/).
 
