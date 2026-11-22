@@ -147,6 +147,15 @@ class UpNextScreenTest {
             assertEquals(listOf<EpisodeAction>(EpisodeAction.Open(3)), actions)
         }
 
+    // A Mac's key labelled "delete" arrives as Backspace, so it must remove the row too.
+    @Test fun keyboardBackspaceRemovesRow() =
+        runDesktopComposeUiTest(width = 650, height = 950) {
+            content()
+            onNodeWithText("Episode 3").requestFocus()
+            onNodeWithText("Episode 3").performKeyInput { pressKey(Key.Backspace) }
+            assertEquals(listOf(3L), removals)
+        }
+
     @Test fun mouseContextMenuMovesRows() =
         runDesktopComposeUiTest(width = 650, height = 950) {
             content()

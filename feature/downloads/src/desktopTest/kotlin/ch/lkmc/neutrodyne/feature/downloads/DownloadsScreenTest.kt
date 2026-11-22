@@ -119,6 +119,33 @@ class DownloadsScreenTest {
             assertEquals(listOf(3L), deleted)
         }
 
+    // A Mac's key labelled "delete" arrives as Backspace, so it must delete the row too.
+    @Test fun backspaceDeletesCompletedRow() =
+        runDesktopComposeUiTest(width = 900, height = 1400) {
+            val overview =
+                empty.copy(
+                    completed =
+                        listOf(testDownloadEntry(3, DownloadState.COMPLETED)),
+                )
+            val deleted = mutableListOf<Long>()
+            setContent {
+                CompositionLocalProvider(
+                    LocalAppNavigator provides RecordingAppNavigator(),
+                    LocalPlatformKind provides PlatformKind.DESKTOP,
+                ) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
+                        Screen(
+                            DownloadsUiState(overview = overview, storage = storage, offline = true),
+                            onDelete = { deleted += it },
+                        )
+                    }
+                }
+            }
+            onNodeWithContentDescription("Episode 3. Podcast. 0 B").performMouseInput { click(centerLeft) }
+            onNodeWithContentDescription("Episode 3. Podcast. 0 B").performKeyInput { pressKey(Key.Backspace) }
+            assertEquals(listOf(3L), deleted)
+        }
+
     @Test fun onlyTwoHighestPriorityNoticesRender() =
         runDesktopComposeUiTest(width = 900, height = 1200) {
             val overview =

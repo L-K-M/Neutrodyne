@@ -112,6 +112,7 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.designsystem.radio.rememberClickSound
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
+import ch.lkmc.neutrodyne.core.ui.isDeleteKey
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_played
@@ -504,7 +505,7 @@ private fun RadioSlip(
                 .focusRequester(focusRequester)
                 .focusProperties { canFocus = true }
                 .onKeyEvent {
-                    if (it.type == KeyEventType.KeyDown && it.key == Key.Delete) {
+                    if (it.type == KeyEventType.KeyDown && it.isDeleteKey()) {
                         discard()
                         true
                     } else {

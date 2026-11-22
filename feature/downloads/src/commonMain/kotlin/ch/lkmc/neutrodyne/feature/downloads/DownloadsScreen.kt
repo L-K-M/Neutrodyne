@@ -94,6 +94,7 @@ import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadCommandText
 import ch.lkmc.neutrodyne.core.ui.downloadSize
 import ch.lkmc.neutrodyne.core.ui.downloadWaitCommand
+import ch.lkmc.neutrodyne.core.ui.isDeleteKey
 import ch.lkmc.neutrodyne.core.ui.onEpisodePointerGesture
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -497,8 +498,8 @@ private fun DownloadEntryRow(
                 if (event.type != KeyEventType.KeyDown) {
                     false
                 } else {
-                    when (event.key) {
-                        Key.Enter, Key.NumPadEnter -> {
+                    when {
+                        event.key == Key.Enter || event.key == Key.NumPadEnter -> {
                             if (rowFocused) {
                                 onOpen(id)
                                 true
@@ -507,7 +508,7 @@ private fun DownloadEntryRow(
                             }
                         }
 
-                        Key.Delete -> {
+                        event.isDeleteKey() -> {
                             if (completed) {
                                 onDelete(id)
                                 true
@@ -516,12 +517,12 @@ private fun DownloadEntryRow(
                             }
                         }
 
-                        Key.Menu -> {
+                        event.key == Key.Menu -> {
                             menu = true
                             true
                         }
 
-                        Key.F10 -> {
+                        event.key == Key.F10 -> {
                             if (event.isShiftPressed) {
                                 menu = true
                                 true
