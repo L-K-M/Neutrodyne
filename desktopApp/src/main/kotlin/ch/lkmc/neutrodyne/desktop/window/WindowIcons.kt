@@ -57,18 +57,19 @@ internal object WindowIcons {
      * transform maps user space to device space, so the inverse transform gives the rectangle
      * Compose's density-independent window state expects. The physical DPI is deliberately not
      * used: on macOS it is not the display scale and applying it double-counts the transform.
+     * The transform is assumed to carry the OS scale, which holds on Windows and macOS and on
+     * most modern Linux JDKs; a noninvertible transform returns null rather than falling back
+     * to device pixels, which would size the window larger than the display.
      */
     fun primaryScreen(): Screen? =
         runCatching {
             val device = GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice
             val config = device.defaultConfiguration
             val userBounds =
-                runCatching {
-                    config.defaultTransform
-                        .createInverse()
-                        .createTransformedShape(config.bounds)
-                        .bounds
-                }.getOrDefault(config.bounds)
+                config.defaultTransform
+                    .createInverse()
+                    .createTransformedShape(config.bounds)
+                    .bounds
             Screen(
                 id = device.getIDstring(),
                 x = userBounds.x,

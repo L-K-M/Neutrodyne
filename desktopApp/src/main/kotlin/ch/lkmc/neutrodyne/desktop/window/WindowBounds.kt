@@ -7,8 +7,10 @@ import androidx.compose.ui.unit.dp
 
 /**
  * The primary screen's rectangle in AWT user-space units, which are the density-independent
- * units Compose's `WindowState` uses on the desktop. [id] identifies the display across
- * launches so a restored window can be matched to its screen.
+ * units Compose's `WindowState` uses on the desktop. [id] is AWT's enumeration-order string
+ * (for example `screen0`); it is not a durable display identity, so a future window-bounds
+ * restore must treat a non-match as a fallback to the primary screen, never as proof of which
+ * display the rectangle belongs to.
  */
 internal data class Screen(
     val id: String,
