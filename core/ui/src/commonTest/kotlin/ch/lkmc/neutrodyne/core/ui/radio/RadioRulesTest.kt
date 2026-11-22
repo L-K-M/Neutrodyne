@@ -82,4 +82,15 @@ class RadioRulesTest {
         assertEquals(1L, radioSelectionAfterRemoval(ids, 1, 3))
         assertNull(radioSelectionAfterRemoval(listOf(1L), 1, 1))
     }
+
+    @Test fun revealScrollDeltaFindsTheNearestEdgeAndGivesUpWhenTheItemCannotFit() {
+        // Fully visible: no scroll.
+        assertNull(revealScrollDelta(itemOffset = 10, itemSize = 20, viewportStart = 0, viewportEnd = 100))
+        // Below the viewport: scroll down by the overflow.
+        assertEquals(20f, revealScrollDelta(itemOffset = 90, itemSize = 30, viewportStart = 0, viewportEnd = 100))
+        // Above the viewport: scroll up by the hidden part.
+        assertEquals(-15f, revealScrollDelta(itemOffset = -15, itemSize = 20, viewportStart = 0, viewportEnd = 100))
+        // Too tall for the viewport: the caller scrolls to the item instead.
+        assertNull(revealScrollDelta(itemOffset = 90, itemSize = 120, viewportStart = 0, viewportEnd = 100))
+    }
 }

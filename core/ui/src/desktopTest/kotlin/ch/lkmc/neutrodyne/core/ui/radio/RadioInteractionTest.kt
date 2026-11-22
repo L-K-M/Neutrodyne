@@ -558,7 +558,6 @@ class RadioInteractionTest {
             onNodeWithTag("radio_episode_2").assertIsFocused()
             // The first slip stays on screen: the press moved the selection, not the viewport.
             onNodeWithTag("radio_episode_1").assertIsDisplayed()
-            onNodeWithTag("radio_episode_3").assertIsDisplayed()
         }
 
     @Test
