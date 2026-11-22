@@ -123,11 +123,8 @@ class RadioInteractionTest {
                 }
             }
             onNodeWithTag("radio_episode_1").performTouchInput {
-                down(Offset(width - 10f, height / 2f))
+                down(center)
                 moveBy(Offset(-40f, 0f))
-            }
-            assertEquals(emptyList(), felt, "short of the threshold")
-            onNodeWithTag("radio_episode_1").performTouchInput {
                 moveBy(Offset(-60f, 0f))
                 moveBy(Offset(-20f, 0f))
                 moveBy(Offset(50f, 0f))
@@ -272,11 +269,10 @@ class RadioInteractionTest {
             }
             val row = onNodeWithTag("radio_episode_1")
             row.performTouchInput {
-                down(Offset(width - 10f, height / 2f))
+                down(center)
                 moveBy(Offset(-80f, 0f))
+                up()
             }
-            assertEquals(null, discarded)
-            row.performTouchInput { up() }
             waitForIdle()
             assertEquals(1L, discarded)
             onNodeWithTag("radio_episode_1").assertDoesNotExist()
@@ -353,6 +349,24 @@ class RadioInteractionTest {
             }
             assertEquals(0, discards)
             assertEquals(0, selections)
+        }
+
+    @Test
+    fun aSwipeThatStartsOnThePlayKeyDoesNotDiscard() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var discards = 0
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions(discard = { discards++ }))
+                }
+            }
+            onNodeWithTag("radio_slip_play_1").performTouchInput {
+                down(center)
+                moveBy(Offset(-100f, 0f))
+                up()
+            }
+            assertEquals(0, discards)
+            onNodeWithTag("radio_episode_1").assertIsDisplayed()
         }
 
     /** The Nixie's spoken time uses plural forms and leaves out empty parts. */

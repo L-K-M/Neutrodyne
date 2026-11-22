@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -601,7 +602,11 @@ private fun SlipPlayKey(
         modifier
             .size(SLIP_KEY_TARGET)
             .clip(CircleShape)
-            .semantics { contentDescription = label }
+            // A swipe that begins on the play key is the listener aiming at Play, not discarding
+            // the slip; consuming the horizontal drag keeps the row's discard gesture out.
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, _ -> change.consume() }
+            }.semantics { contentDescription = label }
             .clickable(
                 role = Role.Button,
                 onClickLabel = label,
