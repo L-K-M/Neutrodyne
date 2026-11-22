@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.TlsKind
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
@@ -71,6 +72,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okio.IOException
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 import ch.lkmc.neutrodyne.sync.api.SyncActivity as SyncLiveActivity
@@ -79,6 +81,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncActivity as SyncLiveActivity
 internal enum class LinkAuthKind { LOGIN, INVITE, LINK }
 
 /** RFC 8628 poll outcomes the link-token endpoint reports as `400 {"error": …}`. */
+private val RETRYABLE_POLL_STATUSES = setOf(408, 429)
 private const val AUTHORIZATION_PENDING = "authorization_pending"
 private const val SLOW_DOWN = "slow_down"
 private const val EXPIRED_TOKEN = "expired_token"
@@ -882,48 +885,80 @@ class SyncControllerImpl(
                 linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LINK))
                 return
             }
-        linkFlow.showCode(start.userCode, start.verificationUri, clock.now() + start.expiresIn * 1_000L)
+        val expiresAtMs = clock.now() + start.expiresIn * 1_000L
+        linkFlow.showCode(start.userCode, start.verificationUri, expiresAtMs)
         var intervalSeconds = start.interval.coerceAtLeast(MIN_LINK_INTERVAL_SECONDS)
         while (true) {
             delay(intervalSeconds * 1_000L)
-            try {
-                val token = client.linkToken(server.serverUrl, start.deviceCode)
-                linkFlow.authorising()
-                authorised(server, token, checkNotNull(pendingNodeId), checkNotNull(pendingDeviceId))
-                return
-            } catch (failure: SyncProblemException) {
-                when (failure.error) {
-                    AUTHORIZATION_PENDING -> {
-                        continue
-                    }
+            val token =
+                try {
+                    client.linkToken(server.serverUrl, start.deviceCode)
+                } catch (failure: SyncProblemException) {
+                    when (failure.error) {
+                        AUTHORIZATION_PENDING -> {
+                            continue
+                        }
 
-                    SLOW_DOWN -> {
-                        intervalSeconds += SLOW_DOWN_INCREMENT_SECONDS
-                    }
+                        SLOW_DOWN -> {
+                            intervalSeconds += SLOW_DOWN_INCREMENT_SECONDS
+                            continue
+                        }
 
-                    EXPIRED_TOKEN -> {
+                        EXPIRED_TOKEN -> {
+                            linkFlow.failed(SyncProblem.InvalidCode)
+                            return
+                        }
+
+                        ACCESS_DENIED -> {
+                            linkFlow.failed(SyncProblem.LinkDeclined)
+                            return
+                        }
+
+                        else -> {
+                            linkFlow.failed(SyncProblem.Server(400))
+                            return
+                        }
+                    }
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Throwable) {
+                    if (!isTransientPollFailure(failure)) {
+                        linkFlow.failed(classify(failure))
+                        return
+                    }
+                    if (clock.now() >= expiresAtMs) {
                         linkFlow.failed(SyncProblem.InvalidCode)
                         return
                     }
-
-                    ACCESS_DENIED -> {
-                        linkFlow.failed(SyncProblem.LinkDeclined)
-                        return
-                    }
-
-                    else -> {
-                        linkFlow.failed(SyncProblem.Server(400))
-                        return
-                    }
+                    continue
                 }
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                linkFlow.failed(classify(failure))
-                return
-            }
+            // Outside the retry: the code is consumed once the server has answered with a token.
+            linkFlow.authorising()
+            authorised(server, token, checkNotNull(pendingNodeId), checkNotNull(pendingDeviceId))
+            return
         }
     }
+
+    /**
+     * Approving in a browser on the same phone puts the app in the background, where Android
+     * blocks its network. The code stays valid, so such a failure must not end the link.
+     */
+    private fun isTransientPollFailure(failure: Throwable): Boolean =
+        when (failure) {
+            is SyncTransportException -> {
+                failure.status in RETRYABLE_POLL_STATUSES || failure.status in 500..599
+            }
+
+            is IOException -> {
+                val error = errors.classify(failure)
+                // A socket cut during the handshake also reads as TLS; a rejected certificate is final.
+                error !is NetError.Tls || error.kind == TlsKind.HANDSHAKE
+            }
+
+            else -> {
+                false
+            }
+        }
 
     /** Stores the token and the link identity, then decides the first-link step (10 First-link choices). */
     private suspend fun authorised(
@@ -1088,13 +1123,9 @@ class SyncControllerImpl(
     private suspend fun deviceInfo(): DeviceInfoDto {
         val nodeId = checkNotNull(pendingNodeId) { "no link in progress" }
         val deviceId = checkNotNull(pendingDeviceId) { "no link in progress" }
-        val name =
-            (address.deviceName()?.takeIf { it.isNotBlank() } ?: defaultDeviceName())
-                .trim()
-                .take(ProtocolLimits.MAX_DEVICE_NAME)
         return DeviceInfoDto(
             id = deviceId,
-            name = name,
+            name = deviceName(),
             platform = platformWire(),
             appVersion = build.versionName,
             nodeId = nodeId.value,
@@ -1123,7 +1154,11 @@ class SyncControllerImpl(
             BuildInfo.Platform.DESKTOP -> build.desktop?.os?.wire ?: "linux"
         }
 
-    private suspend fun deviceName(): String = address.deviceName().orEmpty()
+    /** The name this device registers with, and so the one the finished link shows. */
+    private suspend fun deviceName(): String =
+        (address.deviceName()?.takeIf { it.isNotBlank() } ?: defaultDeviceName())
+            .trim()
+            .take(ProtocolLimits.MAX_DEVICE_NAME)
 
     /**
      * Waits for the Android 17 local-network answer. The deferred exists before the state is

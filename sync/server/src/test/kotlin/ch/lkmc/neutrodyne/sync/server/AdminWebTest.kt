@@ -33,18 +33,21 @@ class AdminWebTest {
             val userWeb = f.services.auth.loginWeb("user", "correct password", null)
             val adminWeb = f.services.auth.loginWeb("admin", "correct password", null)
             val device = f.grant(admin)
+            val signedOut = createClient { followRedirects = false }
             for (path in listOf("/link", "/devices", "/library", "/account", "/admin/accounts", "/admin/server")) {
-                client.get(path).expect(HttpStatusCode.Unauthorized)
-                client
+                // /link is opened from the app, so it offers sign-in. The other pages refuse.
+                val refusal = if (path == "/link") HttpStatusCode.Found else HttpStatusCode.Unauthorized
+                signedOut.get(path).expect(refusal)
+                signedOut
                     .get(
                         path,
                     ) { header(HttpHeaders.Authorization, "Bearer ${device.token}") }
-                    .expect(HttpStatusCode.Unauthorized)
-                client
+                    .expect(refusal)
+                signedOut
                     .get(
                         path,
                     ) { header(HttpHeaders.Cookie, "nds_session=${device.token}") }
-                    .expect(HttpStatusCode.Unauthorized)
+                    .expect(refusal)
                 val response = client.get(path) { header(HttpHeaders.Cookie, "nds_session=$adminWeb") }
                 response.expect(HttpStatusCode.OK)
                 assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
@@ -90,6 +93,49 @@ class AdminWebTest {
                     mapOf("csrf" to login.csrf(), "username" to "admin", "password" to "correct password"),
                 ).expect(HttpStatusCode.Found)
             other.get("/account").expect(HttpStatusCode.OK)
+        }
+
+    @Test fun `the approval address signs in and returns to approval`() =
+        authApplication { f ->
+            f.account("user", "correct password")
+            val browser = Browser(createClient { followRedirects = false })
+            val approval = browser.get("/link")
+            approval.expect(HttpStatusCode.Found)
+            assertEquals("/?next=link", approval.headers[HttpHeaders.Location])
+            val login = browser.get("/?next=link")
+            assertTrue(Regex("name=\"next\"[^>]*value=\"link\"").containsMatchIn(login.bodyAsText()))
+            val signedIn =
+                browser.post(
+                    "/login",
+                    mapOf(
+                        "csrf" to login.csrf(),
+                        "next" to "link",
+                        "username" to "user",
+                        "password" to "correct password",
+                    ),
+                )
+            signedIn.expect(HttpStatusCode.Found)
+            assertEquals("/link", signedIn.headers[HttpHeaders.Location])
+            browser.get("/link").expect(HttpStatusCode.OK)
+        }
+
+    @Test fun `sign-in never follows a caller supplied address`() =
+        authApplication { f ->
+            f.account("user", "correct password")
+            val browser = Browser(createClient { followRedirects = false })
+            val login = browser.get("/?next=https://evil.test/")
+            assertFalse(login.bodyAsText().contains("evil.test"))
+            val signedIn =
+                browser.post(
+                    "/login",
+                    mapOf(
+                        "csrf" to login.csrf(),
+                        "next" to "//evil.test/",
+                        "username" to "user",
+                        "password" to "correct password",
+                    ),
+                )
+            assertEquals("/devices", signedIn.headers[HttpHeaders.Location])
         }
 
     @Test fun `mutation forms enforce Origin and CSRF`() =

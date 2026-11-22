@@ -33,7 +33,10 @@
   <string name="sync_setup_done">Fertig</string>
   <string name="sync_setup_disclosure_title">Was %1$s speichert</string>
   <string name="sync_setup_disclosure_body">Deine Abos%1$s, deine Gruppen, Warteschlange, Wiedergabeverlauf und synchronisierte Einstellungen. Wer den Server betreibt, kann sie lesen: Neutrodyne Sync verschlüsselt sie nicht Ende-zu-Ende. Feed-Passwörter werden nur gespeichert, wenn du „Feed-Passwörter teilen“ einschaltest. Audio, Downloads und Bilder werden nie gesendet. Dein Server ruft deine abonnierten Feeds einschließlich privater Feed-Links regelmäßig ab und speichert ihren Inhalt für deine Geräte zwischen.</string>
-  <string name="sync_setup_private_feeds">, darunter %1$d private Feed-Links</string>
+  <plurals name="sync_setup_private_feeds">
+    <item quantity="one">, darunter %1$d privater Feed-Link</item>
+    <item quantity="other">, darunter %1$d private Feed-Links</item>
+  </plurals>
   <string name="sync_setup_encrypted">Die Verbindung ist verschlüsselt (HTTPS).</string>
   <string name="sync_setup_not_encrypted">Die Verbindung ist nicht verschlüsselt (http).</string>
   <string name="sync_setup_identity_read_failed">Der gespeicherte Benutzername konnte nicht gelesen werden. Gib ihn manuell ein oder versuche es erneut.</string>
@@ -76,7 +79,7 @@
   <string name="sync_setup_connect_anyway">Trotzdem verbinden</string>
   <string name="sync_error_offline">Änderungen werden gespeichert und später gesendet.</string>
   <string name="sync_error_unreachable">%1$s kann nicht erreicht werden.</string>
-  <string name="sync_error_certificate">Das Zertifikat von %1$s wird nicht vertraut. Neutrodyne akzeptiert Zertifikate öffentlicher Stellen wie Let\'s Encrypt; selbst signierte Zertifikate werden nicht unterstützt.</string>
+  <string name="sync_error_certificate">Das Zertifikat von %1$s wird nicht vertraut. Neutrodyne akzeptiert Zertifikate öffentlicher Stellen wie Let's Encrypt; selbst signierte Zertifikate werden nicht unterstützt.</string>
   <string name="sync_error_local_network">Neutrodyne braucht Zugriff auf das lokale Netzwerk, um %1$s zu erreichen.</string>
   <string name="sync_error_revoked">Dieses Gerät wurde von %1$s getrennt. Die Bibliothek ist unverändert.</string>
   <string name="sync_error_app_too_old">%1$s benötigt eine neuere Neutrodyne-Version.</string>

@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -30,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -47,6 +50,7 @@ import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.model.PreparedBackup
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_continue
@@ -85,6 +89,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_choice_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_code_lead
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_connect_anyway
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_disclosure_title
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_done
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_get_code
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_identity_read_failed
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_insecure_body
@@ -266,10 +271,12 @@ internal fun SyncSetupScreen(
         }
     }
 
+    // The cabinet, the docked player and the keyboard can leave a step less height than it needs.
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -423,7 +430,7 @@ internal fun SyncSetupScreen(
 
             is LinkState.Linked -> {
                 LinkedStep(
-                    accountName = (state as LinkState.Linked).accountName,
+                    host = host,
                     deviceName = (state as LinkState.Linked).deviceName,
                 )
             }
@@ -531,10 +538,10 @@ private fun AwaitingInputStep(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         DisclosureCard(disclosure)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MethodButton(LinkMethod.CODE, method, stringResource(Res.string.sync_setup_method_code), onMethod)
-            MethodButton(LinkMethod.INVITE, method, stringResource(Res.string.sync_setup_method_invite), onMethod)
-            MethodButton(LinkMethod.PASSWORD, method, stringResource(Res.string.sync_setup_method_password), onMethod)
+        Column(Modifier.fillMaxWidth().selectableGroup()) {
+            MethodOption(LinkMethod.CODE, method, stringResource(Res.string.sync_setup_method_code), onMethod)
+            MethodOption(LinkMethod.INVITE, method, stringResource(Res.string.sync_setup_method_invite), onMethod)
+            MethodOption(LinkMethod.PASSWORD, method, stringResource(Res.string.sync_setup_method_password), onMethod)
         }
         when (method) {
             LinkMethod.CODE -> {
@@ -607,7 +614,7 @@ private fun InviteInput(
             singleLine = true,
             modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
         )
-        Button(onClick = onSubmit, enabled = code.isNotBlank()) {
+        Button(onClick = onSubmit, enabled = code.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(Res.string.sync_continue))
         }
     }
@@ -640,6 +647,7 @@ private fun PasswordInput(
         Button(
             onClick = onSubmit,
             enabled = username.isNotBlank() && password.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Text(stringResource(Res.string.sync_continue))
         }
@@ -647,16 +655,25 @@ private fun PasswordInput(
 }
 
 @Composable
-private fun MethodButton(
+private fun MethodOption(
     target: LinkMethod,
     current: LinkMethod,
     label: String,
     onMethod: (LinkMethod) -> Unit,
 ) {
-    if (target == current) {
-        Button(onClick = { onMethod(target) }) { Text(label) }
-    } else {
-        OutlinedButton(onClick = { onMethod(target) }) { Text(label) }
+    val selected = target == current
+    // Rows rather than buttons: three labels do not fit across a phone, least of all translated.
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = METHOD_OPTION_MIN_HEIGHT)
+                .selectable(selected = selected, role = Role.RadioButton, onClick = { onMethod(target) }),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -666,10 +683,12 @@ private fun ShowCodeStep(
     onCancel: () -> Unit,
 ) {
     // The code is read aloud spelled out, so screen readers do not stumble over letter pairs.
-    val spoken = state.userCode.chunked(1).joinToString(" ")
+    // The server already hyphenates the code, so regroup only its characters.
+    val groups = state.userCode.filter(Char::isLetterOrDigit).chunked(CODE_GROUP_LENGTH)
+    val spoken = groups.joinToString(", ") { it.toList().joinToString(" ") }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            state.userCode.chunked(4).joinToString("-"),
+            groups.joinToString("-"),
             style = MaterialTheme.typography.displaySmall,
             fontFamily = FontFamily.Monospace,
             modifier =
@@ -711,10 +730,7 @@ private fun ChooseFirstLinkStep(
     onChoice: (FirstLinkChoice) -> Unit,
     onContinue: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             stringResource(Res.string.sync_setup_choice_title, host),
             style = MaterialTheme.typography.titleMedium,
@@ -765,6 +781,8 @@ private sealed interface BackupPhase {
 }
 
 private const val BACKUP_MIME = "application/zip"
+private const val CODE_GROUP_LENGTH = 4
+private val METHOD_OPTION_MIN_HEIGHT = 48.dp
 
 /**
  * 08 Linking a device, "Use the server's library on this device": the confirmation before the
@@ -965,14 +983,18 @@ private fun MergingStep(state: LinkState.Merging) {
 
 @Composable
 private fun LinkedStep(
-    accountName: String,
+    host: String,
     deviceName: String,
 ) {
+    val navigator = LocalAppNavigator.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            stringResource(Res.string.sync_setup_linked_done, accountName, deviceName),
+            stringResource(Res.string.sync_setup_linked_done, host, deviceName),
             style = MaterialTheme.typography.bodyMedium,
         )
+        Button(onClick = { navigator.pop() }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(Res.string.sync_setup_done))
+        }
     }
 }
 

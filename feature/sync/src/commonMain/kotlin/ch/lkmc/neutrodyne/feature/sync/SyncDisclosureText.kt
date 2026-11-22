@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_not_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_private_feeds
 import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -32,7 +33,11 @@ internal fun DisclosureText(
 ) {
     val privateFeeds =
         if (disclosure.privateFeedLinks > 0) {
-            stringResource(Res.string.sync_setup_private_feeds, disclosure.privateFeedLinks)
+            pluralStringResource(
+                Res.plurals.sync_setup_private_feeds,
+                disclosure.privateFeedLinks,
+                disclosure.privateFeedLinks,
+            )
         } else {
             ""
         }

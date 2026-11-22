@@ -152,7 +152,7 @@ class SyncServerStoresTest {
 
             assertEquals(2, harness.controller.fake.disclosureReads.size)
             onNodeWithText("What sync.example.org stores").assertIsDisplayed()
-            onNodeWithText("including 1 private feed links", substring = true).assertIsDisplayed()
+            onNodeWithText("including 1 private feed link,", substring = true).assertIsDisplayed()
         }
 
     @Test

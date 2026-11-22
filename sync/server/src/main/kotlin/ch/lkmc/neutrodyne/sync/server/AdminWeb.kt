@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.server
 
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import io.ktor.http.ContentType
 import io.ktor.http.Cookie
 import io.ktor.http.CookieEncoding
@@ -66,7 +68,15 @@ internal class AdminWeb(
                 }
             }
             get("/link") {
-                val csrf = session(call)
+                val csrf =
+                    try {
+                        session(call)
+                    } catch (failure: ProtocolException) {
+                        if (failure.code != SyncErrorCode.UNAUTHORIZED) throw failure
+                        // The app hands out this address, so it is often opened signed out.
+                        call.respondRedirect("/?$NEXT=$NEXT_LINK")
+                        return@get
+                    }
                 page(
                     call,
                     "Approve a device",
@@ -134,7 +144,8 @@ internal class AdminWeb(
                                 call.clientIp(config),
                             )
                         services.sessions.setCookie(call, raw)
-                        call.respondRedirect("/devices")
+                        // A fixed choice, never an address from the request.
+                        call.respondRedirect(if (form[NEXT] == NEXT_LINK) "/link" else "/devices")
                     }
                     post("/setup") {
                         val form = form(call, FormSession.ANONYMOUS)
@@ -304,6 +315,7 @@ internal class AdminWeb(
         val csrf = services.sessions.preAuth(call)
         page(call, "Sign in") {
             formFor("/login", csrf, "Sign in") {
+                if (call.request.queryParameters[NEXT] == NEXT_LINK) hidden(NEXT, NEXT_LINK)
                 field("username", "Username")
                 field("password", "Password", InputType.password)
             }
@@ -533,6 +545,8 @@ internal class AdminWeb(
 
     private companion object {
         const val MAX_FORM_BYTES = 16_384
+        const val NEXT = "next"
+        const val NEXT_LINK = "link"
         const val LINK = "nds_link"
         const val CODE = "nds_link_code"
         const val INTERVAL = "nds_link_interval"

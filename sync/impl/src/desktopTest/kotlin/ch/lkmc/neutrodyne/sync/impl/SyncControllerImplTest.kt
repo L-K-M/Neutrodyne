@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.TlsKind
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
@@ -69,6 +70,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import okio.IOException
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -76,6 +78,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * The link-flow actions of [SyncControllerImpl] against a scripted [SyncClient]: discovery and the
@@ -489,6 +492,113 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun aCodeSurvivesNetworkLossWhileTheBrowserApprovesIt() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                var polls = 0
+                h.client.linkToken = {
+                    // Android blocks a background app's network while the user is in the browser.
+                    when (++polls) {
+                        1, 2 -> throw IOException("Software caused connection abort")
+                        3 -> throw SyncTransportException(502, null, "proxy restarting")
+                        else -> token()
+                    }
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) {
+                    h.linkFlow.state.value is LinkState.ChooseFirstLink || h.linkFlow.state.value is LinkState.Failed
+                }
+                assertTrue(h.linkFlow.state.value is LinkState.ChooseFirstLink, "${h.linkFlow.state.value}")
+                assertEquals(4, polls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun anInterruptedHandshakeKeepsTheCode() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.classifier.result = NetError.Tls(TlsKind.HANDSHAKE)
+                var polls = 0
+                h.client.linkToken = {
+                    if (++polls == 1) throw IOException("connection closed during handshake")
+                    token()
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) {
+                    h.linkFlow.state.value is LinkState.ChooseFirstLink || h.linkFlow.state.value is LinkState.Failed
+                }
+                assertTrue(h.linkFlow.state.value is LinkState.ChooseFirstLink, "${h.linkFlow.state.value}")
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun networkLossBeyondTheCodesLifetimeExpiresIt() =
+        runTest {
+            val h = harness(this)
+            try {
+                var polls = 0
+                h.client.linkToken = {
+                    if (++polls == 2) h.clock.advanceBy(10.minutes)
+                    throw IOException("offline")
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(SyncProblem.InvalidCode, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertEquals(2, polls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun anUntrustedCertificateEndsTheCodeAtOnce() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.classifier.result = NetError.Tls(TlsKind.UNTRUSTED_CERTIFICATE)
+                var polls = 0
+                h.client.linkToken = {
+                    polls++
+                    throw IOException("untrusted")
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(SyncProblem.CertificateRejected, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertEquals(1, polls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFailureAfterTheGrantNeverRepollsTheConsumedCode() =
+        runTest {
+            val h = harness(this)
+            try {
+                var polls = 0
+                h.client.linkToken = {
+                    polls++
+                    token()
+                }
+                h.client.accountFailure = IOException("offline")
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                h.tick(30_000)
+                assertEquals(1, polls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun cancellingTheFlowStopsTheCodePolling() =
         runTest {
             val h = harness(this)
@@ -505,6 +615,20 @@ class SyncControllerImplTest {
                 h.tick()
                 assertEquals(0, polls)
                 assertEquals(LinkState.Address, h.linkFlow.state.value)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun theFinishedLinkNamesAnUnrenamedDevice() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(0, 0, 0, 0, 0), 1, 0, 0)
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Linked }
+                assertTrue((h.linkFlow.state.value as LinkState.Linked).deviceName.isNotBlank())
             } finally {
                 h.close()
             }
@@ -3124,6 +3248,7 @@ internal class ScriptedSyncClient : SyncClient {
     var revoke: suspend (String) -> Unit = {}
     var logoutHandler: suspend () -> Unit = {}
     var summary: AccountSummary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
+    var accountFailure: Exception? = null
     var changesHandler: suspend (String?) -> ChangesPage = { emptyPage() }
     var syncHandler: suspend (String?, List<ChangeDto>) -> SyncResponse = { _, changes -> defaultSyncResponse(changes) }
     var resetHandler: suspend (String, String, String?) -> AccountSummary = { _, _, _ ->
@@ -3214,6 +3339,7 @@ internal class ScriptedSyncClient : SyncClient {
 
     override suspend fun account(): AccountSummary {
         calls += "account"
+        accountFailure?.let { throw it }
         return summary
     }
 

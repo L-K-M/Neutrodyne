@@ -1289,6 +1289,8 @@ sequenceDiagram
   N->>N: store the token, then the first-link step
 ```
 
+- A signed-out browser opening `/link` is sent to sign in and returns to `/link` afterwards. The return is a fixed choice, never an address from the request.
+- A poll that fails on the network, with 408, 429 or 5xx is repeated until the code expires: Android blocks a background app's network while the user approves in a browser on the same phone. A rejected certificate ends the flow at once.
 - On a linked device: Settings › Sync › "Link another device" → enter the code → the approval sheet names the new device ("Pixel 8 · Android · Neutrodyne 1.0.0") and asks "Link this device to your library?" — the code alone never links anything. On the web page: sign in, open "Approve a device" (`/link`), enter the code, confirm.
 - `slow_down` adds 5 s to the polling interval on the client (RFC 8628 §3.5); `expired_token` after 10 min ends the flow ("The code expired — start again"); `access_denied` after a denial. Implementation note (2026-11-01, MS1): a poll inside the advertised interval is answered `slow_down` from a read transaction without a durable write, and the endpoint is capped per IP before the shared writer; the server no longer ratchets the stored interval because that write was the finding's amplification path.
 
