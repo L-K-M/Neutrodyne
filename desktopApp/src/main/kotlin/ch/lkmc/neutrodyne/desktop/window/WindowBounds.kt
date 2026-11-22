@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -38,14 +37,13 @@ internal data class WindowBounds(
 }
 
 /**
- * The PO-19 minimum as an AWT size at [density] (11 Window sizing: "Minimum 600 × 480 dp,
- * converted with the window's density"). Pure, so the conversion is testable without a display.
+ * The PO-19 minimum as an AWT size. `Window.minimumSize` is in AWT user space, which the OS has
+ * already scaled, and Compose Desktop sizes windows in dp one to one with it, so 600 x 480 dp is
+ * 600 x 480 units at every scale. Multiplying by the density made a Retina window refuse to be
+ * smaller than 1200 x 960, taller than a 13-inch MacBook's usable height.
  */
-internal fun minimumWindowDimension(density: Density): java.awt.Dimension =
-    java.awt.Dimension(
-        with(density) { WindowBounds.MIN_WIDTH.roundToPx() },
-        with(density) { WindowBounds.MIN_HEIGHT.roundToPx() },
-    )
+internal fun minimumWindowDimension(): java.awt.Dimension =
+    java.awt.Dimension(WindowBounds.MIN_WIDTH.value.toInt(), WindowBounds.MIN_HEIGHT.value.toInt())
 
 /**
  * The first-start bounds (11 Window state): 1200 × 800 dp clamped to 90 % of the primary screen
