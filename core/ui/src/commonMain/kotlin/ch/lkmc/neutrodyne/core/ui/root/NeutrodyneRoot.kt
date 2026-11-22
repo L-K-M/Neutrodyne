@@ -654,7 +654,8 @@ private fun dispatchRootKey(
 /**
  * Whether [event] is one of the root's shortcuts, so a focused text field can consume it (08
  * Keyboard and mouse). Mirrors [dispatchRootKey]'s chord set; the window's Ctrl/Cmd+W and Q stay
- * out because the window's close/quit handler owns them.
+ * out because the window's close/quit handler owns them. Escape is not here: it is back on the
+ * desktop, not a text-editing key, so a focused field must let [dispatchRootKey] handle it.
  */
 private fun isRootShortcut(event: KeyEvent): Boolean {
     val ctrl = event.isCtrlPressed || event.isMetaPressed
@@ -663,7 +664,6 @@ private fun isRootShortcut(event: KeyEvent): Boolean {
         Key.Spacebar -> !ctrl && !shift
         Key.DirectionLeft, Key.DirectionRight -> true
         Key.DirectionUp, Key.DirectionDown -> ctrl
-        Key.Escape -> !ctrl && !shift
         Key.Tab -> ctrl
         Key.F, Key.N, Key.O, Key.R, Key.Comma -> ctrl
         Key.F5 -> true

@@ -194,6 +194,23 @@ class RootShortcutTest {
         }
 
     @Test
+    fun escapeGoesBackEvenWhileATextFieldIsFocused() =
+        runComposeUiTest {
+            setContent { TestRoot() }
+
+            focusTarget()
+            pressCtrl(Key.O)
+            onNodeWithText("import-file").assertExists()
+
+            onNodeWithTag("import-field").performClick()
+            onNodeWithTag("import-field").assertIsFocused()
+            waitForIdle()
+            press(Key.Escape)
+
+            onNodeWithText("import-file").assertDoesNotExist()
+        }
+
+    @Test
     fun textFieldFocusReportsEveryTransition() =
         runComposeUiTest {
             setContent { TestRoot() }
@@ -313,7 +330,17 @@ class RootShortcutTest {
                     Text("add-podcast-sheet")
                 }
                 entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") }
-                entry<ImportFileKey>(metadata = NdSceneMetadata.paneDetail()) { Text("import-file") }
+                entry<ImportFileKey>(metadata = NdSceneMetadata.paneDetail()) {
+                    Column(Modifier.fillMaxSize()) {
+                        Text("import-file")
+                        var text by remember { mutableStateOf("") }
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            modifier = Modifier.testTag("import-field").ndTextFieldFocus(),
+                        )
+                    }
+                }
             },
         )
 }
