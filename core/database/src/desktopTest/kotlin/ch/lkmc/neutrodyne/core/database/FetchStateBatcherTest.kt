@@ -121,6 +121,30 @@ class FetchStateBatcherTest {
         }
 
     @Test
+    fun aCancelledDeadlineFreesTheRunScopeAndLeavesTheBatchForTheFinalFlush() =
+        runTest {
+            val writes = mutableListOf<List<PodcastFetchState>>()
+            val run = Job()
+            val batcher =
+                FetchStateBatcher(
+                    write = { writes += it },
+                    clock = TestClock.from(testScheduler),
+                    scope = CoroutineScope(coroutineContext + run),
+                )
+
+            batcher.add(row(failures = 1))
+            batcher.cancelDeadline()
+            runCurrent()
+            assertTrue(run.children.none(), "no deadline job keeps the run's scope open")
+            advanceTimeBy(FetchStateBatcher.MAX_DELAY_MS)
+            runCurrent()
+            assertTrue(writes.isEmpty(), "cancelling the deadline writes nothing")
+            batcher.flush()
+            assertEquals(listOf(1), writes.flatten().map { it.failureCount })
+            run.cancel()
+        }
+
+    @Test
     fun aBackwardWallClockJumpCannotStrandTheDeadline() =
         runTest {
             // The deadline measures elapsed time: a wall-clock setback (NTP, DST, manual change)

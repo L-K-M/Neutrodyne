@@ -501,6 +501,9 @@ internal class FeedRefresher(
                 if (pendingPages.isNotEmpty()) {
                     runBackgroundPaging(request, pendingPages, global, hostPermits)
                 }
+                // The work is done; the finalizer's flush writes what is buffered. Without this
+                // the scope waits for the batcher's deadline job, up to five seconds per run.
+                batcherLock.withLock { batcher }?.cancelDeadline()
             }
             completed = true
         } catch (e: Throwable) {
