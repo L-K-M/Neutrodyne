@@ -304,18 +304,22 @@ internal fun ApplicationScope.NeutrodyneWindow(
         title = windowTitle(nowPlaying?.takeIf { it.isPlaying }?.title),
         icon = icon,
         onKeyEvent = { event ->
-            windowShortcut(event) {
-                requestClose(
-                    behaviour = closeBehaviour,
-                    busy = busy,
-                    onQuit = onQuitRequest,
-                    onHide = { hidden = true },
-                    onIconify = {
-                        activator.iconify()
-                        maybeShowNoTrayHint(appScope, settings, banners)
-                    },
-                )
-            }
+            windowShortcut(
+                event,
+                onCloseRequest = {
+                    requestClose(
+                        behaviour = closeBehaviour,
+                        busy = busy,
+                        onQuit = onQuitRequest,
+                        onHide = { hidden = true },
+                        onIconify = {
+                            activator.iconify()
+                            maybeShowNoTrayHint(appScope, settings, banners)
+                        },
+                    )
+                },
+                onQuitRequest = onQuitRequest,
+            )
         },
     ) {
         // Set the AWT background during apply, before Window's visibility side effect.
@@ -567,25 +571,57 @@ internal suspend fun showNoTrayHintOnce(
 
 private const val NOTIFICATION_ID_NO_TRAY = "shell-no-tray-hint"
 
-/** Ctrl/Cmd+W and Ctrl/Cmd+Q (11 Keyboard shortcuts): both are close requests. */
+/** The two window chords of 11 Keyboard shortcuts, mapped from their key events. */
+internal enum class WindowChord { CLOSE, QUIT }
+
+/**
+ * The pure chord mapping behind the window fallback (11 Keyboard shortcuts): Ctrl or Cmd with W
+ * closes the window, Ctrl or Cmd with Q quits. Key-up events and keys without either modifier map
+ * to null, so typing W or Q never triggers the fallback.
+ */
+private fun windowChord(event: KeyEvent): WindowChord? =
+    windowChord(event.key, event.type, commandHeld = event.isCtrlPressed || event.isMetaPressed)
+
+/** [windowChord] on the event's parts, where [commandHeld] means Ctrl or Cmd is down. */
+internal fun windowChord(
+    key: Key,
+    type: KeyEventType,
+    commandHeld: Boolean,
+): WindowChord? {
+    if (type != KeyEventType.KeyDown || !commandHeld) return null
+
+    return when (key) {
+        Key.W -> WindowChord.CLOSE
+        Key.Q -> WindowChord.QUIT
+        else -> null
+    }
+}
+
+/**
+ * The window-level fallback for the Ctrl/Cmd chords (11 Keyboard shortcuts). The menu's own
+ * accelerators normally win, so this runs only while they stand down (a focused text field or a
+ * menu-less composition): W requests a close, Q quits through [onQuitRequest].
+ */
 private fun windowShortcut(
     event: KeyEvent,
     onCloseRequest: () -> Unit,
-): Boolean {
-    if (event.type != KeyEventType.KeyDown) return false
-    if (!event.isCtrlPressed && !event.isMetaPressed) return false
-
-    return when (event.key) {
-        Key.W, Key.Q -> {
+    onQuitRequest: () -> Unit,
+): Boolean =
+    when (windowChord(event)) {
+        WindowChord.CLOSE -> {
             onCloseRequest()
             true
         }
 
-        else -> {
+        WindowChord.QUIT -> {
+            onQuitRequest()
+            true
+        }
+
+        null -> {
             false
         }
     }
-}
 
 /** The AWT-side window rules: minimum size (PO-19), iconified start, hand-off activation. */
 @Composable
