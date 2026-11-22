@@ -51,21 +51,30 @@ internal object WindowIcons {
             ?.takeIf(File::isFile)
             ?.let { file -> Toolkit.getDefaultToolkit().createImage(file.readBytes()) }
 
-    /** The primary screen once per start; null under headless AWT (smoke without a display). */
+    /**
+     * The primary screen once per start, in user-space units; null under headless AWT (smoke
+     * without a display). `GraphicsConfiguration.bounds` is device space and the default
+     * transform maps user space to device space, so the inverse transform gives the rectangle
+     * Compose's density-independent window state expects. The physical DPI is deliberately not
+     * used: on macOS it is not the display scale and applying it double-counts the transform.
+     */
     fun primaryScreen(): Screen? =
         runCatching {
-            val bounds =
-                GraphicsEnvironment
-                    .getLocalGraphicsEnvironment()
-                    .defaultScreenDevice
-                    .defaultConfiguration
-                    .bounds
+            val device = GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice
+            val config = device.defaultConfiguration
+            val userBounds =
+                runCatching {
+                    config.defaultTransform
+                        .createInverse()
+                        .createTransformedShape(config.bounds)
+                        .bounds
+                }.getOrDefault(config.bounds)
             Screen(
-                x = bounds.x,
-                y = bounds.y,
-                width = bounds.width,
-                height = bounds.height,
-                dpi = Toolkit.getDefaultToolkit().screenResolution,
+                id = device.getIDstring(),
+                x = userBounds.x,
+                y = userBounds.y,
+                width = userBounds.width,
+                height = userBounds.height,
             )
         }.getOrNull()
 
