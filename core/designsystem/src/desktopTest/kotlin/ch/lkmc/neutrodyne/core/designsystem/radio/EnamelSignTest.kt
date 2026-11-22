@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.designsystem.radio
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +65,21 @@ class EnamelSignTest {
             assertEquals(lettering * SMALLEST_LETTERING, cut.lettering(), ADVANCE_TOLERANCE, "letter advance in $room")
         }
 
+    /** A name that ends in a space must letter like the same name without it. */
+    @Test
+    fun aTrailingSpaceDoesNotLetterTheSignAtItsMinimum() =
+        runDesktopComposeUiTest(width = 400, height = 200) {
+            setContent {
+                Column {
+                    EnamelSign(PLAIN_NAME)
+                    EnamelSign(TRAILING_NAME)
+                }
+            }
+            val plain = layout(PLAIN_NAME).lettering()
+            val trailing = layout(TRAILING_NAME).lettering()
+            assertEquals(plain, trailing, ADVANCE_TOLERANCE, "a trailing space changed the lettering")
+        }
+
     private fun ComposeUiTest.width(node: SemanticsNodeInteraction): Dp =
         with(density) {
             node
@@ -80,9 +96,11 @@ class EnamelSignTest {
     // first letter's advance scales with the lettering.
     private fun TextLayoutResult.lettering(): Float = getHorizontalPosition(1, true) - getHorizontalPosition(0, true)
 
-    private fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.layout(): TextLayoutResult {
+    private fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.layout(
+        text: String = NAME,
+    ): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
-        onNodeWithText(NAME, useUnmergedTree = true)
+        onNodeWithText(text, useUnmergedTree = true)
             .fetchSemanticsNode()
             .config
             .getOrNull(SemanticsActions.GetTextLayoutResult)
@@ -93,6 +111,8 @@ class EnamelSignTest {
 
     private companion object {
         const val NAME = "Library"
+        const val PLAIN_NAME = "News"
+        const val TRAILING_NAME = "News "
         const val SIGN = "sign"
         const val SOMEWHAT_LESS = 0.9f
         const val FAR_TOO_LITTLE = 0.6f
