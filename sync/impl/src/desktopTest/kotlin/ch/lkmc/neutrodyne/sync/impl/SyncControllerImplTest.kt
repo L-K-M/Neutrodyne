@@ -79,6 +79,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The link-flow actions of [SyncControllerImpl] against a scripted [SyncClient]: discovery and the
@@ -553,6 +554,27 @@ class SyncControllerImplTest {
                 await(h) { h.linkFlow.state.value is LinkState.Failed }
                 assertEquals(SyncProblem.InvalidCode, (h.linkFlow.state.value as LinkState.Failed).error)
                 assertEquals(2, polls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aPendingCodePastItsLifetimeExpiresInsteadOfPollingForever() =
+        runTest {
+            val h = harness(this)
+            try {
+                var polls = 0
+                h.client.linkToken = {
+                    polls++
+                    // Jump just past the code lifetime so the next loop iteration fails fast.
+                    h.clock.advanceBy(LINK_CODE_LIFETIME_SECONDS.seconds + 1.seconds)
+                    throw SyncProblemException("authorization_pending")
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(SyncProblem.InvalidCode, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertEquals(1, polls)
             } finally {
                 h.close()
             }
@@ -3219,6 +3241,10 @@ internal class Harness(
     }
 }
 
+/** The scripted link code's lifetime and interval, so tests can expire it exactly. */
+private const val LINK_CODE_LIFETIME_SECONDS = 600
+private const val LINK_CODE_INTERVAL_SECONDS = 5
+
 /** A [SyncClient] whose every call is scripted and recorded. */
 internal class ScriptedSyncClient : SyncClient {
     val calls = mutableListOf<String>()
@@ -3234,7 +3260,13 @@ internal class ScriptedSyncClient : SyncClient {
     ) -> TokenResponse = { _, _ -> TokenResponse("nds_test", ACCOUNT_ID, DEVICE_ID, "alice") }
     var invite: suspend (String) -> TokenResponse = { TokenResponse("nds_test", ACCOUNT_ID, DEVICE_ID, "alice") }
     var linkStart: suspend () -> LinkStartResponse = {
-        LinkStartResponse("device-code", "WDJB-MJHT", "https://sync.example/link", 600, 5)
+        LinkStartResponse(
+            "device-code",
+            "WDJB-MJHT",
+            "https://sync.example/link",
+            LINK_CODE_LIFETIME_SECONDS,
+            LINK_CODE_INTERVAL_SECONDS,
+        )
     }
     var linkToken: suspend (String) -> TokenResponse = { TokenResponse("nds_test", ACCOUNT_ID, DEVICE_ID, "alice") }
     var approve: suspend (String) -> LinkApproveResponse = {
