@@ -273,7 +273,9 @@ internal fun RadioProgramme(
                             Arrangement.Center,
                             Alignment.CenterHorizontally,
                         ) {
-                            if (state.loading) {
+                            // A partial first page is still on its way: keep the spinner rather
+                            // than claiming the station is clear before the pager knows.
+                            if (state.loading || !state.complete) {
                                 CircularProgressIndicator(color = Brass, modifier = Modifier.size(24.dp))
                             } else if (!state.loadError && state.playlistsLoaded) {
                                 // Until the groups are read, an empty paper is neither "none" nor "all clear".

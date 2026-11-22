@@ -176,6 +176,21 @@ class RadioInteractionTest {
         }
 
     @Test
+    fun anIncompleteFirstPageKeepsTheSpinnerInsteadOfClaimingAllClear() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        RadioState(playlistsLoaded = true, complete = false),
+                        RadioActions(),
+                    )
+                }
+            }
+            onNodeWithText(getString(Res.string.radio_all_clear)).assertDoesNotExist()
+            onNodeWithText(getString(Res.string.radio_no_playlists_empty)).assertDoesNotExist()
+        }
+
+    @Test
     fun theEmptyRadiosKeysStayWholeOnSmallPhonesAndAtLargeText() {
         // A sideways-scrolling bank pushed Library past the paper's edge from 320 x 800 dp, on
         // most German phones, and at 130 % and 200 % text. The radio reads the window size and
