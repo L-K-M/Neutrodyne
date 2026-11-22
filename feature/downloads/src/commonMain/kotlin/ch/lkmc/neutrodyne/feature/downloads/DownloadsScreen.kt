@@ -590,7 +590,7 @@ private fun DownloadEntryRow(
                 if (total != null && total > 0) {
                     NeedleWindow(
                         ((progress?.downloadedBytes ?: status.downloadedBytes).toFloat() / total).coerceIn(0f, 1f),
-                        Modifier.fillMaxWidth().height(14.dp).padding(top = 2.dp),
+                        Modifier.fillMaxWidth().height(DOWNLOAD_NEEDLE_HEIGHT).padding(top = 2.dp),
                     )
                 } else {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -735,3 +735,6 @@ private val SlipShape = RoundedCornerShape(4.dp)
 // The storage meter keeps a phone's proportions on a wide page, start-aligned with the text
 // above and below it.
 private val GAUGE_MAX_WIDTH = 480.dp
+
+// The brass bezel takes 4.5 dp from each edge; with the 2 dp gap above, 18 dp leaves a 7 dp face.
+private val DOWNLOAD_NEEDLE_HEIGHT = 18.dp

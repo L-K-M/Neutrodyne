@@ -442,7 +442,9 @@ private val MINI_ELEVATION = 6.dp
 
 // The art and the switch keep clear of the faceplate's corner screws.
 private val MINI_END_GAP = 12.dp
-private val NEEDLE_HEIGHT = 14.dp
+
+// The brass bezel takes 4.5 dp from each edge; 18 dp leaves a 9 dp face for the needle.
+private val NEEDLE_HEIGHT = 18.dp
 private val SKIP_KEYS_MIN_WIDTH = 520.dp
 private val SKIP_KEY_TARGET = 48.dp
 private val SKIP_KEY_CAP = 40.dp
