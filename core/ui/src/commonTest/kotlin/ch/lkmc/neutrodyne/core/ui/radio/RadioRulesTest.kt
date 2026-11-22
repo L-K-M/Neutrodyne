@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.radio
 
+import androidx.compose.runtime.saveable.SaverScope
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,5 +82,17 @@ class RadioRulesTest {
         assertEquals(2L, radioSelectionAfterRemoval(ids, 3, 3))
         assertEquals(1L, radioSelectionAfterRemoval(ids, 1, 3))
         assertNull(radioSelectionAfterRemoval(listOf(1L), 1, 1))
+    }
+
+    @Test fun programmeStateSaverKeepsTheFocusHandOff() {
+        val state = RadioProgrammeState().apply { restoreFocus = true }
+        val saved = with(RadioProgrammeState.Saver) { with(TestSaverScope) { save(state) } }
+        assertEquals(listOf("false", "", "true"), saved)
+        val restored = RadioProgrammeState.Saver.restore(saved as List<String>)
+        assertTrue(restored != null && restored.restoreFocus)
+    }
+
+    private object TestSaverScope : SaverScope {
+        override fun canBeSaved(value: Any): Boolean = true
     }
 }
