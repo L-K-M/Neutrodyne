@@ -609,6 +609,65 @@ class DesktopPlaybackTimingTest {
             }
         }
 
+    /**
+     * An item ended but its advance committed nothing (here a stale session revision; a failed
+     * write behaves alike). The Ended latch stayed set and Play only called `engine.play()` on a
+     * finished engine, so playback could never move on short of a relaunch. Play retries the
+     * advance instead.
+     */
+    @Test
+    fun playRetriesTheAdvanceOfAnEndedItemThatCommittedNothing() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.sessions.generation = fixture.sessions.queue.generation + 1
+                fixture.engine.position = 120_000
+                fixture.engine.end()
+                runCurrent()
+                val transitions = {
+                    fixture.sessions.calls.count { it.operation == FakePlaySessionStore.Operation.TRANSITION }
+                }
+                assertEquals(1, transitions(), "the end tried to advance once")
+
+                fixture.controller.play()
+                runCurrent()
+
+                assertEquals(2, transitions(), "Play retries the advance")
+            } finally {
+                fixture.close()
+            }
+        }
+
+    /** Without Play, the next tick's reconcile retries the end against the fresh session. */
+    @Test
+    fun aStaleEndRetriesItsAdvanceOnTheNextTick() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.sessions.generation = fixture.sessions.queue.generation + 1
+                fixture.engine.position = 120_000
+                fixture.engine.end()
+                runCurrent()
+                val transitions = {
+                    fixture.sessions.calls.count { it.operation == FakePlaySessionStore.Operation.TRANSITION }
+                }
+                assertEquals(1, transitions(), "the end tried to advance once")
+
+                advanceTimeBy(1_001) // one 1-s tick
+                runCurrent()
+
+                assertEquals(2, transitions(), "the tick retries the advance")
+            } finally {
+                fixture.close()
+            }
+        }
+
     @Test
     fun endOfEpisodeArmsWhenTheItemLoads() =
         runTest {

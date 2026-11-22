@@ -508,6 +508,11 @@ class DesktopPlaybackController(
                     // The end-of-episode timer completed this item in place; a Play
                     // replays it from the start (06's M5 note).
                     replayFromStart(currentId)
+                } else if (value.engine.state.value == EngineState.Ended && !engineEndedHandled) {
+                    // The item finished and its advance has not committed yet. Play is the
+                    // listener asking to go on, so take the end now rather than at the next tick.
+                    wantPlaying = true
+                    engineState(EngineState.Ended)
                 } else {
                     if (outcome.seekPositionMs == null) applyPausedPickup(value, currentId, ticket)
                     wantPlaying = true
@@ -841,17 +846,22 @@ class DesktopPlaybackController(
             }
         }
 
-    private suspend fun advance(exit: PlaybackExit) {
-        if (!prepared) return
+    /**
+     * Moves the session past the engine's current item. True once the transition or the
+     * session's end committed, even if a later write then took the session over; false when
+     * nothing was written, such as a stale revision after a queue edit raced the end.
+     */
+    private suspend fun advance(exit: PlaybackExit): Boolean {
+        if (!prepared) return false
         val value = requireNotNull(runtime)
         val projection = requireNotNull(projector)
-        val currentId = engineCurrentId ?: return
-        val current = projection.entries.firstOrNull { it.item.episodeId == currentId }?.item ?: return
+        val currentId = engineCurrentId ?: return false
+        val current = projection.entries.firstOrNull { it.item.episodeId == currentId }?.item ?: return false
         // Re-read the live tail before deciding, including edits not yet collected by the projector.
         // The applied generation is only a lagging mirror; expecting it drops the commit
         // when an emission coalesced or an apply was skipped.
         val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-        if (queue.current?.episodeId != current.episodeId) return
+        if (queue.current?.episodeId != current.episodeId) return false
         val revision = SessionRevision(current.episodeId, queue.generation)
         val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
         val entries = value.planner.window(queue, value.media.observe(ids).first())
@@ -863,12 +873,12 @@ class DesktopPlaybackController(
                 value.sessions.endSession(departure, revision, clock.now())
             } else {
                 value.sessions.onTransition(departure, next.episodeId, next.origin, revision, clock.now())
-            } ?: return
+            } ?: return false
         // Publish the generation before the suspending reads below, so the collector cannot
         // mistake this own write for a foreign session and load it paused.
         value.planner.appliedOwnGeneration(generation)
         val committed = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-        if (committed.generation != generation || committed.current?.episodeId != next?.episodeId) return
+        if (committed.generation != generation || committed.current?.episodeId != next?.episodeId) return true
         if (next == null) {
             value.engine.pause()
             projection.apply(committed, emptyList(), listOf(WindowOp.Clear), currentId)
@@ -877,15 +887,16 @@ class DesktopPlaybackController(
             // The end-of-session transaction committed (06's Stopped boundary). `active` is
             // already cleared: a release reading the port sees nothing playing any more.
             stoppedBoundary()
-            return
+            return true
         }
         // The transition transaction committed with the departure saved (06's Transition).
         transitionBoundary(next.episodeId)
-        if (!projectStart(committed)) return
+        if (!projectStart(committed)) return true
         history.record(current)
         wantPlaying = playing
         if (playing) value.engine.play()
         publish()
+        return true
     }
 
     private suspend fun engineState(state: EngineState) {
@@ -916,8 +927,10 @@ class DesktopPlaybackController(
                 engineEndedHandled = true
                 if (sleepTimerCore.state is SleepTimerState.EndOfEpisode) {
                     endOfEpisode()
-                } else {
-                    advance(PlaybackExit.END)
+                } else if (!advance(PlaybackExit.END)) {
+                    // Nothing was written, so keep the end open: the next tick's reconcile
+                    // retries against the fresh session instead of stranding a finished item.
+                    engineEndedHandled = false
                 }
                 return
             }
