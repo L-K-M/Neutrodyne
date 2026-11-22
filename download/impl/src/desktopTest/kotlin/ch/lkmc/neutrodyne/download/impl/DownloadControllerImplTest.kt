@@ -508,6 +508,29 @@ class DownloadControllerImplTest {
             }
         }
 
+    @Test fun cancelStopsAnActiveRowAndIsIdempotent() =
+        runTest {
+            fixture { f ->
+                // The in-memory VERIFYING sub-state is persisted as DOWNLOADING, so this is the
+                // row a VERIFYING tap actually cancels.
+                val id = f.episode()
+                f.insert(id, State.DOWNLOADING)
+                f.controller.cancel(listOf(id))
+                assertNull(f.dao.byEpisode(id))
+                assertEquals(listOf("stop:$id"), f.events.filter { it == "stop:$id" })
+
+                // A racing second tap finds no row and stops nothing again.
+                f.controller.cancel(listOf(id))
+                assertEquals(listOf("stop:$id"), f.events.filter { it == "stop:$id" })
+
+                // A tap after verification completes leaves the completed file alone.
+                val done = f.episode()
+                f.insert(done, State.COMPLETED)
+                f.controller.cancel(listOf(done))
+                assertNotNull(f.dao.byEpisode(done))
+            }
+        }
+
     @Test fun deletionJournalAndUserOnlyTombstones() =
         runTest {
             fixture { f ->
