@@ -71,6 +71,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.measureTime
 
 /**
  * PLAN M1 acceptance 4/7 — the refresh engine's run semantics of 03 "Refresh scheduling": due
@@ -137,6 +139,25 @@ class RefreshEngineTest {
         dueSlackMs = dueSlackMs,
         pagingBudgetMs = pagingBudgetMs,
     )
+
+    /**
+     * The fetch-state batcher's five-second deadline must not hold a fast run open: the run
+     * reported `running` and kept its lock until the timer fired. A 304, the usual answer on a
+     * manual refresh, is the outcome that goes through the batcher. Wall clock on purpose,
+     * since virtual time would skip the delay.
+     */
+    @Test
+    fun aFastRunDoesNotWaitOutTheFetchStateDeadline() =
+        kotlinx.coroutines.runBlocking {
+            val adapter = stubAdapter(mutableMapOf("https://a.example.com/f" to AdapterResult.NotModified(null)))
+            val id = due("https://a.example.com/f")
+            val engine = refresher(adapter)
+
+            val elapsed = measureTime { engine.run(request()) }
+
+            assertTrue(elapsed < FAST_RUN_LIMIT, "a one-feed run took $elapsed")
+            assertTrue(requireNotNull(db.podcastDao().byId(id)).nextRefreshAt != 0L, "the outcome committed")
+        }
 
     @Test
     fun notificationsAreBatchedOncePerRunAndDoNotLeakIntoTheNextRun() =
@@ -2674,3 +2695,6 @@ class RefreshEngineTest {
         const val FLUSH_FAIL_ETAG = "x-flush-fail"
     }
 }
+
+/** Far below the batcher's 5 s deadline and far above a one-feed stub run. */
+private val FAST_RUN_LIMIT = 3.seconds

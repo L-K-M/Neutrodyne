@@ -93,6 +93,18 @@ class FetchStateBatcher internal constructor(
         }
     }
 
+    /**
+     * Cancels the pending deadline flush without writing. The deadline job is a child of [scope],
+     * the run's own scope, so a run whose work ended would otherwise wait out the rest of
+     * [MAX_DELAY_MS] before its finalizer's [flush] could write the batch and report the run done.
+     */
+    suspend fun cancelDeadline() {
+        mutex.withLock {
+            deadlineJob?.cancel()
+            deadlineJob = null
+        }
+    }
+
     /** Writes the remaining outcomes; 03 calls it before user writes and at the run's end. */
     suspend fun flush() {
         mutex.withLock { flushLocked() }
