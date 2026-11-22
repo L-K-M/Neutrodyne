@@ -693,12 +693,18 @@ class SyncApplier(
                 )
             return RecordOutcome.Applied
         }
-        val orderKey = merge.record.stringField("ok")
-        if (orderKey != null && orderKey != existing.orderKey) {
+        // Either merged field can move on its own: a remote reorder wins `ok`, and `addedAt`
+        // merges to the minimum, so an older membership elsewhere lowers it.
+        val orderKey = merge.record.stringField("ok") ?: existing.orderKey
+        val addedAt = merge.record.longField("addedAt") ?: existing.addedAt
+        if (orderKey != existing.orderKey || addedAt != existing.addedAt) {
             db
                 .groupDao()
-                .insertMember(
-                    existing.copy(orderKey = orderKey, addedAt = merge.record.longField("addedAt") ?: existing.addedAt),
+                .updateMemberOrder(
+                    groupId = group.id,
+                    podcastId = podcast.id,
+                    orderKey = orderKey,
+                    addedAt = addedAt,
                 )
         }
         return RecordOutcome.Applied
