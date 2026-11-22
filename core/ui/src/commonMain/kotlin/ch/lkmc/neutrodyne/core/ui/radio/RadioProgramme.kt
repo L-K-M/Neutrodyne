@@ -378,8 +378,20 @@ internal fun RadioProgramme(
                                     actions.selectEpisode(state.episodes[target].id)
                                     focusedId = state.episodes[target].id
                                     scope.launch {
-                                        scroll.animateScrollToItem(target)
-                                        withFrameNanos { }
+                                        // Only move the list when the newly selected slip is not
+                                        // fully in view: a press inside the viewport should change
+                                        // the selection without jumping the reader's place.
+                                        val layoutInfo = scroll.layoutInfo
+                                        val targetInfo =
+                                            layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }
+                                        val fullyVisible =
+                                            targetInfo != null &&
+                                                targetInfo.offset >= layoutInfo.viewportStartOffset &&
+                                                targetInfo.offset + targetInfo.size <= layoutInfo.viewportEndOffset
+                                        if (!fullyVisible) {
+                                            scroll.animateScrollToItem(target)
+                                            withFrameNanos { }
+                                        }
                                         if (scroll.layoutInfo.visibleItemsInfo.any { it.index == target }) {
                                             focusFor(state.episodes[target].id).requestFocus()
                                         }
