@@ -1,40 +1,56 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.impl
 
+import android.content.Context
 import androidx.media3.common.Player
 import androidx.media3.session.CommandButton
+import java.text.DecimalFormatSymbols
 
 internal class MediaButtons(
     private val prefs: PlaybackPrefs,
+    private val context: Context,
     private val currentSpeed: () -> Float = { 1f },
 ) {
-    fun current(speed: Float = currentSpeed()): List<CommandButton> =
-        listOf(
+    fun current(speed: Float = currentSpeed()): List<CommandButton> {
+        val skipBackSeconds = prefs.current.value.skipBackMs / 1000
+        val skipForwardSeconds = prefs.current.value.skipForwardMs / 1000
+        return listOf(
             CommandButton
                 .Builder(backIcon(prefs.current.value.skipBackMs))
                 .setPlayerCommand(Player.COMMAND_SEEK_BACK)
                 .setSlots(CommandButton.SLOT_BACK)
-                .setDisplayName("Back ${prefs.current.value.skipBackMs / 1000} seconds")
+                .setDisplayName(context.getString(R.string.media_skip_back, skipBackSeconds))
                 .build(),
             CommandButton
                 .Builder(forwardIcon(prefs.current.value.skipForwardMs))
                 .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
                 .setSlots(CommandButton.SLOT_FORWARD)
-                .setDisplayName("Forward ${prefs.current.value.skipForwardMs / 1000} seconds")
+                .setDisplayName(context.getString(R.string.media_skip_forward, skipForwardSeconds))
                 .build(),
             CommandButton
                 .Builder(speedIcon(speed))
                 .setSessionCommand(CustomCommands.command(CustomCommands.SPEED_CYCLE))
                 .setSlots(CommandButton.SLOT_OVERFLOW)
-                .setDisplayName("Speed $speed×")
+                .setDisplayName(context.getString(R.string.media_speed, formatSpeed(speed)))
                 .build(),
             CommandButton
                 .Builder(CommandButton.ICON_NEXT)
                 .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .setSlots(CommandButton.SLOT_OVERFLOW)
-                .setDisplayName("Next episode")
+                .setDisplayName(context.getString(R.string.media_next_episode))
                 .build(),
         )
+    }
+
+    /**
+     * The speed reaches the resource as a pre-formatted string (`%1$s`), so its decimal separator comes from
+     * the locale the resources resolved for, as the rest of the label does. `Float.toString` always uses `.`;
+     * swapping only that separator keeps every digit as it was, so the English label is unchanged.
+     */
+    private fun formatSpeed(speed: Float): String {
+        val separator = DecimalFormatSymbols.getInstance(context.resources.configuration.locales[0]).decimalSeparator
+        return speed.toString().replace('.', separator)
+    }
 
     private fun backIcon(ms: Long): Int =
         when (ms) {

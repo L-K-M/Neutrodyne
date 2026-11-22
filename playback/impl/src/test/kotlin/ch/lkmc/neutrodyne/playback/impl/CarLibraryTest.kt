@@ -299,7 +299,7 @@ class CarLibraryTest {
                     { error("Browse activated playback") },
                     ResumptionProvider { error("Unexpected playback") },
                     h.tree,
-                    MediaButtons(h.prefs),
+                    MediaButtons(h.prefs, h.app),
                     h.scope,
                     Dispatchers.IO,
                     ControllerHostIdentity(h.app.packageManager),
@@ -369,7 +369,7 @@ class CarLibraryTest {
                         )
                     },
                     h.tree,
-                    MediaButtons(h.prefs),
+                    MediaButtons(h.prefs, h.app),
                     h.scope,
                     Dispatchers.IO,
                     ControllerHostIdentity(h.app.packageManager),

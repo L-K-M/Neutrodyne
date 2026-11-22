@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.Locale
 import java.util.concurrent.ExecutionException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -39,7 +40,7 @@ class SessionCallbackConnectTest {
                 error("Connection must not resume")
             },
             h.tree,
-            MediaButtons(h.prefs),
+            MediaButtons(h.prefs, h.app),
             h.scope,
             Dispatchers.IO,
             ControllerHostIdentity(h.app.packageManager, facts),
@@ -210,9 +211,52 @@ class SessionCallbackConnectTest {
     }
 
     @Test fun notificationPreferencesKeepSeekSlotsAndEpisodeNext() {
-        val buttons = MediaButtons(PlaybackPrefs(Provider { FakeSettingsRepository() })).current(1.5f)
+        val buttons =
+            MediaButtons(PlaybackPrefs(Provider { FakeSettingsRepository() }), RuntimeEnvironment.getApplication())
+                .current(1.5f)
         assertEquals(Player.COMMAND_SEEK_BACK, buttons[0].playerCommand)
         assertEquals(Player.COMMAND_SEEK_FORWARD, buttons[1].playerCommand)
         assertEquals(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, buttons[3].playerCommand)
+    }
+
+    @Test
+    @Config(qualifiers = "de")
+    fun germanDisplayNamesUseTheApplicationLocale() {
+        withDefaultLocale(Locale.GERMAN) {
+            val buttons =
+                MediaButtons(PlaybackPrefs(Provider { FakeSettingsRepository() }), RuntimeEnvironment.getApplication())
+                    .current(1.5f)
+            assertEquals("30 Sekunden zurück", buttons[0].displayName.toString())
+            assertEquals("30 Sekunden vor", buttons[1].displayName.toString())
+            assertEquals("Tempo 1,5×", buttons[2].displayName.toString())
+            assertEquals("Nächste Episode", buttons[3].displayName.toString())
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "en")
+    fun englishDisplayNamesStayByteIdentical() {
+        withDefaultLocale(Locale.US) {
+            val buttons =
+                MediaButtons(PlaybackPrefs(Provider { FakeSettingsRepository() }), RuntimeEnvironment.getApplication())
+                    .current(1.5f)
+            assertEquals("Back 30 seconds", buttons[0].displayName.toString())
+            assertEquals("Forward 30 seconds", buttons[1].displayName.toString())
+            assertEquals("Speed 1.5×", buttons[2].displayName.toString())
+            assertEquals("Next episode", buttons[3].displayName.toString())
+        }
+    }
+
+    private fun <T> withDefaultLocale(
+        locale: Locale,
+        block: () -> T,
+    ): T {
+        val previous = Locale.getDefault()
+        Locale.setDefault(locale)
+        try {
+            return block()
+        } finally {
+            Locale.setDefault(previous)
+        }
     }
 }

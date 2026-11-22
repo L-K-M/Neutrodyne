@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Unlicense -->
 <resources>
+  <string name="crash_dialog_title">Neutrodyne wurde unerwartet beendet</string>
+  <string name="crash_dialog_text">Neutrodyne wurde unerwartet beendet. Du kannst einen Absturzbericht per E-Mail senden: Deine Mail-App öffnet sich mit dem Bericht im Anhang, und es wird nichts gesendet, bis du dort auf Senden tippst. Der Bericht enthält den Fehler, die App-Version, die Android-Version und das Telefonmodell, aber niemals deine Abonnementliste oder deinen Wiedergabeverlauf; Passwörter und Zugriffstoken werden aus Webadressen in Fehlermeldungen entfernt.</string>
+  <string name="crash_dialog_comment">Was hast du gemacht, als es passiert ist? (optional)</string>
+  <string name="crash_mail_subject">Neutrodyne-Absturzbericht</string>
+  <string name="crash_mail_body">Der Absturzbericht ist angehängt. Ergänze alles, was hilft, das Problem zu reproduzieren.</string>
   <string name="channel_group_new_episodes">Neue Episoden</string>
   <string name="channel_new_episodes_default">Andere Podcasts</string>
   <string name="channel_import_backup">Import und Sicherung</string>

@@ -52,7 +52,7 @@ class SleepTimerCommandsTest {
                         { checkNotNull(h.hub.bridge) },
                         ResumptionProvider { checkNotNull(h.hub.bridge) },
                         h.tree,
-                        MediaButtons(h.prefs),
+                        MediaButtons(h.prefs, h.app),
                         h.scope,
                         kotlinx.coroutines.Dispatchers.IO,
                         ControllerHostIdentity(app.packageManager),
