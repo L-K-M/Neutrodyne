@@ -35,6 +35,17 @@ interface SettingsRepository {
         value: T,
     ): Outcome<Unit, SettingsError>
 
+    /**
+     * Runs [transaction] while holding [key]'s write lock and passes it the [set] of [value]. A
+     * write that must share a Room transaction uses this, never [set] inside that transaction:
+     * sync takes the key's lock before Room's writer, so the opposite order deadlocks both.
+     */
+    suspend fun <T : Any, R> setWithin(
+        key: SettingKey<T>,
+        value: T,
+        transaction: suspend (write: suspend () -> Outcome<Unit, SettingsError>) -> R,
+    ): R
+
     /** Removes the key's stored value so reads fall back to [SettingKey.default]. */
     suspend fun reset(key: SettingKey<*>)
 

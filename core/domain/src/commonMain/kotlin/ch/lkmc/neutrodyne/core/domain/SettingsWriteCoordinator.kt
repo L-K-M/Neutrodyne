@@ -19,7 +19,8 @@ interface SettingsWriteCoordinator {
      * Runs [block] mutually excluded with every other settings write of [key]. Not reentrant: a
      * holder must not call it again for the same key. The lock releases on cancellation and on
      * failure. Record the Room intent and leave its transaction before the DataStore file IO
-     * inside [block]; never hold a Room write transaction across that IO.
+     * inside [block]; never hold a Room write transaction across that IO, except through
+     * [SettingsRepository.setWithin]. Never take this lock while holding Room's writer.
      */
     suspend fun <T> withLock(
         key: SettingKey<*>,
