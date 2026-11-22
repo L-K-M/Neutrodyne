@@ -249,6 +249,72 @@ class DesktopPlaybackTimingTest {
         }
 
     @Test
+    fun aSkipOnTheRestoredSessionMovesWherePlayResumes() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                // Well clear of the two-minute item's end, where a resume starts over.
+                fixture.positions.positions.value = mapOf(1L to StoredPosition(1, 20_000, 0, null))
+                fixture.controller.initialize()
+                runCurrent()
+                assertEquals(
+                    ch.lkmc.neutrodyne.playback.api.PlayerPhase.NOT_LOADED,
+                    fixture.controller.nowPlaying.value
+                        ?.phase,
+                )
+
+                fixture.controller.skipForward()
+                runCurrent()
+                assertEquals(
+                    50_000L,
+                    fixture.controller.nowPlaying.value
+                        ?.position
+                        ?.positionMs,
+                )
+                assertEquals(
+                    50_000L,
+                    fixture.positions.positions.value[1L]
+                        ?.positionMs,
+                )
+
+                fixture.controller.play()
+                runCurrent()
+                assertEquals(50_000L, fixture.engine.position, "Play resumes where the skip moved to")
+            } finally {
+                fixture.close()
+            }
+        }
+
+    /**
+     * The start rule restarts a played item, or one within 30 s of its end, at 0. A seek on the
+     * restored session is the listener's explicit start, so Play must begin there in both cases.
+     */
+    @Test
+    fun playStartsAtARestoredSeekOnAPlayedOrNearlyFinishedItem() =
+        runTest {
+            for ((stored, expected) in listOf(
+                StoredPosition(1, 20_000, 0, 5L) to 50_000L,
+                StoredPosition(1, 70_000, 0, null) to 100_000L,
+            )) {
+                val fixture = TimingFixture(this)
+                try {
+                    fixture.positions.positions.value = mapOf(1L to stored)
+                    fixture.controller.initialize()
+                    runCurrent()
+
+                    fixture.controller.skipForward()
+                    runCurrent()
+                    fixture.controller.play()
+                    runCurrent()
+
+                    assertEquals(expected, fixture.engine.position, "Play starts at the seek from $stored")
+                } finally {
+                    fixture.close()
+                }
+            }
+        }
+
+    @Test
     fun automaticTransitionCapturesTheBoundaryThroughTheSharedRules() =
         runTest {
             val fixture = TimingFixture(this)

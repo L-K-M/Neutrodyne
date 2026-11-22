@@ -157,6 +157,9 @@ class DesktopPlaybackController(
      */
     private var engineEndedHandled = false
 
+    /** A seek on the restored, not yet loaded session: the next Resume starts there. */
+    private var restoredSeek: RestoredSeek? = null
+
     /**
      * The item the end-of-episode timer completed in place. It stays loaded, so a user
      * seek or Play on it starts a replay occurrence (06's M5 note, Android's
@@ -518,11 +521,16 @@ class DesktopPlaybackController(
             }
 
             is StartOutcome.Committed -> {
+                val startMs =
+                    restoredSeek
+                        ?.takeIf { request == StartRequest.Resume && it.episodeId == outcome.queue.current?.episodeId }
+                        ?.positionMs ?: outcome.startPositionMs
+                restoredSeek = null
                 val old = projector?.entries?.firstOrNull()?.item
                 // Publish the generation before projectStart's suspending reads, so the
                 // collector cannot mistake this own write for a foreign session and load it paused.
                 value.planner.appliedOwnGeneration(outcome.queue.generation)
-                if (!projectStart(outcome.queue, outcome.startPositionMs, ticket)) return PlayResult.ServiceUnavailable
+                if (!projectStart(outcome.queue, startMs, ticket)) return PlayResult.ServiceUnavailable
                 requireIntent(ticket)
                 if (old != null && old.episodeId != outcome.queue.current?.episodeId) history.record(old)
                 // The start's session transaction committed; a changed current is a transition.
@@ -753,13 +761,48 @@ class DesktopPlaybackController(
     }
 
     private suspend fun seek(requestedMs: Long) {
-        if (!prepared) return
+        if (!prepared) {
+            seekRestored(requestedMs)
+            return
+        }
         val value = requireNotNull(runtime)
         if (completedBoundary != null && completedBoundary == engineCurrentId) armReplay()
         val target = requestedMs.coerceAtLeast(0).let { durationMs?.let(it::coerceAtMost) ?: it }
         value.engine.seekTo(target)
         checkSave(value.saver.onSeek(target, durationMs, SeekOrigin.USER))
         publish(target)
+    }
+
+    /**
+     * A restored session is shown but not loaded (11 Session restore), so there is no engine to
+     * seek. The seek moves the stored position instead, as a seek while paused would, so the dial
+     * keeps it and the next Play resumes there instead of snapping back to the old position. The
+     * target is also kept as that Play's explicit start: the start rule would restart a played or
+     * nearly finished item at 0.
+     */
+    private suspend fun seekRestored(requestedMs: Long) {
+        val value = runtime ?: return
+        val shown = current.value ?: return
+        val episodeId = shown.episodeId
+        val durationMs = shown.position.durationMs
+        val target = requestedMs.coerceAtLeast(0).let { durationMs?.let(it::coerceAtMost) ?: it }
+        val now = clock.now()
+        val saved =
+            if (target < SEEK_RESET_BOUND_MS) {
+                value.positions.reset(episodeId, now)
+            } else {
+                // The item is not resolved yet, so its source is unknown; the first save while it
+                // plays records the real one.
+                value.positions.save(episodeId, target, durationMs, PositionSource.STREAM, now, now) {
+                    remoteGuard.allowsSaves(episodeId)
+                }
+            }
+        val latest = current.value
+        if (!saved || prepared || latest?.episodeId != episodeId) return
+        restoredSeek = RestoredSeek(episodeId, if (target < SEEK_RESET_BOUND_MS) 0 else target)
+        val snapshot = latest.position.copy(positionMs = target, sampledAtElapsedMs = clock.elapsedRealtime())
+        current.value = latest.copy(position = snapshot)
+        ticks.emit(snapshot)
     }
 
     /**
@@ -1777,10 +1820,18 @@ class DesktopPlaybackController(
 
     private suspend fun <T> serial(block: suspend () -> T): T = withContext(dispatcher) { mutex.withLock { block() } }
 
+    private data class RestoredSeek(
+        val episodeId: Long,
+        val positionMs: Long,
+    )
+
     private companion object {
         const val TAG = "DesktopPlayback"
         const val EVENT_CAPACITY = 8
         const val TICK_MS = 1_000L
+
+        /** `PlaybackController.seekTo`: a user seek below 1 s resets the stored position. */
+        const val SEEK_RESET_BOUND_MS = 1_000L
         const val BYTES_PER_MB = 1_000_000L
         const val DEFAULT_SKIP_BACK_MS = 30_000L
         const val DEFAULT_SKIP_FORWARD_MS = 30_000L
