@@ -2986,9 +2986,9 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 | Episode row | Space | toggles playback like everywhere else: if foundation's `clickable` would consume Space on the row, the row forwards it to the root action (S9 records which) |
 | Any element with a context menu | Menu key, Shift+F10 | opens its [context menu](#context-menus) at the element's end edge |
 | Up next row; Manage groups row | Alt+↑ / Alt+↓ | Move up / Move down (`move`, `GroupRepository.reorder`); "Move to top" is in the context menu |
-| Up next row | Delete | Remove from Up next (with Undo) |
-| Completed Downloads row | Delete | Delete download (with the usual confirmation) |
-| Selection mode | Ctrl/Cmd+A, Delete | select all loaded items; the mode's destructive action with its confirmation |
+| Up next row | Delete or Backspace (the Mac's delete key) | Remove from Up next (with Undo) |
+| Completed Downloads row | Delete or Backspace (the Mac's delete key) | Delete download (with the usual confirmation) |
+| Selection mode | Ctrl/Cmd+A, Delete or Backspace (the Mac's delete key) | select all loaded items; the mode's destructive action with its confirmation |
 | Lists and grids | Page Up / Page Down, Home / End | scroll by a viewport or to the ends (`animateScrollBy`/`scrollToItem` in `onKeyEvent` on the list), focus follows the first visible item |
 | Feeds tab row | ← / → | move between tabs (the tab row consumes them) |
 | Search and address fields | Enter, Esc | submit; clear, then back |
@@ -3001,6 +3001,17 @@ down while a field is focused. On the desktop the window menu's accelerators are
 the same duration, because AWT processes a menu accelerator before Compose's key input and the
 root cannot suppress it by consuming the event; the root's own dispatch of those chords stays
 as the fallback for menu-less compositions (the AC1 `runComposeUiTest` checklist).
+
+**Implementation note (2026-11-22).** A Mac's key labelled "delete" arrives in Compose Desktop
+as `Key.Backspace` (AWT `VK_BACK_SPACE`); `Key.Delete` is forward delete (fn+delete), which
+compact Mac keyboards lack. The four list handlers share `KeyEvent.isDeleteKey()` in `:core:ui`
+so a focused programme slip, Up next row, Library selection and completed download respond to
+the key a Mac labels "delete". The mapping is not Mac-only: `isDeleteKey()` accepts Backspace
+and Delete on every desktop platform, so Windows and Linux get the same removal. All four
+paths stay reversible: the radio and Up next offer undo, while Library unsubscribe and
+completed-download deletion confirm first. Backspace stays with a text field: the radio,
+Up next and Downloads handlers sit on a row, and the Library composes no text field, so
+selection mode never takes the key from an editor.
 
 `KeyboardShortcutsKey` (MD4; Help › Keyboard shortcuts on the desktop) shows 11's list grouped as Playback, Navigation, Library and Window, with the platform's modifier names ("Ctrl", "⌘"). On Android `MainActivity` overrides `Activity.onProvideKeyboardShortcuts` (an Activity callback, independent of Compose) to list the root keys in the system shortcut helper (Meta+/).
 

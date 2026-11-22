@@ -1077,6 +1077,20 @@ class RadioInteractionTest {
             onNodeWithTag("radio_insert").assertDoesNotExist()
             onNodeWithTag("radio_playlist").assertIsFocused()
         }
+
+    // A Mac's key labelled "delete" arrives as Backspace, so it must discard the slip too.
+    @Test fun focusedBackspaceDiscardsProgramme() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var removed: Long? = null
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(radioFixture(), RadioActions(discard = { removed = it }))
+                }
+            }
+            onNodeWithTag("radio_episode_2").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.Backspace) }
+            assertEquals(2L, removed)
+        }
 }
 
 /** A window for the empty radio: its size in dp, its text scale and the listener's locale. */

@@ -804,6 +804,19 @@ class LibraryScreenTest {
             waitUntil { podcasts.calls.last() == "unsubscribe([1, 2])" }
         }
 
+    // A Mac's key labelled "delete" arrives as Backspace, so it must start the bulk action too.
+    @Test fun bulkUnsubscribeOnBackspaceConfirmsCounts() =
+        runComposeUiTest {
+            podcasts.downloadedIds.value = mapOf(1L to listOf(10L), 2L to listOf(20L, 21L))
+            setLibraryRoute(listOf(testLibraryTile(1, "A"), testLibraryTile(2, "B")))
+            onNodeWithContentDescription("A").performTouchInput { longClick() }
+            onNodeWithContentDescription("B").performClick()
+            onRoot().performKeyInput { pressKey(Key.Backspace) }
+            onNodeWithText("Unsubscribe from 2 podcasts?").assertIsDisplayed()
+            onNodeWithText("3 downloaded episodes will be deleted.").assertIsDisplayed()
+            assertEquals(listOf("downloadedEpisodeIds([1, 2])"), podcasts.calls)
+        }
+
     @Test fun bulkMarkPlayedWaitsForCountedConfirmationAndRefreshUsesSelection() =
         runComposeUiTest {
             setLibraryRoute(listOf(testLibraryTile(1, "A"), testLibraryTile(2, "B")))

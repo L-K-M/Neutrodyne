@@ -268,7 +268,7 @@ public fun UpNextList(
                                 Modifier.weight(1f).testTag("queueRow$id").onPreviewKeyEvent { event ->
                                     val callback =
                                         when {
-                                            event.key == Key.Delete -> {
+                                            event.isDeleteKey() -> {
                                                 ({ onRemove(id) })
                                             }
 

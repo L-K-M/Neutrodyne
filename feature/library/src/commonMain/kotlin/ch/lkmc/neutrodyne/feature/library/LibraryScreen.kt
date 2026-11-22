@@ -67,6 +67,7 @@ import ch.lkmc.neutrodyne.core.ui.OfflineBanner
 import ch.lkmc.neutrodyne.core.ui.TileMenuAction
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.isDeleteKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
@@ -176,7 +177,7 @@ internal fun LibraryScreen(
                     if (selectedIds.isEmpty() || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
                     when {
-                        event.key == Key.Delete -> {
+                        event.isDeleteKey() -> {
                             onSelectionAction(SelectionAction.UNSUBSCRIBE)
                             true
                         }
