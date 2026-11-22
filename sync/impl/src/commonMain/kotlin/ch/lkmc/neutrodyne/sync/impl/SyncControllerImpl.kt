@@ -890,6 +890,13 @@ class SyncControllerImpl(
         var intervalSeconds = start.interval.coerceAtLeast(MIN_LINK_INTERVAL_SECONDS)
         while (true) {
             delay(intervalSeconds * 1_000L)
+            // The server should answer `expired_token`, but the code's own lifetime is the
+            // client's stop condition too: a publisher that keeps answering `authorization_pending`
+            // (or a delayed poll that outran the lifetime) must not poll forever.
+            if (clock.now() >= expiresAtMs) {
+                linkFlow.failed(SyncProblem.InvalidCode)
+                return
+            }
             val token =
                 try {
                     client.linkToken(server.serverUrl, start.deviceCode)

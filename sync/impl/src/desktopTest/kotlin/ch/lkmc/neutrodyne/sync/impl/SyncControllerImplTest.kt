@@ -559,6 +559,26 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun aPendingCodePastItsLifetimeExpiresInsteadOfPollingForever() =
+        runTest {
+            val h = harness(this)
+            try {
+                var polls = 0
+                h.client.linkToken = {
+                    polls++
+                    h.clock.advanceBy(10.minutes)
+                    throw SyncProblemException("authorization_pending")
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(SyncProblem.InvalidCode, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertEquals(1, polls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun anUntrustedCertificateEndsTheCodeAtOnce() =
         runTest {
             val h = harness(this)
