@@ -52,6 +52,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -389,6 +390,31 @@ class RadioInteractionTest {
             }
             assertEquals(0, discards)
             assertEquals(0, selections)
+        }
+
+    /**
+     * 08 Keyboard (Space row): a focused slip forwards Space to play/pause like everywhere
+     * else instead of taking it as a click; Enter still selects it.
+     */
+    @Test fun spaceOnAFocusedSlipTogglesPlaybackAndEnterStillSelects() =
+        runDesktopComposeUiTest(width = 390, height = 844) {
+            var toggles = 0
+            var selections = 0
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(
+                        radioFixture(),
+                        RadioActions(togglePlay = { toggles++ }, selectEpisode = { selections++ }),
+                    )
+                }
+            }
+            onNodeWithTag("radio_episode_2").requestFocus()
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.Spacebar) }
+            assertEquals(1, toggles, "Space reaches play/pause")
+            assertEquals(0, selections, "Space is not a click on the slip")
+
+            onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.Enter) }
+            assertEquals(1, selections)
         }
 
     /** The Nixie's spoken time uses plural forms and leaves out empty parts. */

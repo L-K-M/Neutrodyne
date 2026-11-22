@@ -2983,7 +2983,7 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 | Focus | Key | Action |
 |---|---|---|
 | Any row, tile, chip or tab | Enter | its primary action (Open; a tab selects its page) |
-| Episode row | Space | toggles playback like everywhere else: if foundation's `clickable` would consume Space on the row, the row forwards it to the root action (S9 records which) |
+| Episode row | Space | toggles playback like everywhere else: if foundation's `clickable` would consume Space on the row, the row forwards it to the root action (S9 records which; implementation note below) |
 | Any element with a context menu | Menu key, Shift+F10 | opens its [context menu](#context-menus) at the element's end edge |
 | Up next row; Manage groups row | Alt+↑ / Alt+↓ | Move up / Move down (`move`, `GroupRepository.reorder`); "Move to top" is in the context menu |
 | Up next row | Delete | Remove from Up next (with Undo) |
@@ -2992,6 +2992,16 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 | Lists and grids | Page Up / Page Down, Home / End | scroll by a viewport or to the ends (`animateScrollBy`/`scrollToItem` in `onKeyEvent` on the list), focus follows the first visible item |
 | Feeds tab row | ← / → | move between tabs (the tab row consumes them) |
 | Search and address fields | Enter, Esc | submit; clear, then back |
+
+**Implementation note (2026-11-22, Space on rows).** S9's answer: `clickable` and `selectable`
+take a plain Space as a click (key-down presses, key-up clicks), so a focused radio slip
+selected itself and the mini player bar opened the radio instead of pausing. Both now chain
+`Modifier.spaceTogglesPlayback` (`:core:ui`) after that modifier, where it sees Space first
+and consumes both halves; it is not a preview handler, so a focused play key inside the row
+keeps its own Space. The bar forwards to the root's play/pause. A slip works the play switch
+beside it (`RadioActions.togglePlay`): it pauses what plays and otherwise plays the tuned slip,
+which arrow tuning keeps equal to the focused one. Covered by `RadioInteractionTest` and
+`MiniPlayerTest`; episode rows on other pages have not been checked yet.
 
 **Implementation note (2026-11-06, MD4).** Compose text fields do not consume every key
 event they edit: a desktop Space key-down reaches the root's bubbling `onKeyEvent` even while

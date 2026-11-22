@@ -95,6 +95,7 @@ import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.root.PlayerPresentation
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
+import ch.lkmc.neutrodyne.core.ui.spaceTogglesPlayback
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_back
 import ch.lkmc.neutrodyne.feature.player.resources.player_back_value
@@ -240,7 +241,8 @@ private fun MiniBar(
                         } else {
                             false
                         }
-                    }.clearAndSetSemantics {
+                    }.spaceTogglesPlayback(toggle)
+                    .clearAndSetSemantics {
                         this[SemanticsProperties.TestTag] = "mini_player"
                         contentDescription = description
                         onClick(openLabel) {

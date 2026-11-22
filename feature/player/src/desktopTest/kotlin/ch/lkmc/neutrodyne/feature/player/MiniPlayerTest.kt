@@ -64,6 +64,16 @@ class MiniPlayerTest {
             onNodeWithTag("player_side_panel").assertDoesNotExist()
         }
 
+    /** 08 Keyboard: Space on the focused bar is play/pause, as everywhere else, not "open". */
+    @Test fun spaceOnTheFocusedBarTogglesInsteadOfOpeningTheRadio() =
+        runComposeUiTest {
+            val fixture = MiniFixture()
+            setContent { fixture.Content() }
+            onNodeWithTag("mini_player").performClick()
+            onNodeWithTag("mini_player").performKeyInput { pressKey(Key.Spacebar) }
+            assertEquals(listOf("openRadio", "toggle"), fixture.calls)
+        }
+
     @Test fun radioHomeHidesTheBarAndOtherScreensShowIt() =
         runComposeUiTest {
             val fixture = MiniFixture().apply { presentation = PlayerPresentation.RADIO_HOME }
