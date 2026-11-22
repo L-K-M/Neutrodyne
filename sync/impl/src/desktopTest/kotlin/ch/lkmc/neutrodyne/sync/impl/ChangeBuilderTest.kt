@@ -273,6 +273,35 @@ class ChangeBuilderTest {
             }
         }
 
+    @Test
+    fun matchHintsTheProtocolRefusesAreLeftOutAndTheOthersAreKept() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                val broken =
+                    episodeEntity(id = 2, podcastId = 1, identityKey = "g:two", title = "x".repeat(2_000))
+                        .copy(guid = "two", link = "mailto:show@example.com", enclosureUrl = "/relative/two.mp3")
+                db.ingestDao().insertEpisodes(listOf(broken))
+                val rid = "${podcastSyncId}g:two"
+                val hlc = 1_800_000_000_000L shl 16
+                db.syncOutboxDao().upsert(row("episode", rid, "fav", "true", hlc))
+
+                val rows = db.syncOutboxDao().rows().filter { it.rid == rid }
+                val change = ChangeBuilder(db, FakeSecretStore()) { false }.build(rows).single()
+
+                val match = assertNotNull(change.match)
+                assertEquals("two", match.guid)
+                assertEquals(null, match.link)
+                assertEquals(null, match.enc)
+                assertEquals(null, match.title)
+                ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+                    .change(change)
+            } finally {
+                db.close()
+            }
+        }
+
     private fun row(
         coll: String,
         rid: String,

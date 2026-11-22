@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -81,6 +82,11 @@ private fun withoutScheme(url: String): String =
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
 
+private const val TAG = "SyncEngine"
+
+/** The collections whose record id embeds a key taken from a feed. */
+private val FEED_KEYED = setOf(SyncCollection.EPISODE.wire, SyncCollection.UPNEXT.wire)
+
 /** Durable retry history survives successful pull-only rounds and process restarts. */
 internal val SYNC_ERROR_CLOCK_RETRY = SyncErrorCode.CLOCK_SKEW.wire
 internal const val SYNC_ERROR_CLOCK_BLOCKED = "ClockSkew"
@@ -131,10 +137,16 @@ class SyncEngine(
      */
     private val roundMutex = Mutex()
 
-    /** Marks the shared [SyncActivity] flag for the round's whole duration, including failures. */
-    suspend fun round(reason: SyncRoundReason): SyncReport {
+    /**
+     * Marks the shared [SyncActivity] flag for the round's whole duration, including failures.
+     * [onBatch] runs after each batch's acknowledgement and cursor are durable.
+     */
+    suspend fun round(
+        reason: SyncRoundReason,
+        onBatch: suspend () -> Unit = {},
+    ): SyncReport {
         activity.begin()
-        val observation = RoundObservation(diagnosticsRuntime.currentTicket())
+        val observation = RoundObservation(diagnosticsRuntime.currentTicket(), onBatch)
         try {
             // Identity writers may need a first-link round themselves. Snapshot before the
             // round mutex so another round never holds it while waiting for that writer.
@@ -173,6 +185,7 @@ class SyncEngine(
 
     private class RoundObservation(
         var ticket: SyncDiagnosticTicket?,
+        val onBatch: suspend () -> Unit,
     )
 
     /** The round mutex stays held for both the full pull and its resumed push. */
@@ -314,15 +327,9 @@ class SyncEngine(
         while (rounds < MAX_ROUNDS) {
             rounds++
             val pushBlocked = db.syncStateDao().get()?.lastError == SYNC_ERROR_CLOCK_BLOCKED
-            val capturedRows =
-                if (pushBlocked) {
-                    emptyList()
-                } else {
-                    capture.prepareForPush(
-                        reader.next(batchLimit),
-                        reason == SyncRoundReason.FIRST_LINK,
-                    )
-                }
+            val queued = if (pushBlocked) emptyList() else reader.next(batchLimit)
+            if (retireUnaddressable(queued, snapshot.state)) continue
+            val capturedRows = capture.prepareForPush(queued, reason == SyncRoundReason.FIRST_LINK)
             val rows = effects.discardRemovedSourceFields(capturedRows, snapshot.state)
             val changes = builder.build(rows)
             if (changes.isEmpty() && !pullPending && !pushBlocked) break
@@ -373,6 +380,7 @@ class SyncEngine(
             feedsNeedingCredentials += page.feedsNeedingCredentials
             pulled += response.records.size
             commitProgress(response.records, response.cursor, snapshot.state)
+            observation.onBatch()
             observeServerTime(snapshot.state, response.serverTime, sentAt, receivedAt)
             var cursor = response.cursor
             var hasMore = response.hasMore
@@ -439,6 +447,32 @@ class SyncEngine(
             db.syncStateDao().recordSyncAt(clock.now())
         }
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+    }
+
+    /**
+     * A feed can supply an episode key the protocol cannot carry (a control character, more than
+     * the key cap). No retry can send such a row, and left queued it keeps the outbox from ever
+     * draining, so it is retired here and that episode's state stays on this device.
+     */
+    private suspend fun retireUnaddressable(
+        rows: List<SyncOutboxEntity>,
+        profile: SyncStateEntity?,
+    ): Boolean {
+        val unaddressable =
+            rows.filter {
+                it.coll in FEED_KEYED &&
+                    runCatching { RecordId.fromRid(SyncCollection.fromWire(it.coll), it.rid) }.isFailure
+            }
+        if (unaddressable.isEmpty()) return false
+        db.withWriteTransaction {
+            profile?.let { requireSyncProfile(it, db.syncStateDao().get()) }
+            for (row in unaddressable) {
+                db.syncOutboxDao().deleteIfUnchanged(row.coll, row.rid, row.field, row.hlc, row.nodeId)
+            }
+        }
+        val records = unaddressable.distinctBy { it.coll to it.rid }.size
+        Log.w(TAG) { "left $records records out of sync: the protocol cannot carry their episode keys" }
+        return true
     }
 
     /** Retire only the immutable rows actually sent; a concurrent edit remains pending. */

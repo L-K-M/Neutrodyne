@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
@@ -64,7 +65,9 @@ class ChangeBuilder(
                         }
                     }
                     if (collection in HINTED) {
-                        hints = hintsFor(source, collection, rid) ?: hints
+                        // Feed text is untrusted and hints are optional: one the server would
+                        // refuse must not cost the whole record.
+                        hints = hintsFor(source, collection, rid)?.let(ProtocolValidation::admissibleHints) ?: hints
                     }
                 }
                 if (fields.isEmpty()) return@mapNotNull null

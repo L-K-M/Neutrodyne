@@ -101,6 +101,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_local_network_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_local_network_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_merging
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_merging_downloading
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_merging_preparing
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_merging_uploading
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_code
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_invite
@@ -961,18 +962,18 @@ private fun ChoiceCard(
 private fun MergingStep(state: LinkState.Merging) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            if (state.phase == LinkPhase.UPLOADING) {
-                stringResource(Res.string.sync_setup_merging_uploading)
-            } else {
-                stringResource(Res.string.sync_setup_merging_downloading)
+            when (state.phase) {
+                LinkPhase.DOWNLOADING -> stringResource(Res.string.sync_setup_merging_downloading)
+                LinkPhase.PREPARING -> stringResource(Res.string.sync_setup_merging_preparing)
+                LinkPhase.UPLOADING -> stringResource(Res.string.sync_setup_merging_uploading)
             },
             style = MaterialTheme.typography.bodyMedium,
         )
+        NdProgress.Linear(
+            progress = if (state.total > 0) state.done.toFloat() / state.total.toFloat() else null,
+            modifier = Modifier.fillMaxWidth(),
+        )
         if (state.total > 0) {
-            NdProgress.Linear(
-                progress = state.done.toFloat() / state.total.toFloat(),
-                modifier = Modifier.fillMaxWidth(),
-            )
             Text(
                 stringResource(Res.string.sync_setup_merging, state.done, state.total),
                 style = MaterialTheme.typography.bodySmall,

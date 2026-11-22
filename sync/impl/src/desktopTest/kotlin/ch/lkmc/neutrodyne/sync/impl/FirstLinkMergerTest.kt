@@ -1085,6 +1085,115 @@ class FirstLinkMergerTest {
         }
 
     @Test
+    fun anEpisodeWithANonWebLinkStillUploads() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedPlayedEpisodes(db, count = 2, episodeLink = "mailto:show@example.com")
+                val client = ScriptedClient(emptyList(), syncHandler = { _, changes -> admitted(changes) })
+
+                val result = mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertNotNull(db.syncStateDao().get()?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anEpisodeKeyTheProtocolCannotCarryDoesNotBlockTheLink() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedPlayedEpisodes(db, count = 2, firstKey = "g:line one\nline two")
+                val client = ScriptedClient(emptyList(), syncHandler = { _, changes -> admitted(changes) })
+
+                val result = mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertEquals(0, db.syncOutboxDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun uploadProgressStartsBeforeTheFirstRequestAndAdvancesWithEachBatch() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedPlayedEpisodes(db, count = 2_500)
+                val phases = mutableListOf<String>()
+                var latest: Triple<ch.lkmc.neutrodyne.sync.api.LinkPhase, Int, Int>? = null
+                val atRequest = mutableListOf<Triple<ch.lkmc.neutrodyne.sync.api.LinkPhase, Int, Int>?>()
+                val client =
+                    ScriptedClient(emptyList(), syncHandler = { _, changes ->
+                        atRequest += latest
+                        admitted(changes)
+                    })
+
+                val result =
+                    mergerOf(db, client, FakeLibraryMerger()).merge(FirstLinkChoice.MERGE) { phase, done, total ->
+                        latest = Triple(phase, done, total)
+                        if (phases.lastOrNull() != phase.name) phases += phase.name
+                    }
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val uploading = ch.lkmc.neutrodyne.sync.api.LinkPhase.UPLOADING
+                assertEquals(List(3) { uploading }, atRequest.map { it?.first })
+                assertEquals(0, atRequest.first()?.second)
+                val done = atRequest.map { checkNotNull(it).second }
+                assertEquals(done.sorted().distinct(), done, "each accepted batch advances the count")
+                assertEquals(checkNotNull(latest).third, checkNotNull(latest).second, "the upload ends full")
+                assertEquals(listOf("DOWNLOADING", "PREPARING", "UPLOADING"), phases)
+            } finally {
+                db.close()
+            }
+        }
+
+    private suspend fun seedPlayedEpisodes(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        count: Int,
+        firstKey: String = "g:episode-0",
+        episodeLink: String? = null,
+    ) {
+        db.withWriteTransaction {
+            val podcastId = db.podcastDao().insertPodcast(podcastEntity(syncId = podcastSyncId))
+            val episodes =
+                List(count) { index ->
+                    episodeEntity(
+                        podcastId = podcastId,
+                        identityKey = if (index == 0) firstKey else "g:episode-$index",
+                        title = "Episode $index",
+                    ).copy(link = episodeLink.takeIf { index == 0 })
+                }
+            for (id in db.ingestDao().insertEpisodes(episodes)) {
+                db.episodeStateDao().upsert(EpisodeStateEntity(episodeId = id, playedAt = june, updatedAt = june))
+            }
+        }
+    }
+
+    /** Answers as the server does: each change is validated on its own. */
+    private fun admitted(changes: List<ChangeDto>): SyncResponse =
+        SyncResponse(
+            changes.mapIndexed { index, change ->
+                if (runCatching { ProtocolValidation.change(change) }.isSuccess) {
+                    ChangeResultDto(index, "applied")
+                } else {
+                    ChangeResultDto(index, "rejected", code = "invalid")
+                }
+            },
+            emptyList(),
+            "c:00000001:1",
+            false,
+            "",
+        )
+
+    @Test
     fun rejectedFirstLinkWritesCannotCompleteTheLink() =
         runTest {
             val db = TestDb.inMemory()

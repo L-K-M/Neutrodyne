@@ -69,6 +69,7 @@
   <string name="sync_setup_backup_saved">Sicherung gespeichert.</string>
   <string name="sync_setup_merging_uploading">Wird hochgeladen…</string>
   <string name="sync_setup_merging_downloading">Wird heruntergeladen…</string>
+  <string name="sync_setup_merging_preparing">Bibliothek wird vorbereitet…</string>
   <string name="sync_setup_merging">Bibliotheken werden kombiniert… %1$d von %2$d</string>
   <string name="sync_setup_linked_done">Dieses Gerät ist mit %1$s als %2$s verknüpft.</string>
   <string name="sync_setup_local_network_title">Zugriff auf das lokale Netzwerk erlauben?</string>

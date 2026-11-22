@@ -357,8 +357,9 @@ class FirstLinkMerger(
         roundId: Long,
         onProgress: (LinkPhase, Int, Int) -> Unit,
     ): FirstLinkResult {
-        onProgress(LinkPhase.DOWNLOADING, 0, 1)
+        onProgress(LinkPhase.DOWNLOADING, 0, UNKNOWN_TOTAL)
         val pull = pullStaged(roundId, resume = true, onProgress)
+        onProgress(LinkPhase.PREPARING, 0, UNKNOWN_TOTAL)
         // A fresh node needs its own rows seeded before the record merge decides winners.
         seedLocalRows()
         val staged = mapToStagingDirectory(pull, MergePolicy.LINK_MERGE)
@@ -369,7 +370,7 @@ class FirstLinkMerger(
                 stagingDir = staged.dir.toString(),
                 policy = MergePolicy.LINK_MERGE,
                 onUnmatched = { podcastSyncId, identityKey -> park(podcastSyncId, identityKey, hints) },
-                progress = { done, total -> onProgress(LinkPhase.DOWNLOADING, done, total) },
+                progress = { done, total -> onProgress(LinkPhase.PREPARING, done, total) },
                 onApplied = { applied += it },
             )
         if (outcome !is ch.lkmc.neutrodyne.core.common.Outcome.Success<*>) {
@@ -379,7 +380,7 @@ class FirstLinkMerger(
         // Step 4: adopt the cursor and clocks before any bootstrap write, so capture is
         // admitted while the local winners are re-stamped with their own times.
         adoptPulledState(pull.cursor, pull.maxClockPacked)
-        captureLocalWinners()
+        captureLocalWinners(onProgress)
         journalPendingSettings(pull.records)
         effects.drainSettings()
         pushOutbox(onProgress)
@@ -393,6 +394,7 @@ class FirstLinkMerger(
         onProgress: (LinkPhase, Int, Int) -> Unit,
     ): FirstLinkResult {
         val pull = pullStaged(roundId, resume = true, onProgress)
+        onProgress(LinkPhase.PREPARING, 0, UNKNOWN_TOTAL)
         val staged = mapToStagingDirectory(pull, MergePolicy.LINK_REPLACE)
         val hints = staged.parkHints
         val outcome =
@@ -400,7 +402,7 @@ class FirstLinkMerger(
                 stagingDir = staged.dir.toString(),
                 policy = MergePolicy.LINK_REPLACE,
                 onUnmatched = { podcastSyncId, identityKey -> park(podcastSyncId, identityKey, hints) },
-                progress = { done, total -> onProgress(LinkPhase.DOWNLOADING, done, total) },
+                progress = { done, total -> onProgress(LinkPhase.PREPARING, done, total) },
             )
         if (outcome !is ch.lkmc.neutrodyne.core.common.Outcome.Success<*>) {
             return FirstLinkResult.Failed("mergeStaged failed: $outcome")
@@ -464,6 +466,7 @@ class FirstLinkMerger(
         // Upload first: stage the server snapshot, adopt its IDs and merge its episode history
         // into this device's rows (step 2), then capture this device's whole library (step 3).
         val pull = pullStaged(roundId, resume = true, onProgress)
+        onProgress(LinkPhase.PREPARING, 0, UNKNOWN_TOTAL)
         // The seeds freeze the pre-merge values and timestamps: after the history merge only
         // the episode fields the local side won still carry this node's stamps.
         seedLocalRows()
@@ -472,7 +475,7 @@ class FirstLinkMerger(
         captureLocalLibrary()
         // Episode state the local side won is re-sent at its own frozen timestamp; records the
         // full capture above already queued are skipped, so nothing is captured twice.
-        captureLocalWinners()
+        captureLocalWinners(onProgress)
         pushOutbox(onProgress)
         // Prune last: the server drops everything this upload did not re-assert, so no device can
         // observe a half-replaced library.
@@ -499,7 +502,7 @@ class FirstLinkMerger(
                 stagingDir = staged.dir.toString(),
                 policy = MergePolicy.LINK_HISTORY,
                 onUnmatched = { podcastSyncId, identityKey -> park(podcastSyncId, identityKey, hints) },
-                progress = { done, total -> onProgress(LinkPhase.DOWNLOADING, done, total) },
+                progress = { done, total -> onProgress(LinkPhase.PREPARING, done, total) },
             )
         if (outcome !is ch.lkmc.neutrodyne.core.common.Outcome.Success<*>) {
             return FirstLinkResult.Failed("mergeStaged failed: $outcome")
@@ -651,7 +654,8 @@ class FirstLinkMerger(
                         ).writeByte('\n'.code)
                 }
                 cursor = page.cursor
-                onProgress(LinkPhase.DOWNLOADING, records.size, records.size.coerceAtLeast(1))
+                // The server's pages don't announce how many records follow.
+                onProgress(LinkPhase.DOWNLOADING, records.size, UNKNOWN_TOTAL)
                 if (!page.hasMore) {
                     complete = true
                     break
@@ -1305,9 +1309,11 @@ class FirstLinkMerger(
      * origin node and are never re-stamped; a minimum or maximum is decided by value instead.
      * Records with pending outbox rows are left alone.
      */
-    private suspend fun captureLocalWinners() {
+    private suspend fun captureLocalWinners(onProgress: (LinkPhase, Int, Int) -> Unit) {
         val nodeId = nodeId().value
-        for (row in db.syncClockDao().all()) {
+        val rows = db.syncClockDao().all()
+        for ((index, row) in rows.withIndex()) {
+            if (index % PREPARING_STEP == 0) onProgress(LinkPhase.PREPARING, index, rows.size)
             captureOwnedFields(row) { _, stamp -> stamp.nodeId.value == nodeId }
         }
     }
@@ -1520,10 +1526,17 @@ class FirstLinkMerger(
     private suspend fun pushOutbox(onProgress: (LinkPhase, Int, Int) -> Unit) {
         val total = db.syncOutboxDao().count()
         if (total == 0) return
+        var uploaded = 0
+        onProgress(LinkPhase.UPLOADING, uploaded, total)
         var rounds = 0
         while (db.syncOutboxDao().count() > 0 && rounds < MAX_PUSH_ROUNDS) {
             rounds++
-            val report = engine.round(SyncRoundReason.FIRST_LINK)
+            val report =
+                engine.round(SyncRoundReason.FIRST_LINK) {
+                    // An edit made during the upload grows the outbox; the bar never runs backwards.
+                    uploaded = maxOf(uploaded, total - db.syncOutboxDao().count())
+                    onProgress(LinkPhase.UPLOADING, uploaded, total)
+                }
             val error = db.syncStateDao().get()?.lastError
             if (error == SYNC_ERROR_CLOCK_BLOCKED) {
                 throw ProtocolException(SyncErrorCode.CLOCK_SKEW, "The server rejected the corrected device clock")
@@ -1531,11 +1544,11 @@ class FirstLinkMerger(
             if (report.rejected > 0 && error != SYNC_ERROR_CLOCK_RETRY) {
                 throw ProtocolException(SyncErrorCode.INVALID, "The server rejected first-link writes")
             }
-            onProgress(LinkPhase.UPLOADING, rounds, total.coerceAtLeast(1))
         }
         if (db.syncOutboxDao().count() > 0) {
             throw ProtocolException(SyncErrorCode.INVALID, "First-link writes did not finish uploading")
         }
+        onProgress(LinkPhase.UPLOADING, total, total)
     }
 
     /** Writes the negotiated cursor and raises the clock past everything seen and now. */
@@ -1667,6 +1680,8 @@ class FirstLinkMerger(
         const val MAX_PAGES = 10_000
         const val REASSERT_KEYS_PER_PAGE = 128
         const val MAX_PUSH_ROUNDS = 100
+        const val UNKNOWN_TOTAL = 0
+        const val PREPARING_STEP = 100
         const val DELETE_CONFIRMATION = "DELETE"
         const val RESET_MODE_LIBRARY = "library"
 

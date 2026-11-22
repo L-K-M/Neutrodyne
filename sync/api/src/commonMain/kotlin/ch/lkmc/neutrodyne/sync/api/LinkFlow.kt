@@ -10,8 +10,8 @@ enum class LinkMethod { CODE, INVITE, PASSWORD }
 /** The first-link choices of 10 First-link choices. */
 enum class FirstLinkChoice { MERGE, USE_SERVER, USE_DEVICE }
 
-/** The merge phase shown while a first-link step runs. */
-enum class LinkPhase { UPLOADING, DOWNLOADING }
+/** The merge phase shown while a first-link step runs; [PREPARING] is this device's local work. */
+enum class LinkPhase { DOWNLOADING, PREPARING, UPLOADING }
 
 /** The server's discovery result, after the local-network gate and the insecure check. */
 data class DiscoveredServer(
@@ -111,6 +111,7 @@ sealed interface LinkState {
         val removedGroups: Int,
     ) : LinkState
 
+    /** [total] is 0 while the step's length is unknown. */
     data class Merging(
         val phase: LinkPhase,
         val done: Int,

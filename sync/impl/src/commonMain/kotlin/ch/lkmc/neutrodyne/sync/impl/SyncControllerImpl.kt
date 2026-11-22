@@ -1054,7 +1054,7 @@ class SyncControllerImpl(
             coroutineContext.ensureActive()
             _syncing.value = true
             try {
-                linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
+                linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, done = 0, total = 0)
                 when (
                     val result =
                         merger.merge(choice) { phase, done, total -> linkFlow.merging(phase, done, total) }
@@ -1094,7 +1094,7 @@ class SyncControllerImpl(
             coroutineContext.ensureActive()
             _syncing.value = true
             try {
-                linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
+                linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, done = 0, total = 0)
                 val (podcasts, groups) = merger.stageResetEffect()
                 linkFlow.confirmReplaceEverywhere(choices, podcasts, groups)
             } catch (failure: CancellationException) {

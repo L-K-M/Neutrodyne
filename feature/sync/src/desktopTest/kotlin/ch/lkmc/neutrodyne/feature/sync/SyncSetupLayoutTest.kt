@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.sync
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
@@ -40,6 +41,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
+import ch.lkmc.neutrodyne.sync.api.LinkPhase
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import java.util.Locale
@@ -64,6 +66,19 @@ class SyncSetupLayoutTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test
+    fun aStepOfUnknownLengthShowsActivityInsteadOfAnEmptyCount() =
+        runDesktopComposeUiTest(width = PAGE_WIDTH, height = PAGE_HEIGHT) {
+            setPage(LinkState.Merging(LinkPhase.DOWNLOADING, done = 0, total = 0))
+
+            onNode(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.ProgressBarRangeInfo,
+                    ProgressBarRangeInfo.Indeterminate,
+                ),
+            ).assertIsDisplayed()
+        }
 
     @Test
     fun everyMethodFitsOnOneAlignedRow() =

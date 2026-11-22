@@ -129,6 +129,10 @@ object ProtocolValidation {
         validateValue(spec, value.v)
     }
 
+    /** The [match] values admission accepts, for a sender: hints are optional, so one bad value is left out. */
+    fun admissibleHints(match: MatchHints): MatchHints? =
+        hintsFrom(match.values().filter { (name, value) -> admitsHint(name, value) })
+
     fun admit(
         clock: Hlc,
         serverTimeMs: Long,
@@ -415,13 +419,31 @@ object ProtocolValidation {
         ) {
             invalid("unexpected match hints")
         }
-        match.values().forEach { (name, value) ->
-            text(value.content, if (name == "title") ProtocolLimits.MAX_TITLE else ProtocolLimits.MAX_STRING)
-            if (name == "enc" || name == "link") url(value.content)
-        }
-        match.date?.let(::timestamp)
-        if (match.kv != null && match.kv < 1) invalid("invalid key version")
+        match.values().forEach { (name, value) -> hint(name, value) }
     }
+
+    private fun hint(
+        name: String,
+        value: JsonPrimitive,
+    ) {
+        text(value.content, if (name == "title") ProtocolLimits.MAX_TITLE else ProtocolLimits.MAX_STRING)
+        when (name) {
+            "enc", "link" -> url(value.content)
+            "date" -> timestamp(value.content)
+            "kv" -> if (integer(value) < 1) invalid("invalid key version")
+        }
+    }
+
+    private fun admitsHint(
+        name: String,
+        value: JsonPrimitive,
+    ): Boolean =
+        try {
+            hint(name, value)
+            true
+        } catch (_: ProtocolException) {
+            false
+        }
 
     private fun timestamp(value: String) {
         if (!value.endsWith('Z')) invalid("timestamp must be UTC")
