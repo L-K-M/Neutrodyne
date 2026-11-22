@@ -669,7 +669,19 @@ public class RadioViewModel(
 
     public fun consumeCopyLink(id: Long): String? = copyLinks.remove(id)
 
-    private fun position(id: Long?): Long = seeks[id] ?: live[id]?.positionMs ?: 0L
+    /**
+     * A parked seek, else the loaded item's own snapshot, else its stored row. The live-row
+     * collector skips the loaded item, so after a relaunch the restored session (paused, not
+     * loaded yet) would otherwise read 00:00 whenever the rows arrive before its live row.
+     */
+    private fun position(id: Long?): Long =
+        seeks[id]
+            ?: playbackStates.nowPlaying.value
+                ?.takeIf { it.episodeId == id }
+                ?.position
+                ?.positionMs
+            ?: live[id]?.positionMs
+            ?: 0L
 
     private fun writeFailed() {
         messages.post(UiText.Res(Res.string.write_failed))
