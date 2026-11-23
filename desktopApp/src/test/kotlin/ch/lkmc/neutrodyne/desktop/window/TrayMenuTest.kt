@@ -27,6 +27,18 @@ class TrayMenuTest {
     }
 
     @Test
+    fun `the tooltip keeps a supplementary character that fits and drops one that would be split`() {
+        val prefix = "Neutrodyne — "
+        val fitting = "T".repeat(60 - prefix.length - 2)
+        val straddling = fitting + "T"
+
+        assertThat(trayTooltip(testNowPlaying().copy(title = fitting + "🎙 text")))
+            .isEqualTo(prefix + fitting + "🎙")
+        assertThat(trayTooltip(testNowPlaying().copy(title = straddling + "🎙 text")))
+            .isEqualTo(prefix + straddling)
+    }
+
+    @Test
     fun `the play pause label follows the state`() {
         assertThat(trayPlayPause(null)).isEqualTo(TrayPlayPause.PLAY)
         assertThat(trayPlayPause(testNowPlaying().copy(isPlaying = false))).isEqualTo(TrayPlayPause.PLAY)
