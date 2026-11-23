@@ -77,6 +77,11 @@ class YouTubeBreakerNotifierTest {
                 assertEquals(INTERNAL_MAIN_ACTIVITY, intent.component!!.className)
                 assertEquals(app.packageName, intent.component!!.packageName)
                 assertEquals("neutrodyne://open/settings/youtube", intent.dataString)
+                // The OS resolves the alias when the user taps, not when the PendingIntent is
+                // built. Resolving it here makes a renamed or dropped manifest alias fail this
+                // test instead of leaving a notification whose tap silently does nothing.
+                val alias = app.packageManager.getActivityInfo(intent.component!!, 0)
+                assertTrue(alias.exported.not())
             } finally {
                 scope.cancel()
                 manager.cancelAll()
