@@ -2998,10 +2998,12 @@ take a plain Space as a click (key-down presses, key-up clicks), so a focused ra
 selected itself and the mini player bar opened the radio instead of pausing. Both now chain
 `Modifier.spaceTogglesPlayback` (`:core:ui`) after that modifier, where it sees Space first
 and consumes both halves; it is not a preview handler, so a focused play key inside the row
-keeps its own Space. The bar forwards to the root's play/pause. A slip works the play switch
-beside it (`RadioActions.togglePlay`): it pauses what plays and otherwise plays the tuned slip,
-which arrow tuning keeps equal to the focused one. Covered by `RadioInteractionTest` and
-`MiniPlayerTest`; episode rows on other pages have not been checked yet.
+keeps its own Space. The bar forwards to the root's play/pause. A slip forwards to the root
+play/pause (`RadioActions.togglePlay`), not the slip's own play key: it pauses what plays and
+otherwise plays the tuned episode. Arrow tuning keeps the focused and tuned rows equal; Tab can
+focus a different slip, and Space there still follows the tuned episode. Covered by
+`RadioInteractionTest` and `MiniPlayerTest`; episode rows on other pages have not been checked
+yet.
 
 **Implementation note (2026-11-06, MD4).** Compose text fields do not consume every key
 event they edit: a desktop Space key-down reaches the root's bubbling `onKeyEvent` even while

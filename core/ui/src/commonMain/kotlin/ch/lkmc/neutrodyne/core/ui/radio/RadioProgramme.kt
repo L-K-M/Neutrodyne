@@ -520,8 +520,8 @@ private fun RadioSlip(
                             },
                         )
                 }.selectable(selected, onClick = { actions.selectEpisode(episode.id) })
-                // Space on the slip works the play switch beside it: it pauses what plays and
-                // otherwise plays this tuned slip.
+                // Space on the slip is the root play/pause, like everywhere else: it pauses
+                // what plays and otherwise plays the tuned slip.
                 .spaceTogglesPlayback(actions.togglePlay)
                 .pointerInput(episode.id, width, windowSize) {
                     awaitEachGesture {

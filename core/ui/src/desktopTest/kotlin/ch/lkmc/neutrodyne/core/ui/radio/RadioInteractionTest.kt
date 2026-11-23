@@ -413,6 +413,14 @@ class RadioInteractionTest {
             assertEquals(1, toggles, "Space reaches play/pause")
             assertEquals(0, selections, "Space is not a click on the slip")
 
+            // The toggle fires on release, so the auto-repeat key-downs of a held Space are
+            // ignored and a press alone does nothing.
+            onNodeWithTag("radio_episode_2").performKeyInput { keyDown(Key.Spacebar) }
+            assertEquals(1, toggles, "A held Space does not toggle on its auto-repeat key-downs")
+            assertEquals(0, selections, "Space repeats are not clicks on the slip")
+            onNodeWithTag("radio_episode_2").performKeyInput { keyUp(Key.Spacebar) }
+            assertEquals(2, toggles, "Space release reaches play/pause")
+
             onNodeWithTag("radio_episode_2").performKeyInput { pressKey(Key.Enter) }
             assertEquals(1, selections)
         }
