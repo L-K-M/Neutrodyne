@@ -302,6 +302,27 @@ class ImportPipelineTest {
         }
 
     @Test
+    fun opmlFixtureEscapesAttributeValues() =
+        runTest {
+            // A double quote would end the attribute early; the reader's relaxed pass happens to
+            // tolerate a bare ampersand, but the fixture should emit well-formed XML regardless.
+            val folder = "Rock & \"Roll"
+            val url = "https://a.example.com/rss?x=1&y=2"
+            registerBytes(URI, opmlWithFolders(folder to listOf(url)).encodeToByteArray())
+            val sessionId = assertIs<Outcome.Success<Long>>(createOutcome(URI)).value
+            val options = optionsOf(db.importDao().sessionById(sessionId)!!)
+            assertEquals(folder, options.sourceGroups.single().name)
+            assertEquals(
+                url,
+                db
+                    .importDao()
+                    .itemsOf(sessionId)
+                    .single()
+                    .originalUrl,
+            )
+        }
+
+    @Test
     fun gpodderSectionsAreExcludedProposals() =
         runTest {
             val (session, items) = create("gpodder_sections")
@@ -872,12 +893,14 @@ class ImportPipelineTest {
 
     private fun opmlWithFolders(vararg folders: Pair<String, List<String>>): String =
         buildString {
+            fun esc(value: String): String = value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+
             append("""<?xml version="1.0" encoding="UTF-8"?>""")
             append("""<opml version="2.0"><body>""")
             for ((name, urls) in folders) {
-                append("""<outline text="$name">""")
+                append("""<outline text="${esc(name)}">""")
                 for (url in urls) {
-                    append("""<outline text="Show" type="rss" xmlUrl="$url"/>""")
+                    append("""<outline text="Show" type="rss" xmlUrl="${esc(url)}"/>""")
                 }
                 append("</outline>")
             }
