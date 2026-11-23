@@ -78,17 +78,21 @@ class EventsHttpTest {
 
     @Test fun `SSE caps fail before response headers and invalid hb is rejected`() =
         authApplication { f ->
-            val grant = f.grant(f.account())
-            val p = f.principal(grant)
-            val a = f.events.open(p)
-            val b = f.events.open(p)
-            val limited = client.get("/api/v1/events") { api(grant.token) }
+            val account = f.account()
+            // A device replaces its own oldest stream, so fill the account cap across devices.
+            val streams = mutableListOf<EventStream>()
+            repeat(5) { d ->
+                val p = f.principal(f.grant(account, deviceInfo(name = "d$d")))
+                streams += f.events.open(p)
+                streams += f.events.open(p)
+            }
+            val outside = f.grant(account)
+            val limited = client.get("/api/v1/events") { api(outside.token) }
             limited.expect(HttpStatusCode.TooManyRequests)
             assertEquals("10", limited.headers[HttpHeaders.RetryAfter])
             assertFalse(limited.headers[HttpHeaders.ContentType].orEmpty().contains("event-stream"))
-            client.get("/api/v1/events?hb=bad") { api(grant.token) }.expect(HttpStatusCode.BadRequest)
-            a.close()
-            b.close()
+            client.get("/api/v1/events?hb=bad") { api(outside.token) }.expect(HttpStatusCode.BadRequest)
+            streams.forEach { it.close() }
         }
 
     /**

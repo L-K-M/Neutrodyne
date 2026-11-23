@@ -370,7 +370,7 @@ Serves R7.2, R7.4, N9, N13. Delivered in M0b (discovery, health), MS1 (everythin
 | `POST /api/v1/feed-cache` | device token | `FeedCacheRequest` → `FeedCacheResponse` | `feed-cache` |
 | `POST /api/v1/sync` | device token | `SyncRequest` → `SyncResponse` | `sync` |
 | `GET /api/v1/changes?since=&limit=` | device token | → `ChangesPage` | `sync` |
-| `GET /api/v1/events?hb=` | device token | SSE stream | at most 10 concurrent per account, 2 per device |
+| `GET /api/v1/events?hb=` | device token | SSE stream | at most 10 concurrent per account, 2 per device; a new stream replaces the device's oldest |
 | `POST /api/v1/account/reset` | device token | `AccountResetRequest` → `AccountSummary` | `account` |
 | `GET /api/v1/account/export` | device token | → Neutrodyne backup ZIP (`application/zip`) | `export` |
 | `GET /healthz`, `GET /readyz` | none | → `200 ok` / `503` (no details in the body) | none |
@@ -1942,7 +1942,7 @@ loading the library. Purge removes records/indexes, rotates the epoch and
 revokes account devices' tokens and browser sessions; W7 must coordinate backup
 deletion with purge/export before exposing exports.
 
-`EventBus` keeps one `MutableSharedFlow<ChangedEvent>` per account with an active subscriber (`replay = 0`, buffer 1, `DROP_OLDEST`), created on demand and dropped when the last stream closes. `EventsRoutes` checks the token, the account's concurrent-stream count (≤ 10) and the device's (≤ 2), emits `retry: 10000`, then forwards events (`conflate()`) and heartbeats; a revocation event for the device closes its streams. Memory per open stream is one coroutine and its socket.
+`EventBus` keeps one `MutableSharedFlow<ChangedEvent>` per account with an active subscriber (`replay = 0`, buffer 1, `DROP_OLDEST`), created on demand and dropped when the last stream closes. `EventsRoutes` checks the token, the account's concurrent-stream count (≤ 10) and the device's (≤ 2; a new stream closes the device's oldest, because a killed client's socket lingers behind a proxy until a heartbeat write fails), emits `retry: 10000`, then forwards events (`conflate()`) and heartbeats; a revocation event for the device closes its streams. Memory per open stream is one coroutine and its socket.
 
 ### Web UI
 
