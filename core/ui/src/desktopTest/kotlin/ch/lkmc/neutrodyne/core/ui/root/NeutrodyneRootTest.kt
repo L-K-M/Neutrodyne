@@ -434,6 +434,69 @@ class NeutrodyneRootTest {
             onNodeWithTag("nav_feeds").assertDoesNotExist()
         }
 
+    /**
+     * A sheet pushed over the radio home is an overlay, not a page: the home stays underneath, so
+     * the mini player stays hidden (PO-51 hides it only on home).
+     */
+    @Test
+    fun aSheetOverTheRadioHomeHidesTheMiniPlayer() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            val routes = flowOf(Route.Push(SpeedKey))
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            waitForIdle()
+            onNodeWithText("speed-sheet").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.RADIO_HOME, slot?.presentation) }
+        }
+
+    /**
+     * A full page pushed over the radio home leaves it, so the mini player stays: the sheet case
+     * above must not hide the bar on every pushed key.
+     */
+    @Test
+    fun aPushedPageOverTheRadioHomeKeepsTheMiniPlayer() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            val routes = flowOf(Route.Push(FeedBrowserKey))
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            waitForIdle()
+            onNodeWithText("all-feed-content").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation) }
+        }
+
+    /**
+     * A page pushed above a sheet on the radio home still leaves it: only overlays above the last
+     * home keep it showing, so the bar returns once any full page sits in the stack.
+     */
+    @Test
+    fun aPageOverASheetOnTheRadioHomeBringsTheMiniPlayerBack() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            val routes = flowOf(Route.Push(SpeedKey), Route.Push(FeedBrowserKey))
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            waitForIdle()
+            onNodeWithText("all-feed-content").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation) }
+        }
+
     @Test
     fun downloadsBadgeTracksOnlyTheFailureCountFlow() =
         runComposeUiTest {
