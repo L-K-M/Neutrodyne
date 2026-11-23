@@ -55,6 +55,20 @@ internal class DataStoreSettingsRepository(
     override suspend fun <T : Any> set(
         key: SettingKey<T>,
         value: T,
+    ): Outcome<Unit, SettingsError> = setWithin(key, value) { write -> write() }
+
+    // 01 Sync write ordering: the record+persist pair is mutually excluded with a linked
+    // restore's historical accept+persist for the same key, so a concurrent restore can
+    // neither capture before this record nor write its older value after this one.
+    override suspend fun <T : Any, R> setWithin(
+        key: SettingKey<T>,
+        value: T,
+        transaction: suspend (write: suspend () -> Outcome<Unit, SettingsError>) -> R,
+    ): R = writeLocks.withLock(key) { transaction { writeLocked(key, value) } }
+
+    private suspend fun <T : Any> writeLocked(
+        key: SettingKey<T>,
+        value: T,
     ): Outcome<Unit, SettingsError> {
         // Shared registry validation (05 Rules 4): a rejected value is OutOfRange, so a
         // backup restore or sync apply counts it as skipped rather than failing.
@@ -62,39 +76,32 @@ internal class DataStoreSettingsRepository(
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
 
-        // 01 Sync write ordering: the record+persist pair is mutually excluded with a linked
-        // restore's historical accept+persist for the same key, so a concurrent restore can
-        // neither capture before this record nor write its older value after this one.
-        return writeLocks.withLock(key) {
-            // 10 Settings capture: the durable Room intent lands before DataStore, so a crash
-            // between the two recovers the write and a recorder failure leaves DataStore unchanged.
-            val recorded =
-                suspendRunCatching { syncPort.recordLocal(key, value) }
-                    .onFailure { failure ->
-                        Log.w(LOG_TAG, failure) { "sync recorder failed for '${key.name}'" }
-                    }
-            if (recorded.isFailure) {
-                return@withLock Outcome.Failure(SettingsError.WriteFailed)
-            }
-
-            // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
-            suspendRunCatching {
-                if (key.synced) {
-                    settingsStore.setWithReceipt(key, value, recorded.getOrThrow().storedReceipt())
-                } else {
-                    store(key).set(key, value)
+        // 10 Settings capture: the durable Room intent lands before DataStore, so a crash
+        // between the two recovers the write and a recorder failure leaves DataStore unchanged.
+        val recorded =
+            suspendRunCatching { syncPort.recordLocal(key, value) }
+                .onFailure { failure ->
+                    Log.w(LOG_TAG, failure) { "sync recorder failed for '${key.name}'" }
                 }
-            }.fold(
-                onSuccess = {
-                    syncPort.emitLocal(key, value, clock.now())
-                    Outcome.Success(Unit)
-                },
-                onFailure = { failure ->
-                    Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
-                    Outcome.Failure(SettingsError.WriteFailed)
-                },
-            )
-        }
+        if (recorded.isFailure) return Outcome.Failure(SettingsError.WriteFailed)
+
+        // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
+        return suspendRunCatching {
+            if (key.synced) {
+                settingsStore.setWithReceipt(key, value, recorded.getOrThrow().storedReceipt())
+            } else {
+                store(key).set(key, value)
+            }
+        }.fold(
+            onSuccess = {
+                syncPort.emitLocal(key, value, clock.now())
+                Outcome.Success(Unit)
+            },
+            onFailure = { failure ->
+                Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
+                Outcome.Failure(SettingsError.WriteFailed)
+            },
+        )
     }
 
     override suspend fun reset(key: SettingKey<*>) {

@@ -65,6 +65,12 @@ class FakeSettingsRepository : SettingsRepository {
         return Outcome.Success(Unit)
     }
 
+    override suspend fun <T : Any, R> setWithin(
+        key: SettingKey<T>,
+        value: T,
+        transaction: suspend (write: suspend () -> Outcome<Unit, SettingsError>) -> R,
+    ): R = transaction { set(key, value) }
+
     override suspend fun reset(key: SettingKey<*>) {
         loggedCalls.update { it.add("reset(${key.name})") }
         values.update { current ->

@@ -157,41 +157,48 @@ internal class ScopeSettingsRepositoryImpl(
             var mutated = false
             val result: PlaybackScopeWrite =
                 try {
-                    db.withWriteTransaction {
-                        val rows = dao.podcastScopes(listOf(podcastId))
-                        if (rows.isEmpty()) return@withWriteTransaction PlaybackScopeWrite.MISSING_PODCAST
-                        val groupId = rows.mapNotNull { it.groupId }.firstOrNull { it == contextGroupId }
-                        if (scope == SettingScope.GROUP && groupId == null) {
-                            return@withWriteTransaction PlaybackScopeWrite.NO_CONTEXT_GROUP
-                        }
+                    withGlobalWrite(scope, change) { writeGlobal ->
+                        db.withWriteTransaction {
+                            val rows = dao.podcastScopes(listOf(podcastId))
+                            if (rows.isEmpty()) return@withWriteTransaction PlaybackScopeWrite.MISSING_PODCAST
+                            val groupId = rows.mapNotNull { it.groupId }.firstOrNull { it == contextGroupId }
+                            if (scope == SettingScope.GROUP && groupId == null) {
+                                return@withWriteTransaction PlaybackScopeWrite.NO_CONTEXT_GROUP
+                            }
 
-                        val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
-                        val podcastEdit = if (scope == SettingScope.PODCAST) OverrideEdit.SET else OverrideEdit.CLEAR
-                        val next = previous.withPlayback(change, podcastEdit)
-                        mutated = savePodcast(podcastId, previous, next)
-                        if (scope != SettingScope.PODCAST && groupId != null) {
-                            val previousGroup = dao.forGroup(groupId)?.o ?: ScopeOverrides()
-                            val groupEdit = if (scope == SettingScope.GROUP) OverrideEdit.SET else OverrideEdit.CLEAR
-                            val nextGroup = previousGroup.withPlayback(change, groupEdit)
-                            mutated = saveGroup(groupId, previousGroup, nextGroup) || mutated
-                        }
-                        if (scope == SettingScope.GLOBAL) {
-                            // Run clears first so SQL faults cannot change the global. A store failure
-                            // throws through Room so it rolls back every scoped clear as well.
-                            val global =
-                                when (change) {
-                                    is PlaybackSettingChange.Speed -> {
-                                        settings.set(PlaybackSettingKeys.SPEED, change.value)
-                                    }
-
-                                    is PlaybackSettingChange.SkipSilence -> {
-                                        settings.set(PlaybackSettingKeys.SKIP_SILENCE, change.value)
-                                    }
+                            val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
+                            val podcastEdit =
+                                if (scope ==
+                                    SettingScope.PODCAST
+                                ) {
+                                    OverrideEdit.SET
+                                } else {
+                                    OverrideEdit.CLEAR
                                 }
-                            if (global is Outcome.Failure) throw PlaybackWriteFailure(global.error)
-                            mutated = true
+                            val next = previous.withPlayback(change, podcastEdit)
+                            mutated = savePodcast(podcastId, previous, next)
+                            if (scope != SettingScope.PODCAST && groupId != null) {
+                                val previousGroup = dao.forGroup(groupId)?.o ?: ScopeOverrides()
+                                val groupEdit =
+                                    if (scope ==
+                                        SettingScope.GROUP
+                                    ) {
+                                        OverrideEdit.SET
+                                    } else {
+                                        OverrideEdit.CLEAR
+                                    }
+                                val nextGroup = previousGroup.withPlayback(change, groupEdit)
+                                mutated = saveGroup(groupId, previousGroup, nextGroup) || mutated
+                            }
+                            if (writeGlobal != null) {
+                                // Run clears first so SQL faults cannot change the global. A store failure
+                                // throws through Room so it rolls back every scoped clear as well.
+                                val global = writeGlobal()
+                                if (global is Outcome.Failure) throw PlaybackWriteFailure(global.error)
+                                mutated = true
+                            }
+                            PlaybackScopeWrite.APPLIED
                         }
-                        PlaybackScopeWrite.APPLIED
                     }
                 } catch (error: PlaybackWriteFailure) {
                     return@withContext Outcome.Failure(error.error)
@@ -207,6 +214,25 @@ internal class ScopeSettingsRepositoryImpl(
             }
             Outcome.Success(result)
         }
+
+    /** Takes the global key's write lock before Room's writer, in the order a sync round does. */
+    private suspend fun <R> withGlobalWrite(
+        scope: SettingScope,
+        change: PlaybackSettingChange,
+        transaction: suspend (writeGlobal: (suspend () -> Outcome<Unit, SettingsError>)?) -> R,
+    ): R {
+        if (scope != SettingScope.GLOBAL) return transaction(null)
+
+        return when (change) {
+            is PlaybackSettingChange.Speed -> {
+                settings.setWithin(PlaybackSettingKeys.SPEED, change.value, transaction)
+            }
+
+            is PlaybackSettingChange.SkipSilence -> {
+                settings.setWithin(PlaybackSettingKeys.SKIP_SILENCE, change.value, transaction)
+            }
+        }
+    }
 
     private suspend fun savePodcast(
         id: Long,

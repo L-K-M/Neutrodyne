@@ -2585,6 +2585,7 @@
   public java.lang.Object reset(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
   public java.lang.Object resetAll(java.util.List, kotlin.coroutines.Continuation);
   public java.lang.Object set(ch.lkmc.neutrodyne.core.model.settings.SettingKey, java.lang.Object, kotlin.coroutines.Continuation);
+  public java.lang.Object setWithin(ch.lkmc.neutrodyne.core.model.settings.SettingKey, java.lang.Object, kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.SettingsSyncPort {
 }
