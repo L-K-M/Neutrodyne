@@ -6,6 +6,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.SyncCaptureKind
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
@@ -192,6 +193,38 @@ abstract class SessionAdopterTestBase {
 
                 assertNull(adopter.offer.value, "a local play since the remote session wins")
                 assertNull(db.playSessionDao().get()?.currentEpisodeId)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aNewerWholeRecordCaptureSuppressesAnOlderRemoteReplay() =
+        runTest {
+            val db = newTestDb(testScheduler)
+            try {
+                seedLink(db)
+                val podcast = seedPodcastAndEpisode(db)
+                val adopter = testSessionAdopter(db, TestClock(NOW))
+                val localEpisode = episodeId(db, podcast, EPISODE_KEY)
+
+                // The local session is g:one. A whole-record capture at a newer clock re-asserts it.
+                db.withWriteTransaction {
+                    db.playSessionDao().ensureNow(NOW)
+                    val row = requireNotNull(db.playSessionDao().get())
+                    db.playSessionDao().write(
+                        row.copy(currentEpisodeId = localEpisode, generation = row.generation + 1),
+                    )
+                }
+                storeRaw(db, remoteSession(PODCAST_SYNC, EPISODE_KEY, millis = NOW - 10_000L), OTHER_DEVICE)
+                // An older remote replay row still names g:two; the newer `*` capture must win.
+                pendSessionReplay(db, PODCAST_SYNC, OTHER_KEY, Hlc.of(NOW - 5_000L, 0, OTHER_NODE_ID))
+                pendSessionStar(db, Hlc.of(NOW, 0, THIS_NODE_ID))
+                adopter.evaluate()
+                adopter.drainOffers()
+
+                assertNull(adopter.offer.value, "the newer local capture means this device played since")
+                assertEquals(localEpisode, db.playSessionDao().get()?.currentEpisodeId)
             } finally {
                 db.close()
             }
@@ -847,6 +880,50 @@ abstract class SessionAdopterTestBase {
     ) {
         db.withWriteTransaction {
             SyncClockStore(db).put(SESSION_WIRE, SESSION_RID, RawSyncRecord(record, by = by))
+        }
+    }
+
+    /** A pending replay row: a remote write's field captured at its own node and clock. */
+    private suspend fun pendSessionReplay(
+        db: NeutrodyneDatabase,
+        podcastSyncId: String,
+        key: String,
+        clock: Hlc,
+    ) {
+        db.withWriteTransaction {
+            db
+                .syncOutboxDao()
+                .upsert(
+                    SyncOutboxEntity(
+                        coll = SESSION_WIRE,
+                        rid = SESSION_RID,
+                        field = "episode",
+                        hlc = clock.packed,
+                        nodeId = clock.nodeId.value,
+                        captureKind = SyncCaptureKind.REPLAY,
+                        value = episodeRef(podcastSyncId, key).toString(),
+                    ),
+                )
+        }
+    }
+
+    /** A pending whole-record capture row (`*`) at this node's clock. */
+    private suspend fun pendSessionStar(
+        db: NeutrodyneDatabase,
+        clock: Hlc,
+    ) {
+        db.withWriteTransaction {
+            db
+                .syncOutboxDao()
+                .upsert(
+                    SyncOutboxEntity(
+                        coll = SESSION_WIRE,
+                        rid = SESSION_RID,
+                        field = "*",
+                        hlc = clock.packed,
+                        nodeId = clock.nodeId.value,
+                    ),
+                )
         }
     }
 

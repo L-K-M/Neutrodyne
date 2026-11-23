@@ -983,6 +983,15 @@ Room, DataStore and `SecretStore` cannot commit atomically. `SyncApplyEffects` t
 - A remote value that wins against a pending per-field row (remote clock > outbox `hlc`) deletes that row during apply: the local change lost under LWW and the server would answer `stale` anyway (a `*` row stays, as above).
 - Expected size: tens of rows in normal use; a 300-feed import produces about 1,000 rows (podcasts, members, groups), pushed in one or two rounds.
 
+**Implementation note (2026-11-22).** `ChangeBuilder` and `SyncApplier.pendingState` applied a
+record's `*` row first and its named rows over it whatever their clocks, so an Undo of a group
+delete pushed the delete once the hold-back ended: the Undo's insert writes a newer `*`, but the
+triggers coalesce per field, so the older `deleted = true` row stays beside it. Both now apply a
+record's rows oldest clock first (`OUTBOX_APPLY_ORDER`, a `*` first at an equal clock), which is
+the newest-clock rule above. `SessionAdopter.pendingSession`, their mirror for the session record,
+uses the same order; its only `*` comes from a whole-library capture (`captureLocalLibrary`:
+the use-device first link and restore-everywhere).
+
 ### Push
 
 `OutboxReader.next()` reads rows in `hlc` order until 1,000 distinct `(coll, rid)` records are collected (all rows of a record are included), then `ChangeBuilder` maps them:

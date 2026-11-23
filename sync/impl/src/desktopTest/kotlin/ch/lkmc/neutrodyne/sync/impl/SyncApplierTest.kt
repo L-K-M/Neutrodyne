@@ -41,6 +41,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -1080,6 +1081,56 @@ class SyncApplierTest {
                 assertEquals(deviceId, raw.by, "the writer survives the page commit")
                 val episode = raw.state.fields["episode"]?.v as? JsonObject
                 assertEquals(JsonPrimitive("g:one"), episode?.get("k"))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anUndoneLocalDeleteBeatsAnOlderRemoteDelete() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                db.withWriteTransaction {
+                    db.syncStateDao().withApplying {
+                        db.groupDao().insert(groupEntity(uuid = groupUuid, orderKey = "a0"))
+                    }
+                }
+                // Delete at 5, Undo at 20: the remote delete at 10 sits between them.
+                for ((field, counter, value) in listOf(Triple("deleted", 5L, "true"), Triple("*", 20L, null))) {
+                    db.syncOutboxDao().upsert(
+                        SyncOutboxEntity(
+                            coll = "group",
+                            rid = groupUuid,
+                            field = field,
+                            hlc = clock(counter).packed,
+                            nodeId = node.value,
+                            value = value,
+                        ),
+                    )
+                }
+
+                val result =
+                    applier(db).applyPage(
+                        listOf(record("group", JsonPrimitive(groupUuid), null, "deleted" to bool(true))),
+                        roundId = now,
+                    )
+
+                assertEquals(0, result.held, "the Undo is newer than the remote delete")
+                val raw = SyncClockStore(db).get("group", groupUuid)
+                assertNotNull(raw, "the merged group record is stored")
+                val deleted = raw.state.fields["deleted"]
+                assertEquals(
+                    false,
+                    (deleted?.v as? JsonPrimitive)?.booleanOrNull,
+                    "the local Undo must win the `deleted` field against the remote delete",
+                )
+                assertEquals(
+                    Hlc.of(now, 20L, node),
+                    deleted?.c,
+                    "the surviving `deleted` carries the Undo's clock",
+                )
             } finally {
                 db.close()
             }
