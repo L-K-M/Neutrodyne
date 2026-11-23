@@ -682,4 +682,5 @@ public class RadioViewModel(
 private val NowPlaying.transportActive: Boolean
     get() = isPlaying || (playWhenReady && phase != PlayerPhase.ERROR && phase != PlayerPhase.ENDED)
 
-private fun NowPlaying.toRadioEpisode(): RadioEpisode = RadioEpisode(episodeId, title, podcastTitle, position.durationMs)
+private fun NowPlaying.toRadioEpisode(): RadioEpisode =
+    RadioEpisode(episodeId, title, podcastTitle, position.durationMs)
