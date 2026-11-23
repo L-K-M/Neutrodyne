@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop
 
+import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.ConnectionPoolEvictor
 import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.PowerEvent
@@ -8,6 +9,7 @@ import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.desktop.shell.SingleInstanceLock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +23,10 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -35,6 +40,23 @@ import kotlin.time.Instant
  * `FinalizerLane` shape; here the order against the scope cancels is what counts.
  */
 class DesktopShellTest {
+    @get:Rule
+    val temp = TemporaryFolder()
+
+    @Test
+    fun `start reports a state directory error when the instance lock cannot be opened`() {
+        val dirs = AppDirs.resolve(AppDirs.DesktopOs.LINUX, env = emptyMap(), home = temp.root.toPath())
+        val lockPath = dirs.state.resolve(SingleInstanceLock.LOCK_FILE_NAME)
+        Files.createDirectories(lockPath)
+        val errors = mutableListOf<String>()
+
+        val exit = DesktopShell.start(emptyArray(), dirs, errors::add)
+
+        assertThat(exit).isEqualTo(3)
+        assertThat(errors.single()).startsWith("Neutrodyne cannot create or write its directory ${dirs.state}:")
+        assertThat(Files.isDirectory(lockPath)).isTrue()
+    }
+
     @Test
     fun `stopServices awaits the runner's lane finalizer before cancelling the scopes`() =
         runBlocking {
