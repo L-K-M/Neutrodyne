@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -126,6 +127,116 @@ class SyncApplierTest {
                 assertTrue(db.syncOutboxDao().rows().isEmpty())
                 assertNull(db.podcastDao().bySyncId(podcastSyncId))
                 assertNull(db.groupDao().groupByUuid(groupUuid))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aWinningRemoteMemberOrderUpdatesTheExistingMember() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val podcast = seedPodcast(db, podcastSyncId)
+                val group = db.groupDao().insert(groupEntity(uuid = groupUuid, orderKey = "a"))
+                db.groupDao().insertMember(memberEntity(groupId = group, podcastId = podcast, orderKey = "a0"))
+                link(db)
+                val applier = applier(db)
+
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            record(
+                                "member",
+                                buildJsonObject {
+                                    put("g", groupUuid)
+                                    put("p", podcastSyncId)
+                                },
+                                null,
+                                "ok" to text("a5"),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+
+                assertEquals(1, result.applied)
+                assertEquals("a5", db.groupDao().member(group, podcast)?.orderKey)
+                assertTrue(db.syncOutboxDao().rows().isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anEarlierRemoteAddedAtLowersTheExistingMembersWithItsOrderUnchanged() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val podcast = seedPodcast(db, podcastSyncId)
+                val group = db.groupDao().insert(groupEntity(uuid = groupUuid, orderKey = "a"))
+                db.groupDao().insertMember(
+                    memberEntity(groupId = group, podcastId = podcast, orderKey = "a0", addedAt = LOCAL_ADDED_AT),
+                )
+                link(db)
+
+                val result =
+                    applier(db).applyPage(
+                        listOf(
+                            record(
+                                "member",
+                                buildJsonObject {
+                                    put("g", groupUuid)
+                                    put("p", podcastSyncId)
+                                },
+                                null,
+                                "ok" to text("a0"),
+                                "addedAt" to int(REMOTE_ADDED_AT),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+
+                assertEquals(1, result.applied)
+                val member = db.groupDao().member(group, podcast)
+                assertEquals("a0", member?.orderKey)
+                assertEquals(REMOTE_ADDED_AT, member?.addedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aMemberRecordWithoutAnOrderKeyFallsBackToTheExistingOrder() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val podcast = seedPodcast(db, podcastSyncId)
+                val group = db.groupDao().insert(groupEntity(uuid = groupUuid, orderKey = "a"))
+                db.groupDao().insertMember(
+                    memberEntity(groupId = group, podcastId = podcast, orderKey = "a0", addedAt = LOCAL_ADDED_AT),
+                )
+                link(db)
+
+                val result =
+                    applier(db).applyPage(
+                        listOf(
+                            record(
+                                "member",
+                                buildJsonObject {
+                                    put("g", groupUuid)
+                                    put("p", podcastSyncId)
+                                },
+                                null,
+                                "addedAt" to int(REMOTE_ADDED_AT),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+
+                assertEquals(1, result.applied)
+                val member = db.groupDao().member(group, podcast)
+                assertEquals("a0", member?.orderKey)
+                assertEquals(REMOTE_ADDED_AT, member?.addedAt)
             } finally {
                 db.close()
             }
@@ -1195,3 +1306,7 @@ class SyncApplierTest {
 
     private fun clock(counter: Long): Hlc = Hlc.of(now, counter, remote)
 }
+
+// A member added here first, and the same membership added earlier on another device.
+private const val LOCAL_ADDED_AT = 1_700_000_000_000L
+private const val REMOTE_ADDED_AT = 1_600_000_000_000L

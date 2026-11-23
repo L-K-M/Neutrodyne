@@ -137,6 +137,23 @@ abstract class GroupDao {
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
     abstract suspend fun insertMember(row: PodcastGroupMemberEntity): Long
 
+    /**
+     * A merged remote member (10 Pull and apply): an existing membership's `orderKey` and
+     * `addedAt` are updated in place. [insertMember] cannot carry them because its `IGNORE`
+     * conflict strategy leaves an existing row untouched, so a reorder from another device never
+     * landed.
+     */
+    @Query(
+        "UPDATE podcast_group_member SET orderKey = :orderKey, addedAt = :addedAt" +
+            " WHERE groupId = :groupId AND podcastId = :podcastId",
+    )
+    abstract suspend fun updateMemberOrder(
+        groupId: Long,
+        podcastId: Long,
+        orderKey: String,
+        addedAt: Long,
+    ): Int
+
     @Query("SELECT * FROM podcast_group WHERE id = :id")
     abstract suspend fun groupById(id: Long): PodcastGroupEntity?
 
