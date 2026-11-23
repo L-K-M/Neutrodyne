@@ -127,7 +127,9 @@ internal object DesktopShell {
             try {
                 lock.tryAcquire()
             } catch (e: IOException) {
-                return dataDirFailure(dirs.state, e, showError)
+                val lockPath = dirs.state.resolve(SingleInstanceLock.LOCK_FILE_NAME)
+                showError("${ShellDialogs.INSTANCE_LOCK_FAILURE_PREFIX} $lockPath: ${e.message}")
+                return EXIT_DATA_DIR_FAILURE
             }
         return when (acquisition) {
             SingleInstanceLock.Acquire.HeldByOther -> handOffToOwner(dirs, inputs, buildInfo)

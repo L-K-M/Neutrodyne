@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.desktop.shell.ShellDialogs
 import ch.lkmc.neutrodyne.desktop.shell.SingleInstanceLock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -44,7 +45,7 @@ class DesktopShellTest {
     val temp = TemporaryFolder()
 
     @Test
-    fun `start reports a state directory error when the instance lock cannot be opened`() {
+    fun `start reports the lock path when the instance lock cannot be opened`() {
         val dirs = AppDirs.resolve(AppDirs.DesktopOs.LINUX, env = emptyMap(), home = temp.root.toPath())
         val lockPath = dirs.state.resolve(SingleInstanceLock.LOCK_FILE_NAME)
         Files.createDirectories(lockPath)
@@ -52,9 +53,22 @@ class DesktopShellTest {
 
         val exit = DesktopShell.start(emptyArray(), dirs, errors::add)
 
-        assertThat(exit).isEqualTo(3)
-        assertThat(errors.single()).startsWith("Neutrodyne cannot create or write its directory ${dirs.state}:")
+        assertThat(exit).isEqualTo(3) // The documented state-directory failure exit.
+        assertThat(errors.single()).startsWith("${ShellDialogs.INSTANCE_LOCK_FAILURE_PREFIX} $lockPath:")
         assertThat(Files.isDirectory(lockPath)).isTrue()
+    }
+
+    @Test
+    fun `start reports the state directory when it cannot be created`() {
+        val dirs = AppDirs.resolve(AppDirs.DesktopOs.LINUX, env = emptyMap(), home = temp.root.toPath())
+        Files.createDirectories(dirs.state.parent)
+        Files.createFile(dirs.state)
+        val errors = mutableListOf<String>()
+
+        val exit = DesktopShell.start(emptyArray(), dirs, errors::add)
+
+        assertThat(exit).isEqualTo(3)
+        assertThat(errors.single()).startsWith("${ShellDialogs.DATA_DIR_FAILURE_PREFIX} ${dirs.state}:")
     }
 
     @Test
