@@ -14,6 +14,9 @@ import kotlinx.coroutines.launch
 
 /** Change notifications coalesce; revocation uses a separate close signal that cannot be dropped.
  * Registration precedes the credential recheck, so revocation during either step closes the stream.
+ * A device runs one client process at a time, and a killed process's socket stays open behind a proxy
+ * until a heartbeat write fails, so a device at the per-device cap closes its oldest stream to accept
+ * the new one instead of answering 429.
  */
 internal class EventBus(
     private val valid: suspend (AccountPrincipal) -> Boolean,
@@ -26,6 +29,8 @@ internal class EventBus(
                 extraBufferCapacity = 1,
                 onBufferOverflow = BufferOverflow.DROP_OLDEST,
             )
+
+        // LinkedHashSet, so insertion order is open order and the first match is the oldest stream.
         val streams = mutableSetOf<EventStream>()
     }
 
@@ -37,12 +42,26 @@ internal class EventBus(
             synchronized(this) {
                 if (stopped) throw AuthThrottled(10)
                 val account = accounts.getOrPut(principal.accountId) { AccountFlow() }
-                if (account.streams.size >= minOf(10, maxPerAccount) ||
-                    account.streams.count { it.principal.deviceId == principal.deviceId } >= 2
-                ) {
-                    throw AuthThrottled(10)
+                val deviceId = principal.deviceId
+                if (deviceId == null) {
+                    if (account.streams.count { it.principal.deviceId == null } >= MAX_STREAMS_PER_DEVICE) {
+                        throw AuthThrottled(10)
+                    }
+                } else {
+                    // The old stream is a dead socket the proxy has not noticed yet, so evict this
+                    // device's oldest stream(s) before the account cap check. close() calls remove(),
+                    // which re-enters this monitor; the set is copied because remove() mutates it.
+                    while (account.streams.count { it.principal.deviceId == deviceId } >= MAX_STREAMS_PER_DEVICE) {
+                        account.streams
+                            .toList()
+                            .first { it.principal.deviceId == deviceId }
+                            .close()
+                    }
                 }
-                EventStream(principal, account.changed) { removed -> remove(removed) }.also { account.streams += it }
+                // An eviction that emptied the account removed its entry; register on the live one.
+                val live = accounts.getOrPut(principal.accountId) { account }
+                if (live.streams.size >= minOf(10, maxPerAccount)) throw AuthThrottled(10)
+                EventStream(principal, live.changed) { removed -> remove(removed) }.also { live.streams += it }
             }
         try {
             if (!valid(principal)) unauthorized()
@@ -88,6 +107,10 @@ internal class EventBus(
     }
 
     @Synchronized internal fun streamCount(): Int = accounts.values.sumOf { it.streams.size }
+
+    private companion object {
+        const val MAX_STREAMS_PER_DEVICE = 2
+    }
 }
 
 internal class EventStream(

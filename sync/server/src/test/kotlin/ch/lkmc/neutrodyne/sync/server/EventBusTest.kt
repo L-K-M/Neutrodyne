@@ -24,6 +24,11 @@ class EventBusTest {
         token: String = "t",
     ) = AccountPrincipal(account, AccountRole.USER, TokenKind.DEVICE, token, device)
 
+    private fun webPrincipal(
+        account: Long = 1,
+        token: String = "w",
+    ) = AccountPrincipal(account, AccountRole.USER, TokenKind.WEB_SESSION, token, null)
+
     private fun changed(
         seq: Int,
         account: Long = 1,
@@ -106,16 +111,69 @@ class EventBusTest {
                 val streams = mutableListOf<EventStream>()
                 repeat(5) { d -> repeat(2) { streams += bus.open(principal(device = "d$d")) } }
                 assertFailsWith<AuthThrottled> { bus.open(principal(device = "sixth")) }
-                assertFailsWith<AuthThrottled> { bus.open(principal(device = "d0")) }
-                streams.first().close()
+                // A device at its own cap evicts its oldest stream instead of being throttled.
+                streams += bus.open(principal(device = "d0"))
+                assertEquals(10, bus.streamCount())
+                streams[1].close()
                 streams += bus.open(principal(device = "sixth"))
                 streams.forEach { it.close() }
                 assertEquals(0, bus.streamCount())
-                val one = bus.open(principal())
-                val two = bus.open(principal(token = "second"))
-                assertFailsWith<AuthThrottled> { bus.open(principal(token = "third")) }
-                one.close()
-                two.close()
+            }
+        }
+
+    @Test fun `a device over its stream cap replaces its oldest stream`() =
+        runBlocking<Unit> {
+            EventBus({ true }).use { bus ->
+                val oldest = bus.open(principal(device = "d0", token = "oldest"))
+                val second = bus.open(principal(device = "d0", token = "second"))
+                val other = bus.open(principal(device = "d1", token = "other"))
+                val oldestEnd = async(start = CoroutineStart.UNDISPATCHED) { oldest.events.collect() }
+                val secondEnd = async(start = CoroutineStart.UNDISPATCHED) { second.events.collect() }
+                val otherEnd = async(start = CoroutineStart.UNDISPATCHED) { other.events.collect() }
+                repeat(3) { yield() }
+                bus.open(principal(device = "d0", token = "newest"))
+                withTimeout(2000) { oldestEnd.await() }
+                assertFalse(secondEnd.isCompleted)
+                assertFalse(otherEnd.isCompleted)
+                assertEquals(3, bus.streamCount())
+                second.close()
+                other.close()
+                withTimeout(2000) { secondEnd.await() }
+                withTimeout(2000) { otherEnd.await() }
+            }
+        }
+
+    @Test fun `a principal without a device at the stream cap is throttled`() =
+        runBlocking<Unit> {
+            EventBus({ true }).use { bus ->
+                bus.open(webPrincipal(token = "w1"))
+                bus.open(webPrincipal(token = "w2"))
+                assertFailsWith<AuthThrottled> { bus.open(webPrincipal(token = "w3")) }
+                assertEquals(2, bus.streamCount())
+            }
+        }
+
+    @Test fun `the account stream cap still throttles a new device`() =
+        runBlocking<Unit> {
+            EventBus({ true }).use { bus ->
+                repeat(5) { d -> repeat(2) { bus.open(principal(device = "d$d")) } }
+                assertFailsWith<AuthThrottled> { bus.open(principal(device = "sixth")) }
+                assertEquals(10, bus.streamCount())
+            }
+        }
+
+    @Test fun `a device at the account cap replaces its own oldest stream`() =
+        runBlocking<Unit> {
+            EventBus({ true }).use { bus ->
+                val oldest = bus.open(principal(device = "d0", token = "oldest"))
+                bus.open(principal(device = "d0", token = "second"))
+                repeat(4) { d -> repeat(2) { bus.open(principal(device = "d${d + 1}")) } }
+                assertEquals(10, bus.streamCount())
+                val oldestEnd = async(start = CoroutineStart.UNDISPATCHED) { oldest.events.collect() }
+                repeat(3) { yield() }
+                bus.open(principal(device = "d0", token = "newest"))
+                withTimeout(2000) { oldestEnd.await() }
+                assertEquals(10, bus.streamCount())
             }
         }
 
