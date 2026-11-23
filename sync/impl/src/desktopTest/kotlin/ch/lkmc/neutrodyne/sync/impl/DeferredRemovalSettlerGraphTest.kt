@@ -9,7 +9,10 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.database.DatabaseFactory
+import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.StrictMigrations
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncActive
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncEvent
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
@@ -50,6 +53,15 @@ interface SettlerTestGraph {
     @Provides
     fun tokens(): SyncTokenStore = SyncTokenStore(FakeSecretStore())
 
+    // The settings coordinator's DatabaseOpener needs these. The graph's database is the
+    // factory's `db`, so the opener is never opened and its factory never builds one.
+    @Provides
+    @StrictMigrations
+    fun strictMigrations(): Boolean = true
+
+    @Provides
+    fun databaseFactory(dirs: AppDirs): DatabaseFactory = DesktopDatabaseFactory(dirs)
+
     @Provides
     @Dispatcher(NeutrodyneDispatchers.IO)
     fun ioDispatcher(): CoroutineDispatcher = Dispatchers.IO
@@ -65,6 +77,7 @@ interface SettlerTestGraph {
             @Provides playback: PlaybackSyncPort,
             @Provides clock: Clock,
             @Provides storagePaths: StoragePaths,
+            @Provides dirs: AppDirs,
             @Provides @ApplicationScope scope: CoroutineScope,
         ): SettlerTestGraph
     }
@@ -94,6 +107,7 @@ class DeferredRemovalSettlerGraphTest {
             playback = playback,
             clock = TestClock(now),
             storagePaths = StoragePaths(dirs),
+            dirs = dirs,
             scope = scope,
         )
     }

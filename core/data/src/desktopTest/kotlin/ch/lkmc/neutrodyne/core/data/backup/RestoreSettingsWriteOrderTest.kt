@@ -198,7 +198,7 @@ class RestoreSettingsWriteOrderTest {
             ch.lkmc.neutrodyne.core.domain.SettingWriteOrigin
                 .Captured("historical fixture intent")
         }
-        val writeLocks = DataStoreSettingsWriteCoordinator()
+        val writeLocks = DataStoreSettingsWriteCoordinator { db }
         val repository =
             DataStoreSettingsRepository(
                 settingsStore = settingsStore,

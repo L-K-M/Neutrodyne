@@ -65,6 +65,8 @@ class FakeSettingsRepository : SettingsRepository {
         return Outcome.Success(Unit)
     }
 
+    // No per-key lock: the fake has no sync round to order against, so there is nothing to
+    // deadlock with. Lock-order tests use the real repository and coordinator.
     override suspend fun <T : Any, R> setWithin(
         key: SettingKey<T>,
         value: T,
