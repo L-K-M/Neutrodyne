@@ -246,6 +246,9 @@ private fun ReadyRoot(
     var viewportBottomPx by remember { mutableFloatStateOf(0f) }
     // The registrations the host renders, read here only for their overlay metadata. Built once
     // for the same reason as the host's provider: the installer set's identity churns.
+    // Lockstep invariant: nav3's entryProvider throws for a key with no registered entry, so any
+    // key the host can render must come from `installers` too, or this lookup crashes composition.
+    // If the host's provider grows beyond `installers`, hoist one shared provider instead.
     val registrations = remember { entryProvider<NavKey> { installers.forEach { install -> install() } } }
     val radioHome =
         radioHomeIsShowing(navigation.selectedTab, navigation.stack(FeedsKey).toList()) {

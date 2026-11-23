@@ -476,6 +476,27 @@ class NeutrodyneRootTest {
             runOnIdle { kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation) }
         }
 
+    /**
+     * A page pushed above a sheet on the radio home still leaves it: only overlays above the last
+     * home keep it showing, so the bar returns once any full page sits in the stack.
+     */
+    @Test
+    fun aPageOverASheetOnTheRadioHomeBringsTheMiniPlayerBack() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            val routes = flowOf(Route.Push(SpeedKey), Route.Push(FeedBrowserKey))
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            waitForIdle()
+            onNodeWithText("all-feed-content").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(PlayerPresentation.STANDARD, slot?.presentation) }
+        }
+
     @Test
     fun downloadsBadgeTracksOnlyTheFailureCountFlow() =
         runComposeUiTest {
