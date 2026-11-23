@@ -192,6 +192,8 @@
   <string name="sync_diag_pending">Pending changes</string>
   <string name="sync_diag_last_round">Last round</string>
   <string name="sync_diag_rounds_empty">No rounds recorded yet</string>
+  <string name="sync_diag_in_progress">In progress</string>
+  <string name="sync_diag_in_progress_line">%1$s, running %2$d s, %3$s for %4$d s</string>
   <string name="sync_diag_collection_podcast">Podcasts</string>
   <string name="sync_diag_collection_group">Groups</string>
   <string name="sync_diag_collection_member">Members</string>

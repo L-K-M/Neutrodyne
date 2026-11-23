@@ -1254,7 +1254,7 @@ stateDiagram-v2
 
 ### Diagnostics
 
-Settings › Sync › Diagnostics (08) and the diagnostics export ([09 Crash reporting and diagnostics](09-quality-and-release.md#crash-reporting-and-diagnostics)) show: server version and protocol, account and device names, last round (time, reason, `SyncReport`), the last 20 round summaries (in memory), pending outbox rows by collection, parked and held counts, clock offset, SSE state and reconnect count, the LAN gate state (Android), and the last error code. Never shown or exported: the token, the cursor in full (first 8 characters only), feed URLs.
+Settings › Sync › Diagnostics (08) and the diagnostics export ([09 Crash reporting and diagnostics](09-quality-and-release.md#crash-reporting-and-diagnostics)) show: server version and protocol, account and device names, last round (time, reason, `SyncReport`), the last 20 round summaries (in memory, cancelled rounds included as `CANCELLED`, which is not an error code), the rounds still in progress with their reason, age and phase (`STARTING`, `WAITING` for an earlier round, `PREPARING`, `REQUESTING`, `APPLYING`), pending outbox rows by collection, parked and held counts, clock offset, SSE state and reconnect count, the LAN gate state (Android), and the last error code. Never shown or exported: the token, the cursor in full (first 8 characters only), feed URLs.
 
 ---
 
