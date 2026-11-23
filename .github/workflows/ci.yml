@@ -283,7 +283,7 @@ jobs:
         id: robolectric-set
         if: ${{ !cancelled() }}
         run: |
-          jars=$(find ~/.m2/repository/org/robolectric -name '*.jar' -printf '%P\n' 2>/dev/null | LC_ALL=C sort)
+          jars=$(find ~/.m2/repository/org/robolectric -name '*.jar' -printf '%P\n' 2>/dev/null | LC_ALL=C sort || true)
           if [ -z "$jars" ]; then
             echo "No Robolectric jars to cache"
             exit 0

@@ -773,7 +773,7 @@ Triggers: `pull_request`, `push` to `main` and `release/*`, `workflow_dispatch`.
         with: { python-version: "3.14" }   # = chaquopy.defaultConfig.version (01) and the desktop's PBS minor; both shim suites run on it
       - uses: gradle/actions/setup-gradle@<sha> # v6.4.0 (also validates the wrapper checksum)
         with: { cache-provider: basic, cache-read-only: "${{ github.ref != 'refs/heads/main' }}" }
-      - uses: actions/cache@<sha>
+      - uses: actions/cache/restore@<sha>
         with: { path: ~/.m2/repository/org/robolectric, key: robolectric-4.17-, restore-keys: robolectric-4.17- }   # restore only; main saves the grown set after the tests
       - run: |
           set +e
