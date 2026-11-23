@@ -151,6 +151,17 @@ re-read or reproduce those first.
   - [#654](https://github.com/L-K-M/Neutrodyne/pull/654) Take up a synced position on a headset resume.
   - [#655](https://github.com/L-K-M/Neutrodyne/pull/655) Push an undone group delete as the restored group.
   - [#656](https://github.com/L-K-M/Neutrodyne/pull/656) Stop at the end of the episode on the desktop.
+  - [#657](https://github.com/L-K-M/Neutrodyne/pull/657) Cache every Robolectric SDK jar the host tests use.
+
+  Where they stand (2026-11-23): each reached review steady state and none is
+  merged. #632, #635, #639-#642, #644-#651, #653 and #655-#657 are fully
+  green. The `unit` job of #636, #637, #638, #643, #652 and #654 is red only on
+  Maven Central HTTP 429 responses to Robolectric `android-all-instrumented`
+  fetches; no test of theirs fails. Rerun them once #657 is on main and a main
+  `unit` run has saved the full jar set
+  ([Cache every Robolectric SDK the host tests pin](#cache-every-robolectric-sdk-the-host-tests-pin)).
+  Their deferred review findings are in
+  [Follow-ups from the Opus 5.5 PR reviews](#follow-ups-from-the-opus-55-pr-reviews).
 
 ## Playback and programme correctness
 
@@ -690,6 +701,58 @@ the Speed and Sleep sheets, because a pushed sheet counted as leaving home
 - **The podcast detail still has a settings gear**, against PO-55 [LU-08,
   REPORTED].
 
+## Follow-ups from the Opus 5.5 PR reviews
+
+Review findings deferred on the open Opus 5.5 PRs. Each builds on its PR, so
+merge that first; the paths below are on the PR's branch.
+
+- **Evict a deleted playlist's pager** (#640). `RadioViewModel.pagingFor`
+  keeps the tuned playlist's pager and the last two visited
+  (`PAGE_CACHE_SIZE = 3`). A deleted playlist's entry stays until it is
+  evicted, so up to three dead pagers keep collecting. Evict the entry when its
+  playlist leaves the chooser's list. Test: delete a cached playlist and check
+  that its scope is cancelled.
+- **One shortcut model for the desktop** (#644). Three places list the chords:
+  the menu bar (`desktopApp/.../window/DesktopMenuBar.kt`), the root key handler
+  (`NeutrodyneRoot.dispatchRootKey`) and the new Help > Keyboard shortcuts card
+  (`feature/settings/.../KeyboardShortcutsScreen.kt`). All 24 rows matched on
+  review. Feed all three from one `DesktopShortcuts` model so a new chord cannot
+  drift.
+- **One entry provider for both hosts** (#647). `NeutrodyneNavHost` and
+  `NeutrodyneRoot` each build an `entryProvider`, and #647 only added a
+  lockstep comment. Hoist one provider for both.
+- **Bound an end-of-item advance that commits nothing** (#646).
+  `DesktopPlaybackController` now retries an advance that committed nothing at
+  the end of an item. The retry stops once the live queue read catches up, but
+  no cap bounds it. Add a retry cap and an issue the transport can print.
+- **Carry the row version on `StartOutcome`** (#654). `AndroidServiceBridge`
+  suppresses the paused-item pickup while the stored position row's `updatedAt`
+  is not after the settled start. A row written between the starter's read and
+  the mark still counts as older than the start. The full fix returns the row
+  version the `PlayStarter` read in `StartOutcome` and compares that.
+- **Check Space on the other pages' episode rows** (#642). Space now toggles
+  playback on radio slips and the mini player bar. It acts on key-up, so
+  auto-repeat cannot toggle it again. Episode rows on the other pages have not
+  been checked, and 08-ui-ux.md says so. Chain `Modifier.spaceTogglesPlayback`
+  where `clickable` would take Space as a click, and update the note. Optionally
+  track the key-down in a `Modifier.Node`, so a key-up without its key-down
+  (focus moved mid-press) does not toggle.
+- **Test and comment hygiene.**
+  - `FfAudioEngineTest.kt:315` (#656) appends to the collector list from
+    `Dispatchers.Default`. Use a `CopyOnWriteArrayList`.
+  - `aWinningRemoteMemberOrderUpdatesTheExistingMember` (#650) should also
+    assert that the member keeps its `addedAt` when only the order key arrives.
+  - The `CONTENT_PADDING` KDoc at `ShowNotesRenderer.kt:473` (#639) says note
+    blocks, but images stay full-bleed. Make it say text blocks.
+  - `OUTBOX_APPLY_ORDER` in `SourceReader.kt` (#655) relies on packed HLC
+    strings sorting in clock order. `HlcTest` pins that order; a direct test
+    of the comparator would guard it at the call site. Use valid 16-hex-digit
+    `NodeId`s.
+- **Owner decision: RFC 8215 local-use NAT64** (#648). #648 screens RFC 6052's
+  well-known `64:ff9b::/96` by its embedded IPv4. `64:ff9b:1::/48` literals
+  still pass as public, and RFC 8215 says not to assume an embedded IPv4 layout
+  there. Decide whether to screen them, and with which RFC 6052 layouts.
+
 ## Performance
 
 ### Measure the work done by playback ticks
@@ -788,6 +851,53 @@ the reference CI OS against the committed PNG. Record its JDK, rasterizer,
 density, fonts and renderer configuration, then decide whether the host should
 use its own baseline or run visual acceptance on the reference OS. Verify all
 six presets and prove a deliberate layout change still fails.
+
+## CI and test infrastructure
+
+### Cache every Robolectric SDK the host tests pin
+
+**In review: [#657](https://github.com/L-K-M/Neutrodyne/pull/657).** The
+`unit` job's cache key `robolectric-4.17-sdk36` was saved once on main
+(2026-10-07, about 200 MB) and holds only the SDK 36 `android-all-instrumented`
+jar. GitHub Actions never updates an existing key. About 100 host-test classes
+pin `@Config(sdk = ...)` to 26, 28, 30, 31, 32, 33 or 34, 73 of them to 34, so
+every run fetched about 900 MB of jars from Maven Central. Maven Central
+answers parallel runs with HTTP 429, and each failed fetch fails its whole test
+class (`AssertionError: Failed to fetch maven artifact
+org.robolectric:android-all-instrumented:14-robolectric-10818077-i7`). On
+2026-11-23 this left the `unit` job of six open PRs red although none of their
+tests failed.
+
+#657 restores by the prefix `robolectric-4.17-` and takes the newest set. On
+main only, it saves the jar set after the tests under a key built from a hash
+of the jar names, so the cache grows whenever a run fetched a jar it lacked.
+Robolectric checks each download in a temporary directory before moving it in,
+so a failed run leaves only whole jars. `record-screenshots.yml` restores by
+the same prefix.
+
+After it merges:
+
+- Check that the first main `unit` run logs `Cache saved with key:
+  robolectric-4.17-<hash>`, and that the next PR run restores it and fetches
+  no jars.
+- Rerun the PRs whose `unit` was red only on the fetches.
+- Delete `robolectric-4.17-sdk36` once a fuller set is saved
+  (`gh cache delete`). Each set is about 1.1 GB against the repository's
+  10 GB cache quota, so prune older sets when the pins change.
+- Optional: narrow the SDK spread. Many pinned classes do not need a specific
+  API level. Moving them to one or two SDKs shrinks the set, the restore time
+  and the exposure to Maven Central. Keep the pins that test API-level
+  behaviour.
+
+### Fix the GroupFeedJourneyTest timeout flake
+
+`GroupFeedJourneyTest.createFilterPlayReorderDeleteAndUndo` failed once on
+#647's first head (`d07e4d6`) with `UncompletedCoroutinesError` after three
+minutes, then passed on the next head. #647's change cannot reach that test.
+Run it in a loop to reproduce, then look for a collector or timer launched into
+the test scope and never cancelled. Two older `unit` flakes, an exit value 10
+(a StrictMode death) and an `ExternalYouTubeModeTest` timeout, also clear on a
+rerun.
 
 ## Listening workflows
 
