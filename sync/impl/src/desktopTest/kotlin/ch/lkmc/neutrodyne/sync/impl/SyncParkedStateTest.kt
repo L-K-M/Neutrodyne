@@ -510,7 +510,8 @@ class SyncParkedStateTest {
                 val raw = assertNotNull(SyncClockStore(db).get("episode", podcastSyncId + "g:one"))
                 assertEquals(JsonPrimitive(true), raw.state.fields["played"]?.v)
                 assertEquals(JsonPrimitive(9L), raw.state.fields["playedAt"]?.v)
-                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                val state = assertNotNull(db.episodeStateDao().byEpisode(episodeId))
+                assertNull(state.playedAt)
                 assertEquals(500L, db.positionDao().byEpisode(episodeId)?.positionMs)
                 assertEquals(0, db.syncParkedDao().count())
             } finally {

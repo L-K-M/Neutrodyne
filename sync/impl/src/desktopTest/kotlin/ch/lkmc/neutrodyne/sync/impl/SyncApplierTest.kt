@@ -832,7 +832,8 @@ class SyncApplierTest {
                     )
                 runCurrent()
 
-                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                val state = assertNotNull(db.episodeStateDao().byEpisode(episodeId))
+                assertNull(state.playedAt)
                 assertTrue(playback.remotePlayed.isEmpty(), "a hidden played mark never freezes")
                 assertTrue(result.remotePlayed.isEmpty())
                 assertTrue(received.isEmpty())
@@ -840,6 +841,23 @@ class SyncApplierTest {
                     5_000L,
                     db.positionDao().byEpisode(episodeId)?.positionMs,
                     "the newer listening position won the merge",
+                )
+
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "pos" to pos(0, reset = true).copy(c = clock(40).toString()),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+                assertEquals(
+                    9L,
+                    db.episodeStateDao().byEpisode(episodeId)?.playedAt,
+                    "the raw timestamp survives hiding",
                 )
             } finally {
                 db.close()
