@@ -59,8 +59,8 @@ internal class ImportClassifier(
     class Result
         internal constructor(
             val items: List<ClassifiedItem>,
-            /** Group names cut to `GroupNames.MAX_CODE_POINTS` — folds into TRUNCATED_NAMES. */
-            val truncatedNames: Int,
+            /** Distinct shortened group-name keys — folds into TRUNCATED_NAMES once per name. */
+            val truncatedNameKeys: Set<String>,
         )
 
     enum class InputMode { MIXED, YOUTUBE_ONLY }
@@ -74,14 +74,14 @@ internal class ImportClassifier(
         val groupsByItem = ArrayList<LinkedHashMap<String, String>>()
         // identity → index of the first entry carrying it; only a first occurrence is a winner.
         val winnerByIdentity = HashMap<String, Int>()
-        var truncated = 0
+        val truncatedKeys = LinkedHashSet<String>()
 
         for (entry in entries) {
             val input = if (youTube.classify(entry.url) != null) entry.url else entry.htmlUrl
             val ref = input?.let(youTube::classify)
             val target = classificationOf(entry, ref, mode)
             val names = groupNamesOf(entry.groupNames)
-            truncated += names.truncated
+            truncatedKeys += names.truncatedKeys
 
             var status = target.status
             var podcastId: Long? = null
@@ -144,7 +144,7 @@ internal class ImportClassifier(
                 items.mapIndexed { index, item ->
                     item.copy(groupNames = groupsByItem[index].values.toList())
                 },
-            truncatedNames = truncated,
+            truncatedNameKeys = truncatedKeys,
         )
     }
 
@@ -231,12 +231,12 @@ internal class ImportClassifier(
 
     /**
      * 05 §4: `category` tokens ∪ the parent folder, each `GroupNames`-normalised — empty names
-     * drop, over-long ones truncate and count toward the TRUNCATED_NAMES warning. Duplicates by
-     * `nameKey` keep the first spelling.
+     * drop, over-long ones truncate; each shortened name key counts once toward the
+     * TRUNCATED_NAMES warning. Duplicates by `nameKey` keep the first spelling.
      */
     private fun groupNamesOf(raw: List<String>): NormalizedNames {
         val byKey = LinkedHashMap<String, String>()
-        var truncated = 0
+        val truncatedKeys = LinkedHashSet<String>()
         for (name in raw) {
             val valid =
                 when (val validation = GroupNames.validate(name)) {
@@ -249,13 +249,14 @@ internal class ImportClassifier(
                     }
 
                     is GroupNames.Validation.TooLong -> {
-                        truncated++
-                        GroupNames.truncate(name) ?: continue
+                        val truncated = GroupNames.truncate(name) ?: continue
+                        truncatedKeys += truncated.nameKey
+                        truncated
                     }
                 }
             byKey.putIfAbsent(valid.nameKey, valid.name)
         }
-        return NormalizedNames(byKey, truncated)
+        return NormalizedNames(byKey, truncatedKeys)
     }
 
     private suspend fun existingPodcast(identity: String): Long? {
@@ -304,7 +305,7 @@ internal class ImportClassifier(
 
     private class NormalizedNames(
         val byKey: LinkedHashMap<String, String>,
-        val truncated: Int,
+        val truncatedKeys: Set<String>,
     )
 
     private companion object {

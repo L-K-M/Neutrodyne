@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.feeds.youtube.NewPipeSubscriptions
 import ch.lkmc.neutrodyne.feeds.youtube.TakeoutSubscriptionsParser
 import ch.lkmc.neutrodyne.feeds.youtube.UrlListParser
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * One parser-agnostic import row (05 Adapters): [title]/[customTitle] hold the document's spellings;
@@ -62,6 +63,12 @@ public data class ImportDocument(
     val salvaged: Boolean = false,
     val warnings: List<ImportDocumentWarning> = emptyList(),
     val ignoredOutlines: Int = 0,
+    /**
+     * Distinct name keys the adapter shortened, so the preview can union them with the
+     * classifier's entry names instead of adding the two counts. Transient: the import goldens
+     * pin the document's serialized shape.
+     */
+    @Transient val truncatedNameKeys: Set<String> = emptySet(),
 )
 
 /**
@@ -118,7 +125,7 @@ public object ImportDocuments {
 
         val groups = ArrayList<ImportGroup>()
         val seen = HashSet<String>()
-        var truncatedNames = 0
+        val truncatedKeys = LinkedHashSet<String>()
 
         fun propose(
             name: String,
@@ -136,8 +143,11 @@ public object ImportDocuments {
                 valid = GroupNames.truncate(name) ?: return
                 proposal = valid.name
             }
+            // Record the shortened key before the dedup return: a truncated name whose key an
+            // earlier proposal claimed was still shortened, and the classifier counts it the
+            // same way (its groupNamesOf adds before putIfAbsent).
+            if (truncated) truncatedKeys += valid.nameKey
             if (!seen.add(valid.nameKey)) return
-            if (truncated) truncatedNames++
             groups += ImportGroup(proposal, colorArgb, iconKey, reason)
         }
 
@@ -202,13 +212,14 @@ public object ImportDocuments {
             warnings =
                 doc.warnings.map { ImportDocumentWarning(it.code.name, it.count) } +
                     listOfNotNull(
-                        if (truncatedNames > 0) {
-                            ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, truncatedNames)
+                        if (truncatedKeys.isNotEmpty()) {
+                            ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, truncatedKeys.size)
                         } else {
                             null
                         },
                     ),
             ignoredOutlines = doc.ignoredOutlines,
+            truncatedNameKeys = truncatedKeys,
         )
     }
 

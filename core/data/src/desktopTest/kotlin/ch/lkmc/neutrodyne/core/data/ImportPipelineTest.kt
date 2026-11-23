@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
@@ -267,6 +268,58 @@ class ImportPipelineTest {
             assertEquals(2, items.size)
             val warnings = ImportWarningJson.decodeAll(requireNotNull(session.warningsJson))
             assertTrue(warnings.any { it.code == "IGNORED_OUTLINES" })
+        }
+
+    @Test
+    fun oneOverlongFolderWithThreePodcastsReportsOneShortenedName() =
+        runTest {
+            val folder = "a".repeat(GroupNames.MAX_CODE_POINTS + 5)
+            assertEquals(
+                1,
+                truncatedNamesCount(
+                    folder to
+                        listOf(
+                            "https://a.example.com/rss",
+                            "https://b.example.com/rss",
+                            "https://c.example.com/rss",
+                        ),
+                ),
+            )
+        }
+
+    @Test
+    fun twoOverlongFoldersReportTwoShortenedNames() =
+        runTest {
+            val first = "a".repeat(GroupNames.MAX_CODE_POINTS + 5)
+            val second = "b".repeat(GroupNames.MAX_CODE_POINTS + 5)
+            assertEquals(
+                2,
+                truncatedNamesCount(
+                    first to listOf("https://a.example.com/rss", "https://b.example.com/rss"),
+                    second to listOf("https://c.example.com/rss", "https://d.example.com/rss"),
+                ),
+            )
+        }
+
+    @Test
+    fun opmlFixtureEscapesAttributeValues() =
+        runTest {
+            // A double quote would end the attribute early; the reader's relaxed pass happens to
+            // tolerate a bare ampersand, but the fixture should emit well-formed XML regardless.
+            val folder = "Rock & \"Roll"
+            val url = "https://a.example.com/rss?x=1&y=2"
+            registerBytes(URI, opmlWithFolders(folder to listOf(url)).encodeToByteArray())
+            val sessionId = assertIs<Outcome.Success<Long>>(createOutcome(URI)).value
+            val options = optionsOf(db.importDao().sessionById(sessionId)!!)
+            assertEquals(folder, options.sourceGroups.single().name)
+            assertEquals(
+                url,
+                db
+                    .importDao()
+                    .itemsOf(sessionId)
+                    .single()
+                    .originalUrl,
+            )
         }
 
     @Test
@@ -826,6 +879,33 @@ class ImportPipelineTest {
     ) {
         payloads.register(uri, bytes = bytes)
     }
+
+    /** The session's `TRUNCATED_NAMES` count for an OPML of [folders] (name to feed URLs). */
+    private suspend fun truncatedNamesCount(vararg folders: Pair<String, List<String>>): Int {
+        registerBytes(URI, opmlWithFolders(*folders).encodeToByteArray())
+        val sessionId = assertIs<Outcome.Success<Long>>(createOutcome(URI)).value
+        val warnings =
+            ImportWarningJson.decodeAll(
+                requireNotNull(db.importDao().sessionById(sessionId)!!.warningsJson),
+            )
+        return warnings.single { it.code == "TRUNCATED_NAMES" }.count
+    }
+
+    private fun opmlWithFolders(vararg folders: Pair<String, List<String>>): String =
+        buildString {
+            fun esc(value: String): String = value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+
+            append("""<?xml version="1.0" encoding="UTF-8"?>""")
+            append("""<opml version="2.0"><body>""")
+            for ((name, urls) in folders) {
+                append("""<outline text="${esc(name)}">""")
+                for (url in urls) {
+                    append("""<outline text="Show" type="rss" xmlUrl="${esc(url)}"/>""")
+                }
+                append("</outline>")
+            }
+            append("</body></opml>")
+        }
 
     private suspend fun createOutcome(uri: String): Outcome<Long, ImportError> =
         sessions.create(ImportSource(uri, "$uri.opml"), CreateImportOptions())
