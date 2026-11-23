@@ -662,6 +662,7 @@ class DesktopPlaybackTimingTest {
                 assertEquals(2L, now.episodeId)
                 assertFalse(now.isPlaying)
                 assertEquals("pause", fixture.engine.commands.last { it == "play" || it == "pause" })
+                assertEquals(ItemEnd.CONTINUE, fixture.engine.itemEnd, "a fired timer lets later items roll on")
             } finally {
                 fixture.close()
             }
