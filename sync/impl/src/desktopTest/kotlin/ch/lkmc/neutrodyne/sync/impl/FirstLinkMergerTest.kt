@@ -3458,6 +3458,8 @@ class FirstLinkMergerTest {
 
             override suspend fun deviceName(): String? = null
 
+            override suspend fun setDeviceName(name: String?) = Outcome.Success(Unit)
+
             override suspend fun shareFeedPasswords(): Boolean = false
 
             override suspend fun syncPlaybackSettings(): Boolean = true

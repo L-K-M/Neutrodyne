@@ -635,6 +635,69 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun aFinishedLinkStoresTheRegisteredDeviceName() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(0, 0, 0, 0, 0), 1, 0, 0)
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Linked }
+                val name = (h.linkFlow.state.value as LinkState.Linked).deviceName
+                assertEquals(name, h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFinishedMergeStoresTheRegisteredDeviceName() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
+                h.client.changesHandler = { since ->
+                    if (since == null) ChangesPage(listOf(podcastRecord()), "c:00000001:1", false, "") else emptyPage()
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Linked }
+                val name = (h.linkFlow.state.value as LinkState.Linked).deviceName
+                assertEquals(name, h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFailedDeviceNameStoreDoesNotFailTheLink() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(0, 0, 0, 0, 0), 1, 0, 0)
+                h.address.nextPreferenceError = SettingsError.WriteFailed
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Linked }
+                assertNull(h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun diagnosticsShowsTheStoredDeviceNameAfterALink() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(0, 0, 0, 0, 0), 1, 0, 0)
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.Linked }
+                val snapshot = (h.controller.diagnostics() as Outcome.Success).value
+                assertEquals((h.linkFlow.state.value as LinkState.Linked).deviceName, snapshot.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun anInviteRedeemsAndLinks() =
         runTest {
             val h = harness(this)
@@ -1405,6 +1468,49 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun renamingThisDeviceStoresTheTrimmedName() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val result = h.controller.renameDevice(DEVICE_ID, "  Office  ")
+                assertTrue(result is Outcome.Success)
+                assertEquals("Office", h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun renamingAnotherDeviceDoesNotStoreTheName() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                val result = h.controller.renameDevice("dev-2", "Office")
+                assertTrue(result is Outcome.Success)
+                assertNull(h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFailedRenameStoreStillReturnsSuccess() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.address.nextPreferenceError = SettingsError.WriteFailed
+                val result = h.controller.renameDevice(DEVICE_ID, "Office")
+                assertTrue(result is Outcome.Success)
+                assertNull(h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun revokingADeviceCallsTheServer() =
         runTest {
             val h = harness(this)
@@ -1518,6 +1624,65 @@ class SyncControllerImplTest {
                 assertTrue(devices[0].current)
                 assertFalse(devices[1].current)
                 assertTrue(devices[1].stale)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun devicesStoresThisDevicesServerNameWhenItDiffers() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.client.devicesHandler = {
+                    listOf(
+                        DeviceDto(DEVICE_ID, "Server name", "android", "1.0.0", null, current = true, stale = false),
+                    )
+                }
+                val result = h.controller.devices()
+                assertTrue(result is Outcome.Success)
+                assertEquals("Server name", h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun devicesLeavesTheStoredNameWhenThisDeviceIsMissing() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.address.updateDeviceName("Stored")
+                h.client.devicesHandler = {
+                    listOf(
+                        DeviceDto("dev-2", "Other", "linux", "1.0.0", null, current = false, stale = true),
+                    )
+                }
+                val result = h.controller.devices()
+                assertTrue(result is Outcome.Success)
+                assertEquals("Stored", h.address.deviceName)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFailedDevicesStoreDoesNotChangeTheList() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.address.nextPreferenceError = SettingsError.WriteFailed
+                h.client.devicesHandler = {
+                    listOf(
+                        DeviceDto(DEVICE_ID, "Server name", "android", "1.0.0", null, current = true, stale = false),
+                    )
+                }
+                val devices = (h.controller.devices() as Outcome.Success).value
+                assertEquals("Server name", devices.single().name)
+                assertNull(h.address.deviceName)
             } finally {
                 h.close()
             }

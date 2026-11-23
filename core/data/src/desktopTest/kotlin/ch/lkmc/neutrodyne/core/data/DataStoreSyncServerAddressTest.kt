@@ -64,6 +64,46 @@ class DataStoreSyncServerAddressTest {
             )
         }
 
+    /** A stored name reads back, and a failed write preserves the previous value. */
+    @Test
+    fun deviceNameWriteFailurePreservesTheStoredValue() =
+        runTest {
+            val repository = FakeSettingsRepository()
+            val address = DataStoreSyncServerAddress(repository)
+
+            val stored: Any? = address.setDeviceName("Office")
+
+            assertEquals<Any?>(Outcome.Success(Unit), stored)
+            assertEquals("Office", address.deviceName())
+            repository.failNextSet = SettingsError.WriteFailed
+            val failed: Any? = address.setDeviceName("New")
+            assertEquals<Any?>(Outcome.Failure(SettingsError.WriteFailed), failed)
+            assertEquals("Office", address.deviceName())
+        }
+
+    /** `null` and blank names reset the setting, so the next link falls back to the default. */
+    @Test
+    fun blankDeviceNameResetsTheSetting() =
+        runTest {
+            val repository = FakeSettingsRepository()
+            val address = DataStoreSyncServerAddress(repository)
+            repository.set(SyncSettingKeys.DEVICE_NAME, "Office")
+
+            val nullResult: Any? = address.setDeviceName(null)
+
+            assertEquals<Any?>(Outcome.Success(Unit), nullResult)
+            assertEquals(null, address.deviceName())
+
+            repository.set(SyncSettingKeys.DEVICE_NAME, "Office")
+            val blankResult: Any? = address.setDeviceName("  ")
+            assertEquals<Any?>(Outcome.Success(Unit), blankResult)
+            assertEquals(null, address.deviceName())
+            assertEquals(
+                listOf("reset(sync.device_name)", "reset(sync.device_name)"),
+                repository.calls.filter { it.startsWith("reset(") },
+            )
+        }
+
     /** A failed batched write keeps both stored values — no partial forget. */
     @Test
     fun clearServerIdentityFailureKeepsBothValues() =

@@ -17,6 +17,12 @@ interface SyncServerAddress {
     /** This device's name as other devices see it; `null`/blank when never set (10 Link methods). */
     suspend fun deviceName(): String?
 
+    /**
+     * Stores the name the next link registers and diagnostics shows; `null` or blank resets it, so
+     * a later link falls back to the platform default. A failed write preserves the stored value.
+     */
+    suspend fun setDeviceName(name: String?): Outcome<Unit, SettingsError>
+
     suspend fun shareFeedPasswords(): Boolean
 
     suspend fun syncPlaybackSettings(): Boolean
