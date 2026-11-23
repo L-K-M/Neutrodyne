@@ -545,8 +545,11 @@ internal class ImportSessions(
         )
     }
 
-    /** `warningsJson`: the read's warnings, with `TRUNCATED_NAMES` recomputed as the distinct
-     * shortened names across the adapter's proposals and the classifier's entry names.
+    /**
+     * `warningsJson`: the read's warnings, with `TRUNCATED_NAMES` recomputed as the distinct
+     * shortened names across the adapter's proposals, the classifier's entry names and raw
+     * over-long group names. [document] must be freshly parsed: `truncatedNameKeys` is
+     * `@Transient`, so a deserialized document would lose the adapter's side of the union.
      */
     private fun sessionWarnings(
         document: ImportDocument?,
@@ -560,7 +563,9 @@ internal class ImportSessions(
         // One shortened name across every source: the adapter's proposals, the classifier's
         // entry names and a raw over-long group name all reduce to the same `GroupNames` key,
         // so the warning counts the union rather than adding per-source counts (a folder shared
-        // by ten entries is one shortened name, not ten plus the adapter's one).
+        // by ten entries is one shortened name, not ten plus the adapter's one). The groups loop
+        // covers raw names a non-OPML adapter such as LibreTube stores untruncated; OPML
+        // proposals are already truncated, so it finds nothing there.
         val shortened = HashSet<String>()
         classified?.truncatedNameKeys?.let { shortened.addAll(it) }
         shortened.addAll(document.truncatedNameKeys)
