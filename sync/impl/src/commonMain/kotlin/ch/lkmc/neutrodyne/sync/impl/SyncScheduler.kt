@@ -93,8 +93,12 @@ class SyncScheduler(
     /** Group `deleted = true` rows seen: rid → capture wall-ms (`hlc >> 16`), for the undo window. */
     private val groupDeletes = mutableMapOf<String, Long>()
     private var maturityJob: Job? = null
-    private var debounceJob: Job? = null
-    private var remoteRoundJob: Job? = null
+
+    /** The 2-s outbox debounce; a change during the round queues another instead of cancelling it. */
+    private val outboxTrigger = CoalescedTrigger(scope, OUTBOX_DEBOUNCE_MS) { onOutboxDue() }
+
+    /** The 500-ms SSE coalescing, with the same rule for a signal during the round. */
+    private val remoteTrigger = CoalescedTrigger(scope, SSE_ROUND_DELAY_MS) { roundOrFallback(SyncRoundReason.SSE) }
 
     /**
      * Launches the collectors once (the platform's start-up initializer calls it): the outbox
@@ -143,9 +147,9 @@ class SyncScheduler(
         // The caller can be the debounce or maturity job itself (a revoked in-process
         // round): cancelling the running job would kill the platform's cancel call.
         val self = coroutineContext.job
-        debounceJob?.takeIf { it != self }?.cancel()
+        outboxTrigger.cancel(self)
         maturityJob?.takeIf { it != self }?.cancel()
-        remoteRoundJob?.takeIf { it != self }?.cancel()
+        remoteTrigger.cancel(self)
         hooks.onUnlinked()
         linkStateChanged()
     }
@@ -153,15 +157,11 @@ class SyncScheduler(
     /**
      * 10 Live updates: the events stream signals here — a remote `changed` or a (re)connect —
      * and one coalesced round runs 500 ms after the last signal. SSE is signaling only; the
-     * round is the authoritative pull (`SyncRoundReason.SSE`).
+     * round is the authoritative pull (`SyncRoundReason.SSE`). A signal during that round
+     * queues one more round after it.
      */
-    internal fun onRemoteChanged() {
-        remoteRoundJob?.cancel()
-        remoteRoundJob =
-            scope.launch {
-                delay(SSE_ROUND_DELAY_MS)
-                roundOrFallback(SyncRoundReason.SSE)
-            }
+    internal suspend fun onRemoteChanged() {
+        remoteTrigger.signal()
     }
 
     /** `true` while a captured change may legitimately reach the server (R7.1). */
@@ -169,17 +169,13 @@ class SyncScheduler(
 
     /**
      * One outbox-table invalidation: note new group deletions for the undo window, then re-arm
-     * the 2-s debounce job. `internal` so tests can drive the trigger without waiting on Room's
-     * asynchronous tracker delivery.
+     * the 2-s debounce. A round's own outbox writes land here too; they queue a check after the
+     * round rather than cancelling it. `internal` so tests can drive the trigger without waiting
+     * on Room's asynchronous tracker delivery.
      */
     internal suspend fun onOutboxChanged() {
         noteGroupDeletions()
-        debounceJob?.cancel()
-        debounceJob =
-            scope.launch {
-                delay(OUTBOX_DEBOUNCE_MS)
-                onOutboxDue()
-            }
+        outboxTrigger.signal()
     }
 
     /** A playback boundary or the network regain path reached due: push the eligible rows. */
