@@ -33,6 +33,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -504,9 +505,12 @@ class SyncParkedStateTest {
 
                 parkedApplier(db, applier).retryAll()
 
-                // The remote played mark won (nothing local opposed it)…
-                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
-                // …but the newer local position survived the parked record's older one.
+                // Keep the raw mark for later merges. The newer local listening position
+                // hides it from the library's projection.
+                val raw = assertNotNull(SyncClockStore(db).get("episode", podcastSyncId + "g:one"))
+                assertEquals(JsonPrimitive(true), raw.state.fields["played"]?.v)
+                assertEquals(JsonPrimitive(9L), raw.state.fields["playedAt"]?.v)
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
                 assertEquals(500L, db.positionDao().byEpisode(episodeId)?.positionMs)
                 assertEquals(0, db.syncParkedDao().count())
             } finally {

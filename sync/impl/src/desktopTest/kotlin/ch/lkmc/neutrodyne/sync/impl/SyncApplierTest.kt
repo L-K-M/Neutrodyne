@@ -832,6 +832,7 @@ class SyncApplierTest {
                     )
                 runCurrent()
 
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
                 assertTrue(playback.remotePlayed.isEmpty(), "a hidden played mark never freezes")
                 assertTrue(result.remotePlayed.isEmpty())
                 assertTrue(received.isEmpty())
