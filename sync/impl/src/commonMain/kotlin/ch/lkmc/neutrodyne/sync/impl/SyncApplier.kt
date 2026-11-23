@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress
 import ch.lkmc.neutrodyne.sync.protocol.EpisodeStateRules
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -724,7 +725,7 @@ class SyncApplier(
         if (matched == null) {
             val effect = EpisodeStateRules.derive(merge.record.fields)
             val canStub =
-                (effect.state == ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress.IN_PROGRESS || effect.favourite) &&
+                (effect.state == EpisodeProgress.IN_PROGRESS || effect.favourite) &&
                     (hints?.enc != null || hints?.ytId != null)
             if (!canStub) return RecordOutcome.Parked
             val idInserted =
@@ -771,7 +772,7 @@ class SyncApplier(
         // a newly winning played marker may freeze again or name its writer in a notice.
         if ("played" !in merge.advanced) return
         if (EpisodeStateRules.derive(merge.record.fields).state !=
-            ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress.PLAYED
+            EpisodeProgress.PLAYED
         ) {
             return
         }
@@ -792,7 +793,12 @@ class SyncApplier(
         db
             .episodeStateDao()
             .ensure(EpisodeStateEntity(episodeId = episodeId, updatedAt = clock.now()))
-        val playedAt = record.nullableLongField("playedAt", current?.playedAt)
+        val playedAt =
+            if (effect.state == EpisodeProgress.IN_PROGRESS) {
+                null
+            } else {
+                record.nullableLongField("playedAt", current?.playedAt)
+            }
         val favourite = record.booleanField("fav") ?: (current?.isFavorite ?: false)
         val playCount =
             maxOf(record.longField("playCount") ?: 0L, current?.playCount?.toLong() ?: 0L)
@@ -804,7 +810,7 @@ class SyncApplier(
                 EpisodeStateEntity(
                     episodeId = episodeId,
                     startedAt =
-                        if (effect.state == ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress.PLAYED) {
+                        if (effect.state == EpisodeProgress.PLAYED) {
                             null
                         } else {
                             current?.startedAt ?: effect.startedAt
