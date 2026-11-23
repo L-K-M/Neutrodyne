@@ -34,6 +34,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 /**
  * A sync round holds a setting's write lock while it waits for the Room writer. A global player
@@ -56,7 +57,7 @@ class PlaybackWriteLockOrderTest {
         key: SettingKey<*>,
     ) = runBlocking {
         val store = DataStoreBindings.settingsStore(MemoryPreferences())
-        val real = DataStoreSettingsWriteCoordinator()
+        val real = DataStoreSettingsWriteCoordinator { db }
         val locks = ObservedLocks(real)
         val port = DataStoreSettingsSyncPort(store, clock)
         // SettingsCapture's callbacks open their own transactions inside the player's.
@@ -98,7 +99,8 @@ class PlaybackWriteLockOrderTest {
         val write = scope.async { repository.writePlayback(podcast, null, SettingScope.GLOBAL, change) }
         try {
             val result = withTimeoutOrNull(LIMIT_MS) { round.await().let { write.await() } }
-            assertEquals(Outcome.Success(PlaybackScopeWrite.APPLIED), result, "the write and the round deadlocked")
+            assertNotNull(result, "the write and the round deadlocked")
+            assertEquals(Outcome.Success(PlaybackScopeWrite.APPLIED), result)
         } finally {
             // The player write is non-cancellable: release the round first so it can unwind.
             round.cancel()

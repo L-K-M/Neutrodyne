@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundPhase
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.protocol.ChangeStatus
@@ -146,17 +147,29 @@ class SyncEngine(
         onBatch: suspend () -> Unit = {},
     ): SyncReport {
         activity.begin()
-        val observation = RoundObservation(diagnosticsRuntime.currentTicket(), onBatch)
+        val inFlight = diagnosticsRuntime.roundStarted(reason, clock.now())
+        val observation =
+            RoundObservation(diagnosticsRuntime.currentTicket(), onBatch) { phase ->
+                diagnosticsRuntime.roundPhase(inFlight, phase, clock.now())
+            }
         try {
             // Identity writers may need a first-link round themselves. Snapshot before the
             // round mutex so another round never holds it while waiting for that writer.
             val snapshot = captureRound()
+            observation.phase(SyncRoundPhase.WAITING)
             val report = roundMutex.withLock { roundWithRecovery(reason, snapshot, observation) }
             observation.ticket?.let {
                 diagnosticsRuntime.completed(it, SyncRoundSummary(reason, clock.now(), report))
             }
             return report
         } catch (cancelled: CancellationException) {
+            // Recorded so the history shows rounds that never finished, not only failures.
+            observation.ticket?.let {
+                diagnosticsRuntime.completed(
+                    it,
+                    SyncRoundSummary(reason, clock.now(), report = null, failure = SyncRoundFailure.CANCELLED),
+                )
+            }
             throw cancelled
         } catch (failure: Exception) {
             observation.ticket?.let {
@@ -179,6 +192,7 @@ class SyncEngine(
             }
             throw failure
         } finally {
+            diagnosticsRuntime.roundEnded(inFlight)
             activity.end()
         }
     }
@@ -186,6 +200,7 @@ class SyncEngine(
     private class RoundObservation(
         var ticket: SyncDiagnosticTicket?,
         val onBatch: suspend () -> Unit,
+        val phase: (SyncRoundPhase) -> Unit,
     )
 
     /** The round mutex stays held for both the full pull and its resumed push. */
@@ -296,6 +311,7 @@ class SyncEngine(
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
         verifyRound(snapshot)
+        observation.phase(SyncRoundPhase.PREPARING)
         // The volatile share gate is only as fresh as its last hydration — a restart's cache
         // would withhold auth until a retoggle, so every round re-reads the persisted switches
         // before the first effect or push consults them (10 Settings capture).
@@ -336,6 +352,7 @@ class SyncEngine(
             val state = db.syncStateDao().get()
             verifyRound(snapshot)
             val sentAt = clock.now()
+            observation.phase(SyncRoundPhase.REQUESTING)
             val response =
                 try {
                     markingRevocation(snapshot.state) { transport.sync(state?.cursor, changes) }
@@ -366,6 +383,7 @@ class SyncEngine(
             // the acknowledged auths' exact sent snapshots stage first (outside the writer),
             // then the outbox deletes and the immutable reference binds land in one Room
             // transaction, so a replayed push reasserts accepted bytes, not live ones.
+            observation.phase(SyncRoundPhase.APPLYING)
             effects.acknowledge(changes, response.results, snapshot.state)
             applied += response.records.size
             val page = applier.applyPage(response.records, roundId, expectedProfile = snapshot.state)
@@ -388,8 +406,10 @@ class SyncEngine(
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
                 val pageSentAt = clock.now()
+                observation.phase(SyncRoundPhase.REQUESTING)
                 val next = markingRevocation(snapshot.state) { transport.changes(cursor, ProtocolLimits.MAX_RECORDS) }
                 val pageReceivedAt = clock.now()
+                observation.phase(SyncRoundPhase.APPLYING)
                 verifyRound(snapshot)
                 applied += next.records.size
                 pulled += next.records.size
