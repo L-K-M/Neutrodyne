@@ -82,7 +82,10 @@ internal fun KeyboardShortcutsScreen(desktopOs: DesktopOs?) {
                 )
                 for (row in group.rows) {
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .semantics(mergeDescendants = true) {},
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(row.action, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)

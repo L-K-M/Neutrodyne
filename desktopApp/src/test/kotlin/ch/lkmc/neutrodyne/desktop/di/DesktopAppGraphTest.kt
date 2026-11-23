@@ -667,6 +667,8 @@ class DesktopAppGraphTest {
     fun everyMenuAndSerializedKeyHasAnEntry() {
         val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
 
+        // The real check is `provider(key)`: it throws IllegalStateException for a key no
+        // installer contributes, and contentKey is non-null, so the assertion never fails.
         for (key in MENU_PUSHED_KEYS + SERIALIZED_KEYS) {
             assertThat(provider(key).contentKey).isNotNull()
         }

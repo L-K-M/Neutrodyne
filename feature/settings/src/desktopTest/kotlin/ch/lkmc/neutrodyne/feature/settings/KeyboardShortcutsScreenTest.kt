@@ -49,8 +49,8 @@ class KeyboardShortcutsScreenTest {
             onNodeWithTag("shortcuts_group_window").assertIsDisplayed()
             onNodeWithText("Space").assertIsDisplayed()
             onNodeWithText("⌘,").assertIsDisplayed()
-            onNodeWithText("⇧⌘→").assertExists()
-            onNodeWithText("⌃Tab").assertExists()
+            onNodeWithText("⇧⌘→").assertIsDisplayed()
+            onNodeWithText("⌃Tab").assertIsDisplayed()
         }
 
     /** Windows and Linux spell the modifiers out and join them with "+". */
@@ -66,7 +66,24 @@ class KeyboardShortcutsScreenTest {
             }
 
             onNodeWithText("Ctrl+,").assertIsDisplayed()
-            onNodeWithText("Ctrl+Shift+→").assertExists()
-            onNodeWithText("Ctrl+Tab").assertExists()
+            onNodeWithText("Ctrl+Shift+→").assertIsDisplayed()
+            onNodeWithText("Ctrl+Tab").assertIsDisplayed()
+        }
+
+    /** Linux behaves like Windows: spelled-out modifiers joined with "+". */
+    @Test
+    fun linuxSpellsTheModifiersOut() =
+        runDesktopComposeUiTest(width = 600, height = 1200) {
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
+                    NeutrodyneTheme(SystemUiState.DEFAULT) {
+                        KeyboardShortcutsScreen(DesktopOs.LINUX)
+                    }
+                }
+            }
+
+            onNodeWithText("Ctrl+,").assertIsDisplayed()
+            onNodeWithText("Ctrl+Shift+→").assertIsDisplayed()
+            onNodeWithText("Ctrl+Tab").assertIsDisplayed()
         }
 }
