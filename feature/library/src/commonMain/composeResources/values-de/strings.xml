@@ -9,6 +9,7 @@
     <string name="new_group">Neue Gruppe</string>
     <string name="edit_group">Gruppe bearbeiten</string>
     <string name="manage_groups">Gruppen verwalten</string>
+    <string name="library_backup_restore">Sicherung und Wiederherstellung</string>
     <string name="selected_count">%1$d ausgewählt</string>
     <string name="exit_selection">Auswahl beenden</string>
     <string name="add_to_group">Zu Gruppe hinzufügen…</string>
