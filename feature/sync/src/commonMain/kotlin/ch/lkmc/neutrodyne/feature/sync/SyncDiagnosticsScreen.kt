@@ -48,6 +48,8 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_collection_upnext
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_cursor
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_device
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_held
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_in_progress
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_in_progress_line
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_lan
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_last_error
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_last_round
@@ -68,6 +70,7 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_unavailable
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_diag_unknown
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
 import ch.lkmc.neutrodyne.sync.api.SyncPendingCollection
+import ch.lkmc.neutrodyne.sync.api.SyncRoundInFlight
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import org.jetbrains.compose.resources.StringResource
@@ -212,6 +215,9 @@ private fun SnapshotLines(
         }
 
         SectionHeader(Res.string.sync_diag_section_rounds)
+        for (round in snapshot.inFlight) {
+            Line(Res.string.sync_diag_in_progress, inFlightLine(round, nowMs))
+        }
         val lastRound = snapshot.lastRound
         if (lastRound == null) {
             Text(
@@ -256,6 +262,25 @@ private fun roundLine(
 ): String =
     listOfNotNull(round.reason.name, FeedDates.relative(round.completedAtMs, nowMs).asString(), round.result())
         .joinToString(" · ")
+
+/** `{reason}, running {s} s, {phase} for {s} s` — a round that has not finished. */
+@Composable
+private fun inFlightLine(
+    round: SyncRoundInFlight,
+    nowMs: Long,
+): String =
+    stringResource(
+        Res.string.sync_diag_in_progress_line,
+        round.reason.name,
+        elapsedSeconds(round.startedAtMs, nowMs),
+        round.phase.name,
+        elapsedSeconds(round.phaseSinceMs, nowMs),
+    )
+
+private fun elapsedSeconds(
+    sinceMs: Long,
+    nowMs: Long,
+): Int = ((nowMs - sinceMs).coerceAtLeast(0) / 1_000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
 @Composable
 private fun collectionLabel(collection: SyncPendingCollection): String =

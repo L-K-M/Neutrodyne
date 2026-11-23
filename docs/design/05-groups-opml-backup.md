@@ -698,6 +698,9 @@ as inherit in the write callback too, so they cannot block unrelated edits. A fa
 write rolls back the scoped clears. A global write takes the setting's write lock
 (`SettingsRepository.setWithin`) before the Room writer, the order sync uses: the
 opposite order deadlocked sync and every later database write (2026-11-22).
+Since 2026-11-23 the settings write coordinator fails a key-lock request made
+inside a Room transaction at once, so the inversion surfaces in tests instead of
+as a rare hang.
 Room and DataStore have no shared commit:
 if the final Room commit fails after DataStore succeeds, the global can remain
 stored, the scoped overrides survive and the operation reports failure. No

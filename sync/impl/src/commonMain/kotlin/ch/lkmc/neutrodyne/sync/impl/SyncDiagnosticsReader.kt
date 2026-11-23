@@ -88,6 +88,7 @@ class SyncDiagnosticsReader internal constructor(
                 deviceName = deviceName,
                 lastSyncAtMs = stored.state?.lastSyncAt,
                 rounds = memory.rounds,
+                inFlight = memory.inFlight,
                 pendingByCollection = stored.pending,
                 parkedCount = stored.parked,
                 heldCount = stored.held,
@@ -95,7 +96,9 @@ class SyncDiagnosticsReader internal constructor(
                 streamState = memory.streamState,
                 reconnectCount = memory.reconnectCount,
                 lanGate = lanGate,
-                lastErrorCode = errorCode(stored.state?.lastError) ?: roundErrorCode(memory.rounds.lastOrNull()),
+                lastErrorCode =
+                    errorCode(stored.state?.lastError)
+                        ?: roundErrorCode(memory.rounds.lastOrNull { it.failure != SyncRoundFailure.CANCELLED }),
                 cursorPrefix = stored.state?.cursor?.take(CURSOR_PREFIX_LENGTH),
             ),
         )
@@ -131,6 +134,11 @@ class SyncDiagnosticsReader internal constructor(
 
             SyncRoundFailure.UNEXPECTED -> {
                 "UNEXPECTED"
+            }
+
+            // Not an error; the caller skips cancelled rounds, so this branch only keeps `when` total.
+            SyncRoundFailure.CANCELLED -> {
+                null
             }
 
             null -> {

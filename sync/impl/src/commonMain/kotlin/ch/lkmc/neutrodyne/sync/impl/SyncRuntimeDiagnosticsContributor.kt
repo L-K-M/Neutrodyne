@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsLine
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSeverity
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
+import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -41,7 +42,8 @@ internal fun SyncDiagnosticsSnapshot.runtimeLines(): List<DiagnosticsLine> =
         lastRound?.let {
             add(DiagnosticsLine("lastRoundAtMs", it.completedAtMs.toString()))
             add(DiagnosticsLine("lastRoundReason", it.reason.name))
-            add(DiagnosticsLine("lastRoundReport", it.report?.toString() ?: "failed"))
+            val unfinished = if (it.failure == SyncRoundFailure.CANCELLED) "cancelled" else "failed"
+            add(DiagnosticsLine("lastRoundReport", it.report?.toString() ?: unfinished))
         }
         rounds.forEachIndexed { index, round ->
             add(
@@ -55,6 +57,14 @@ internal fun SyncDiagnosticsSnapshot.runtimeLines(): List<DiagnosticsLine> =
                         round.httpStatus?.toString(),
                         round.protocolCode,
                     ).joinToString(" "),
+                ),
+            )
+        }
+        inFlight.forEachIndexed { index, round ->
+            add(
+                DiagnosticsLine(
+                    "inFlight.$index",
+                    "${round.startedAtMs} ${round.reason.name} ${round.phase.name} ${round.phaseSinceMs}",
                 ),
             )
         }

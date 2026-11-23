@@ -56,6 +56,8 @@ import ch.lkmc.neutrodyne.sync.api.SyncLanGateState
 import ch.lkmc.neutrodyne.sync.api.SyncPendingCollection
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundInFlight
+import ch.lkmc.neutrodyne.sync.api.SyncRoundPhase
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
@@ -126,6 +128,20 @@ class SyncDiagnosticsScreenTest {
             setScreen(harness)
 
             onNodeWithText("Local network: GRANTED").assertIsDisplayed()
+        }
+
+    @Test
+    fun aRoundInProgressShowsItsReasonAgeAndPhase() =
+        runComposeUiTest {
+            val now = TestClock().now()
+            val unfinished = SyncRoundInFlight(SyncRoundReason.SSE, now - 95_000, SyncRoundPhase.WAITING, now - 80_000)
+            val harness = Harness(Outcome.Success(SyncDiagnosticsSnapshot(inFlight = listOf(unfinished))))
+            setScreen(harness)
+
+            onNodeWithText("In progress: SSE, running 95 s, WAITING for 80 s").assertIsDisplayed()
+            onNodeWithText("No rounds recorded yet").assertIsDisplayed()
+            val text = harness.vm.plainText() ?: error("a current snapshot must produce the copy text")
+            assertTrue("inFlight.0: ${now - 95_000} SSE WAITING ${now - 80_000}" in text, text)
         }
 
     @Test

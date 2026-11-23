@@ -39,6 +39,11 @@ large-text sizes and traced selection, paging and transport in source. The
 fixes below have regression tests. The cabinet proposals still need
 live renders, and speaker compositing needs frame and layer measurements.
 
+A follow-up against `cd58d34bc` checked the desktop shell, Android media and
+workers, and the sync client and server against the existing backlog. It also
+compared tracked desktop radio goldens for compact, playing and wide layouts.
+The native macOS and Android Auto scenarios below still need device checks.
+
 ## Done since the last consolidation
 
 - **The home's compact and short layouts follow the usable height (PR #578).**
@@ -169,6 +174,17 @@ live renders, and speaker compositing needs frame and layer measurements.
   [Follow-ups from the Opus 5.5 PR reviews](#follow-ups-from-the-opus-55-pr-reviews).
 
 ## Changes with open pull requests
+
+The regressions below reproduced on macOS before the fixes and passed
+afterward.
+
+- Report an instance-lock I/O failure in a startup dialog that names
+  `instance.lock` and return exit code 3. [#659](https://github.com/L-K-M/Neutrodyne/pull/659)
+- Keep a supplementary character whole at the desktop tray tooltip's
+  60-code-unit boundary. [#660](https://github.com/L-K-M/Neutrodyne/pull/660)
+- Clear the local played timestamp when a newer synced position wins.
+  Parked records retain the raw played field and timestamp for later merges.
+  [#661](https://github.com/L-K-M/Neutrodyne/pull/661)
 
 - **Keep player state with the selected episode** [#658](https://github.com/L-K-M/Neutrodyne/pull/658).
   Browsing from failed episode A to idle B could show A's playback error and
@@ -807,6 +823,46 @@ merge that first; the paths below are on the PR's branch.
   still pass as public, and RFC 8215 says not to assume an embedded IPv4 layout
   there. Decide whether to screen them, and with which RFC 6052 layouts.
 
+## Desktop platform follow-ups
+
+### Deliver fallback notifications when the window can display them
+
+On macOS, `OsDesktopNotifier` currently sends OS notification requests to
+`DesktopBannerNotifier`. Snackbar durations in `UserMessageEffect` run
+even when the target window is hidden or iconified. Queue fallback events until
+the window becomes visible. Reuse the notifier's bounded, ID-based queue
+and its retention of a message when presentation is cancelled.
+Test posting before reveal, iconifying mid-notice and repeated events.
+Verify that a successful native delivery creates only one notice.
+
+### Keep native media integration running after a transient error
+
+`NativeSystemMediaSession` polls inside a long-lived coroutine and
+`MediaSessionCoordinator` publishes from a collector. Check how native
+failures propagate at both boundaries. Recover from errors that permit
+another call, with backoff and cancellation, and keep diagnostics for
+permanent failures. A fake should throw once on poll and publish, then
+accept a media command and new metadata. Exercise close during backoff.
+
+### Parent desktop file pickers and verify Windows filtering
+
+The fallback AWT file and save dialogs and Swing folder chooser in
+`PlatformActions.desktop.kt` pass a null owner. Use the active frame to
+keep the picker above its window. The JDK documents that its reference Windows
+implementation ignores the filename filter. Verify OPML filtering on the
+packaged Windows build and use the existing Swing picker pattern if needed.
+Check Open, Save and folder selection after minimizing.
+[JDK FileDialog documentation](https://docs.oracle.com/en/java/javase/25/docs/api/java.desktop/java/awt/FileDialog.html#setFilenameFilter(java.io.FilenameFilter))
+
+### Decide how launch-at-login failures should appear
+
+`DesktopShell.start` uses an AWT modal dialog for startup I/O failures,
+including `--background` launches. Review the Shell failure-mode contract
+for this case. If login should stay noninteractive, send the diagnostic to
+a durable startup log while preserving the exit status and the foreground
+dialog. Use the exception type when an I/O error has no detail message.
+Test both launch modes without an open main window.
+
 ## Performance
 
 ### Measure the work done by playback ticks
@@ -1164,8 +1220,11 @@ the prefix helper.
   proxy [SERVER-05]. Warn at startup and key banner and cookie on
   `!publicUrlIsHttps && insecureLan`.
 - The CLI has `user disable` but no `user enable`, and disabling the only
-  admin locks out web administration; `admin create` is an undocumented way
-  out [SERVER-06].
+  admin locks out web administration. `admin create` is an undocumented
+  recovery path [SERVER-06]. Review `ServerCli` and `AdminWeb` together.
+  Document and test operator recovery or preserve the last-enabled-admin
+  invariant. Cover a server with no enabled admin, missing accounts and session
+  revocation on disable.
 - The feed cache is bounded per account (512 MiB) but not globally
   [SERVER-07]; add a global budget to `evictFeedCacheOverflow`.
 - `sse.max_per_account` above 10 is silently clamped (`EventBus.kt:40`)
@@ -1195,7 +1254,8 @@ second account, and measure per-account time since the last successful
 check, pass duration and cache-hit rate. Prototype bounded round-robin
 work across accounts only if the cadence needs to change. Preserve
 host serialization, the fetch body concurrency bound and cancellation at
-shutdown.
+shutdown. Verify that manual refresh can complete while scheduled work is
+pending and that cancellation releases all fetch permits.
 
 ### Harden the login buckets and body budget (new)
 
@@ -1294,7 +1354,27 @@ produce the same guard verdicts.
   desktop installation fingerprint is never written, so a cloned profile is not
   noticed [SY-11]; `matchClocks` is ignored on HLC receive and a first-link
   pull is held in memory [SY-13] (all REPORTED). An episode played elsewhere
-  may re-enter Up next [SY-08, PLAUSIBLE].
+  may re-enter Up next [SY-08, PLAUSIBLE]. For [SY-09], follow
+  `SyncEngine`'s per-change report into the status UI. Preserve unsynced
+  changes and show why a batch stopped. Verify that pulls can still proceed
+  and that raising the quota lets retained work sync.
+
+### Use discovery capabilities in the link method picker
+
+`ServerDiscovery` stores the advertised feature set but the setup screen
+always offers code, invite and password. Gate optional methods on the
+server's advertised capabilities. Check the protocol's legacy/default
+feature semantics and keep the invitation path available where supported.
+Test current server, password-disabled server and an older discovery document.
+
+### Define how outstanding invites behave after deleting account data
+
+`AccountService` revokes device and web-session tokens on library purge.
+The reset endpoint description names those two kinds, while the user-facing
+specification in 10 says all tokens are revoked. Resolve which promise
+covers outstanding invites. If purge should cut off outstanding
+invitations, revoke them in the same transaction. Check that an invite issued
+after the purge can still be used.
 
 ## Library, downloads, and sync defects
 
@@ -1388,6 +1468,45 @@ half-forgets it [SE-01]; "What syncs" is static text whatever is switched on
 [SE-02]; the home sync summary drops the last-sync time on an error [SE-03];
 the exported diagnostics file always suggests the same name [SE-04]; the
 YouTube engine's diagnostics section is thin [SE-05].
+
+### Count Android Auto children without building playable items
+
+`LibraryCallbacks` recalculates subscribed-parent counts after library
+changes. `MediaLibraryTree.childCount` builds entries and reads media and
+position for individual episodes. Give the tree a count-only path using
+the same availability predicates, ordering limits and host rules. Test that
+counts match returned children for downloaded, unavailable, played and
+queued episodes. Measure database calls for a subscribed parent with 100
+items before and after a position update.
+
+### Bound repeated Android engine preparation and snapshot failures
+
+`EnginePrepareWorker` retries missing compile markers and thrown failures
+without an attempt ceiling. `AutoSnapshotWorker` does the same on unexpected
+producer exceptions. Prefer existing failure/result reporting and reuse the
+update worker's bounded-retry pattern where appropriate. Ensure a fresh
+eligible startup or deliberate retry can recover the engine, periodic
+snapshots continue after a terminal attempt, and cancellation still works.
+Test persistent failures and transient success under WorkManager.
+
+### Match Android's Next button to the queue
+
+`SessionPlayer.getState` advertises the Next episode command whenever an
+item is loaded, even though `nextEpisode` needs a successor. Adjust the
+notification's Next episode presentation in concert with Media3. The design
+also uses the media-item commands for legacy hardware keys, where Next
+means seek forward. Preserve that path and Previous's restart behavior.
+Verify the last item, appending and removing a successor, and both
+notification controls and a legacy headset.
+
+### Decide the Android browse privacy boundary
+
+`SessionCallback` and `LibraryCallbacks` intentionally support media clients
+beyond the explicitly identified Auto controller. Decide which third-party
+hosts need browse access before narrowing the returned library or limiting
+artwork reads. Verify supported Auto and Assistant browsing alongside an
+unknown controller using supported test fixtures. Keep the decision and the
+allowed library data in the Android design.
 
 ## More ideas from the polish pass
 
@@ -1560,6 +1679,27 @@ Each must respect reduced motion and add no per-frame work while idle.
 - A paper spike in the tray corner that stacks discarded slips; tapping it
   recalls the last one, as Undo does.
 
+### Give app volume a small, accessible cabinet control
+
+Desktop routes keyboard and menu volume actions through
+`DesktopUserVolume`. Add feedback for those actions on the cabinet.
+Prototype a knurled volume control on the wide cabinet with a modest detent
+indicator. Wire it to the same app-only level and expose discrete keyboard
+adjustment, a numeric accessibility value and an accessible reset. Let the
+control collapse to a menu action at compact widths. Exercise VoiceOver,
+keyboard adjustment, live resize and the interaction with the sleep fade.
+Compare the result at 700 dp and 1200 dp against the standard desktop menu.
+
+### Pin a listening moment to a programme slip
+
+Give an episode a small, optional brass bookmark tab that jumps back to one
+saved timestamp. Keep the first prototype local and accessible through the
+episode menu and keyboard. Reuse the normal episode seek path, including when
+a different episode is loaded. Use the episode's stable identity, and define
+what happens when the bookmarked timestamp exceeds a revised duration.
+Test offline playback, a shorter replacement enclosure and resuming the
+current queue after a seek. Keep the slip uncluttered before its first pin.
+
 ## Owner decisions: documentation the code contradicts
 
 Each needs a decision: build it, or correct the document.
@@ -1600,6 +1740,14 @@ Each needs a decision: build it, or correct the document.
   and body budget".
 
 ## Checked and cleared
+
+- `ServerRecovery.validate` queries `identity_redirect` to require a readable
+  ledger table. An empty ledger is valid, so ignoring the count is consistent
+  with that check. A row consistency assertion would need a separate invariant
+  that survives redirect compaction.
+- The earlier radio paging patch matches the change already applied to main
+  in #613. The nine-patch stop calculation already clamps the leading and
+  trailing insets for destinations smaller than their sum.
 
 - **Elapsed time after a seek.** A suspected freeze does not exist: `seek()`
   populates `seeks` only in the not-loaded branch, so a loaded needle seek or

@@ -1104,6 +1104,14 @@ boundary poke was lost. A 401 inside `SyncEngine.round` records the
 revocation for every caller; the worker then fails the work and cancels
 every sync work name.
 
+**Implementation note (2026-11-23, debounce).** The outbox debounce and the
+SSE coalescing restart only their quiet window. A signal whose window ends
+while that trigger's round still runs queues one more round after it; it
+never cancels the running round. An outbox round deletes the rows it pushed,
+which signals the outbox trigger, so cancelling there stopped rounds after
+their push and before their pull and bookkeeping. Unlink still cancels the
+running round and drops the queued one.
+
 ### Live updates
 
 `SyncEventsClient` keeps one SSE connection through Ktor's client SSE support (in `ktor-client-core`, with reconnection, [Ktor client SSE](https://ktor.io/docs/client-server-sent-events.html)) over the `SYNC` OkHttp client:
@@ -1254,7 +1262,7 @@ stateDiagram-v2
 
 ### Diagnostics
 
-Settings › Sync › Diagnostics (08) and the diagnostics export ([09 Crash reporting and diagnostics](09-quality-and-release.md#crash-reporting-and-diagnostics)) show: server version and protocol, account and device names, last round (time, reason, `SyncReport`), the last 20 round summaries (in memory), pending outbox rows by collection, parked and held counts, clock offset, SSE state and reconnect count, the LAN gate state (Android), and the last error code. Never shown or exported: the token, the cursor in full (first 8 characters only), feed URLs.
+Settings › Sync › Diagnostics (08) and the diagnostics export ([09 Crash reporting and diagnostics](09-quality-and-release.md#crash-reporting-and-diagnostics)) show: server version and protocol, account and device names, last round (time, reason, `SyncReport`), the last 20 round summaries (in memory, cancelled rounds included as `CANCELLED`, which is not an error code), the rounds still in progress with their reason, age and phase (`STARTING`, `WAITING` for an earlier round, `PREPARING`, `REQUESTING`, `APPLYING`), pending outbox rows by collection, parked and held counts, clock offset, SSE state and reconnect count, the LAN gate state (Android), and the last error code. Never shown or exported: the token, the cursor in full (first 8 characters only), feed URLs.
 
 ---
 
