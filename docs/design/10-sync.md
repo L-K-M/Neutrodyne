@@ -1104,6 +1104,14 @@ boundary poke was lost. A 401 inside `SyncEngine.round` records the
 revocation for every caller; the worker then fails the work and cancels
 every sync work name.
 
+**Implementation note (2026-11-23, debounce).** The outbox debounce and the
+SSE coalescing restart only their quiet window. A signal whose window ends
+while that trigger's round still runs queues one more round after it; it
+never cancels the running round. An outbox round deletes the rows it pushed,
+which signals the outbox trigger, so cancelling there stopped rounds after
+their push and before their pull and bookkeeping. Unlink still cancels the
+running round and drops the queued one.
+
 ### Live updates
 
 `SyncEventsClient` keeps one SSE connection through Ktor's client SSE support (in `ktor-client-core`, with reconnection, [Ktor client SSE](https://ktor.io/docs/client-server-sent-events.html)) over the `SYNC` OkHttp client:
