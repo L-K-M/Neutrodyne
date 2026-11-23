@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feeds.jvm.opml
 
+import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.importing.ImportDocumentWarning
 import ch.lkmc.neutrodyne.feeds.importing.ImportDocuments
 import ch.lkmc.neutrodyne.feeds.importing.ImportGroup
@@ -213,7 +214,7 @@ class ImportDocumentsTest {
     /** A shortened key colliding with an unshortened proposal still counts once. */
     @Test
     fun truncatedKeyCollidingWithAnUnshortenedProposalStillCounts() {
-        val prefix = "a".repeat(40)
+        val prefix = "a".repeat(GroupNames.MAX_CODE_POINTS)
         val doc =
             OpmlDocument(
                 entries = listOf(entry(0, "https://a.example/rss", folderId = 1)),
