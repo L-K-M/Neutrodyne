@@ -135,6 +135,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_release
 import ch.lkmc.neutrodyne.core.ui.resources.radio_removed
 import ch.lkmc.neutrodyne.core.ui.resources.settings_update_available
 import ch.lkmc.neutrodyne.core.ui.root.LocalSettingsBadge
+import ch.lkmc.neutrodyne.core.ui.spaceTogglesPlayback
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.abs
@@ -519,6 +520,9 @@ private fun RadioSlip(
                             },
                         )
                 }.selectable(selected, onClick = { actions.selectEpisode(episode.id) })
+                // Space on the slip is the root play/pause, like everywhere else: it pauses
+                // what plays and otherwise plays the tuned slip.
+                .spaceTogglesPlayback(actions.togglePlay)
                 .pointerInput(episode.id, width, windowSize) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
