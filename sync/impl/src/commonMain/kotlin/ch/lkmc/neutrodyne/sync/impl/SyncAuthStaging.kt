@@ -78,10 +78,12 @@ internal fun authPair(value: JsonElement?): Pair<String, CharArray>? {
  */
 internal suspend fun referencedAuthKeys(db: NeutrodyneDatabase): Set<String> {
     val account = db.syncStateDao().get()?.accountId ?: "local"
+    // Only podcast records carry an `authReference`/`pendingAuth`; every writer gates them on
+    // `coll == PODCAST`, so the podcast rows are the whole reference set.
     val fromRaw =
         db
             .syncClockDao()
-            .all()
+            .allIn(SyncCollection.PODCAST.wire)
             .asSequence()
             .mapNotNull { decodeRawClocks(it.clocks) }
             .flatMap { listOfNotNull(it.authReference?.storeKey, it.pendingAuth?.reference) }

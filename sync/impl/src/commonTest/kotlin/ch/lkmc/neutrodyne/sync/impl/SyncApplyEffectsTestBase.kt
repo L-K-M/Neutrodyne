@@ -771,6 +771,33 @@ abstract class SyncApplyEffectsTestBase {
             }
         }
 
+    /**
+     * The drain reads only its own collection: a large `sync_clock` table of other records
+     * must not stop a pending setting marker from applying. `allIn` is a `coll` prefix scan
+     * of the `sync_clock` primary key.
+     */
+    @Test
+    fun drainSettingsAppliesItsMarkerBesideManyUnrelatedClockRows() =
+        runTest {
+            val db = newTestDb(testScheduler)
+            try {
+                link(db)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                seedPending(db, key, "15000", Hlc(now shl 16, remote))
+                seedUnrelatedClocks(db)
+                val port = FakeSettingsSyncPort()
+
+                effects(db, port).drainSettings()
+
+                assertEquals(1, port.applied.size)
+                assertEquals(key, port.applied.single().first)
+                assertEquals("15000", port.applied.single().second)
+                assertNull(pendingSetting(db, key.name))
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(
         db: NeutrodyneDatabase,
         port: SettingsSyncPort,
@@ -1007,6 +1034,23 @@ private suspend fun seedPending(
             ),
         ),
     )
+}
+
+/** Many `episode` clock rows: the drains' unrelated-collection noise. */
+private suspend fun seedUnrelatedClocks(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+    db.withWriteTransaction {
+        repeat(500) { index ->
+            db.syncClockDao().upsert(
+                SyncClockEntity(
+                    SyncCollection.EPISODE.wire,
+                    "ep-$index",
+                    SyncJson.encodeToString(
+                        RawSyncRecord(state = RecordState(SyncCollection.EPISODE)),
+                    ),
+                ),
+            )
+        }
+    }
 }
 
 private suspend fun seedLocal(

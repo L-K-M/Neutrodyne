@@ -22,15 +22,20 @@ class EpisodeMatcher(
         key: String,
         hints: MatchHints?,
     ): Long? {
+        val kv = hints?.kv ?: EpisodeKeys.VERSION
+        // The current version's key is unique per podcast, so a hit is one indexed lookup.
+        // The full candidate list below is read only on a miss or another key version.
+        if (kv == EpisodeKeys.VERSION) {
+            backupDao.restoreEpisodeCandidate(podcastId, key)?.let { return it.id }
+        }
+
         val candidates = backupDao.restoreEpisodeCandidates(podcastId)
         if (candidates.isEmpty()) return null
 
-        val kv = hints?.kv ?: EpisodeKeys.VERSION
         // A newer key version skips key matching only (02): the app cannot compute it, but the
-        // enclosure and guid rungs below still apply.
-        if (kv == EpisodeKeys.VERSION) {
-            candidates.firstOrNull { it.identityKey == key }?.let { return it.id }
-        } else if (kv < EpisodeKeys.VERSION) {
+        // enclosure and guid rungs below still apply. An older version recomputes each stored
+        // key at that version.
+        if (kv < EpisodeKeys.VERSION) {
             val versioned =
                 candidates.firstOrNull { candidate ->
                     EpisodeKeys.keyFor(candidate.toKeyInput(), kv) == key

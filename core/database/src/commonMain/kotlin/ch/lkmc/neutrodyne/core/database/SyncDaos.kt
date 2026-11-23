@@ -507,6 +507,14 @@ abstract class SyncClockDao(
     @Query("SELECT * FROM sync_clock")
     abstract suspend fun all(): List<SyncClockEntity>
 
+    /**
+     * One collection's rows only. `sync_clock` is `WITHOUT ROWID` with primary key
+     * `(coll, rid)`, so the `coll` equality is a prefix scan of that key — the drains no
+     * longer load every record's `clocks` JSON to skip the other collections.
+     */
+    @Query("SELECT * FROM sync_clock WHERE coll = :coll")
+    abstract suspend fun allIn(coll: String): List<SyncClockEntity>
+
     @Query(
         "SELECT coll, rid FROM sync_clock WHERE coll > :coll OR (coll = :coll AND rid > :rid)" +
             " ORDER BY coll, rid LIMIT :limit",

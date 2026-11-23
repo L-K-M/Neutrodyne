@@ -169,8 +169,7 @@ class SyncApplyEffects(
         // The switch gate is the persisted value read live: markers stay pending while it is
         // off, so enabling it later applies them (the server's values win, as at the first link).
         if (!settingsSyncEnabled()) return
-        for (row in db.syncClockDao().all()) {
-            if (row.coll != SyncCollection.SETTING.wire) continue
+        for (row in db.syncClockDao().allIn(SyncCollection.SETTING.wire)) {
             val key = AllSettingKeys.list.firstOrNull { it.name == row.rid } ?: continue
             drainSetting(key)
         }
@@ -204,8 +203,7 @@ class SyncApplyEffects(
     suspend fun drainPasswords() {
         secrets.awaitLoaded()
         sweepOrphanedAuthStaging()
-        for (row in db.syncClockDao().all()) {
-            if (row.coll != SyncCollection.PODCAST.wire) continue
+        for (row in db.syncClockDao().allIn(SyncCollection.PODCAST.wire)) {
             val raw = decode(row.clocks) ?: continue
             val pending = raw.pendingAuth ?: continue
             drainAuth(row.rid, pending)
