@@ -11,7 +11,7 @@ shared cabinet.
 
 Review history: a first pass on `f9bd91021`, a polish pass on `a9b0e114f`, a
 native-verification pass on 2026-11-18, a fourth source pass on `ad8dc5399`, and
-an independent pass on `c542b073e` (2026-11-22) which is the current head. The
+an independent pass on `c542b073e` (2026-11-22) used as the baseline. The
 2026-11-22 pass re-read the radio, feeds adapter, desktop shell, sync server and
 download data layer; its findings are folded in below and marked **new** where
 earlier passes had not recorded them. A further independent pass on the same
@@ -33,6 +33,11 @@ Its findings are folded in below with their working ids in brackets (L-, V-, M-,
 Q-, A-, DP-, SY-, DA-, DL-, LU-, AS-, DI-, SE-, P-, SERVER-); it opened the fixes
 listed under Done. **REPORTED** marks a helper's trace that nobody has re-read;
 re-read or reproduce those first.
+
+The 2026-11-23 radio pass reviewed the desktop goldens at short, narrow, wide and
+large-text sizes and traced selection, paging and transport in source. The
+fixes below have regression tests. The cabinet proposals still need
+live renders, and speaker compositing needs frame and layer measurements.
 
 ## Done since the last consolidation
 
@@ -163,6 +168,22 @@ re-read or reproduce those first.
   Their deferred review findings are in
   [Follow-ups from the Opus 5.5 PR reviews](#follow-ups-from-the-opus-55-pr-reviews).
 
+## Changes with open pull requests
+
+- **Keep player state with the selected episode** [#658](https://github.com/L-K-M/Neutrodyne/pull/658).
+  Browsing from failed episode A to idle B could show A's playback error and
+  red lamp on B, including after paging and discarding the failed slip. A paging
+  update could also replace a paused episode's measured duration with the feed
+  estimate and shorten the seek clamp. Match the loaded snapshot to the selected
+  episode and keep the programme row's title and podcast name. The regression
+  tests cover browsing, paging, reselecting, discard and seeking while paused.
+- **Print compact durations on programme slips** [#662](https://github.com/L-K-M/Neutrodyne/pull/662) [L-26].
+  `RadioSlip` used to print "0 min" for a short trailer and "180 min" for
+  a three-hour episode. The shared feed formatter prints "<1 min" and "3 h"
+  and includes both fields when needed ("3 h 2 min"). Unknown duration has
+  no label. A narrow-layout test covers two positive formats and an unknown
+  duration.
+
 ## Playback and programme correctness
 
 ### Reconcile paging during Undo and clarify repeated discards
@@ -202,6 +223,18 @@ legible. At the 600 dp minimum width the home already takes the two-column
 layout: the speaker grille takes half the width, both skip keys disappear and
 slip titles cut to two short lines. Consider a 720 dp threshold for the split or
 a speaker that yields width before the keys do.
+
+### Make the short transport show the selected episode's state
+
+Short layout drops the whole status row, including the pilot light, while a
+buffering, ended or failed selected item uses the same title and dial as an
+idle item. The on/off switch still conveys start and buffer intent. Test
+buffering, failure and pause at the minimum desktop height and in phone
+landscape. Try placing the existing status and pilot dot on the same line as
+the title when there is room, or using the gap beneath the dial as a single
+line. Give the full state to assistive technology even if the visual label
+must collapse, and preserve skip and seek targets at large text. Coordinate
+with the existing recovery and high-text-scale transport work.
 
 ### Give long playlists a reliable count
 
@@ -369,6 +402,17 @@ enough episodes to require scrolling. The deck now shows whenever the window is
 tall enough (owner decision 2026-11-17); the 560/440/500 dp minimums are still
 unmeasured.
 
+### Keep the cabinet grounded when a window grows
+
+The empty grille grows faster than the programme's useful reading area.
+Before the existing grille-card prototypes, compare a 1200 to 1360 dp
+cabinet maximum centred on the stage against
+the current fill behavior on a 1600 dp window and an ultrawide display. Give
+extra vertical room to the programme tray and let the stage take the spare
+width. Measure the longest first line and visible episode count, and test
+both sides of the wide breakpoint during live resize. Preserve the current
+minimum sizes and window controls.
+
 ### Give the playlist sign room and a legible fallback
 
 `RadioProgramme` reserves an invisible key's worth of width to centre the sign
@@ -393,6 +437,19 @@ treatments at 700 and 1200 dp, with a long list, one clipped row, a tray shorter
 than the thumb minimum and a fully fitting list. Test wheel and trackpad
 movement, and keep the play target unobstructed. The loaded window is the
 scrollbar's extent until pagination supplies more rows.
+
+### Give the programme tray a clear lower edge
+
+The small and landscape goldens show part of the final visible slip, with the
+transport cabinet hard against it. On tall and wide layouts the same material
+leaves substantial blank paper beneath a short playlist. Keep the paper,
+scroll position and existing scrollbar proposal. Prototype a shallow lip
+over the tray's lower edge, with a short fade only when another slip is
+partially visible. Compare the cabinet with the treatment off and on at the
+smallest supported Mac window, 1.3x and 2x text, and the 1200-wide default.
+Fade the clipped part of the paper only when there is more below and keep
+complete slips and keyboard focus outlines at full contrast. This is a visual
+test of the tray edge before any row-height change.
 
 ### Establish a material and type hierarchy
 
@@ -684,9 +741,6 @@ the Speed and Sleep sheets, because a pushed sheet counted as leaving home
 - **The programme's empty and error states are footnotes.** When a playlist is
   empty or fails to load, the tray shows only a small strip at its foot; give
   that state the paper's full height.
-- **Slips print "0 min" for an episode under a minute and "180 min" for three
-  hours** (`RadioSlip` uses integer minutes) where other rows use hours and
-  minutes [L-26]. Share the rows' duration formatter.
 - **Show notes' nested lists indent twice, and long notes have no reading
   width** [L-25]: `NoteList` adds `24 * level` inside a parent column that is
   already past the marker gutter, and paragraphs run over 1,000 dp at 1600 wide.
@@ -818,6 +872,18 @@ Two more cheap wins to measure first:
   shifts indices and re-fires the load for a row whose episode key is stable.
   Key it by episode id if profiling shows it matters.
 
+### Check whether the speaker needs an offscreen surface
+
+The existing grille redraw may have an additional GPU cost.
+`RadioCabinet.Speaker` requests `CompositingStrategy.Offscreen` around a
+radial gradient and normally blended lines. `recess` already clips to the
+rounded opening. Compare captures at 1x and 2x, paying particular attention
+to the border and clipped outer strokes, and run the existing goldens.
+In a wide Retina window, record allocated layer size and frame time during
+resize before combining this with the grille-caching work. Measure allocation
+and raster cost before changing the related `MaterialPlate` drawing work
+tracked under per-draw allocations.
+
 ### Remove the remaining per-draw and per-tick allocations
 
 Measured on an M4 Max: 1.5% CPU idle, 5.4% playing, 110 to 160 MB RSS, so these
@@ -926,6 +992,17 @@ session-only prototype feels right. Returning to the radio also rebuilt the
 pager and lost the place, because `RadioViewModel.pagingFor` returned a new
 `Pager` flow with no `cachedIn`, against `FeedRepository.kt:73` [L-11];
 [#640](https://github.com/L-K-M/Neutrodyne/pull/640) caches the last three tuned pagers.
+
+### Allow an explicit programme hand-off to the queue
+
+Prototype a paper tab on the currently tuned slip that explains where Play
+will continue (the station, Up next, or a standalone episode). When a station
+episode is playing, an explicit action could append the remaining programme
+after the existing Up next entries. Start with a preview count and a small
+bounded append supporting Undo. Exercise a partially paged station, later
+arrivals, duplicate episodes, and repeated taps. Decide ordering and whether
+discarded slips are excluded before altering the queue. Settle the playback
+context before exposing the action.
 
 ### Make first tuning a short, recoverable journey
 
@@ -1103,8 +1180,22 @@ the prefix helper.
   JSON, and always shows "Set up the first administrator" [SERVER-10, S-01]:
   redirect web routes to sign-in, hide the setup link once an admin exists, and
   give `admin.css` the navy and amber palette with CSS alone.
-- A feed pass (two permits, 30 s per feed, 15 min interval) can outrun the
-  30 min TTL on a large library [S-02, PLAUSIBLE].
+
+### Measure cache freshness across accounts
+
+Extend the server's existing feed-cache freshness item (S-02).
+`FeedCacheService.refreshAll` finishes all enabled accounts in sequence.
+`start` then sleeps for the configured interval (15 minutes by default).
+Each account gets two concurrent fetches with a 30-second call timeout.
+The time between visits to a feed therefore includes the other accounts'
+work plus the full sleep.
+A small library can miss the 30-minute cache TTL even when none of its own
+feeds are slow. Add a fake-clock test with a slow first account and a quick
+second account, and measure per-account time since the last successful
+check, pass duration and cache-hit rate. Prototype bounded round-robin
+work across accounts only if the cadence needs to change. Preserve
+host serialization, the fetch body concurrency bound and cancellation at
+shutdown.
 
 ### Harden the login buckets and body budget (new)
 
@@ -1158,6 +1249,17 @@ action is a no-op. `PodcastViewModel` already injects
 message when it returns null (design 04). Add the string EN and DE, bind the
 row's availability update through the existing episode flow, and test success,
 a new reason and a transient failure.
+
+### Measure the library count on the pre-play sync path
+
+Every enabled `SyncEngine.roundLocked` reads every podcast entity through
+`PodcastDao.allForExport().size` for the mass-change guard denominator.
+This includes playback-triggered rounds that have nothing to push. Time
+that read and measure allocations with a seeded large library. Swap in
+a suspend `COUNT(*)` query if the read is measurable. Keep the count
+before the first pull can add or deduplicate a podcast. Verify that an
+empty library and a removal just above and below the share threshold
+produce the same guard verdicts.
 
 ### Sync client defects (new)
 
@@ -1405,6 +1507,16 @@ and avoid extra permanent controls. Decide from a full-size and a compact render
 whether this earns space. Prototype slightly longer brass ticks, cluster marks
 too close for a pointer to resolve, and test late-arriving chapter data with four
 and eighty chapters.
+
+### Make the power lever easy to read with the text covered
+
+In the normal and playing phone goldens the red ON paint is equally strong.
+At thumbnail size the lever angle is the only difference between off and on.
+Prototype a less prominent OFF plate with an inset shadow and an illuminated
+ON index with a static warm core. Keep the mechanical travel, on/off markings
+and toggle semantics. Evaluate side by side at actual sizes on Retina and
+non-Retina, and in grayscale and high-contrast mode. Verify that starting and
+buffering remain distinguishable by the existing separate status lamp.
 
 ### Fill the speaker grille on wide windows
 
