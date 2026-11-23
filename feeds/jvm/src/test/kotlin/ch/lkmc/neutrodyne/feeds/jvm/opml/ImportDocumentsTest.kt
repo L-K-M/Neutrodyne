@@ -210,6 +210,30 @@ class ImportDocumentsTest {
         )
     }
 
+    /** A shortened key colliding with an unshortened proposal still counts once. */
+    @Test
+    fun truncatedKeyCollidingWithAnUnshortenedProposalStillCounts() {
+        val prefix = "a".repeat(40)
+        val doc =
+            OpmlDocument(
+                entries = listOf(entry(0, "https://a.example/rss", folderId = 1)),
+                folders =
+                    listOf(
+                        FolderRef(id = 0, name = prefix),
+                        FolderRef(id = 1, name = prefix + "x"),
+                    ),
+                neutrodyne = true,
+                mode = ParseMode.STRICT,
+            )
+        val import = ImportDocuments.fromOpml(doc)
+
+        assertEquals(listOf(ImportGroup(prefix)), import.groups)
+        assertEquals(
+            listOf(ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, 1)),
+            import.warnings,
+        )
+    }
+
     /**
      * A Neutrodyne export of a pending podcast carries only `text` (05's writer emits
      * `text = COALESCE(customTitle, title)`), so `text` is the custom title and `title`

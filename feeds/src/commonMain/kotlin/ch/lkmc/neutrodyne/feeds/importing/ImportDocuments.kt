@@ -143,8 +143,11 @@ public object ImportDocuments {
                 valid = GroupNames.truncate(name) ?: return
                 proposal = valid.name
             }
-            if (!seen.add(valid.nameKey)) return
+            // Record the shortened key before the dedup return: a truncated name whose key an
+            // earlier proposal claimed was still shortened, and the classifier counts it the
+            // same way (its groupNamesOf adds before putIfAbsent).
             if (truncated) truncatedKeys += valid.nameKey
+            if (!seen.add(valid.nameKey)) return
             groups += ImportGroup(proposal, colorArgb, iconKey, reason)
         }
 
