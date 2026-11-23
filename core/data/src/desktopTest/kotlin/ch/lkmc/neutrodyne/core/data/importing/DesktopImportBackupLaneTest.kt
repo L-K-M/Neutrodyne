@@ -188,7 +188,7 @@ class DesktopImportBackupLaneTest {
                     settings,
                     TestDb.inMemory(),
                     FakeSettingsSyncPort(),
-                    DataStoreSettingsWriteCoordinator(),
+                    DataStoreSettingsWriteCoordinator { db },
                 ),
             payloads = payloads,
             storagePaths = storagePaths,

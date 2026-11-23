@@ -204,7 +204,7 @@ class RestoreRunnerTest {
             merger = merger,
             episodes = episodeMerger,
             settingsMerge =
-                RestoreSettingsMerge(settings, db, settingsSyncPort, DataStoreSettingsWriteCoordinator()),
+                RestoreSettingsMerge(settings, db, settingsSyncPort, DataStoreSettingsWriteCoordinator { db }),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,
