@@ -1053,8 +1053,11 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory create(dev.zacsweers.metro.Provider);
+}
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory {
-  public static ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory create();
+  ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope {
 }

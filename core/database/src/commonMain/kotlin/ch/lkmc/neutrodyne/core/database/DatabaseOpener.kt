@@ -151,6 +151,14 @@ class DatabaseOpener(
         return runBlocking { deferred.await() }
     }
 
+    /** The open database, or null while the open is pending or after it failed. Never blocks. */
+    @OptIn(ExperimentalCoroutinesApi::class) // getCompleted after the completion checks
+    fun openedDatabaseOrNull(): NeutrodyneDatabase? {
+        val deferred = openDeferred
+        if (!deferred.isCompleted || deferred.getCompletionExceptionOrNull() != null) return null
+        return deferred.getCompleted()
+    }
+
     // --- Open and recovery (02's flow) -------------------------------------------------------------
 
     private class OpenOutcome(

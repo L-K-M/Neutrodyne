@@ -167,27 +167,11 @@ internal class ScopeSettingsRepositoryImpl(
                             }
 
                             val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
-                            val podcastEdit =
-                                if (scope ==
-                                    SettingScope.PODCAST
-                                ) {
-                                    OverrideEdit.SET
-                                } else {
-                                    OverrideEdit.CLEAR
-                                }
-                            val next = previous.withPlayback(change, podcastEdit)
+                            val next = previous.withPlayback(change, scope.editAt(SettingScope.PODCAST))
                             mutated = savePodcast(podcastId, previous, next)
                             if (scope != SettingScope.PODCAST && groupId != null) {
                                 val previousGroup = dao.forGroup(groupId)?.o ?: ScopeOverrides()
-                                val groupEdit =
-                                    if (scope ==
-                                        SettingScope.GROUP
-                                    ) {
-                                        OverrideEdit.SET
-                                    } else {
-                                        OverrideEdit.CLEAR
-                                    }
-                                val nextGroup = previousGroup.withPlayback(change, groupEdit)
+                                val nextGroup = previousGroup.withPlayback(change, scope.editAt(SettingScope.GROUP))
                                 mutated = saveGroup(groupId, previousGroup, nextGroup) || mutated
                             }
                             if (writeGlobal != null) {
@@ -255,6 +239,10 @@ internal class ScopeSettingsRepositoryImpl(
     }
 
     private enum class OverrideEdit { SET, CLEAR }
+
+    /** A write at this scope sets [level]'s override when it targets that level and clears it otherwise. */
+    private fun SettingScope.editAt(level: SettingScope): OverrideEdit =
+        if (this == level) OverrideEdit.SET else OverrideEdit.CLEAR
 
     private fun ScopeOverrides.withPlayback(
         change: PlaybackSettingChange,
