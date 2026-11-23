@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.core.testing.sync.InMemorySyncServer
 import ch.lkmc.neutrodyne.core.testing.sync.SyncAddress
 import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundPhase
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
@@ -48,10 +49,12 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -178,7 +181,7 @@ class SyncEngineTest {
         }
 
     @Test
-    fun aCancelledRoundDoesNotAddDiagnosticErrorNoise() =
+    fun aCancelledRoundIsRecordedAsCancelledRatherThanAsAnError() =
         runTest {
             val cancelled = CancellationException("cancel requested")
             val client =
@@ -195,7 +198,12 @@ class SyncEngineTest {
                 db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
                 assertSame(cancelled, assertFailsWith<CancellationException> { device.round() })
                 val runtime = device.engine.diagnosticsRuntime
-                assertTrue(runtime.snapshot(assertNotNull(runtime.currentTicket()).profile).rounds.isEmpty())
+                val snapshot = runtime.snapshot(assertNotNull(runtime.currentTicket()).profile)
+                val summary = snapshot.rounds.single()
+                assertEquals(SyncRoundFailure.CANCELLED, summary.failure)
+                assertNull(summary.report)
+                assertNull(summary.httpStatus)
+                assertTrue(snapshot.inFlight.isEmpty())
                 assertFalse(activity.active)
             } finally {
                 device.close()
@@ -805,6 +813,63 @@ class SyncEngineTest {
                 assertTrue(result.isFailure, "the round must propagate the client failure")
                 assertEquals(0, activity.count.value, "a failed round must clear the activity flag")
                 assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anUnfinishedRoundShowsItsPhaseAndALaterRoundWaitsBehindIt() =
+        // Real time: the rounds run on Room's own threads, so a virtual-time timeout could lapse early.
+        runBlocking {
+            val requested = CompletableDeferred<Unit>()
+            val gate = CompletableDeferred<Unit>()
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse {
+                        requested.complete(Unit)
+                        gate.await()
+                        return SyncResponse(emptyList(), emptyList(), "c:00000001:1", false, "")
+                    }
+                }
+            val db = TestDb.inMemory()
+            try {
+                seedRound(db)
+                val activity = SyncActivityState()
+                val device = Device(db, client, activity)
+                val runtime = device.engine.diagnosticsRuntime
+                // In-flight rounds are not profile-scoped, so any profile reads them.
+                val anyProfile = SyncDiagnosticProfile(null, null, null, null, null, enabled = false)
+                val first = launch { device.engine.round(SyncRoundReason.SSE) }
+                withTimeout(10.seconds) { requested.await() }
+                val running = runtime.snapshot(anyProfile).inFlight.single()
+                assertEquals(SyncRoundReason.SSE, running.reason)
+                assertEquals(SyncRoundPhase.REQUESTING, running.phase)
+
+                val second = launch { device.engine.round(SyncRoundReason.SYNC_NOW) }
+                val both =
+                    withTimeout(10.seconds) {
+                        while (runtime
+                                .snapshot(anyProfile)
+                                .inFlight
+                                .getOrNull(1)
+                                ?.phase != SyncRoundPhase.WAITING
+                        ) {
+                            delay(10)
+                        }
+                        runtime.snapshot(anyProfile).inFlight
+                    }
+                assertEquals(listOf(SyncRoundReason.SSE, SyncRoundReason.SYNC_NOW), both.map { it.reason })
+                assertEquals(SyncRoundPhase.REQUESTING, both.first().phase)
+
+                gate.complete(Unit)
+                first.join()
+                second.join()
+                assertTrue(runtime.snapshot(anyProfile).inFlight.isEmpty())
+                assertEquals(0, activity.count.value)
             } finally {
                 db.close()
             }

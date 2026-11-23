@@ -138,6 +138,30 @@ class SyncDiagnosticsReaderTest {
         }
 
     @Test
+    fun aCancelledRoundIsNoErrorAndKeepsTheEarlierFailuresCode() =
+        runTest {
+            fixture { db, address, gate, runtime ->
+                val ticket = runtime.activate(STATE.diagnosticProfile(URL))
+                runtime.completed(
+                    ticket,
+                    SyncRoundSummary(SyncRoundReason.SSE, 10, null, SyncRoundFailure.CANCELLED),
+                )
+                assertNull(success(reader(db, address, gate, runtime).read()).lastErrorCode)
+                runtime.completed(
+                    ticket,
+                    SyncRoundSummary(SyncRoundReason.SYNC_NOW, 11, null, SyncRoundFailure.TRANSPORT, 503),
+                )
+                runtime.completed(
+                    ticket,
+                    SyncRoundSummary(SyncRoundReason.SSE, 12, null, SyncRoundFailure.CANCELLED),
+                )
+                val snapshot = success(reader(db, address, gate, runtime).read())
+                assertEquals("HTTP_503", snapshot.lastErrorCode)
+                assertEquals(SyncRoundFailure.CANCELLED, snapshot.lastRound?.failure)
+            }
+        }
+
+    @Test
     fun failedSettingsReadIsUnavailableRatherThanSuccessfulEmptyCounts() =
         runTest {
             fixture { db, address, gate, runtime ->
