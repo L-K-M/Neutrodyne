@@ -24,6 +24,8 @@ internal object ShellDialogs {
     /** 11 Shell failure modes: a data directory cannot be created or written. */
     const val DATA_DIR_FAILURE_PREFIX = "Neutrodyne cannot create or write its directory"
 
+    const val INSTANCE_LOCK_FAILURE_PREFIX = "Neutrodyne cannot acquire its single-instance lock"
+
     /** Shows a modal error dialog and returns when it is dismissed; stderr when headless. */
     fun showError(message: String) {
         if (GraphicsEnvironment.isHeadless()) {

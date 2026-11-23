@@ -87,7 +87,11 @@ internal object DesktopShell {
     private const val REASON_SIGNAL = "signal"
     private const val REASON_WINDOW_CLOSED = "window closed"
 
-    fun start(rawArgs: Array<String>): Int {
+    fun start(
+        rawArgs: Array<String>,
+        dirs: AppDirs = AppDirs.current(),
+        showError: (String) -> Unit = ShellDialogs::showError,
+    ): Int {
         // Step 1: split `--background` (start at login) from inputs. No sinks are installed yet,
         // so unknown flags are collected and logged once the owner side opens the log.
         var background = false
@@ -103,13 +107,12 @@ internal object DesktopShell {
 
         val buildInfo = BuildInfoLoader.load()
         val clock = DesktopClock
-        val dirs = AppDirs.current()
 
         // Only `state` exists before the lock (11 start-up step 2).
         try {
             Files.createDirectories(dirs.state)
         } catch (e: IOException) {
-            return dataDirFailure(dirs.state, e)
+            return dataDirFailure(dirs.state, e, showError)
         }
 
         // Step 3: lock, or hand off to the owner and exit before AWT is initialised.
@@ -120,7 +123,15 @@ internal object DesktopShell {
                 startedAtMs = clock.now(),
                 versionName = buildInfo.versionName,
             )
-        return when (lock.tryAcquire()) {
+        val acquisition =
+            try {
+                lock.tryAcquire()
+            } catch (e: IOException) {
+                val lockPath = dirs.state.resolve(SingleInstanceLock.LOCK_FILE_NAME)
+                showError("${ShellDialogs.INSTANCE_LOCK_FAILURE_PREFIX} $lockPath: ${e.message}")
+                return EXIT_DATA_DIR_FAILURE
+            }
+        return when (acquisition) {
             SingleInstanceLock.Acquire.HeldByOther -> handOffToOwner(dirs, inputs, buildInfo)
             SingleInstanceLock.Acquire.Acquired -> runOwner(dirs, inputs, unknownFlags, background, buildInfo, lock)
         }
@@ -474,8 +485,9 @@ internal object DesktopShell {
     private fun dataDirFailure(
         dir: Path,
         e: IOException,
+        showError: (String) -> Unit = ShellDialogs::showError,
     ): Int {
-        ShellDialogs.showError("${ShellDialogs.DATA_DIR_FAILURE_PREFIX} $dir: ${e.message}")
+        showError("${ShellDialogs.DATA_DIR_FAILURE_PREFIX} $dir: ${e.message}")
         return EXIT_DATA_DIR_FAILURE
     }
 }
