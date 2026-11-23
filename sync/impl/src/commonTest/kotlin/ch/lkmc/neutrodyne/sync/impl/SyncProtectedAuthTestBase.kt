@@ -151,6 +151,43 @@ abstract class SyncProtectedAuthTestBase {
             }
         }
 
+    /**
+     * The drain reads only the podcast collection: a large `sync_clock` table of other
+     * records must not stop a pending auth marker from installing. `allIn` is a `coll`
+     * prefix scan of the `sync_clock` primary key.
+     */
+    @Test
+    fun drainPasswordsInstallsItsMarkerBesideManyUnrelatedClockRows() =
+        runTest {
+            val db = newTestDb(testScheduler)
+            try {
+                link(db)
+                val h = harness(db)
+                h.applier.applyPage(listOf(authRecord()), roundId = 1)
+                seedCredential(db, h.secrets, origin)
+                db.withWriteTransaction {
+                    repeat(500) { index ->
+                        db.syncClockDao().upsert(
+                            ch.lkmc.neutrodyne.core.database.SyncClockEntity(
+                                SyncCollection.EPISODE.wire,
+                                "ep-$index",
+                                "{}",
+                            ),
+                        )
+                    }
+                }
+
+                h.effects.drainPasswords()
+
+                val podcast = db.podcastDao().bySyncId(rid)!!
+                assertNotNull(podcast.credentialId)
+                assertFalse(podcast.needsCredentials)
+                assertNull(decodeRawClocks(clocksJson(db))!!.pendingAuth)
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun aCrashBetweenTheStoresRepeatsIdempotently() =
         runTest {

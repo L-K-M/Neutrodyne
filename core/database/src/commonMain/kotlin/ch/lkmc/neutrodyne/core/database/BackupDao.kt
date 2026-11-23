@@ -225,6 +225,21 @@ interface BackupDao {
     suspend fun restoreEpisodeCandidates(podcastId: Long): List<RestoreEpisodeCandidate>
 
     /**
+     * The one candidate a current-version identity key claims: `(podcastId, identityKey)`
+     * is a unique index, so this is a single-row lookup. Sync's episode matcher uses it
+     * before loading the podcast's whole candidate list, which a page of records would
+     * otherwise re-read per record.
+     */
+    @Query(
+        "SELECT id, identityKey, guid, enclosureUrl, title, pubDate, link" +
+            " FROM episode WHERE podcastId = :podcastId AND identityKey = :identityKey",
+    )
+    suspend fun restoreEpisodeCandidate(
+        podcastId: Long,
+        identityKey: String,
+    ): RestoreEpisodeCandidate?
+
+    /**
      * `episode_description` blobs of `h:`-key candidates — loaded only on demand: a row needs
      * its head only when some line's `kv` differs from the row's stored version AND the row's
      * own columns fall through to the `h:` recipe (02). Chunked at the bind limit; use this,
