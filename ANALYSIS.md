@@ -113,13 +113,14 @@ re-read or reproduce those first.
   and closed as a duplicate.
 - **The independent 2026-11-22 pass's fixes are merged:** #613 gates the
   radio's All clear sign on finished paging (an empty first window with an
-  append pending no longer claims the station is cleared), and #616 gives the
-  home Menu key its `KEY_PRESS` sound per PO-56. In review from the same pass:
-  #617 remembers the desktop's `failedDownloads` flow, #620 reserves a 48 x 48
-  dp hit target around `RadioSwitch`'s unchanged plate, #621 letters a sign
-  whose name ends in a space at full size (a duplicate of #630 from another
-  pass), and #626 shows the localized unplayed count on the dial while paging
-  and leaves the total unchanged when the count query fails.
+  append pending no longer claims the station is cleared), #616 gives the
+  home Menu key its `KEY_PRESS` sound per PO-56, #617 remembers the desktop's
+  `failedDownloads` flow, #620 reserves a 48 x 48 dp hit target around
+  `RadioSwitch`'s unchanged plate (goldens re-recorded on CI), and #626 shows
+  the localized unplayed count on the dial while paging and leaves the total
+  unchanged when the count query fails, and #621 letters a sign whose name ends
+  in a space at full size (also opened as #630 from another pass; #621 landed
+  first, so #630 is now the duplicate).
 
 - **Fixes from the Opus 5.5 pass are in review** (each test-first, red then
   green locally, reviewed by an independent model before the PR; links below).
@@ -207,9 +208,9 @@ changes, or delete it [R-04, REPORTED].
 ("%1$d podcasts - %2$d episodes") is defined in EN and DE, but neither is drawn.
 A failed count currently reports a write error for a read; a failed count should
 leave the total unknown. Test successive append, invalidation, count failure,
-discard and Undo, and a playing episode outside the selected group. In review:
-#626 prints the localized unplayed total (`group_unplayed_fmt`) on the dial
-while paging is incomplete and makes a failed count a silent keep-previous
+discard and Undo, and a playing episode outside the selected group. Merged as
+#626: the dial prints the localized unplayed total (`group_unplayed_fmt`)
+while paging is incomplete and a failed count is a silent keep-previous
 instead of a write error.
 
 ### Replace the last Material buttons on the radio home
@@ -449,9 +450,9 @@ before sizing the surrounding panel. For standalone switches, reserve a distinct
 48 x 48 dp area around the current plate (a centred plate in a 48 dp box, not a
 larger plate). Verify corner taps, lever flicks, disabled controls and vertical
 scrolling at 2x text. For rows that own their switch action, retain one
-accessible target. In review: #620 implements exactly that (`BatToggle`/
-`BatToggleFace` take a `plateSize`; the modifier is the 48 x 48 dp hit box), with
-the affected desktop goldens re-recorded through the record-screenshots workflow.
+accessible target. Merged as #620: `BatToggle`/`BatToggleFace` take a
+`plateSize`; the modifier is the 48 x 48 dp hit box, and the affected desktop
+goldens were re-recorded through the record-screenshots workflow.
 
 ### Place the Mac window in the display's usable coordinates
 
@@ -652,16 +653,16 @@ the Speed and Sleep sheets, because a pushed sheet counted as leaving home
 - **`SignLettering` mishandles a trailing space** (`RadioParts.kt:160-175`):
   it compares `getLineEnd(0, visibleEnd = true)`, which excludes trailing
   whitespace, with the full length, so a name ending in a space always letters
-  at its minimum size. In review: [#630](https://github.com/L-K-M/Neutrodyne/pull/630)
-  and #621 (same fix from the independent 2026-11-22 pass) compare against the
-  trimmed name; the regression test fails before and passes after.
+  at its minimum size. Merged as #621 (same fix opened as #630 from another
+  pass; #621 landed first, so #630 is now the duplicate): it compares against
+  the trimmed name, and the regression test fails before and passes after.
 - **The desktop's failed-downloads badge blips to zero on settings changes**
   (new, independent pass 2026-11-22). `DesktopShell` built the `failedDownloads`
   flow inline in the `application {}` block, so a settings-driven
   recomposition produced an unequal `Flow` and restarted `NeutrodyneRoot`'s
   `collectAsStateWithLifecycle`, resetting the badge to its initial 0 until the
   database-gated re-subscribe emitted. `MainActivity` already wraps the
-  identical flow in `remember(graph)`. In review: #617.
+  identical flow in `remember(graph)`. Merged as #617.
 - **A multi-file drop persists an import session per file but opens only one**
   (new, needs a product decision). `DesktopOpenHandler.open(batch)` routes every
   input and `imports().create` persists a session for each, but only the first
