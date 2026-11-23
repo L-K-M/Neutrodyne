@@ -46,7 +46,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
         // Armed only by device tests; the callback sees the player before any prepare.
         PlaybackTestHooks.playerCreated?.invoke(player)
         factory.bindPrefs(player, serviceScope)
-        val buttons = MediaButtons(access.prefs) { player.playbackParameters.speed }
+        val buttons = MediaButtons(access.prefs, applicationContext) { player.playbackParameters.speed }
         val runtime: suspend () -> ServiceBridge = { checkNotNull(starting).await() }
         val wrapper =
             SessionPlayer(

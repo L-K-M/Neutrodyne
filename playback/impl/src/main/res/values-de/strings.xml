@@ -8,4 +8,14 @@
     <string name="auto_groups">Gruppen</string>
     <string name="auto_downloads">Downloads</string>
     <string name="auto_podcasts">Podcasts</string>
+    <plurals name="media_skip_back">
+        <item quantity="one">%1$d Sekunde zurück</item>
+        <item quantity="other">%1$d Sekunden zurück</item>
+    </plurals>
+    <plurals name="media_skip_forward">
+        <item quantity="one">%1$d Sekunde vor</item>
+        <item quantity="other">%1$d Sekunden vor</item>
+    </plurals>
+    <string name="media_speed">Tempo %1$s×</string>
+    <string name="media_next_episode">Nächste Episode</string>
 </resources>
