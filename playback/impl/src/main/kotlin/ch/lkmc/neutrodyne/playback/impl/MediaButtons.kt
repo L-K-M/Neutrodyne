@@ -12,20 +12,20 @@ internal class MediaButtons(
     private val currentSpeed: () -> Float = { 1f },
 ) {
     fun current(speed: Float = currentSpeed()): List<CommandButton> {
-        val skipBackSeconds = prefs.current.value.skipBackMs / 1000
-        val skipForwardSeconds = prefs.current.value.skipForwardMs / 1000
+        val skipBackSeconds = (prefs.current.value.skipBackMs / 1000).toInt()
+        val skipForwardSeconds = (prefs.current.value.skipForwardMs / 1000).toInt()
         return listOf(
             CommandButton
                 .Builder(backIcon(prefs.current.value.skipBackMs))
                 .setPlayerCommand(Player.COMMAND_SEEK_BACK)
                 .setSlots(CommandButton.SLOT_BACK)
-                .setDisplayName(context.getString(R.string.media_skip_back, skipBackSeconds))
+                .setDisplayName(seconds(R.plurals.media_skip_back, skipBackSeconds))
                 .build(),
             CommandButton
                 .Builder(forwardIcon(prefs.current.value.skipForwardMs))
                 .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
                 .setSlots(CommandButton.SLOT_FORWARD)
-                .setDisplayName(context.getString(R.string.media_skip_forward, skipForwardSeconds))
+                .setDisplayName(seconds(R.plurals.media_skip_forward, skipForwardSeconds))
                 .build(),
             CommandButton
                 .Builder(speedIcon(speed))
@@ -41,6 +41,11 @@ internal class MediaButtons(
                 .build(),
         )
     }
+
+    private fun seconds(
+        label: Int,
+        count: Int,
+    ): String = context.resources.getQuantityString(label, count, count)
 
     /**
      * The speed reaches the resource as a pre-formatted string (`%1$s`), so its decimal separator comes from

@@ -8,8 +8,14 @@
     <string name="auto_groups">Groups</string>
     <string name="auto_downloads">Downloads</string>
     <string name="auto_podcasts">Podcasts</string>
-    <string name="media_skip_back">Back %1$d seconds</string>
-    <string name="media_skip_forward">Forward %1$d seconds</string>
+    <plurals name="media_skip_back">
+        <item quantity="one">Back %1$d second</item>
+        <item quantity="other">Back %1$d seconds</item>
+    </plurals>
+    <plurals name="media_skip_forward">
+        <item quantity="one">Forward %1$d second</item>
+        <item quantity="other">Forward %1$d seconds</item>
+    </plurals>
     <string name="media_speed">Speed %1$s×</string>
     <string name="media_next_episode">Next episode</string>
 </resources>
