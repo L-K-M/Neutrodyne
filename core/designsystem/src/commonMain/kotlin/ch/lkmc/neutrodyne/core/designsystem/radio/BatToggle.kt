@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.lkmc.neutrodyne.core.designsystem.resources.Res
@@ -62,6 +63,7 @@ public fun BatToggle(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     plate: SwitchPlate = SwitchPlate.BRASS,
+    plateSize: DpSize? = null,
 ) {
     // Read through states: the flick detector below outlives recompositions.
     val currentOn by rememberUpdatedState(on)
@@ -91,6 +93,7 @@ public fun BatToggle(
             },
         enabled,
         plate,
+        plateSize,
     )
 }
 
@@ -101,6 +104,10 @@ public fun BatToggle(
  * lever down; the app prints [onLabel] and [offLabel] on its blank enamel so they follow the
  * user's language. The printed labels stay silent: the switch's state, not its plate, is what a
  * screen reader announces.
+ *
+ * [plateSize] separates the painted plate's box from the hit area: the caller sizes [modifier]
+ * (the touch target, 48 dp or more) and the plate keeps its render's proportion inside
+ * [plateSize], centred in the target.
  */
 @Composable
 public fun BatToggleFace(
@@ -110,11 +117,18 @@ public fun BatToggleFace(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     plate: SwitchPlate = SwitchPlate.BRASS,
+    plateSize: DpSize? = null,
 ) {
     val reducedMotion = LocalReducedMotion.current
     BoxWithConstraints(modifier.alpha(if (enabled) 1f else DISABLED_ALPHA), contentAlignment = Alignment.Center) {
-        // The plate keeps the render's proportion inside whatever box the caller gives it.
-        val plateHeight = minOf(maxHeight, maxWidth * plate.aspect)
+        // The plate keeps the render's proportion inside its own box: [plateSize] when the caller
+        // reserved a larger hit area, else the whole box.
+        val plateHeight =
+            if (plateSize != null) {
+                minOf(plateSize.height, plateSize.width * plate.aspect)
+            } else {
+                minOf(maxHeight, maxWidth * plate.aspect)
+            }
         val plateWidth = plateHeight / plate.aspect
         Box(
             Modifier
