@@ -306,6 +306,31 @@ class FfAudioEngineTest {
         }
     }
 
+    /** The end-of-episode sleep timer: the item ends the chain and the successor never opens. */
+    @Test
+    fun aStopAtTheItemEndEndsWithoutTransitioning() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val resolver = resolver().apply { sources[2L to 0] = ResolvedSource.File(media()) }
+        engine(resolver).use { engine ->
+            val transitions = mutableListOf<EngineEvent.ItemTransition>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.ItemTransition>().collect { transitions += it }
+            }
+            try {
+                engine.setItemEnd(ItemEnd.STOP)
+                engine.setWindow(listOf(item, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                await("end of the first item") { engine.state.value == EngineState.Ended }
+                assertTrue(transitions.isEmpty(), "transitions $transitions")
+                assertFalse(synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } })
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
     /** The next item's preparation starts about 10 s before the end, not at the start. */
     @Test
     fun theNextItemIsPreparedAboutTenSecondsBeforeTheEnd() {

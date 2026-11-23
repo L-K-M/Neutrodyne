@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineItem
 import ch.lkmc.neutrodyne.playback.engine.EngineState
 import ch.lkmc.neutrodyne.playback.engine.EngineWindowDiff
+import ch.lkmc.neutrodyne.playback.engine.ItemEnd
 import ch.lkmc.neutrodyne.playback.engine.TransitionReason
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,8 @@ class FakeAudioEngine : AudioEngine {
     var skipSilence: Boolean = false
         private set
     var fade: Float = 1f
+        private set
+    var itemEnd: ItemEnd = ItemEnd.CONTINUE
         private set
     var closed: Boolean = false
         private set
@@ -109,6 +112,10 @@ class FakeAudioEngine : AudioEngine {
     override fun setFade(factor: Float) {
         commands += "fade"
         fade = factor
+    }
+
+    override fun setItemEnd(end: ItemEnd) {
+        itemEnd = end
     }
 
     override fun positionMs(): Long = position

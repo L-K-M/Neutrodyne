@@ -61,6 +61,7 @@ import ch.lkmc.neutrodyne.playback.core.WindowPlayback
 import ch.lkmc.neutrodyne.playback.engine.EngineError
 import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineState
+import ch.lkmc.neutrodyne.playback.engine.ItemEnd
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -259,6 +260,7 @@ class DesktopPlaybackController(
         val value = withContext(ioDispatcher) { runtimeFactory() }
         runtime = value
         value.engine.setVolume(userVolume)
+        value.engine.setItemEnd(itemEndFor(sleepTimerCore.state))
         sleepSampledAt = clock.elapsedRealtime()
         projector = DesktopQueueProjector(value.engine, value.resolver)
         // A freeze a revert or an unfreeze cleared drops its watcher too.
@@ -1247,7 +1249,11 @@ class DesktopPlaybackController(
         history.record(outgoing.item)
         followChapters(toId)
         pendingTracksKnown.remove(toId)?.let { applyTracksKnown(it) }
-        applySleep(sleepTimerCore.currentChanged(toId))
+        // End of episode was armed after the decoder had begun the arrival (it reads seconds
+        // ahead of the device), so the engine could not stop at the boundary. Stop now, at the
+        // arrival's start, instead of re-arming the timer for a whole further episode.
+        val sleepsHere = sleepTimerCore.state is SleepTimerState.EndOfEpisode
+        if (!sleepsHere) applySleep(sleepTimerCore.currentChanged(toId))
         val group = context?.takeIf { it.type == ContextType.GROUP }?.id
         val settings = requireNotNull(value.settings.cached(row.podcastId, group))
         effective.value = settings
@@ -1279,6 +1285,7 @@ class DesktopPlaybackController(
             value.engine.seekTo(startMs)
             checkSave(value.saver.onSeek(startMs, durationMs, SeekOrigin.CORE))
         }
+        if (sleepsHere) applySleep(sleepTimerCore.endOfItem())
         publish(startMs)
         // The committed queue emission re-projects the tail; apply it now so the
         // engine's window and the planner agree even when the emission coalesced.
@@ -1468,6 +1475,9 @@ class DesktopPlaybackController(
         if (prepared) checkSave(requireNotNull(runtime).saver.onPause(position(), durationMs))
     }
 
+    private fun itemEndFor(state: SleepTimerState): ItemEnd =
+        if (state is SleepTimerState.EndOfEpisode) ItemEnd.STOP else ItemEnd.CONTINUE
+
     private fun sleepElapsed(): Long {
         val now = clock.elapsedRealtime()
         val elapsed = (now - sleepSampledAt).coerceAtLeast(0)
@@ -1480,9 +1490,9 @@ class DesktopPlaybackController(
     }
 
     /**
-     * Applies the shared core's commands. The desktop has no EndOfItemPauseArbiter:
-     * the end-of-episode pause is driven by the core state at [EngineState.Ended],
-     * so [SleepTimerCore.Effect.ArmEndOfItem] only records what that handler reads.
+     * Applies the shared core's commands. [SleepTimerCore.Effect.ArmEndOfItem] is the desktop's
+     * EndOfItemPauseArbiter: the engine finishes the current item instead of rolling into the
+     * next one, and the core state at [EngineState.Ended] completes it in place.
      */
     private suspend fun applySleep(effects: List<SleepTimerCore.Effect>) {
         val value = runtime ?: return
@@ -1493,7 +1503,7 @@ class DesktopPlaybackController(
                 }
 
                 is SleepTimerCore.Effect.ArmEndOfItem -> {
-                    Unit
+                    value.engine.setItemEnd(if (effect.armed) ItemEnd.STOP else ItemEnd.CONTINUE)
                 }
 
                 SleepTimerCore.Effect.Pause -> {
