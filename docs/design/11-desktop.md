@@ -1213,6 +1213,16 @@ The controller applies 06's recovery rules ([06 Error recovery](06-playback.md#e
 - **System sleep** ([Power](#power-suspend-wake-and-idle-sleep)): pause and save on `Suspending`; nothing resumes on wake.
 - **Start-up:** the controller loads `play_session` and the saved position and publishes `NowPlaying` with phase `NOT_LOADED` and `isPlaying = false`; nothing is resolved, fetched or decoded until the user presses Play, a media key or the tray's Play (R8.4).
 
+**Implementation note (2026-11-22, seeking a restored session).** A seek on
+the restored session (phase `NOT_LOADED`), from the needle, a skip key, the
+mini player, a menu or the OS media controls, used to return at once because
+nothing is prepared, so the dial moved and then snapped back on Play. The
+controller now saves the target as the stored position (a target below 1 s
+resets it, as `seekTo` documents), updates the published snapshot and keeps
+the target as the next Resume's explicit start; without that, the shared start
+rule restarts a played item, or one within 30 s of its end, at 0
+(`DesktopPlaybackTimingTest`).
+
 **MD1b implementation note (2026-11-05).** The recovery slice implements the
 table above and the device-loss reaction. The controller owns
 `RecoveryBudget`: a skip-type failure (HTTP, auth, format, no media,
