@@ -25,6 +25,14 @@ internal class DataStoreSyncServerAddress(
 
     override suspend fun deviceName(): String? = settings.get(SyncSettingKeys.DEVICE_NAME).takeIf { it.isNotBlank() }
 
+    override suspend fun setDeviceName(name: String?): Outcome<Unit, SettingsError> {
+        if (name.isNullOrBlank()) {
+            settings.reset(SyncSettingKeys.DEVICE_NAME)
+            return Outcome.Success(Unit)
+        }
+        return settings.set(SyncSettingKeys.DEVICE_NAME, name)
+    }
+
     override suspend fun shareFeedPasswords(): Boolean = settings.get(SyncSettingKeys.SHARE_FEED_PASSWORDS)
 
     override suspend fun syncPlaybackSettings(): Boolean = settings.get(SyncSettingKeys.SYNC_PLAYBACK_SETTINGS)
