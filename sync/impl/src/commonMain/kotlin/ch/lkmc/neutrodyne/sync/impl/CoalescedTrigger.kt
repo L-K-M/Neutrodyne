@@ -61,6 +61,9 @@ internal class CoalescedTrigger(
                 queued = true
                 return@withLock
             }
+            // A run that threw skipped its tail and may have left a request queued; this
+            // fresh run serves it, so it must not run a second time.
+            queued = false
             running = scope.launch { runQueued() }
         }
     }
