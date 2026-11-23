@@ -545,7 +545,10 @@ fun outboxClock(row: SyncOutboxEntity): Hlc? = runCatching { Hlc(row.hlc, NodeId
  * every field ends with the value of its newest row. Triggers coalesce per field only, so a `*`
  * and named rows coexist: a group's `deleted = true` stays beside the newer `*` its Undo writes,
  * and applying the named row last pushed the undone delete. A `*` goes first at an equal clock,
- * because its named rows refine it.
+ * because its named rows refine it. The `hlc` and `nodeId` sort keys are the packed strings,
+ * which relies on packed clocks sorting chronologically (the same assumption OutboxReader's
+ * `hlc`-ordered read makes) and on the node tie-break matching Hlc.compareTo; keep this
+ * comparator in lockstep with Hlc if the packing ever changes.
  */
 internal val OUTBOX_APPLY_ORDER: Comparator<SyncOutboxEntity> =
     compareBy<SyncOutboxEntity>({ it.hlc }, { it.nodeId }, { it.field != "*" }, { it.field })

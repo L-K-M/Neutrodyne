@@ -989,7 +989,8 @@ delete pushed the delete once the hold-back ended: the Undo's insert writes a ne
 triggers coalesce per field, so the older `deleted = true` row stays beside it. Both now apply a
 record's rows oldest clock first (`OUTBOX_APPLY_ORDER`, a `*` first at an equal clock), which is
 the newest-clock rule above. `SessionAdopter.pendingSession`, their mirror for the session record,
-uses the same order; its only `*` comes from the first link.
+uses the same order; its only `*` comes from a whole-library capture (`captureLocalLibrary`:
+the use-device first link and restore-everywhere).
 
 ### Push
 

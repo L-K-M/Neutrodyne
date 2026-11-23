@@ -41,6 +41,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -1117,6 +1118,19 @@ class SyncApplierTest {
                     )
 
                 assertEquals(0, result.held, "the Undo is newer than the remote delete")
+                val raw = SyncClockStore(db).get("group", groupUuid)
+                assertNotNull(raw, "the merged group record is stored")
+                val deleted = raw.state.fields["deleted"]
+                assertEquals(
+                    false,
+                    (deleted?.v as? JsonPrimitive)?.booleanOrNull,
+                    "the local Undo must win the `deleted` field against the remote delete",
+                )
+                assertEquals(
+                    Hlc.of(now, 20L, node),
+                    deleted?.c,
+                    "the surviving `deleted` carries the Undo's clock",
+                )
             } finally {
                 db.close()
             }

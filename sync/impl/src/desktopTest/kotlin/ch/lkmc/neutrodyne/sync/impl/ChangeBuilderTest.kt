@@ -342,6 +342,29 @@ class ChangeBuilderTest {
             }
         }
 
+    @Test
+    fun anEqualClockStarYieldsToItsNamedRefinement() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                // Same clock for both rows: the tie-break must put `*` first so the named
+                // refinement of the same write wins.
+                db.syncOutboxDao().upsert(row("group", groupUuid, "*", null, 1L))
+                db.syncOutboxDao().upsert(row("group", groupUuid, "deleted", "true", 1L))
+                val change = ChangeBuilder(db, FakeSecretStore()) { false }.build(db.syncOutboxDao().rows()).single()
+
+                assertTrue(
+                    change.fields
+                        .getValue("deleted")
+                        .v
+                        .boolean(),
+                )
+            } finally {
+                db.close()
+            }
+        }
+
     private fun row(
         coll: String,
         rid: String,
