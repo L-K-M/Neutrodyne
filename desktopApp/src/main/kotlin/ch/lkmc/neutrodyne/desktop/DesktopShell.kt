@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.desktop
 
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.window.application
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
@@ -328,15 +329,21 @@ internal object DesktopShell {
                 graph.settingsRepository
                     .observe(AppearanceSettingKeys.CONTROL_SOUNDS)
                     .collectAsState(initial = AppearanceSettingKeys.CONTROL_SOUNDS.default)
+            // Remembered like MainActivity's identical flow: a fresh, unequal Flow per
+            // recomposition would restart NeutrodyneRoot's collection and blip the
+            // failed-downloads badge to zero until the database-gated re-subscribe emits.
+            val failedDownloads =
+                remember(graph) {
+                    kotlinx.coroutines.flow.flow {
+                        graph.databaseOpener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    }
+                }
             NeutrodyneWindow(
                 rowArt = rowArt.value,
                 controlSounds = controlSounds.value,
                 installers = graph.entryInstallers,
-                failedDownloads =
-                    kotlinx.coroutines.flow.flow {
-                        graph.databaseOpener.awaitOpen()
-                        graph.downloadController().observeFailedCount().collect { emit(it) }
-                    },
+                failedDownloads = failedDownloads,
                 portal = graph.linuxDesktopPortal,
                 openHandler = openHandler,
                 menuActions = menuActions,
