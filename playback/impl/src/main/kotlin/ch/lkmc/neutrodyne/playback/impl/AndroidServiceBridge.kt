@@ -145,10 +145,12 @@ internal class AndroidServiceBridge(
     private var boundaryPaused = false
     private var pending: StartOutcome.Committed? = null
 
-    // The item whose position a start just settled, consumed by the first Play after it that
-    // goes ahead. A start whose Play never comes leaves it until the next Play, which then skips
-    // one pickup: the behaviour before beforePlay picked up at all, never a wrong seek.
-    private var settledStart: Long? = null
+    // The item and start time whose position a start just settled, consumed by the first Play
+    // after it that goes ahead. A start whose Play never comes leaves it until the next Play,
+    // which then skips one pickup: the behaviour before beforePlay picked up at all. The skip
+    // holds only while the stored row is the one that start read; a row written after it (a sync
+    // pull, a restore, an explicit reset) is an outside write the resume must take up.
+    private var settledStart: SettledStart? = null
     private var pendingTimeout: Job? = null
     private var startReserved = false
     private var reservationTimeout: Job? = null
@@ -299,7 +301,10 @@ internal class AndroidServiceBridge(
                 }
 
                 is StartOutcome.AlreadyCurrent -> {
-                    settledStart = outcome.queue.current?.episodeId
+                    settledStart =
+                        outcome.queue.current
+                            ?.episodeId
+                            ?.let { SettledStart(it, access.clock.now()) }
                     if (application == StartApplication.MEDIA3) {
                         hold(
                             StartOutcome.Committed(
@@ -317,7 +322,10 @@ internal class AndroidServiceBridge(
 
                 is StartOutcome.Committed -> {
                     generation = outcome.queue.generation
-                    settledStart = outcome.queue.current?.episodeId
+                    settledStart =
+                        outcome.queue.current
+                            ?.episodeId
+                            ?.let { SettledStart(it, access.clock.now()) }
                     if (player.mediaItemCount == 0 || application == StartApplication.MEDIA3) {
                         // Only true resumption/onSetMediaItems may install an empty player's window.
                         hold(outcome)
@@ -384,7 +392,7 @@ internal class AndroidServiceBridge(
                 throw UnsupportedOperationException("Playback refused: $it")
             }
             val built = projector.prepareExternalStart(committed)
-            settledStart = id
+            settledStart = SettledStart(id, access.clock.now())
             serviceIssue = null
             return MediaSession.MediaItemsWithStartPosition(built, 0, committed.startPositionMs)
         } catch (failure: Throwable) {
@@ -425,13 +433,29 @@ internal class AndroidServiceBridge(
             // boundary) the next one still follows the same start.
             val settled = settledStart
             settledStart = null
-            if (advanced != PlayResult.Started && settled != id) applyPausedPickup(id)
+            if (advanced != PlayResult.Started && !keepsStartPosition(settled, id)) {
+                applyPausedPickup(id)
+            }
             smartResume.resume()
             serviceIssue = null
             boundaryPaused = false
             updateBoundary()
             true
         }
+
+    /**
+     * The mark suppresses the pickup only while the stored row is the one the start read: a row
+     * written after the start is an outside write (a sync pull, a restore, an explicit reset)
+     * that the resume must take up.
+     */
+    private suspend fun keepsStartPosition(
+        settled: SettledStart?,
+        episodeId: Long,
+    ): Boolean {
+        if (settled == null || settled.episodeId != episodeId) return false
+        val row = ports.positions.observe(episodeId).first() ?: return true
+        return row.updatedAt <= settled.settledAt
+    }
 
     private fun reportRefusal(result: PlayResult) {
         val problem =
@@ -733,6 +757,11 @@ internal class AndroidServiceBridge(
         tracker.coreSeek { player.seekTo(pickup) }
         tracker.startPositionApplied(pickup)
     }
+
+    private data class SettledStart(
+        val episodeId: Long,
+        val settledAt: Long,
+    )
 
     private enum class StartApplication { COMMAND, MEDIA3 }
 
