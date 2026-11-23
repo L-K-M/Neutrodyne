@@ -224,10 +224,19 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Robolectric's android-all SDK jars. A cache key is saved once and never
+      # updated, so the fixed robolectric-4.17-sdk36 key held only SDK 36 while
+      # the host tests pin SDKs 26 to 36; every run fetched the rest from Maven
+      # Central, which throttles parallel runs with HTTP 429 and failed whole
+      # test classes. Main now saves each new jar set under a key naming it
+      # (the save step after the tests); restore by prefix takes the newest,
+      # falling back to the first sdk36 set.
+      - id: robolectric-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository/org/robolectric
-          key: robolectric-4.17-sdk36
+          key: robolectric-4.17-
+          restore-keys: robolectric-4.17-
       # :desktop:system's MPRIS test needs a private session bus; the runner
       # owns the daemon because test code may not spawn processes (rule 17).
       - name: Session bus for the MPRIS test
@@ -265,6 +274,27 @@ jobs:
           if [ "$aggregate_status" -ne 0 ] || [ "$mpris_status" -ne 0 ]; then
             exit 1
           fi
+      # Names the jar set the tests left behind, so main saves a new cache only
+      # when a run fetched jars the restored set lacked. Robolectric checks each
+      # download in a temporary directory before moving it in, so a failed run
+      # still leaves only whole jars. Branches compute the name but never save:
+      # like the Gradle cache, main's caches are written by main alone.
+      - name: Name the Robolectric jar set
+        id: robolectric-set
+        if: ${{ !cancelled() }}
+        run: |
+          jars=$(find ~/.m2/repository/org/robolectric -name '*.jar' -printf '%P\n' 2>/dev/null | LC_ALL=C sort)
+          if [ -z "$jars" ]; then
+            echo "No Robolectric jars to cache"
+            exit 0
+          fi
+          printf '%s\n' "$jars"
+          echo "key=robolectric-4.17-$(printf '%s\n' "$jars" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.robolectric-set.outputs.key != '' && steps.robolectric-set.outputs.key != steps.robolectric-restore.outputs.cache-matched-key }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ steps.robolectric-set.outputs.key }}
       # A desktop test worker that dies mid-suite leaves no test XML — the
       # debug crash-fast path writes crash-<UTC>.txt under <root>/state and
       # then halt(1)s, and /tmp was never inside the unit-reports glob.
