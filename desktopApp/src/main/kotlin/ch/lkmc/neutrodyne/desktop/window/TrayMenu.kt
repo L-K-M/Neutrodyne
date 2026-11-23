@@ -6,10 +6,11 @@ import ch.lkmc.neutrodyne.playback.api.NowPlaying
 // 11's tray-menu and tooltip rules as pure functions; the Compose `Tray` call site stays a
 // thin render of them so every label and string is unit-tested without AWT.
 
-/** The "Neutrodyne — {episode title}" tooltip, hard-truncated to 60 characters (11 Tray icon). */
+/** The tray tooltip, limited to 60 UTF-16 code units without splitting a surrogate pair. */
 internal fun trayTooltip(nowPlaying: NowPlaying?): String {
     val title = nowPlaying?.title ?: return APP_NAME
-    return "$APP_NAME — $title".take(TOOLTIP_MAX_CHARS)
+    val tooltip = "$APP_NAME — $title".take(TOOLTIP_MAX_CHARS)
+    return if (tooltip.last().isHighSurrogate()) tooltip.dropLast(1) else tooltip
 }
 
 /** The Play/Pause item's state (11 Tray icon: the label follows the playback state). */
