@@ -26,13 +26,24 @@ import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
+import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
+import ch.lkmc.neutrodyne.core.navigation.BackupKey
+import ch.lkmc.neutrodyne.core.navigation.DiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
+import ch.lkmc.neutrodyne.core.navigation.ExportKey
+import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
+import ch.lkmc.neutrodyne.core.navigation.GroupSettingsKey
+import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
 import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
+import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
+import ch.lkmc.neutrodyne.core.navigation.KeyboardShortcutsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
@@ -42,8 +53,18 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
+import ch.lkmc.neutrodyne.core.navigation.SyncAccountHelpKey
+import ch.lkmc.neutrodyne.core.navigation.SyncApproveKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDevicesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncDiagnosticsKey
+import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
+import ch.lkmc.neutrodyne.core.navigation.SyncSettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SyncSetupKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
+import ch.lkmc.neutrodyne.core.navigation.YouTubeSearchKey
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -637,6 +658,23 @@ class DesktopAppGraphTest {
     }
 
     /**
+     * MD4's Help › Keyboard shortcuts pushed `KeyboardShortcutsKey` with no contributor, so
+     * nav3's provider threw `IllegalStateException("Unknown screen …")` during composition and
+     * killed the process. Every key the desktop menu pushes and every key `NavKeySerializers`
+     * registers must resolve through the production installers.
+     */
+    @Test
+    fun everyMenuAndSerializedKeyHasAnEntry() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
+
+        // The real check is `provider(key)`: it throws IllegalStateException for a key no
+        // installer contributes, and contentKey is non-null, so the assertion never fails.
+        for (key in MENU_PUSHED_KEYS + SERIALIZED_KEYS) {
+            assertThat(provider(key).contentKey).isNotNull()
+        }
+    }
+
+    /**
      * 01 Feature entry installers: the window root hands this to `LocalMetroViewModelFactory`, so
      * `metroViewModel()` inside the Library route can only work if the factory resolves the VM.
      * Graph compilation alone does not prove that — the VM is created through the public factory.
@@ -904,6 +942,68 @@ class DesktopAppGraphTest {
                 PodcastKey(7),
                 AddPodcastKey(null),
                 ImportFileKey,
+            )
+
+        /** The keys `DesktopMenuBar` pushes (11 Menus), including Help › Keyboard shortcuts. */
+        val MENU_PUSHED_KEYS: List<NavKey> =
+            listOf(
+                AddPodcastKey(null),
+                ImportFileKey,
+                ExportKey(null),
+                BackupKey,
+                SettingsHomeKey,
+                FeedsKey,
+                LibraryKey,
+                UpNextKey,
+                DownloadsKey,
+                DiscoverKey,
+                InstallHelpKey(),
+                KeyboardShortcutsKey,
+                LicencesKey,
+                DiagnosticsKey,
+            )
+
+        /** One instance of every key `NavKeySerializers` registers (08 Screen inventory). */
+        val SERIALIZED_KEYS: List<NavKey> =
+            listOf(
+                FeedsKey,
+                FeedBrowserKey,
+                LibraryKey,
+                UpNextKey,
+                DownloadsKey,
+                DiscoverKey,
+                PodcastKey(7L),
+                PodcastPreviewKey("https://example.test/feed"),
+                PodcastSettingsKey(7L),
+                EpisodeKey(7L),
+                GroupEditKey(null),
+                GroupsManageKey,
+                GroupSettingsKey(7L),
+                AddToGroupsKey(listOf(7L)),
+                AllGroupsKey,
+                DirectoryKey("", null),
+                YouTubeSearchKey(""),
+                AddPodcastKey(null),
+                ImportFileKey,
+                ImportKey("1"),
+                BackupKey,
+                ExportKey(null),
+                SettingsHomeKey,
+                SettingsKey(SettingsPage.ABOUT),
+                LicencesKey,
+                InstallHelpKey(),
+                VerificationNoticeKey,
+                KeyboardShortcutsKey,
+                SyncSettingsKey,
+                SyncSetupKey(),
+                SyncApproveKey(),
+                SyncDevicesKey,
+                SyncHeldChangesKey(7L),
+                SyncDiagnosticsKey,
+                SyncAccountHelpKey,
+                DiagnosticsKey,
+                SpeedKey,
+                SleepTimerKey,
             )
     }
 }
