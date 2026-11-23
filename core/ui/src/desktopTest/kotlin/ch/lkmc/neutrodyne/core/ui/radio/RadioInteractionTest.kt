@@ -111,6 +111,27 @@ class RadioInteractionTest {
     }
 
     @Test
+    fun programmeSlipsUseCompactFeedDurationLabels() =
+        runDesktopComposeUiTest(width = 320, height = 844) {
+            val fixture = radioFixture()
+            val episodes =
+                listOf(
+                    fixture.episodes[0].copy(durationMs = 30_000),
+                    fixture.episodes[1].copy(durationMs = 10_920_000),
+                    fixture.episodes[2].copy(durationMs = -60_000),
+                )
+            setContent {
+                NeutrodyneTheme(SystemUiState.DEFAULT) {
+                    RadioScreen(fixture.copy(episodes = episodes), RadioActions())
+                }
+            }
+            onNodeWithText("<1 min", useUnmergedTree = true).assertIsDisplayed()
+            onNodeWithText("3 h 2 min", useUnmergedTree = true).assertIsDisplayed()
+            onNodeWithTag("radio_episode_3").assertIsDisplayed()
+            onNodeWithText("-1 min", useUnmergedTree = true).assertDoesNotExist()
+        }
+
+    @Test
     fun aSlipTicksOnceAsItCrossesIntoReleaseToDiscard() =
         runDesktopComposeUiTest(width = 390, height = 844) {
             val felt = mutableListOf<HapticFeedbackType>()
