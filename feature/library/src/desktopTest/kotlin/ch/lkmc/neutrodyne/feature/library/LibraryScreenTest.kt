@@ -447,7 +447,8 @@ class LibraryScreenTest {
 
     /**
      * 08 Library overflow lists Backup and restore after Export subscriptions and opens `BackupKey`
-     * as a detail (08 rule 4), so a second open beside it replaces rather than stacks.
+     * as a detail (08 rule 4). The replace-instead-of-stack behavior belongs to `pushDetail`
+     * itself and is covered by navigator-level tests; this test only checks the first open.
      */
     @Test
     fun overflowBackupRestoreOpensBackupKey() =
