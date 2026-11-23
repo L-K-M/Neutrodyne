@@ -37,7 +37,9 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -651,6 +653,34 @@ class RadioViewModelTest : MainDispatcherTest() {
         assertEquals(1, radioPageIndex(42, 0, listOf(41, 42, 43)))
         assertNull(radioPageIndex(1, 400, listOf(41, 42, 43)))
     }
+
+    @Test fun pagingForCachesAPlaylistPagerAndEvictsTheLeastRecentlyUsed() =
+        runTest {
+            withRadio { model, id ->
+                val first = model.pagingFor(id)
+                assertSame(first, model.pagingFor(id))
+                assertEquals(1, feeds.pagingRequests.count { it.first == FeedSource.Group(id) })
+
+                for (other in listOf(10L, 11L, 12L, 13L)) model.pagingFor(other)
+                val rebuilt = model.pagingFor(id)
+                assertNotSame(first, rebuilt)
+                assertEquals(2, feeds.pagingRequests.count { it.first == FeedSource.Group(id) })
+            }
+        }
+
+    @Test fun pagingForPromotesAHitSoItSurvivesLaterEvictions() =
+        runTest {
+            withRadio { model, id ->
+                val first = model.pagingFor(id)
+                model.pagingFor(10L)
+                model.pagingFor(11L)
+                // The cache is full and id is oldest; a hit must re-insert it as newest.
+                assertSame(first, model.pagingFor(id))
+                model.pagingFor(12L)
+                assertSame(first, model.pagingFor(id))
+                assertEquals(1, feeds.pagingRequests.count { it.first == FeedSource.Group(id) })
+            }
+        }
 
     @Test fun deletingAndUndoingTheActiveGroupDoesNotReselectIt() =
         runTest {

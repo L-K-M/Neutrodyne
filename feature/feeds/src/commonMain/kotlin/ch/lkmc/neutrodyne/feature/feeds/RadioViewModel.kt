@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.feeds
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
@@ -47,6 +48,11 @@ import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -85,6 +91,12 @@ public class RadioViewModel(
     private var deferredRows: Rows? = null
     private var rowsRevision = 0
 
+    /**
+     * Per-playlist pager caches; evicting an entry also stops its `cachedIn` collector.
+     * Accessed from Main only, like the Compose `pagingFor` call in `RadioRoute`.
+     */
+    private val pages = linkedMapOf<Long, PageEntry>()
+
     /** Needle positions chosen for episodes that are not loaded; the radio's own start applies them. */
     private val seeks = mutableMapOf<Long, Long>()
 
@@ -110,12 +122,24 @@ public class RadioViewModel(
             onFailure = { writeFailed() },
         )
 
-    public fun pagingFor(id: Long?): kotlinx.coroutines.flow.Flow<PagingData<EpisodeRow>> =
-        if (id == null) {
-            flowOf(PagingData.empty())
-        } else {
-            feeds.pagedFeed(FeedSource.Group(id), FILTERS, FeedOrder.NEWEST_FIRST)
+    /** Returns the cached pager for [id], or builds one in its own scope. */
+    public fun pagingFor(id: Long?): Flow<PagingData<EpisodeRow>> {
+        if (id == null) return flowOf(PagingData.empty())
+        pages.remove(id)?.let { entry ->
+            pages[id] = entry
+            return entry.flow
         }
+        if (pages.size >= PAGE_CACHE_SIZE) evict(pages.keys.first())
+        val scope =
+            CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
+        val flow = feeds.pagedFeed(FeedSource.Group(id), FILTERS, FeedOrder.NEWEST_FIRST).cachedIn(scope)
+        pages[id] = PageEntry(scope, flow)
+        return flow
+    }
+
+    private fun evict(id: Long) {
+        pages.remove(id)?.scope?.cancel()
+    }
 
     init {
         viewModelScope.launch {
@@ -675,6 +699,11 @@ public class RadioViewModel(
         messages.post(UiText.Res(Res.string.write_failed))
     }
 
+    private data class PageEntry(
+        val scope: CoroutineScope,
+        val flow: Flow<PagingData<EpisodeRow>>,
+    )
+
     private data class Rows(
         val playlistId: Long,
         val items: List<RadioEpisode>,
@@ -692,6 +721,11 @@ public class RadioViewModel(
     )
 
     private companion object {
+        /**
+         * The tuned playlist plus the last two visited. Assumes at most one pager is actively
+         * collected at a time; an evicted pager stops updating when its scope is cancelled.
+         */
+        const val PAGE_CACHE_SIZE = 3
         val FILTERS = FeedFilters(unplayedOnly = true)
     }
 }
