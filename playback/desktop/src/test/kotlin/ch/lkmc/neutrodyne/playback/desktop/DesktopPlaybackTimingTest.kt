@@ -623,6 +623,8 @@ class DesktopPlaybackTimingTest {
                 fixture.controller.play()
                 fixture.engine.ready()
                 runCurrent()
+                // A queue edit raced the end: the store committed a newer session revision
+                // than the queue snapshot the controller projects.
                 fixture.sessions.generation = fixture.sessions.queue.generation + 1
                 fixture.engine.position = 120_000
                 fixture.engine.end()
@@ -631,11 +633,19 @@ class DesktopPlaybackTimingTest {
                     fixture.sessions.calls.count { it.operation == FakePlaySessionStore.Operation.TRANSITION }
                 }
                 assertEquals(1, transitions(), "the end tried to advance once")
+                // The edit publishes its queue, so the retry reads the fresh revision.
+                val fresh = fixture.sessions.queue.copy(generation = fixture.sessions.generation)
+                fixture.sessions.queue = fresh
+                fixture.queue.queue.value = fresh
 
                 fixture.controller.play()
                 runCurrent()
 
                 assertEquals(2, transitions(), "Play retries the advance")
+
+                advanceTimeBy(2_001) // two more ticks
+                runCurrent()
+                assertEquals(2, transitions(), "the retried end settles; no further retries")
             } finally {
                 fixture.close()
             }
@@ -650,6 +660,8 @@ class DesktopPlaybackTimingTest {
                 fixture.controller.play()
                 fixture.engine.ready()
                 runCurrent()
+                // A queue edit raced the end: the store committed a newer session revision
+                // than the queue snapshot the controller projects.
                 fixture.sessions.generation = fixture.sessions.queue.generation + 1
                 fixture.engine.position = 120_000
                 fixture.engine.end()
@@ -658,11 +670,19 @@ class DesktopPlaybackTimingTest {
                     fixture.sessions.calls.count { it.operation == FakePlaySessionStore.Operation.TRANSITION }
                 }
                 assertEquals(1, transitions(), "the end tried to advance once")
+                // The edit publishes its queue, so the retry reads the fresh revision.
+                val fresh = fixture.sessions.queue.copy(generation = fixture.sessions.generation)
+                fixture.sessions.queue = fresh
+                fixture.queue.queue.value = fresh
 
                 advanceTimeBy(1_001) // one 1-s tick
                 runCurrent()
 
                 assertEquals(2, transitions(), "the tick retries the advance")
+
+                advanceTimeBy(2_001) // two more ticks
+                runCurrent()
+                assertEquals(2, transitions(), "the retried end settles; no further retries")
             } finally {
                 fixture.close()
             }
