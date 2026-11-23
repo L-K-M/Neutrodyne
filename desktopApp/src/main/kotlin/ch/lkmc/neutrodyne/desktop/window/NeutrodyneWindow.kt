@@ -600,7 +600,9 @@ internal fun windowChord(
 /**
  * The window-level fallback for the Ctrl/Cmd chords (11 Keyboard shortcuts). The menu's own
  * accelerators normally win, so this runs only while they stand down (a focused text field or a
- * menu-less composition): W requests a close, Q quits through [onQuitRequest].
+ * menu-less composition): W requests a close, Q quits through [onQuitRequest]. The quit is
+ * unconditional, like the menu and tray Quit items; `desktop.close_behaviour` and the busy guard
+ * govern close requests (W) only.
  */
 private fun windowShortcut(
     event: KeyEvent,

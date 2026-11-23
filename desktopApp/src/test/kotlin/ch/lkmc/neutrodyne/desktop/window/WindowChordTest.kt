@@ -21,7 +21,10 @@ class WindowChordTest {
         assertThat(windowChord(Key.Q, KeyEventType.KeyUp, commandHeld = true)).isNull()
     }
 
-    @Test fun `a plain q maps to nothing`() {
+    @Test fun `plain keys and unrelated chords map to nothing`() {
+        assertThat(windowChord(Key.W, KeyEventType.KeyDown, commandHeld = false)).isNull()
         assertThat(windowChord(Key.Q, KeyEventType.KeyDown, commandHeld = false)).isNull()
+        assertThat(windowChord(Key.R, KeyEventType.KeyDown, commandHeld = true)).isNull()
+        assertThat(windowChord(Key.W, KeyEventType.Unknown, commandHeld = true)).isNull()
     }
 }
