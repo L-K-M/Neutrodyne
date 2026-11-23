@@ -44,6 +44,7 @@ class FakeSyncServerAddress(
     val writtenSyncPlaybackSettings = mutableListOf<Boolean>()
     val writtenServerUrls = mutableListOf<String?>()
     val writtenUsernames = mutableListOf<String?>()
+    val writtenDeviceNames = mutableListOf<String?>()
     val identityClears = mutableListOf<Unit>()
 
     fun updateServerUrl(value: String?) {
@@ -92,6 +93,16 @@ class FakeSyncServerAddress(
     override suspend fun setUsername(username: String?) {
         writtenUsernames += username
         this.username = username
+    }
+
+    override suspend fun setDeviceName(name: String?): Outcome<Unit, SettingsError> {
+        nextPreferenceError?.let {
+            nextPreferenceError = null
+            return Outcome.Failure(it)
+        }
+        writtenDeviceNames += name
+        deviceName = name?.takeIf { it.isNotBlank() }
+        return Outcome.Success(Unit)
     }
 
     override suspend fun clearServerIdentity(): Outcome<Unit, SettingsError> {
