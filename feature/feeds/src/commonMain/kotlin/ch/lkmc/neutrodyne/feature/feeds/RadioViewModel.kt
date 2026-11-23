@@ -213,13 +213,7 @@ public class RadioViewModel(
                             playing = now.isPlaying,
                             phase = now.phase,
                             issue = now.issue,
-                            nowPlayingEpisode =
-                                RadioEpisode(
-                                    now.episodeId,
-                                    now.title,
-                                    now.podcastTitle,
-                                    now.position.durationMs,
-                                ),
+                            nowPlayingEpisode = now.toRadioEpisode(),
                             elapsedMs = now.position.positionMs,
                             hasPlayed =
                                 current.hasPlayed || now.isPlaying,
@@ -230,19 +224,13 @@ public class RadioViewModel(
                             selectedId = now.episodeId,
                             phase = now.phase,
                             issue = now.issue,
-                            nowPlayingEpisode =
-                                RadioEpisode(
-                                    now.episodeId,
-                                    now.title,
-                                    now.podcastTitle,
-                                    now.position.durationMs,
-                                ),
+                            nowPlayingEpisode = now.toRadioEpisode(),
                             elapsedMs = now.position.positionMs,
                             playing = true,
                             hasPlayed = true,
                         )
                 } else {
-                    mutableState.value = current
+                    mutableState.value = current.copy(playing = false, phase = null, issue = null)
                 }
             }
         }
@@ -289,6 +277,7 @@ public class RadioViewModel(
                 }
             }
         if (rows.isNotEmpty()) initialSelectionPending = false
+        val selectedTransport = engine?.takeIf { it.episodeId == selected }
         mutableState.value =
             current.copy(
                 episodes = rows,
@@ -296,7 +285,7 @@ public class RadioViewModel(
                 episodeCount = if (complete) rows.size else current.episodeCount,
                 selectedId = selected,
                 nowPlayingEpisode =
-                    active?.let { RadioEpisode(it.episodeId, it.title, it.podcastTitle, it.position.durationMs) }
+                    selectedTransport?.toRadioEpisode()
                         ?: rows.find { it.id == selected } ?: current.selected,
                 elapsedMs =
                     if (selected ==
@@ -307,9 +296,8 @@ public class RadioViewModel(
                         active?.position?.positionMs ?: position(selected)
                     },
                 playing = active?.isPlaying ?: (current.playing && selected != null),
-                // Keep the transport status with the loaded item the playing flag describes.
-                phase = engine?.phase,
-                issue = engine?.issue,
+                phase = selectedTransport?.phase,
+                issue = selectedTransport?.issue,
             )
         val revision = ++rowsRevision
         if (!complete) {
@@ -332,17 +320,21 @@ public class RadioViewModel(
     }
 
     public fun selectEpisode(id: Long) {
-        if (id == state.value.selectedId || state.value.episodes.none { it.id == id }) return
-        val playing = state.value.switchOn
+        val current = state.value
+        if (id == current.selectedId) return
+        val episode = current.episodes.find { it.id == id } ?: return
+        val selectedTransport = playbackStates.nowPlaying.value?.takeIf { it.episodeId == id }
         selectionOrigin = SelectionOrigin.BROWSE
         mutableState.value =
-            state.value.copy(
+            current.copy(
                 selectedId = id,
-                nowPlayingEpisode = state.value.episodes.find { it.id == id },
+                nowPlayingEpisode = selectedTransport?.toRadioEpisode() ?: episode,
                 elapsedMs = position(id),
                 hasPlayed = position(id) > 0,
+                phase = selectedTransport?.phase,
+                issue = selectedTransport?.issue,
             )
-        if (playing) start(id)
+        if (current.switchOn) start(id)
     }
 
     /**
@@ -428,13 +420,7 @@ public class RadioViewModel(
                 selectedId = active.episodeId,
                 phase = active.phase,
                 issue = active.issue,
-                nowPlayingEpisode =
-                    RadioEpisode(
-                        active.episodeId,
-                        active.title,
-                        active.podcastTitle,
-                        active.position.durationMs,
-                    ),
+                nowPlayingEpisode = active.toRadioEpisode(),
                 elapsedMs = active.position.positionMs,
                 playing = true,
                 hasPlayed = true,
@@ -506,20 +492,11 @@ public class RadioViewModel(
                 complete = false,
                 episodeCount = null,
                 selectedId = loaded?.episodeId,
-                nowPlayingEpisode =
-                    loaded?.let {
-                        RadioEpisode(
-                            it.episodeId,
-                            it.title,
-                            it.podcastTitle,
-                            it.position.durationMs,
-                        )
-                    },
+                nowPlayingEpisode = loaded?.toRadioEpisode(),
                 elapsedMs = loaded?.position?.positionMs ?: 0,
                 playing = loaded != null,
                 playWhenReadyEpisodeId = loaded?.episodeId,
                 hasPlayed = loaded != null,
-                // A paused switch keeps the loaded transport's phase; a fresh browse has none.
                 phase = loaded?.phase,
                 issue = loaded?.issue,
                 removed =
@@ -567,14 +544,17 @@ public class RadioViewModel(
             return
         }
         val selected = radioSelectionAfterRemoval(current.episodes.map { it.id }, current.selectedId, row.id)
+        val selectedTransport = playbackStates.nowPlaying.value?.takeIf { it.episodeId == selected }
         val elapsed = position(selected)
         mutableState.value =
             updated.copy(
                 selectedId = selected,
-                nowPlayingEpisode = remaining.find { it.id == selected },
+                nowPlayingEpisode = selectedTransport?.toRadioEpisode() ?: remaining.find { it.id == selected },
                 elapsedMs = elapsed,
                 playing = current.playing && selected != null,
                 hasPlayed = selected != null && elapsed > 0,
+                phase = selectedTransport?.phase,
+                issue = selectedTransport?.issue,
             )
         if (selected == null) {
             // A paused or followed session can belong to another screen.
@@ -701,3 +681,6 @@ public class RadioViewModel(
 
 private val NowPlaying.transportActive: Boolean
     get() = isPlaying || (playWhenReady && phase != PlayerPhase.ERROR && phase != PlayerPhase.ENDED)
+
+private fun NowPlaying.toRadioEpisode(): RadioEpisode =
+    RadioEpisode(episodeId, title, podcastTitle, position.durationMs)

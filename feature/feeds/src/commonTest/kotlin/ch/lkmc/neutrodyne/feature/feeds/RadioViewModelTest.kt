@@ -363,6 +363,63 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun browsingAndPagingKeepTheErrorWithTheFailedEpisode() =
+        runTest {
+            withRadio { model, id ->
+                val failed =
+                    testNowPlaying(1).copy(
+                        isPlaying = false,
+                        playWhenReady = false,
+                        phase = PlayerPhase.ERROR,
+                        issue = PlaybackIssue.NETWORK_LOST,
+                    )
+                controller.state.nowPlaying.value = failed
+                runCurrent()
+                assertEquals(PlayerPhase.ERROR, model.state.value.phase)
+
+                model.selectEpisode(2)
+                assertEquals(2L, model.state.value.selectedId)
+                assertNull(model.state.value.phase)
+                assertNull(model.state.value.issue)
+
+                model.onRows(id, rows, complete = false)
+                assertNull(model.state.value.phase)
+                assertNull(model.state.value.issue)
+
+                model.selectEpisode(1)
+                assertEquals(PlayerPhase.ERROR, model.state.value.phase)
+                assertEquals(PlaybackIssue.NETWORK_LOST, model.state.value.issue)
+                assertFalse(model.state.value.switchOn)
+
+                model.discard(1)
+                runCurrent()
+                assertEquals(2L, model.state.value.selectedId)
+                assertNull(model.state.value.phase)
+                assertNull(model.state.value.issue)
+            }
+        }
+
+    @Test fun pagingKeepsThePausedEpisodesMeasuredDurationAndTheProgrammeTitle() =
+        runTest {
+            withRadio { model, id ->
+                val loaded = testNowPlaying(1)
+                controller.state.nowPlaying.value =
+                    loaded.copy(
+                        isPlaying = false,
+                        playWhenReady = false,
+                        position = loaded.position.copy(durationMs = 75_000),
+                    )
+                runCurrent()
+                val updated = rows.first().copy(title = "Updated programme title")
+                model.onRows(id, listOf(updated) + rows.drop(1))
+
+                assertEquals(updated, model.state.value.selected)
+                assertEquals(75_000L, model.state.value.selectedDurationMs)
+                model.seek(90_000)
+                assertEquals(75_000L, model.state.value.elapsedMs)
+            }
+        }
+
     @Test fun discardSelectedAdvancesWhileOtherRemovalLeavesPlayerAloneAndUndoDoesNotRewind() =
         runTest {
             withRadio { model, _ ->
