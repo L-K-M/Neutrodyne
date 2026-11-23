@@ -111,7 +111,9 @@ import ch.lkmc.neutrodyne.core.designsystem.radio.barlow
 import ch.lkmc.neutrodyne.core.designsystem.radio.courier
 import ch.lkmc.neutrodyne.core.designsystem.radio.recess
 import ch.lkmc.neutrodyne.core.designsystem.radio.rememberClickSound
+import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
+import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_played
@@ -119,7 +121,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_undo
-import ch.lkmc.neutrodyne.core.ui.resources.date_duration_minutes
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.import_title
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
@@ -578,11 +579,9 @@ private fun RadioSlip(
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         RadioText(episode.podcast, 11, modifier = Modifier.weight(1f), maxLines = 1)
-                        episode.durationMs?.let {
-                            RadioText(
-                                stringResource(Res.string.date_duration_minutes, it / 60000),
-                                11,
-                            )
+                        val duration = FeedDates.duration(episode.durationMs?.takeIf { it > 0 }).asString()
+                        if (duration.isNotEmpty()) {
+                            RadioText(duration, 11, maxLines = 1)
                         }
                     }
                     RadioText(episode.title, rows.titleSize, bold = true, maxLines = 2)
