@@ -58,6 +58,14 @@ interface AudioEngine : AutoCloseable {
     /** Sleep-timer fade factor 0..1 (GainStage). */
     fun setFade(factor: Float)
 
+    /**
+     * What happens when the playing item ends: roll into the next window item, or finish there
+     * and report [EngineState.Ended] (the end-of-episode sleep timer, 06 Sleep timer). The
+     * decoder reads ahead of the device, so a change made after it began decoding the successor
+     * still arrives as an [EngineEvent.ItemTransition]; the controller handles that case.
+     */
+    fun setItemEnd(end: ItemEnd)
+
     /** Current position in milliseconds; safe from any thread (TimelineClock). */
     fun positionMs(): Long
 
@@ -143,6 +151,9 @@ sealed interface EngineEvent {
 
     data object DeviceLost : EngineEvent
 }
+
+/** See [AudioEngine.setItemEnd]. */
+enum class ItemEnd { CONTINUE, STOP }
 
 /** Why the engine moved to another item (11 Engine contracts). */
 enum class TransitionReason { AUTO, SEEK_TO_ITEM, SKIP }

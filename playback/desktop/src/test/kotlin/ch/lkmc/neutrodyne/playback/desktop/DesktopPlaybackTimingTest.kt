@@ -49,6 +49,7 @@ import ch.lkmc.neutrodyne.playback.engine.EngineError
 import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineState
 import ch.lkmc.neutrodyne.playback.engine.Gapless
+import ch.lkmc.neutrodyne.playback.engine.ItemEnd
 import ch.lkmc.neutrodyne.playback.engine.SpanCache
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.ResolvedAudio
@@ -604,6 +605,64 @@ class DesktopPlaybackTimingTest {
                 advanceTimeBy(10_000)
                 runCurrent()
                 assertEquals(1, events.size)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun endOfEpisodeStopsTheEngineAtTheItemsEndUntilItIsOff() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                assertEquals(ItemEnd.CONTINUE, fixture.engine.itemEnd)
+
+                fixture.controller.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                runCurrent()
+                assertEquals(ItemEnd.STOP, fixture.engine.itemEnd, "the successor must not start")
+
+                fixture.controller.setSleepTimer(SleepTimerMode.Off)
+                runCurrent()
+                assertEquals(ItemEnd.CONTINUE, fixture.engine.itemEnd)
+
+                fixture.controller.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                runCurrent()
+                fixture.engine.end()
+                runCurrent()
+                assertEquals(ItemEnd.CONTINUE, fixture.engine.itemEnd, "a fired timer lets later items roll on")
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun endOfEpisodeArmedAfterTheSuccessorBeganStopsAtTheArrival() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                val events = mutableListOf<PlaybackEvent>()
+                backgroundScope.launch { fixture.controller.events.collect { events += it } }
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.controller.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                runCurrent()
+                // The decoder crosses into the successor seconds before it is heard, so the
+                // engine's transition can still arrive after the timer was armed.
+                fixture.engine.position = 119_000
+                fixture.engine.transition(2)
+                runCurrent()
+
+                assertEquals(SleepTimerState.Off, fixture.controller.sleepTimer.value)
+                assertEquals(listOf<PlaybackEvent>(PlaybackEvent.SleepTimerFired), events)
+                val now = requireNotNull(fixture.controller.nowPlaying.value)
+                assertEquals(2L, now.episodeId)
+                assertFalse(now.isPlaying)
+                assertEquals("pause", fixture.engine.commands.last { it == "play" || it == "pause" })
+                assertEquals(ItemEnd.CONTINUE, fixture.engine.itemEnd, "a fired timer lets later items roll on")
             } finally {
                 fixture.close()
             }

@@ -129,6 +129,7 @@ class FfAudioEngine internal constructor(
     private val commands = ConcurrentLinkedQueue<Request>()
     private val settings = AtomicReference(Settings())
     private var window = emptyList<EngineItem>()
+    private var itemEnd = ItemEnd.CONTINUE
     private var current: EngineItem? = null
     private var wantPlaying = false
     private var source: ByteSource? = null
@@ -262,6 +263,12 @@ class FfAudioEngine internal constructor(
         require(factor.isFinite() && factor in 0f..1f)
         updateSettings { it.copy(fade = factor) }
     }
+
+    override fun setItemEnd(end: ItemEnd) =
+        synchronized(control) {
+            checkOpen()
+            itemEnd = end
+        }
 
     override fun positionMs(): Long = clock?.positionMs() ?: anchorMs.get()
 
@@ -620,12 +627,13 @@ class FfAudioEngine internal constructor(
     }
 
     /**
-     * The window item after [item], or null at the end of the window. The
-     * outgoing item stays in the window until the controller's diff removes it,
-     * so the engine's list only changes through [updateWindow].
+     * The window item after [item], or null at the end of the window or when the item must end
+     * here ([ItemEnd.STOP]). The outgoing item stays in the window until the controller's diff
+     * removes it, so the engine's list only changes through [updateWindow].
      */
     private fun nextItemAfter(item: EngineItem): EngineItem? =
         synchronized(control) {
+            if (itemEnd == ItemEnd.STOP) return@synchronized null
             val index = window.indexOfFirst { it.episodeId == item.episodeId }
             if (index < 0) null else window.getOrNull(index + 1)
         }

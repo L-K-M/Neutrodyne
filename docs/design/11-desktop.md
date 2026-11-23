@@ -881,6 +881,7 @@ interface AudioEngine : AutoCloseable {
     fun setSkipSilence(enabled: Boolean)
     fun setVolume(linear: Float)                // GainStage: user volume × fade factor
     fun setFade(factor: Float)                  // sleep-timer fade, 0..1
+    fun setItemEnd(end: ItemEnd)                // CONTINUE into the next item, or STOP there (end-of-episode sleep)
     fun positionMs(): Long                      // any thread; lock-free (TimelineClock)
 }
 data class EngineItem(val episodeId: Long, val cacheKey: String, val localHint: Boolean)   // ep:{id}:{fp} or yt:{videoId}:{formatId}
@@ -994,6 +995,15 @@ drives `setFade` at its 500-ms step, and its end-of-episode state completes the
 item in place through `PlaySessionStore.markBoundaryPlayed`. The earlier
 "Off/null until MD1b" statement is superseded; download-time chapter
 extraction (`DesktopChapterExtractor`) remains M6.
+
+**Implementation note (2026-11-22).** End of episode never stopped on the desktop when the
+item had a successor: the engine rolled into it without `Ended`, and the transition re-armed
+the timer for the arrival, so a playlist played on all night. `SleepTimerCore`'s
+`ArmEndOfItem` now sets `AudioEngine.setItemEnd(STOP)`, the engine's counterpart of
+`pauseAtEndOfMediaItems`: the item ends the chain and the existing `Ended` path completes it in
+place. The decoder reads seconds ahead of the device, so a timer armed after the successor
+began decoding still arrives as an automatic transition; the controller then pauses at the
+arrival's start and fires the timer instead of re-arming it.
 
 **MD1b implementation note (2026-11-06).** Download-time chapter extraction
 is implemented: `DesktopChapterExtractor` (`:playback:desktop`) opens the
