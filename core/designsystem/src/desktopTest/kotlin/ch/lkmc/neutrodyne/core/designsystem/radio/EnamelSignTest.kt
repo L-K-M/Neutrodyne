@@ -64,6 +64,31 @@ class EnamelSignTest {
             assertEquals(lettering * SMALLEST_LETTERING, cut.lettering(), ADVANCE_TOLERANCE, "letter advance in $room")
         }
 
+    /**
+     * A name that ends in a space still letters at full size when the room fits its visible
+     * glyphs: the auto-size must not count the invisible trailing space against the name.
+     */
+    @Test
+    fun aNameEndingInASpaceKeepsItsFullLettering() =
+        runDesktopComposeUiTest(width = 400, height = 200) {
+            var padded by mutableStateOf(true)
+            setContent {
+                Box {
+                    EnamelSign(if (padded) "$NAME " else NAME, Modifier.testTag(SIGN))
+                }
+            }
+            val paddedLettering = layout(if (padded) "$NAME " else NAME).lettering()
+            padded = false
+            waitForIdle()
+            val plainLettering = layout(NAME).lettering()
+            assertEquals(
+                plainLettering,
+                paddedLettering,
+                ADVANCE_TOLERANCE,
+                "a trailing space shrank the sign's lettering",
+            )
+        }
+
     private fun ComposeUiTest.width(node: SemanticsNodeInteraction): Dp =
         with(density) {
             node
@@ -80,9 +105,11 @@ class EnamelSignTest {
     // first letter's advance scales with the lettering.
     private fun TextLayoutResult.lettering(): Float = getHorizontalPosition(1, true) - getHorizontalPosition(0, true)
 
-    private fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.layout(): TextLayoutResult {
+    private fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.layout(
+        name: String = NAME,
+    ): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
-        onNodeWithText(NAME, useUnmergedTree = true)
+        onNodeWithText(name, useUnmergedTree = true)
             .fetchSemanticsNode()
             .config
             .getOrNull(SemanticsActions.GetTextLayoutResult)

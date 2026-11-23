@@ -176,7 +176,9 @@ private data class SignLettering(
         var size = max.value
         while (size > min.value) {
             val layout = performLayout(constraints, text, size.sp)
-            if (layout.getLineEnd(0, visibleEnd = true) >= text.length) return size.sp
+            // The visible line end excludes trailing whitespace, so compare against the
+            // trimmed length: a name ending in a space still letters at full size.
+            if (layout.getLineEnd(0, visibleEnd = true) >= text.text.trimEnd().length) return size.sp
             size -= SIGN_SIZE_STEP
         }
         return min
