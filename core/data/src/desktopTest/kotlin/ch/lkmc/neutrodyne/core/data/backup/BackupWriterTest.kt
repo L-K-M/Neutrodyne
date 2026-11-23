@@ -339,7 +339,7 @@ class BackupWriterTest {
                         DataStoreBindings.deviceSettingsStore(device),
                         port,
                         clock,
-                        DataStoreSettingsWriteCoordinator(),
+                        DataStoreSettingsWriteCoordinator { db },
                     )
                 assertIs<Outcome.Success<*>>(repository.set(PlaybackSettingKeys.SKIP_BACK_MS, 45000L))
                 assertTrue(store.readWithReceipt(PlaybackSettingKeys.SKIP_BACK_MS).receipt!!.contains(receipt))
@@ -383,7 +383,7 @@ class BackupWriterTest {
                         restored,
                         TestDb.inMemory(),
                         FakeSettingsSyncPort(),
-                        DataStoreSettingsWriteCoordinator(),
+                        DataStoreSettingsWriteCoordinator { db },
                     ).apply(reader.settings()),
                 )
                 assertEquals(expected, restored.observePortableSnapshot().first())
@@ -439,7 +439,7 @@ class BackupWriterTest {
                         restored,
                         TestDb.inMemory(),
                         FakeSettingsSyncPort(),
-                        DataStoreSettingsWriteCoordinator(),
+                        DataStoreSettingsWriteCoordinator { db },
                     ).apply(exported),
                 )
                 assertEquals(false, restored.get(UpdateSettingKeys.CHECK_ENABLED))

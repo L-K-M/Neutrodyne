@@ -118,7 +118,7 @@ class LibraryMergerImplTest {
                     clock = clock,
                 ),
             settings =
-                RestoreSettingsMerge(settingsRepository, db, settingsSync, DataStoreSettingsWriteCoordinator()),
+                RestoreSettingsMerge(settingsRepository, db, settingsSync, DataStoreSettingsWriteCoordinator { db }),
             fileSystem = fileSystem,
             io = Dispatchers.Default,
         )

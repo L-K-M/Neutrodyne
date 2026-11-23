@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundFailure
+import ch.lkmc.neutrodyne.sync.api.SyncRoundInFlight
+import ch.lkmc.neutrodyne.sync.api.SyncRoundPhase
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 import ch.lkmc.neutrodyne.sync.api.SyncStreamState
@@ -34,6 +36,31 @@ class SyncRuntimeDiagnosticsTest {
         assertEquals(SyncRoundFailure.TRANSPORT, rounds.last().failure)
         assertEquals(503, rounds.last().httpStatus)
         assertNull(rounds.last().report)
+    }
+
+    @Test
+    fun unfinishedRoundsShowTheirPhaseUntilTheyEndWhateverTheProfile() {
+        val runtime = SyncRuntimeDiagnostics()
+        val first = runtime.roundStarted(SyncRoundReason.SSE, 100)
+        val second = runtime.roundStarted(SyncRoundReason.OUTBOX, 200)
+        runtime.roundPhase(first, SyncRoundPhase.REQUESTING, 150)
+        runtime.roundPhase(second, SyncRoundPhase.WAITING, 250)
+
+        // A round starts before it knows its profile, so the list does not depend on it.
+        runtime.activate(A)
+        assertEquals(
+            listOf(
+                SyncRoundInFlight(SyncRoundReason.SSE, 100, SyncRoundPhase.REQUESTING, 150),
+                SyncRoundInFlight(SyncRoundReason.OUTBOX, 200, SyncRoundPhase.WAITING, 250),
+            ),
+            runtime.snapshot(B).inFlight,
+        )
+
+        runtime.roundEnded(first)
+        runtime.roundPhase(first, SyncRoundPhase.APPLYING, 300)
+        assertEquals(listOf(SyncRoundReason.OUTBOX), runtime.snapshot(A).inFlight.map { it.reason })
+        runtime.roundEnded(second)
+        assertTrue(runtime.snapshot(A).inFlight.isEmpty())
     }
 
     @Test

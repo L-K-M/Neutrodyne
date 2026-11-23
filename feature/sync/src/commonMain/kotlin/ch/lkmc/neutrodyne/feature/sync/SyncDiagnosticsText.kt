@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.sync
 import ch.lkmc.neutrodyne.sync.api.SyncDiagnosticsSnapshot
 import ch.lkmc.neutrodyne.sync.api.SyncPendingCollection
 import ch.lkmc.neutrodyne.sync.api.SyncReport
+import ch.lkmc.neutrodyne.sync.api.SyncRoundInFlight
 import ch.lkmc.neutrodyne.sync.api.SyncRoundSummary
 
 /**
@@ -30,6 +31,9 @@ internal fun SyncDiagnosticsSnapshot.plainText(): String =
                 "round.$index",
                 listOfNotNull(round.completedAtMs, round.reason.name, round.result()).joinToString(" "),
             )
+        }
+        inFlight.forEachIndexed { index, round ->
+            line("inFlight.$index", round.fields())
         }
         for (collection in SyncPendingCollection.entries) {
             line("pending.${collection.name.lowercase()}", pendingByCollection[collection] ?: 0)
@@ -62,3 +66,6 @@ internal fun SyncRoundSummary.result(): String? {
     val failure = failure ?: return null
     return listOfNotNull(failure.name, httpStatus?.let { "http $it" }, protocolCode).joinToString(" ")
 }
+
+/** An unfinished round for the copy text and the export: start, reason, phase and phase start. */
+internal fun SyncRoundInFlight.fields(): String = "$startedAtMs ${reason.name} ${phase.name} $phaseSinceMs"

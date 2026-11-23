@@ -40,7 +40,9 @@ interface SettingsRepository {
      * write that must share a Room transaction uses this, never [set] inside that transaction:
      * sync takes the key's lock before Room's writer, so the opposite order deadlocks both.
      * Calling `write` inside the transaction holds Room's writer and the key's lock across a
-     * DataStore file write, so keep that transaction short.
+     * DataStore file write, so keep that transaction short. Call `write` at most once, as the
+     * transaction's last step: DataStore does not roll back with Room, so a failure after a
+     * successful `write` leaves the new value stored.
      */
     suspend fun <T : Any, R> setWithin(
         key: SettingKey<T>,

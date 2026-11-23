@@ -9,11 +9,42 @@ enum class SyncStreamState { STOPPED, CONNECTING, CONNECTED, WAITING, UNSUPPORTE
 
 enum class SyncLanGateState { UNCONFIGURED, NOT_REQUIRED, GRANTED, REQUIRED }
 
-enum class SyncRoundFailure { TRANSPORT, PROTOCOL, UNEXPECTED }
+/**
+ * Why a round has no report. [CANCELLED] is not an error: the round stopped before it finished
+ * (an unlink, its caller's cancellation or the process ending), and the next trigger runs another.
+ */
+enum class SyncRoundFailure { TRANSPORT, PROTOCOL, UNEXPECTED, CANCELLED }
+
+/** Where an unfinished round is; a stuck "Syncing…" shows which step it waits in. */
+enum class SyncRoundPhase {
+    /** Reading the linked profile and token. */
+    STARTING,
+
+    /** Waiting for an earlier round to finish: the engine runs one at a time. */
+    WAITING,
+
+    /** Local work before the first request: settings capture and pending effect drains. */
+    PREPARING,
+
+    /** A push or pull request is out. */
+    REQUESTING,
+
+    /** Applying a received page and its settings and password effects. */
+    APPLYING,
+}
+
+/** A round that started and has not finished. */
+data class SyncRoundInFlight(
+    val reason: SyncRoundReason,
+    val startedAtMs: Long,
+    val phase: SyncRoundPhase,
+    /** When the round entered [phase]. */
+    val phaseSinceMs: Long,
+)
 
 enum class SyncDiagnosticsError { UNAVAILABLE }
 
-/** A completed round; cancellation is not recorded as a failed round. No exception text. */
+/** A finished round, including a cancelled one ([SyncRoundFailure.CANCELLED]). No exception text. */
 data class SyncRoundSummary(
     val reason: SyncRoundReason,
     val completedAtMs: Long,
@@ -34,6 +65,8 @@ data class SyncDiagnosticsSnapshot(
     val deviceName: String? = null,
     val lastSyncAtMs: Long? = null,
     val rounds: List<SyncRoundSummary> = emptyList(),
+    /** Rounds that started and have not finished, oldest first; they keep "Syncing…" shown. */
+    val inFlight: List<SyncRoundInFlight> = emptyList(),
     val pendingByCollection: Map<SyncPendingCollection, Int> = emptyMap(),
     val parkedCount: Int = 0,
     val heldCount: Int = 0,

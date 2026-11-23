@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -79,6 +80,28 @@ class SyncSchedulerTest {
             deps.await { deps.rounds.isNotEmpty() }
 
             assertEquals(listOf(SyncRoundReason.OUTBOX), deps.rounds)
+        }
+
+    @Test
+    fun `an outbox change during a round queues one more round instead of cancelling it`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.writeOutbox(coll = "podcast", rid = "p1", field = "subscribed")
+            val gate = CompletableDeferred<Unit>()
+            deps.roundGate = gate
+            deps.scheduler.onOutboxChanged()
+            deps.await { deps.rounds.size == 1 }
+
+            // A round's own outbox writes (the pushed rows' deletion) signal while it runs.
+            deps.scheduler.onOutboxChanged()
+            testScheduler.advanceTimeBy(OUTBOX_DEBOUNCE_MS * 2)
+            runCurrent()
+            assertEquals(1, deps.rounds.size, "the queued round must wait for the running one")
+
+            gate.complete(Unit)
+            deps.await { deps.completed.size == 2 }
+            assertEquals(listOf(SyncRoundReason.OUTBOX, SyncRoundReason.OUTBOX), deps.completed)
         }
 
     @Test
@@ -235,6 +258,49 @@ class SyncSchedulerTest {
             deps.await { deps.rounds.isNotEmpty() }
 
             assertEquals(listOf(SyncRoundReason.SSE), deps.rounds)
+        }
+
+    @Test
+    fun `a remote change during an SSE round queues one more round instead of cancelling it`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            val gate = CompletableDeferred<Unit>()
+            deps.roundGate = gate
+            deps.scheduler.onRemoteChanged()
+            deps.await { deps.rounds.size == 1 }
+
+            repeat(3) { deps.scheduler.onRemoteChanged() }
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS * 2)
+            runCurrent()
+            assertEquals(1, deps.rounds.size, "the queued round must wait for the running one")
+
+            gate.complete(Unit)
+            deps.await { deps.completed.size == 2 }
+            assertEquals(listOf(SyncRoundReason.SSE, SyncRoundReason.SSE), deps.completed)
+        }
+
+    @Test
+    fun `an unlink during an SSE round drops the round and the one queued behind it`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            val gate = CompletableDeferred<Unit>()
+            deps.roundGate = gate
+            deps.scheduler.onRemoteChanged()
+            deps.await { deps.rounds.size == 1 }
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS * 2)
+            runCurrent()
+
+            deps.scheduler.onUnlinked()
+            gate.complete(Unit)
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS * 2)
+            runCurrent()
+            deps.awaitQuiet()
+
+            assertEquals(listOf(SyncRoundReason.SSE), deps.rounds)
+            assertTrue(deps.completed.isEmpty(), "the unlink cancels the running round")
         }
 
     @Test
@@ -419,6 +485,10 @@ class SyncSchedulerTest {
     ) {
         var interactive: Boolean = true
         var roundFailsWith: Throwable? = null
+
+        /** When set, the next round waits on it, so a test can signal while that round runs. */
+        var roundGate: CompletableDeferred<Unit>? = null
+        val completed = mutableListOf<SyncRoundReason>()
         val unlinks = mutableListOf<String>()
         val linkStates = mutableListOf<String>()
 
@@ -430,6 +500,11 @@ class SyncSchedulerTest {
                 round = { reason ->
                     roundFailsWith?.let { throw it }
                     rounds += reason
+                    roundGate?.let { gate ->
+                        roundGate = null
+                        gate.await()
+                    }
+                    completed += reason
                 },
                 playback = playback,
                 network = network,
