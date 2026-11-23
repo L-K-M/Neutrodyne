@@ -11,7 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.net.toUri
-import ch.lkmc.neutrodyne.MainActivity
+import ch.lkmc.neutrodyne.INTERNAL_MAIN_ACTIVITY
 import ch.lkmc.neutrodyne.YouTubeAlertReceiver
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -64,12 +64,11 @@ internal class YouTubeBreakerNotifier(
                         PendingIntent.getActivity(
                             app,
                             NOTIFICATION_ID,
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                "neutrodyne://open/settings/youtube".toUri(),
-                                app,
-                                MainActivity::class.java,
-                            ),
+                            Intent().setClassName(app, INTERNAL_MAIN_ACTIVITY).apply {
+                                action = Intent.ACTION_VIEW
+                                data = "neutrodyne://open/settings/youtube".toUri()
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            },
                             FLAGS,
                         )
                     val retry =
