@@ -6,6 +6,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -41,6 +42,7 @@ import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import dev.zacsweers.metro.ContributesBinding
@@ -92,6 +94,7 @@ private const val SLOW_DOWN_INCREMENT_SECONDS = 5
 private const val UNLINK_PUSH_BUDGET_MS = 5_000L
 private const val DELETE_CONFIRMATION = "DELETE"
 private const val RESET_MODE_PURGE = "purge"
+private const val TAG = "SyncController"
 
 /** 10 Errors: the `sync_state.lastError` marker the engine's rounds and the status map treat as a revoked link. */
 internal const val SYNC_ERROR_REVOKED = "Revoked"
@@ -506,8 +509,10 @@ class SyncControllerImpl(
         refreshGateVerdict()
         return try {
             val current = context.profile.deviceId
+            val fetched = context.transport.devices().also { verifyControlProfile(context.profile) }
+            storeThisDeviceName(fetched, current)
             Outcome.Success(
-                context.transport.devices().also { verifyControlProfile(context.profile) }.map { device ->
+                fetched.map { device ->
                     SyncDevice(
                         id = device.id,
                         name = device.name,
@@ -705,8 +710,12 @@ class SyncControllerImpl(
         val context = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
         refreshGateVerdict()
         return try {
-            context.transport.renameDevice(deviceId, name.trim())
+            val trimmed = name.trim()
+            context.transport.renameDevice(deviceId, trimmed)
             verifyControlProfile(context.profile)
+            if (deviceId == context.profile.deviceId) {
+                storeDeviceName(trimmed)
+            }
             Outcome.Success(Unit)
         } catch (failure: CancellationException) {
             throw failure
@@ -1042,7 +1051,9 @@ class SyncControllerImpl(
         // 10 Settings capture: the link is durable, so the recorder installs before the state
         // refresh — a local edit between link and install must not escape the outbox.
         settingsCapture.reconcile()
-        linkFlow.linked(accountName.orEmpty(), deviceName())
+        val name = deviceName()
+        storeDeviceName(name)
+        linkFlow.linked(accountName.orEmpty(), name)
         scheduler.onLinked()
         refreshStatus()
     }
@@ -1063,7 +1074,9 @@ class SyncControllerImpl(
                         // 10 Settings capture: install through the same reconcile as the switch —
                         // the merge left the link durable and any remote values already drained.
                         settingsCapture.reconcile()
-                        linkFlow.linked(accountName.orEmpty(), deviceName())
+                        val name = deviceName()
+                        storeDeviceName(name)
+                        linkFlow.linked(accountName.orEmpty(), name)
                         scheduler.onLinked()
                         refreshStatus()
                     }
@@ -1159,6 +1172,26 @@ class SyncControllerImpl(
         (address.deviceName()?.takeIf { it.isNotBlank() } ?: defaultDeviceName())
             .trim()
             .take(ProtocolLimits.MAX_DEVICE_NAME)
+
+    /** Stores the name this device registers with; a failed write never fails the caller. */
+    private suspend fun storeDeviceName(name: String) {
+        if (address.setDeviceName(name) is Outcome.Failure) {
+            Log.w(TAG) { "could not store the device name" }
+        }
+    }
+
+    /**
+     * Adopts the server's name for this device when it differs, repairing links made before the
+     * name was stored and renames made from another device. A failed write leaves the list intact.
+     */
+    private suspend fun storeThisDeviceName(
+        devices: List<DeviceDto>,
+        current: String?,
+    ) {
+        val serverName = devices.firstOrNull { it.id == current }?.name ?: return
+        if (address.deviceName() == serverName) return
+        storeDeviceName(serverName)
+    }
 
     /**
      * Waits for the Android 17 local-network answer. The deferred exists before the state is
