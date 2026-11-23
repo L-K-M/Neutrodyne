@@ -525,12 +525,15 @@ class DesktopPlaybackController(
                     restoredSeek
                         ?.takeIf { request == StartRequest.Resume && it.episodeId == outcome.queue.current?.episodeId }
                         ?.positionMs ?: outcome.startPositionMs
-                restoredSeek = null
                 val old = projector?.entries?.firstOrNull()?.item
                 // Publish the generation before projectStart's suspending reads, so the
                 // collector cannot mistake this own write for a foreign session and load it paused.
                 value.planner.appliedOwnGeneration(outcome.queue.generation)
                 if (!projectStart(outcome.queue, startMs, ticket)) return PlayResult.ServiceUnavailable
+                // Cleared only after the start committed its window: a failed projectStart leaves the
+                // seek for the retry, which would otherwise fall back to the start rule and restart a
+                // played or nearly finished item at 0.
+                restoredSeek = null
                 requireIntent(ticket)
                 if (old != null && old.episodeId != outcome.queue.current?.episodeId) history.record(old)
                 // The start's session transaction committed; a changed current is a transition.

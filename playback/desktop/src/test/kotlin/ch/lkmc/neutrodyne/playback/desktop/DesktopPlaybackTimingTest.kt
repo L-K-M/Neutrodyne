@@ -314,6 +314,53 @@ class DesktopPlaybackTimingTest {
             }
         }
 
+    /**
+     * A failed start must not consume the restored seek: the retry is still the listener's explicit
+     * start, so a played item must not fall back to the shared rule's restart at 0.
+     */
+    @Test
+    fun aFailedStartKeepsTheRestoredSeekForTheRetry() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.positions.positions.value = mapOf(1L to StoredPosition(1, 20_000, 0, 5L))
+                fixture.controller.initialize()
+                runCurrent()
+
+                fixture.controller.skipForward()
+                runCurrent()
+                assertEquals(
+                    50_000L,
+                    fixture.controller.nowPlaying.value
+                        ?.position
+                        ?.positionMs,
+                )
+
+                // The starter accepts the restored session, then a restore replaces it before
+                // projectStart's first recheck, so the start fails with nothing prepared.
+                val accepted = fixture.queue.queue.value
+                var reads = 0
+                fixture.sessions.afterVirtualQueueRead = {
+                    reads++
+                    if (reads == 1) {
+                        fixture.sessions.queue =
+                            fixture.sessions.queue.copy(generation = fixture.sessions.queue.generation + 1)
+                    }
+                }
+                assertEquals(PlayResult.ServiceUnavailable, fixture.controller.play())
+                runCurrent()
+                assertEquals(0L, fixture.engine.position, "The failed start must not prepare the engine")
+
+                fixture.sessions.afterVirtualQueueRead = null
+                fixture.sessions.queue = accepted
+                fixture.controller.play()
+                runCurrent()
+                assertEquals(50_000L, fixture.engine.position, "The retry keeps the restored seek")
+            } finally {
+                fixture.close()
+            }
+        }
+
     @Test
     fun automaticTransitionCapturesTheBoundaryThroughTheSharedRules() =
         runTest {
