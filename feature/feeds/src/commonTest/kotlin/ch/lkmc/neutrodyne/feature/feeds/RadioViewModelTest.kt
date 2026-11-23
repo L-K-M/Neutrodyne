@@ -668,6 +668,20 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun pagingForPromotesAHitSoItSurvivesLaterEvictions() =
+        runTest {
+            withRadio { model, id ->
+                val first = model.pagingFor(id)
+                model.pagingFor(10L)
+                model.pagingFor(11L)
+                // The cache is full and id is oldest; a hit must re-insert it as newest.
+                assertSame(first, model.pagingFor(id))
+                model.pagingFor(12L)
+                assertSame(first, model.pagingFor(id))
+                assertEquals(1, feeds.pagingRequests.count { it.first == FeedSource.Group(id) })
+            }
+        }
+
     @Test fun deletingAndUndoingTheActiveGroupDoesNotReselectIt() =
         runTest {
             withRadio { model, id ->

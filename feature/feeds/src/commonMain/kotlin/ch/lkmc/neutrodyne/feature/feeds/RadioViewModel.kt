@@ -91,7 +91,10 @@ public class RadioViewModel(
     private var deferredRows: Rows? = null
     private var rowsRevision = 0
 
-    /** Per-playlist pager caches; evicting an entry also stops its `cachedIn` collector. */
+    /**
+     * Per-playlist pager caches; evicting an entry also stops its `cachedIn` collector.
+     * Accessed from Main only, like the Compose `pagingFor` call in `RadioRoute`.
+     */
     private val pages = linkedMapOf<Long, PageEntry>()
 
     /** Needle positions chosen for episodes that are not loaded; the radio's own start applies them. */
@@ -126,7 +129,7 @@ public class RadioViewModel(
             pages[id] = entry
             return entry.flow
         }
-        if (pages.size == PAGE_CACHE_SIZE) evict(pages.keys.first())
+        if (pages.size >= PAGE_CACHE_SIZE) evict(pages.keys.first())
         val scope =
             CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
         val flow = feeds.pagedFeed(FeedSource.Group(id), FILTERS, FeedOrder.NEWEST_FIRST).cachedIn(scope)
@@ -718,7 +721,10 @@ public class RadioViewModel(
     )
 
     private companion object {
-        /** The tuned playlist plus the last two visited. */
+        /**
+         * The tuned playlist plus the last two visited. Assumes at most one pager is actively
+         * collected at a time; an evicted pager stops updating when its scope is cancelled.
+         */
         const val PAGE_CACHE_SIZE = 3
         val FILTERS = FeedFilters(unplayedOnly = true)
     }
